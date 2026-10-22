@@ -147,7 +147,7 @@ def character_out(b: Bot) -> dict:
     row["flags"] = {"reactions": b.reactions, "reaction_autopilot": b.reaction_autopilot,
                     "avatar_pool": b.avatar_pool, "image_jobs": b.image_jobs,
                     "quick_actions": b.quick_actions, "hide_unlocked": b.hide_unlocked,
-                    "hidden": bool(getattr(b, "hidden", False) or b.hide_unlocked)}
+                    "hidden": is_hidden(b)}
     return row
 
 
@@ -240,17 +240,12 @@ def _visible(b: Bot, principal) -> bool:
     return hb != "all" and b.id in hb
 
 
-def visible_to(bot_or_principal, principal_or_bots=None):
-    """``visible_to(bot, principal) -> bool``: may use it AND it is listed - not hidden, or
-    the profile's explicit household list names it (rails, ``bots`` / ``hello`` frames,
-    ``/api/bots``, ``ctx.bots_visible``).
-
-    Compat form (3.x callers): ``visible_to(principal, bots=None) -> list[Bot]`` keeps its 3.x
-    meaning, every character the principal may USE (:func:`usable_bots`, hidden ones
-    included: the Characters manager lists them); rails call :func:`visible_bots`."""
-    if isinstance(bot_or_principal, Bot):
-        return _visible(bot_or_principal, principal_or_bots)
-    return usable_bots(bot_or_principal, principal_or_bots)
+def visible_to(bot: Bot, principal) -> bool:
+    """May ``principal`` use ``bot`` AND is it listed - not hidden, or the profile's explicit
+    household list names it (rails, ``bots`` / ``hello`` frames, ``/api/bots``,
+    ``ctx.bots_visible``). Lists: :func:`visible_bots` (rails) and :func:`usable_bots`
+    (every bot the principal may use, hidden ones included: the Characters manager)."""
+    return _visible(bot, principal)
 
 
 def visible_bots(principal, bots: list[Bot] | None = None) -> list[Bot]:
@@ -456,7 +451,12 @@ def patch(bot_id: str, changes: dict[str, Any]) -> Bot:
         raise CharacterError("bot_not_found", "Unknown bot", 404)
     changes = dict(changes)
     if "hidden" in changes:                                  # the Admin's "Hide"
-        changes[_hidden_field()] = bool(changes.pop("hidden"))
+        want = bool(changes.pop("hidden"))
+        changes[_hidden_field()] = want
+        if not want:
+            # 010 keeps the 3.x hide_unlocked beside hidden and is_hidden reads either, so
+            # showing a bot again clears both.
+            changes["hide_unlocked"] = False
     for fld in extensions.BOT_FIELDS:
         if changes.get(fld) is not None:
             check_extension_field(fld, bot_id, str(changes[fld]).strip())

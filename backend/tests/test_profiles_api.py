@@ -34,6 +34,11 @@ def team(world):
         clients[name] = c
     r = owner.post("/api/characters", json={"name": "Otter", "backend": "direct", "id": "otter"})
     assert r.status_code == 201, r.text
+    # People-API creation runs profiles_service.on_profile_created: the second Admin and the User
+    # start with their own Atlas, the Basic profile with nothing (SPEC: every new profile gets one).
+    for name, want in (("Eve", 1), ("Max", 1), ("Dee", 0)):
+        assert profiles_service.has_atlas(ids[name]) is bool(want), name
+        assert profiles_service.content_counts(ids[name])["bots"] == want, name
     return {"ids": ids, **clients, "world": world}
 
 
@@ -91,7 +96,8 @@ def test_reset_by_the_profile_itself(team):
     bot = _bot(max_)
     _chat(max_, bot["id"])
     p = max_.get("/api/me/reset/preview").json()
-    assert p["counts"] == {"bots": 1, "chats": 1, "pictures": 0, "voices": 0} and p["outcome"] == "atlas"
+    # bots = the one made here plus the Atlas the profile got when it was created
+    assert p["counts"] == {"bots": 2, "chats": 1, "pictures": 0, "voices": 0} and p["outcome"] == "atlas"
     r = max_.post("/api/me/reset", json={"token": p["token"]})
     assert r.status_code == 200, r.text
     assert r.json()["deleted"]["chats"] == 1 and r.json()["keeps_voices"] is True
@@ -157,7 +163,8 @@ def test_my_bots_crud(team):
     max_ = team["Max"]
     made = _bot(max_, "Mine", persona="Short answers.", emoji="🦊")
     assert made["id"].startswith("p") and made["name"] == "Mine" and made["personality"]["text"] == "Short answers."
-    assert [b["id"] for b in max_.get("/api/me/characters").json()["characters"]] == [made["id"]]
+    listed = max_.get("/api/me/characters").json()["characters"]
+    assert sorted(b["name"] for b in listed) == ["Atlas", "Mine"] and made["id"] in {b["id"] for b in listed}
     assert max_.get(f"/api/me/characters/{made['id']}").json()["emoji"] == "🦊"
     r = max_.patch(f"/api/me/characters/{made['id']}", json={"name": "Renamed", "persona": ""})
     assert r.status_code == 200 and r.json()["name"] == "Renamed"
@@ -165,7 +172,7 @@ def test_my_bots_crud(team):
     d = max_.delete(f"/api/me/characters/{made['id']}")
     assert d.status_code == 200 and d.json()["deleted"]["chats"] == 1
     assert max_.get(f"/api/threads/{tid}").status_code == 404
-    assert max_.get("/api/me/characters").json()["characters"] == []
+    assert [b["name"] for b in max_.get("/api/me/characters").json()["characters"]] == ["Atlas"]
 
 
 def test_the_editor_only_sends_what_a_personal_bot_may_have(team):
@@ -272,7 +279,7 @@ def test_export_is_the_callers_own_data_only(team):
     assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
     doc = r.json()
     assert doc["profile"]["id"] == team["ids"]["Max"]
-    assert [t["id"] for t in doc["threads"]] == [tid] and [b["name"] for b in doc["bots"]] == ["Mine"]
+    assert [t["id"] for t in doc["threads"]] == [tid] and sorted(b["name"] for b in doc["bots"]) == ["Atlas", "Mine"]
     assert "api_key" not in r.text
 
 
@@ -315,7 +322,7 @@ def test_deleting_a_profile_removes_its_content_first(team):
     _chat(team["Max"], bot["id"])
     eve = team["Eve"]
     p = eve.get(f"/api/people/{max_id}/delete/preview")
-    assert p.status_code == 200 and p.json()["counts"]["bots"] == 1
+    assert p.status_code == 200 and p.json()["counts"]["bots"] == 2          # SENT-DEL-bot + its Atlas
     assert eve.post(f"/api/people/{max_id}/delete", json={"confirm_token": "nope"}).status_code == 409
     r = eve.post(f"/api/people/{max_id}/delete", json={"confirm_token": p.json()["token"]})
     assert r.status_code == 200, r.text

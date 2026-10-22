@@ -4,6 +4,30 @@
       "note": "an installed add-on's operator API (its own Origin check applies)",
       "permission": "manage_plugins"
     },
+    "owned_clones": {
+      "use_requirement": {
+        "note": "voice reads: the add-on lists household voices plus the caller's own clones and serves a clone's recordings to its owner only",
+        "permission": "use_voice"
+      },
+      "use_voice": [
+        "GET /api/voice/status",
+        "GET /api/voice/preview",
+        "GET /api/voice/profiles",
+        "GET /api/voice/profiles/{pid}",
+        "GET /api/voice/profiles/{pid}/files/{name}"
+      ],
+      "voice_lab": [
+        "POST /api/voice/profiles",
+        "POST /api/voice/profiles/analyse",
+        "PATCH /api/voice/profiles/{pid}",
+        "DELETE /api/voice/profiles/{pid}",
+        "POST /api/voice/profiles/{pid}/say"
+      ],
+      "voice_lab_requirement": {
+        "note": "create / rename / delete / try a line of the caller's own cloned voice (the add-on answers 404 to a non-owner)",
+        "permission": "voice_lab"
+      }
+    },
     "use": [
       {
         "method": "GET",
@@ -71,6 +95,7 @@
       "method": "POST",
       "path": "/api/advisor/requests/{rid}/dismiss",
       "requirement": {
+        "owner_scoped": "thread",
         "permission": "approve_agent_actions"
       }
     },
@@ -79,6 +104,7 @@
       "path": "/api/advisor/requests/{rid}/send",
       "requirement": {
         "note": "the human Send button; a machine may never press it",
+        "owner_scoped": "thread",
         "permission": "approve_agent_actions"
       }
     },
@@ -161,6 +187,7 @@
       "path": "/api/agents/profile-budgets/{profile_id}",
       "requirement": {
         "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
         "permission": "manage_agents"
       }
     },
@@ -185,6 +212,7 @@
       "path": "/api/agents/secrets/{name}",
       "requirement": {
         "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "owner_scoped": "none: write-only household secret (manage_agents)",
         "permission": "manage_agents"
       }
     },
@@ -193,6 +221,7 @@
       "path": "/api/agents/secrets/{name}",
       "requirement": {
         "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "owner_scoped": "none: write-only household secret (manage_agents)",
         "permission": "manage_agents"
       }
     },
@@ -225,6 +254,7 @@
       "path": "/api/agents/{agent_id}",
       "requirement": {
         "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "owner_scoped": "none: an agent definition is household configuration (manage_agents)",
         "permission": "manage_agents"
       }
     },
@@ -233,6 +263,7 @@
       "path": "/api/agents/{agent_id}",
       "requirement": {
         "note": "define agents, credentials, budgets, retention (write-only secrets)",
+        "owner_scoped": "none: an agent definition is household configuration (manage_agents)",
         "permission": "manage_agents"
       }
     },
@@ -241,6 +272,7 @@
       "path": "/api/approvals/{request_id}",
       "requirement": {
         "note": "allow or deny one tool call; destructive tools are asked every time",
+        "owner_scoped": "task",
         "permission": "approve_agent_actions"
       }
     },
@@ -252,6 +284,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: WP-DEL - Image Studio's ledger is shared until wave 2; /targets and /chat-images read the caller's own threads",
         "permission": "use_images"
       }
     },
@@ -263,6 +296,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: WP-DEL - Image Studio's ledger is shared until wave 2; /targets and /chat-images read the caller's own threads",
         "permission": "use_images"
       }
     },
@@ -274,6 +308,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: WP-DEL - Image Studio's ledger is shared until wave 2; /targets and /chat-images read the caller's own threads",
         "permission": "use_images"
       }
     },
@@ -285,6 +320,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: WP-DEL - Image Studio's ledger is shared until wave 2; /targets and /chat-images read the caller's own threads",
         "permission": "use_images"
       }
     },
@@ -296,6 +332,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: WP-DEL - Image Studio's ledger is shared until wave 2; /targets and /chat-images read the caller's own threads",
         "permission": "use_images"
       }
     },
@@ -307,6 +344,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: WP-DEL - Image Studio's ledger is shared until wave 2; /targets and /chat-images read the caller's own threads",
         "permission": "use_images"
       }
     },
@@ -340,6 +378,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -351,6 +390,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -362,6 +402,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -373,6 +414,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -384,6 +426,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -395,6 +438,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -406,6 +450,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -417,6 +462,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -428,6 +474,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -439,6 +486,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -450,6 +498,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -461,6 +510,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -472,6 +522,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -483,6 +534,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -494,6 +546,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
         "permission": "manage_agents"
       }
     },
@@ -624,6 +677,7 @@
         "machine": [
           "machine:avatar_pool"
         ],
+        "owner_scoped": "character",
         "permission": "manage_characters"
       }
     },
@@ -634,6 +688,7 @@
         "machine": [
           "machine:avatar_pool"
         ],
+        "owner_scoped": "character",
         "permission": "manage_characters"
       }
     },
@@ -644,6 +699,7 @@
         "machine": [
           "machine:avatar_pool"
         ],
+        "owner_scoped": "character",
         "permission": "manage_characters"
       }
     },
@@ -654,6 +710,7 @@
         "machine": [
           "machine:avatar_pool"
         ],
+        "owner_scoped": "character",
         "permission": "manage_characters"
       }
     },
@@ -689,6 +746,7 @@
       "method": "DELETE",
       "path": "/api/backups/{backup_id}",
       "requirement": {
+        "owner_scoped": "none: host control (admin_system); a backup holds every profile's chats, stated in docs/security.md",
         "permission": "admin_system"
       }
     },
@@ -696,6 +754,7 @@
       "method": "POST",
       "path": "/api/backups/{backup_id}/restore",
       "requirement": {
+        "owner_scoped": "none: host control (admin_system)",
         "permission": "admin_system"
       }
     },
@@ -703,6 +762,7 @@
       "method": "POST",
       "path": "/api/backups/{backup_id}/verify",
       "requirement": {
+        "owner_scoped": "none: host control (admin_system)",
         "permission": "admin_system"
       }
     },
@@ -749,6 +809,7 @@
       "method": "DELETE",
       "path": "/api/bots/{bot_id}",
       "requirement": {
+        "owner_scoped": "character",
         "permission": "manage_characters"
       }
     },
@@ -756,6 +817,7 @@
       "method": "PATCH",
       "path": "/api/bots/{bot_id}",
       "requirement": {
+        "owner_scoped": "character",
         "permission": "manage_characters"
       }
     },
@@ -766,6 +828,7 @@
         "machine": [
           "machine:avatars"
         ],
+        "owner_scoped": "character",
         "permission": "use_chat",
         "scoped": true
       }
@@ -777,6 +840,7 @@
         "machine": [
           "machine:avatars"
         ],
+        "owner_scoped": "character",
         "permission": "manage_characters"
       }
     },
@@ -787,6 +851,7 @@
         "machine": [
           "machine:avatars"
         ],
+        "owner_scoped": "character",
         "permission": "use_images"
       }
     },
@@ -797,6 +862,7 @@
         "machine": [
           "machine:avatars"
         ],
+        "owner_scoped": "character",
         "permission": "use_chat",
         "scoped": true
       }
@@ -808,6 +874,7 @@
         "machine": [
           "machine:avatars"
         ],
+        "owner_scoped": "character",
         "permission": "use_chat",
         "scoped": true
       }
@@ -819,6 +886,7 @@
         "machine": [
           "machine:avatars"
         ],
+        "owner_scoped": "character",
         "permission": "manage_characters"
       }
     },
@@ -829,6 +897,7 @@
         "machine": [
           "machine:avatars"
         ],
+        "owner_scoped": "character",
         "permission": "use_chat",
         "scoped": true
       }
@@ -837,6 +906,7 @@
       "method": "GET",
       "path": "/api/bots/{bot_id}/models",
       "requirement": {
+        "owner_scoped": "character",
         "permission": "manage_characters"
       }
     },
@@ -881,9 +951,28 @@
       }
     },
     {
+      "method": "POST",
+      "path": "/api/characters/{bot_id}/clone",
+      "requirement": {
+        "note": "a household bot into the caller's own profile; agent bots refused",
+        "owner_scoped": "character",
+        "permission": "create_characters"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/characters/{bot_id}/clone-to/{profile_id}",
+      "requirement": {
+        "note": "an Admin copies setup into a profile; chats are never copied",
+        "owner_scoped": "character",
+        "permission": "manage_users"
+      }
+    },
+    {
       "method": "DELETE",
       "path": "/api/characters/{character_id}",
       "requirement": {
+        "owner_scoped": "character",
         "permission": "manage_characters"
       }
     },
@@ -891,6 +980,7 @@
       "method": "GET",
       "path": "/api/characters/{character_id}",
       "requirement": {
+        "owner_scoped": "character",
         "permission": "manage_characters"
       }
     },
@@ -898,6 +988,15 @@
       "method": "PATCH",
       "path": "/api/characters/{character_id}",
       "requirement": {
+        "owner_scoped": "character",
+        "permission": "manage_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/characters/{character_id}/delete-preview",
+      "requirement": {
+        "owner_scoped": "none: household characters only, numbers only (manage_characters)",
         "permission": "manage_characters"
       }
     },
@@ -947,6 +1046,7 @@
       "method": "DELETE",
       "path": "/api/connections/{connection_id}",
       "requirement": {
+        "owner_scoped": "none: household configuration (manage_connections)",
         "permission": "manage_connections"
       }
     },
@@ -954,6 +1054,7 @@
       "method": "GET",
       "path": "/api/connections/{connection_id}",
       "requirement": {
+        "owner_scoped": "none: household configuration (manage_connections)",
         "permission": "manage_connections"
       }
     },
@@ -961,6 +1062,7 @@
       "method": "PATCH",
       "path": "/api/connections/{connection_id}",
       "requirement": {
+        "owner_scoped": "none: household configuration (manage_connections)",
         "permission": "manage_connections"
       }
     },
@@ -968,6 +1070,7 @@
       "method": "POST",
       "path": "/api/connections/{connection_id}/test",
       "requirement": {
+        "owner_scoped": "none: household configuration (manage_connections)",
         "permission": "manage_connections"
       }
     },
@@ -978,6 +1081,7 @@
         "machine": [
           "machine:daily"
         ],
+        "owner_scoped": "none: the Owner's daily thread (a machine's sphere)",
         "permission": "manage_agents"
       }
     },
@@ -1007,6 +1111,7 @@
       "path": "/api/drop",
       "requirement": {
         "note": "daily byte quota for Restricted",
+        "owner_scoped": "thread",
         "permission": "use_chat"
       }
     },
@@ -1014,8 +1119,9 @@
       "method": "GET",
       "path": "/api/export",
       "requirement": {
-        "note": "dumps all history",
-        "permission": "admin_system"
+        "note": "the caller's OWN history (4.0); every profile's chats are only in the encrypted backup",
+        "owner_scoped": "thread",
+        "permission": "manage_history"
       }
     },
     {
@@ -1058,6 +1164,7 @@
       "method": "DELETE",
       "path": "/api/files/{file_id}",
       "requirement": {
+        "owner_scoped": "none: WP-DEL - files.owner_profile_id is stamped; the per-owner File Server checks land in wave 2",
         "permission": "use_tools"
       }
     },
@@ -1065,6 +1172,7 @@
       "method": "GET",
       "path": "/api/files/{file_id}/download",
       "requirement": {
+        "owner_scoped": "none: WP-DEL - per-owner File Server (see /api/files/{file_id})",
         "permission": "use_tools"
       }
     },
@@ -1072,6 +1180,7 @@
       "method": "GET",
       "path": "/api/files/{file_id}/raw",
       "requirement": {
+        "owner_scoped": "none: WP-DEL - per-owner File Server (see /api/files/{file_id})",
         "permission": "use_tools"
       }
     },
@@ -1114,6 +1223,7 @@
       "path": "/api/harness/jobs/{job_id}",
       "requirement": {
         "note": "code execution on the host",
+        "owner_scoped": "none: host control (admin_system: the coding harness)",
         "permission": "admin_system"
       }
     },
@@ -1162,6 +1272,7 @@
       "path": "/api/harness/sessions/{sid}",
       "requirement": {
         "note": "code execution on the host",
+        "owner_scoped": "none: host control (admin_system: the coding harness)",
         "permission": "admin_system"
       }
     },
@@ -1170,6 +1281,7 @@
       "path": "/api/harness/sessions/{sid}/dismiss",
       "requirement": {
         "note": "code execution on the host",
+        "owner_scoped": "none: host control (admin_system: the coding harness)",
         "permission": "admin_system"
       }
     },
@@ -1178,6 +1290,7 @@
       "path": "/api/harness/sessions/{sid}/stop",
       "requirement": {
         "note": "code execution on the host",
+        "owner_scoped": "none: host control (admin_system: the coding harness)",
         "permission": "admin_system"
       }
     },
@@ -1223,6 +1336,7 @@
         "machine": [
           "machine:image_jobs"
         ],
+        "owner_scoped": "thread",
         "permission": "use_images"
       }
     },
@@ -1233,6 +1347,7 @@
         "machine": [
           "machine:image_jobs"
         ],
+        "owner_scoped": "thread",
         "permission": "use_images"
       }
     },
@@ -1244,6 +1359,7 @@
           "machine:image_job_callback"
         ],
         "note": "the image rig's per-job callback token is the credential; the body is discarded",
+        "owner_scoped": "none: the rig's per-job token is the credential and nothing is returned",
         "public": true
       }
     },
@@ -1254,6 +1370,7 @@
         "machine": [
           "machine:inject"
         ],
+        "owner_scoped": "thread",
         "permission": "manage_agents"
       }
     },
@@ -1287,6 +1404,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1298,6 +1416,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1309,6 +1428,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1320,6 +1440,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1331,6 +1452,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1342,6 +1464,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1353,6 +1476,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1364,6 +1488,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1375,6 +1500,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1386,6 +1512,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1397,6 +1524,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1408,6 +1536,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1419,6 +1548,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1430,6 +1560,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1441,6 +1572,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
+        "owner_scoped": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
         "permission": "manage_agents"
       }
     },
@@ -1547,6 +1679,90 @@
     },
     {
       "method": "GET",
+      "path": "/api/me/characters",
+      "requirement": {
+        "note": "the caller's own bots",
+        "permission": "create_characters"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/me/characters",
+      "requirement": {
+        "note": "the caller's own bots",
+        "permission": "create_characters"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/me/characters/draft",
+      "requirement": {
+        "note": "AI build: a draft bot from a description; nothing is saved or logged",
+        "permission": "create_characters"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/me/characters/{bot_id}",
+      "requirement": {
+        "note": "the caller's own bot; anyone else's is 404",
+        "owner_scoped": "character",
+        "permission": "create_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/me/characters/{bot_id}",
+      "requirement": {
+        "note": "the caller's own bot; anyone else's is 404",
+        "owner_scoped": "character",
+        "permission": "create_characters"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/me/characters/{bot_id}",
+      "requirement": {
+        "note": "the caller's own bot; anyone else's is 404",
+        "owner_scoped": "character",
+        "permission": "create_characters"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/me/characters/{bot_id}/avatar",
+      "requirement": {
+        "note": "the caller's own bot",
+        "owner_scoped": "character",
+        "permission": "create_characters"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/me/export",
+      "requirement": {
+        "note": "the caller's own chats and bot setup",
+        "permission": "manage_history"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/me/reset",
+      "requirement": {
+        "note": "Reset to default for the caller's own profile; every role, the default profile included",
+        "permission": "manage_history"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/me/reset/preview",
+      "requirement": {
+        "note": "counts only, for the caller's own profile",
+        "permission": "manage_history"
+      }
+    },
+    {
+      "method": "GET",
       "path": "/api/media",
       "requirement": {
         "permission": "use_images"
@@ -1559,6 +1775,7 @@
         "machine": [
           "machine:messages"
         ],
+        "owner_scoped": "message",
         "permission": "manage_history"
       }
     },
@@ -1566,6 +1783,7 @@
       "method": "PATCH",
       "path": "/api/messages/{message_id}",
       "requirement": {
+        "owner_scoped": "message",
         "permission": "manage_history"
       }
     },
@@ -1573,6 +1791,7 @@
       "method": "PATCH",
       "path": "/api/messages/{message_id}/checklist",
       "requirement": {
+        "owner_scoped": "message",
         "permission": "manage_history"
       }
     },
@@ -1581,6 +1800,7 @@
       "path": "/api/messages/{message_id}/feedback",
       "requirement": {
         "note": "daily feedback quota for Restricted",
+        "owner_scoped": "message",
         "permission": "use_chat"
       }
     },
@@ -1588,6 +1808,7 @@
       "method": "GET",
       "path": "/api/messages/{message_id}/mood-face",
       "requirement": {
+        "owner_scoped": "message",
         "permission": "use_chat",
         "scoped": true
       }
@@ -1606,6 +1827,7 @@
       "method": "POST",
       "path": "/api/openclaw/import",
       "requirement": {
+        "owner_scoped": "thread",
         "permission": "manage_agents"
       }
     },
@@ -1613,6 +1835,7 @@
       "method": "GET",
       "path": "/api/openclaw/sessions",
       "requirement": {
+        "owner_scoped": "thread",
         "permission": "manage_agents"
       }
     },
@@ -1620,6 +1843,7 @@
       "method": "GET",
       "path": "/api/openclaw/transcript",
       "requirement": {
+        "owner_scoped": "thread",
         "permission": "manage_agents"
       }
     },
@@ -1659,17 +1883,10 @@
       }
     },
     {
-      "method": "PUT",
-      "path": "/api/people/devices/this",
-      "requirement": {
-        "note": "binds the CALLING device",
-        "permission": "manage_users"
-      }
-    },
-    {
       "method": "DELETE",
       "path": "/api/people/devices/{device_id}",
       "requirement": {
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
         "permission": "manage_users"
       }
     },
@@ -1677,6 +1894,7 @@
       "method": "DELETE",
       "path": "/api/people/{profile_id}",
       "requirement": {
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
         "permission": "manage_users"
       }
     },
@@ -1684,6 +1902,43 @@
       "method": "PATCH",
       "path": "/api/people/{profile_id}",
       "requirement": {
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/people/{profile_id}/backends",
+      "requirement": {
+        "note": "which connections a profile's own bots may run on",
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/people/{profile_id}/delete",
+      "requirement": {
+        "note": "deletes the profile and its content after a confirm token",
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/{profile_id}/delete/preview",
+      "requirement": {
+        "note": "counts only",
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/people/{profile_id}/household-bots",
+      "requirement": {
+        "note": "which household bots a profile may use",
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
         "permission": "manage_users"
       }
     },
@@ -1691,6 +1946,7 @@
       "method": "POST",
       "path": "/api/people/{profile_id}/password",
       "requirement": {
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
         "permission": "manage_users"
       }
     },
@@ -1698,6 +1954,7 @@
       "method": "DELETE",
       "path": "/api/people/{profile_id}/pin",
       "requirement": {
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
         "permission": "manage_users"
       }
     },
@@ -1705,6 +1962,43 @@
       "method": "POST",
       "path": "/api/people/{profile_id}/pin",
       "requirement": {
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/people/{profile_id}/reset",
+      "requirement": {
+        "note": "counts only; the protected Admin only by itself",
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/{profile_id}/reset/preview",
+      "requirement": {
+        "note": "counts only",
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/people/{profile_id}/role",
+      "requirement": {
+        "note": "to Basic deletes the profile's bots and chats after a confirm token",
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/{profile_id}/role/preview",
+      "requirement": {
+        "note": "counts only",
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
         "permission": "manage_users"
       }
     },
@@ -1712,6 +2006,7 @@
       "method": "POST",
       "path": "/api/people/{profile_id}/sign-out",
       "requirement": {
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
         "permission": "manage_users"
       }
     },
@@ -1733,6 +2028,7 @@
       "method": "PUT",
       "path": "/api/plugins/extensions/{ext_id}",
       "requirement": {
+        "owner_scoped": "none: household plugin switch (manage_plugins)",
         "permission": "manage_plugins"
       }
     },
@@ -1754,6 +2050,7 @@
       "method": "GET",
       "path": "/api/practice-links/{client_id}",
       "requirement": {
+        "owner_scoped": "none: host control (admin_system)",
         "permission": "admin_system"
       }
     },
@@ -1761,6 +2058,7 @@
       "method": "PUT",
       "path": "/api/practice-links/{client_id}",
       "requirement": {
+        "owner_scoped": "none: host control (admin_system)",
         "permission": "admin_system"
       }
     },
@@ -1769,6 +2067,7 @@
       "path": "/api/practice/{path:path}",
       "requirement": {
         "note": "same-origin proxy onto the practice box",
+        "owner_scoped": "none: host control (admin_system proxy)",
         "permission": "admin_system"
       }
     },
@@ -1777,6 +2076,7 @@
       "path": "/api/practice/{path:path}",
       "requirement": {
         "note": "same-origin proxy onto the practice box",
+        "owner_scoped": "none: host control (admin_system proxy)",
         "permission": "admin_system"
       }
     },
@@ -1834,7 +2134,8 @@
         "machine": [
           "machine:reactions"
         ],
-        "note": "agents only"
+        "note": "agents only",
+        "owner_scoped": "thread"
       }
     },
     {
@@ -1918,6 +2219,7 @@
       "method": "DELETE",
       "path": "/api/reactions/{rid}",
       "requirement": {
+        "owner_scoped": "none: the household reaction library (manage_characters)",
         "permission": "manage_characters"
       }
     },
@@ -1925,6 +2227,7 @@
       "method": "PATCH",
       "path": "/api/reactions/{rid}",
       "requirement": {
+        "owner_scoped": "none: the household reaction library (manage_characters)",
         "permission": "manage_characters"
       }
     },
@@ -1932,6 +2235,7 @@
       "method": "GET",
       "path": "/api/reactions/{rid}/image",
       "requirement": {
+        "owner_scoped": "none: a household reaction card (safe flag decides Restricted)",
         "permission": "use_chat",
         "scoped": true
       }
@@ -1940,6 +2244,7 @@
       "method": "POST",
       "path": "/api/recover/transcript",
       "requirement": {
+        "owner_scoped": "thread",
         "permission": "admin_system"
       }
     },
@@ -1947,8 +2252,9 @@
       "method": "GET",
       "path": "/api/search",
       "requirement": {
-        "note": "searches every conversation",
-        "permission": "view_activity"
+        "note": "the caller's OWN conversations (4.0), every role",
+        "owner_scoped": "thread",
+        "permission": "use_chat"
       }
     },
     {
@@ -1991,6 +2297,7 @@
       "method": "POST",
       "path": "/api/starter-packs/{pack_id}/install",
       "requirement": {
+        "owner_scoped": "none: household characters (manage_characters)",
         "permission": "manage_characters"
       }
     },
@@ -2029,6 +2336,7 @@
       "path": "/api/tasks/{task_id}",
       "requirement": {
         "note": "own tasks; an Owner/Admin sees everyone's",
+        "owner_scoped": "task",
         "permission": "dispatch_agents"
       }
     },
@@ -2037,6 +2345,7 @@
       "path": "/api/tasks/{task_id}/cancel",
       "requirement": {
         "note": "own tasks; an Owner/Admin sees everyone's",
+        "owner_scoped": "task",
         "permission": "dispatch_agents"
       }
     },
@@ -2044,6 +2353,7 @@
       "method": "POST",
       "path": "/api/tasks/{task_id}/dismiss",
       "requirement": {
+        "owner_scoped": "task",
         "permission": "approve_agent_actions"
       }
     },
@@ -2052,6 +2362,7 @@
       "path": "/api/tasks/{task_id}/events",
       "requirement": {
         "note": "own tasks; an Owner/Admin sees everyone's",
+        "owner_scoped": "task",
         "permission": "dispatch_agents"
       }
     },
@@ -2060,6 +2371,7 @@
       "path": "/api/tasks/{task_id}/interrupt",
       "requirement": {
         "note": "own tasks; an Owner/Admin sees everyone's",
+        "owner_scoped": "task",
         "permission": "dispatch_agents"
       }
     },
@@ -2068,6 +2380,7 @@
       "path": "/api/tasks/{task_id}/release",
       "requirement": {
         "note": "the human Send for a held handoff; a machine may never press it",
+        "owner_scoped": "task",
         "permission": "approve_agent_actions"
       }
     },
@@ -2076,6 +2389,7 @@
       "path": "/api/tasks/{task_id}/resume",
       "requirement": {
         "note": "own tasks; an Owner/Admin sees everyone's",
+        "owner_scoped": "task",
         "permission": "dispatch_agents"
       }
     },
@@ -2084,6 +2398,7 @@
       "path": "/api/tasks/{task_id}/send",
       "requirement": {
         "note": "own tasks; an Owner/Admin sees everyone's",
+        "owner_scoped": "task",
         "permission": "dispatch_agents"
       }
     },
@@ -2094,6 +2409,7 @@
         "machine": [
           "machine:threads"
         ],
+        "owner_scoped": "thread",
         "permission": "use_chat",
         "scoped": true
       }
@@ -2106,6 +2422,7 @@
           "machine:threads"
         ],
         "note": "daily thread quota for Restricted",
+        "owner_scoped": "thread",
         "permission": "use_chat"
       }
     },
@@ -2116,6 +2433,7 @@
         "machine": [
           "machine:threads"
         ],
+        "owner_scoped": "thread",
         "permission": "manage_history"
       }
     },
@@ -2126,6 +2444,7 @@
         "machine": [
           "machine:threads"
         ],
+        "owner_scoped": "thread",
         "permission": "use_chat",
         "scoped": true
       }
@@ -2138,6 +2457,7 @@
           "machine:threads"
         ],
         "note": "model/thinking fields additionally need a signed-in session",
+        "owner_scoped": "thread",
         "permission": "manage_history"
       }
     },
@@ -2145,6 +2465,7 @@
       "method": "POST",
       "path": "/api/threads/{thread_id}/abort",
       "requirement": {
+        "owner_scoped": "thread",
         "permission": "manage_history"
       }
     },
@@ -2152,6 +2473,7 @@
       "method": "GET",
       "path": "/api/threads/{thread_id}/avatar",
       "requirement": {
+        "owner_scoped": "thread",
         "permission": "use_chat",
         "scoped": true
       }
@@ -2163,6 +2485,7 @@
         "machine": [
           "machine:avatars"
         ],
+        "owner_scoped": "thread",
         "permission": "manage_characters"
       }
     },
@@ -2173,6 +2496,7 @@
         "machine": [
           "machine:threads"
         ],
+        "owner_scoped": "thread",
         "permission": "use_chat",
         "scoped": true
       }
@@ -2184,6 +2508,7 @@
         "machine": [
           "machine:threads"
         ],
+        "owner_scoped": "thread",
         "permission": "use_chat"
       }
     },
@@ -2194,6 +2519,7 @@
         "machine": [
           "machine:threads"
         ],
+        "owner_scoped": "thread",
         "permission": "use_chat"
       }
     },
@@ -2217,6 +2543,7 @@
       "method": "POST",
       "path": "/api/tools/{tool_id}/refresh",
       "requirement": {
+        "owner_scoped": "none: household tool (manage_plugins)",
         "permission": "manage_plugins"
       }
     },
@@ -2224,6 +2551,7 @@
       "method": "GET",
       "path": "/api/tools/{tool_id}/status",
       "requirement": {
+        "owner_scoped": "none: household tool status (use_tools)",
         "permission": "use_tools",
         "scoped": true
       }
@@ -2235,6 +2563,7 @@
         "machine": [
           "machine:threads"
         ],
+        "owner_scoped": "thread",
         "permission": "use_chat",
         "scoped": true
       }
@@ -2255,6 +2584,7 @@
       "path": "/api/users/{profile_id}",
       "requirement": {
         "note": "same rank rules as /api/people",
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
         "permission": "manage_users"
       }
     },
@@ -2263,6 +2593,7 @@
       "path": "/api/users/{profile_id}/export",
       "requirement": {
         "note": "the Owner and Admins may export anyone; the Owner's own export is the Owner's",
+        "owner_scoped": "none: account metadata only (no chats), manage_users; the own-data export is /api/me/export (WP-PROF)",
         "permission": "manage_users"
       }
     },
@@ -2322,6 +2653,7 @@
       "method": "POST",
       "path": "/api/wizard/step/{step}",
       "requirement": {
+        "owner_scoped": "none: first-run settings (manage_settings)",
         "permission": "manage_settings"
       }
     },
@@ -2330,6 +2662,7 @@
       "path": "/apps/{app_id}",
       "requirement": {
         "note": "mounted app",
+        "owner_scoped": "none: an app's static page (its manifest permission)",
         "permission": "use_tools"
       }
     },
@@ -2338,6 +2671,7 @@
       "path": "/apps/{app_id}/{rel:path}",
       "requirement": {
         "note": "mounted app",
+        "owner_scoped": "none: an app's static files (its manifest permission)",
         "permission": "use_tools"
       }
     },
@@ -2346,6 +2680,7 @@
       "path": "/ext/{ext_id}/{rel:path}",
       "requirement": {
         "note": "an add-on's public frontend files",
+        "owner_scoped": "none: an add-on's public frontend files",
         "permission": "use_voice"
       }
     },
@@ -2353,6 +2688,7 @@
       "method": "GET",
       "path": "/local/file/{path:path}",
       "requirement": {
+        "owner_scoped": "none: host control (admin_system: files off the host)",
         "permission": "admin_system"
       }
     },
@@ -2361,6 +2697,7 @@
       "path": "/local/view/{ticket}/{rel:path}",
       "requirement": {
         "note": "capability URL: the random, expiring, client-bound ticket is the credential",
+        "owner_scoped": "none: a capability URL (the ticket is the credential)",
         "public": true
       }
     },
@@ -2369,6 +2706,7 @@
       "path": "/tools/_t/{ticket}/{rel:path}",
       "requirement": {
         "note": "capability URL: the random, expiring ticket is the credential",
+        "owner_scoped": "none: a capability URL (the ticket is the credential)",
         "public": true
       }
     },
@@ -2376,6 +2714,7 @@
       "method": "GET",
       "path": "/tools/{tool_id}",
       "requirement": {
+        "owner_scoped": "none: a tool panel page (use_tools)",
         "permission": "use_tools",
         "scoped": true
       }
@@ -2384,6 +2723,7 @@
       "method": "GET",
       "path": "/tools/{tool_id}/{rel:path}",
       "requirement": {
+        "owner_scoped": "none: a tool panel's files (use_tools)",
         "permission": "use_tools",
         "scoped": true
       }
@@ -2392,39 +2732,49 @@
   "schema": 1,
   "websocket_actions": {
     "abort": {
+      "owner_scoped": "thread",
       "permission": "manage_history"
     },
     "archive_thread": {
+      "owner_scoped": "thread",
       "permission": "manage_history"
     },
     "create_thread": {
       "note": "quota-charged for Restricted",
+      "owner_scoped": "none: the new thread is stamped with its creator",
       "permission": "use_chat"
     },
     "edit_rerun": {
+      "owner_scoped": "thread",
       "permission": "manage_history"
     },
     "get_messages": {
+      "owner_scoped": "thread",
       "permission": "use_chat",
       "scoped": true
     },
     "get_threads": {
+      "owner_scoped": "thread",
       "permission": "use_chat",
       "scoped": true
     },
     "ping": {
       "note": "liveness",
+      "owner_scoped": "none: liveness",
       "public": true
     },
     "regenerate": {
+      "owner_scoped": "thread",
       "permission": "manage_history"
     },
     "retry": {
       "note": "quota-charged for Restricted",
+      "owner_scoped": "thread",
       "permission": "use_chat"
     },
     "send": {
       "note": "quota-charged for Restricted",
+      "owner_scoped": "thread",
       "permission": "use_chat"
     }
   },
@@ -2435,6 +2785,7 @@
     },
     "/ws/{name}/{thread_id}": {
       "note": "an add-on's socket; the host also checks the thread's character",
+      "owner_scoped": "thread",
       "permission": "use_voice",
       "scoped": true
     }

@@ -398,6 +398,27 @@
         "title": "AgentTaskResumeIn",
         "type": "object"
       },
+      "BackendsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed"
+          }
+        },
+        "title": "BackendsIn",
+        "type": "object"
+      },
       "BackupCreateIn": {
         "additionalProperties": false,
         "properties": {
@@ -465,6 +486,20 @@
           "file"
         ],
         "title": "Body_file_upload_api_files_post",
+        "type": "object"
+      },
+      "Body_my_character_avatar_api_me_characters__bot_id__avatar_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_my_character_avatar_api_me_characters__bot_id__avatar_post",
         "type": "object"
       },
       "Body_pin_thread_avatar_api_threads__thread_id__avatar_post": {
@@ -1040,6 +1075,11 @@
             "title": "Emoji",
             "type": "string"
           },
+          "hidden": {
+            "default": false,
+            "title": "Hidden",
+            "type": "boolean"
+          },
           "id": {
             "anyOf": [
               {
@@ -1239,6 +1279,17 @@
               }
             ],
             "title": "Emoji"
+          },
+          "hidden": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hidden"
           },
           "hide_unlocked": {
             "anyOf": [
@@ -1743,6 +1794,22 @@
         "title": "DailyThreadIn",
         "type": "object"
       },
+      "DeleteIn": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm_token": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Confirm Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirm_token"
+        ],
+        "title": "DeleteIn",
+        "type": "object"
+      },
       "DetectIn": {
         "additionalProperties": false,
         "properties": {
@@ -1761,36 +1828,6 @@
           }
         },
         "title": "DetectIn",
-        "type": "object"
-      },
-      "DeviceIn": {
-        "additionalProperties": false,
-        "properties": {
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 60,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "profile_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profile Id"
-          }
-        },
-        "title": "DeviceIn",
         "type": "object"
       },
       "DiscoverIn": {
@@ -1813,19 +1850,24 @@
         "title": "DiscoverIn",
         "type": "object"
       },
-      "FamilyIn": {
+      "DraftIn": {
         "additionalProperties": false,
         "properties": {
-          "install_animal_friends": {
-            "default": false,
-            "title": "Install Animal Friends",
-            "type": "boolean"
-          },
-          "install_assistants": {
-            "default": false,
-            "title": "Install Assistants",
-            "type": "boolean"
-          },
+          "description": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "title": "DraftIn",
+        "type": "object"
+      },
+      "FamilyIn": {
+        "properties": {
           "people": {
             "items": {
               "$ref": "#/components/schemas/Person"
@@ -2113,6 +2155,31 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HouseholdIn": {
+        "additionalProperties": false,
+        "properties": {
+          "household_bots": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "const": "all",
+                "type": "string"
+              }
+            ],
+            "title": "Household Bots"
+          }
+        },
+        "required": [
+          "household_bots"
+        ],
+        "title": "HouseholdIn",
+        "type": "object"
+      },
       "ImageJobIn": {
         "description": "Ask for a picture in a thread and get an id back, not a picture.\n\nOne call, and the agent's turn is free again: DisPatch writes the\nplaceholder, drives the image server, and rewrites that same message when\nthe render lands (or fails). `workflow` and the size fields are optional —\nomitted, the image server picks its own default, which is what an agent\nthat does not know this rig's workflow names should do.",
         "properties": {
@@ -2252,6 +2319,20 @@
               }
             ],
             "title": "Date"
+          },
+          "delivery_key": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9._:@/+-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Key"
           },
           "media_url": {
             "anyOf": [
@@ -2610,6 +2691,244 @@
         "title": "MessageFeedbackIn",
         "type": "object"
       },
+      "MyCharacterCreateIn": {
+        "additionalProperties": false,
+        "description": "What the editor sends for a new bot. Everything else (flags, agents, pools, audience)\nis household and is not accepted here.",
+        "properties": {
+          "color": {
+            "default": "",
+            "maxLength": 32,
+            "title": "Color",
+            "type": "string"
+          },
+          "connection": {
+            "anyOf": [
+              {
+                "maxLength": 48,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 400,
+            "title": "Description",
+            "type": "string"
+          },
+          "emoji": {
+            "default": "",
+            "maxLength": 8,
+            "title": "Emoji",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "persona": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persona"
+          },
+          "personality": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personality"
+          },
+          "quick_actions": {
+            "default": true,
+            "title": "Quick Actions",
+            "type": "boolean"
+          },
+          "tools": {
+            "default": true,
+            "title": "Tools",
+            "type": "boolean"
+          },
+          "voice": {
+            "default": "",
+            "maxLength": 80,
+            "title": "Voice",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MyCharacterCreateIn",
+        "type": "object"
+      },
+      "MyCharacterPatchIn": {
+        "additionalProperties": false,
+        "description": "Present keys are set, absent ones left alone; ``connection`` null/\"\" detaches.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "connection": {
+            "anyOf": [
+              {
+                "maxLength": 48,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 400,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "emoji": {
+            "anyOf": [
+              {
+                "maxLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emoji"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "persona": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persona"
+          },
+          "personality": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personality"
+          },
+          "quick_actions": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Actions"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools"
+          },
+          "voice": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice"
+          }
+        },
+        "title": "MyCharacterPatchIn",
+        "type": "object"
+      },
       "NetworkIn": {
         "additionalProperties": false,
         "properties": {
@@ -2708,6 +3027,21 @@
       "Person": {
         "additionalProperties": false,
         "properties": {
+          "household_bots": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Household Bots"
+          },
           "name": {
             "maxLength": 40,
             "minLength": 1,
@@ -2786,6 +3120,23 @@
               }
             ],
             "title": "Grants"
+          },
+          "household_bots": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Household Bots"
           },
           "name": {
             "maxLength": 40,
@@ -2914,6 +3265,23 @@
               }
             ],
             "title": "Grants"
+          },
+          "household_bots": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Household Bots"
           },
           "name": {
             "anyOf": [
@@ -3076,6 +3444,57 @@
           }
         },
         "title": "RestoreIn",
+        "type": "object"
+      },
+      "RoleChangeIn": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm_token": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm Token"
+          },
+          "household_bots": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "const": "all",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Household Bots"
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "user",
+              "basic",
+              "member",
+              "restricted"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "RoleChangeIn",
         "type": "object"
       },
       "ScoreIn": {
@@ -3274,6 +3693,22 @@
           }
         },
         "title": "TagsIn",
+        "type": "object"
+      },
+      "TokenIn": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "TokenIn",
         "type": "object"
       },
       "UpdateBotOrderIn": {
@@ -5540,6 +5975,7 @@
     },
     "/api/auth/lock": {
       "post": {
+        "description": "Lock = sign out on this device and land on the lock target (4.0, BUILD-PLAN-v2 §1.4):\nthe default profile (``lock_target: default_profile``) or the profile list. The push\nsubscription of the session being closed goes with it (a locked device pings nobody).",
         "operationId": "auth_lock_api_auth_lock_post",
         "responses": {
           "200": {
@@ -7631,6 +8067,89 @@
         "summary": "Personality Presets"
       }
     },
+    "/api/characters/{bot_id}/clone": {
+      "post": {
+        "operationId": "clone_character_api_characters__bot_id__clone_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clone Character"
+      }
+    },
+    "/api/characters/{bot_id}/clone-to/{profile_id}": {
+      "post": {
+        "operationId": "clone_character_to_api_characters__bot_id__clone_to__profile_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clone Character To"
+      }
+    },
     "/api/characters/{character_id}": {
       "delete": {
         "operationId": "delete_character_api_characters__character_id__delete",
@@ -7746,6 +8265,44 @@
           }
         },
         "summary": "Patch Character"
+      }
+    },
+    "/api/characters/{character_id}/delete-preview": {
+      "get": {
+        "description": "What deleting a household character leaves behind, as numbers: the chats people have\nwith it (they stay, but can no longer be continued) and how many profiles they belong to.\nCopies people made of it are their own bots and are not touched.",
+        "operationId": "character_delete_preview_api_characters__character_id__delete_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "character_id",
+            "required": true,
+            "schema": {
+              "title": "Character Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Character Delete Preview"
       }
     },
     "/api/connections": {
@@ -8398,7 +8955,7 @@
     },
     "/api/export": {
       "get": {
-        "description": "Export all messages (or one bot / one thread) as JSON, Markdown, or HTML.\n\nThe user's 'retrieve ALL messages' guarantee: a single action that dumps the\nfull conversation history into an open, human-readable + re-importable file.",
+        "description": "Export YOUR messages (or one bot / one thread of yours) as JSON, Markdown, or HTML.\n\nThe 'retrieve ALL my messages' guarantee: a single action that dumps the caller's whole\nconversation history into an open, human-readable + re-importable file. 4.0: own\nthreads only, for everyone - the full dump of every profile's chats is the encrypted\nbackup (Settings > System > Backups, admin_system), not this route.",
         "operationId": "export_all_api_export_get",
         "parameters": [
           {
@@ -11360,6 +11917,324 @@
         "summary": "My Activity"
       }
     },
+    "/api/me/characters": {
+      "get": {
+        "operationId": "my_characters_api_me_characters_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Characters"
+      },
+      "post": {
+        "operationId": "my_character_create_api_me_characters_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MyCharacterCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Character Create"
+      }
+    },
+    "/api/me/characters/draft": {
+      "post": {
+        "operationId": "draft_character_api_me_characters_draft_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft Character"
+      }
+    },
+    "/api/me/characters/{bot_id}": {
+      "delete": {
+        "operationId": "my_character_delete_api_me_characters__bot_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Character Delete"
+      },
+      "get": {
+        "operationId": "my_character_api_me_characters__bot_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Character"
+      },
+      "patch": {
+        "operationId": "my_character_patch_api_me_characters__bot_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MyCharacterPatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Character Patch"
+      }
+    },
+    "/api/me/characters/{bot_id}/avatar": {
+      "post": {
+        "operationId": "my_character_avatar_api_me_characters__bot_id__avatar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_my_character_avatar_api_me_characters__bot_id__avatar_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Character Avatar"
+      }
+    },
+    "/api/me/export": {
+      "get": {
+        "operationId": "my_export_api_me_export_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Export"
+      }
+    },
+    "/api/me/reset": {
+      "post": {
+        "operationId": "my_reset_api_me_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Reset"
+      }
+    },
+    "/api/me/reset/preview": {
+      "get": {
+        "operationId": "my_reset_preview_api_me_reset_preview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Reset Preview"
+      }
+    },
     "/api/media": {
       "get": {
         "description": "Serve a local image/video file, but only from allow-listed base directories.",
@@ -12644,43 +13519,6 @@
         "summary": "People Devices"
       }
     },
-    "/api/people/devices/this": {
-      "put": {
-        "description": "Bind THIS browser to a default profile (``null`` unbinds): a device bound to a\nRestricted profile opens as that profile with nobody signed in.",
-        "operationId": "people_bind_this_device_api_people_devices_this_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeviceIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "People Bind This Device"
-      }
-    },
     "/api/people/devices/{device_id}": {
       "delete": {
         "operationId": "people_forget_device_api_people_devices__device_id__delete",
@@ -12720,6 +13558,7 @@
     },
     "/api/people/{profile_id}": {
       "delete": {
+        "description": "4.0: deleting a profile deletes its chats, characters, files and cloned voices, so it\ngoes through ``profiles_service.delete_profile`` with the counts confirmed first:\n``GET /api/people/{id}/delete/preview`` then ``POST /api/people/{id}/delete``.",
         "operationId": "people_delete_api_people__profile_id__delete",
         "parameters": [
           {
@@ -12755,6 +13594,7 @@
         "summary": "People Delete"
       },
       "patch": {
+        "description": "Name, picture, grants / denies, budgets, timeout, disabled. 4.0: a role change and the\nhousehold list go through ``profiles_service`` (``POST /api/people/{id}/role`` with its\npreview token - a User -> Basic change deletes content - and\n``PUT /api/people/{id}/household-bots``), so the wipe can never be skipped.",
         "operationId": "people_patch_api_people__profile_id__patch",
         "parameters": [
           {
@@ -12798,6 +13638,184 @@
           }
         },
         "summary": "People Patch"
+      }
+    },
+    "/api/people/{profile_id}/backends": {
+      "put": {
+        "operationId": "people_backends_api_people__profile_id__backends_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackendsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Backends"
+      }
+    },
+    "/api/people/{profile_id}/delete": {
+      "post": {
+        "operationId": "people_delete_api_people__profile_id__delete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Delete"
+      }
+    },
+    "/api/people/{profile_id}/delete/preview": {
+      "get": {
+        "operationId": "people_delete_preview_api_people__profile_id__delete_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Delete Preview"
+      }
+    },
+    "/api/people/{profile_id}/household-bots": {
+      "put": {
+        "operationId": "people_household_api_people__profile_id__household_bots_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HouseholdIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Household"
       }
     },
     "/api/people/{profile_id}/password": {
@@ -12928,6 +13946,183 @@
           }
         },
         "summary": "People Set Pin"
+      }
+    },
+    "/api/people/{profile_id}/reset": {
+      "post": {
+        "operationId": "people_reset_api_people__profile_id__reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Reset"
+      }
+    },
+    "/api/people/{profile_id}/reset/preview": {
+      "get": {
+        "operationId": "people_reset_preview_api_people__profile_id__reset_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Reset Preview"
+      }
+    },
+    "/api/people/{profile_id}/role": {
+      "post": {
+        "operationId": "people_role_api_people__profile_id__role_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleChangeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Role"
+      }
+    },
+    "/api/people/{profile_id}/role/preview": {
+      "get": {
+        "operationId": "people_role_preview_api_people__profile_id__role_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "role",
+            "required": true,
+            "schema": {
+              "title": "Role",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Role Preview"
       }
     },
     "/api/people/{profile_id}/sign-out": {
@@ -14116,7 +15311,7 @@
     },
     "/api/search": {
       "get": {
-        "description": "Full-text search across every thread's messages (FTS5, LIKE fallback).",
+        "description": "Full-text search across the CALLER'S OWN conversations (FTS5, LIKE fallback).\n\n4.0: every role searches its own chats, and only those - Admins included (before 4.0\nthis read every thread in the house), Basic profiles too (their chats are theirs).",
         "operationId": "search_messages_api_search_get",
         "parameters": [
           {

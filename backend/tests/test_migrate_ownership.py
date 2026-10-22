@@ -16,6 +16,7 @@ import pytest
 import yaml
 
 from app import accounts, auth, characters, config, migrate, policy
+from app.contracts.permissions import Role
 
 PUSH_KEYS = {"remembered": "a" * 64, "legacy": "b" * 64, "dead": "c" * 64, "open": "open:" + "d" * 64}
 
@@ -166,8 +167,23 @@ def test_applying_assigns_by_the_never_widen_rule(v3):
     assert (rep.backup / "apps-data" / "imagestudio" / "images.jsonl").exists()
 
 
+def _could_use_3x(bot, prof) -> bool:
+    """The 3.x rule 009 was written against, restated here independently of migrate.py
+    (4.0's characters.may_use asks other questions: household lists, personal bots).
+    Admins everything; then the character's profile list; Basic (stored restricted) only
+    audience all/restricted."""
+    if prof.role is Role.ADMIN:
+        return True
+    if bot.profiles and prof.id not in bot.profiles:
+        return False
+    if prof.role is Role.BASIC:
+        return bot.audience in ("all", "restricted")
+    return True
+
+
 def test_no_profile_gains_access_to_a_chat_it_could_not_read(v3):
-    """The rule, checked directly: every new owner could already use the character."""
+    """The rule, checked directly: every new owner could already use the character
+    (under the pre-upgrade 3.x rules, which is what 009's never-widen promise is about)."""
     migrate.run()
     accounts.reset_for_tests()
     bots = {b.id.lower(): b for b in config.load_bots()}
@@ -179,7 +195,7 @@ def test_no_profile_gains_access_to_a_chat_it_could_not_read(v3):
         con.close()
         bot = bots.get(bot_id.lower())
         if not prof.protected:
-            assert bot is not None and characters.may_use(bot, policy.profile_principal(prof)), (tid, bot_id)
+            assert bot is not None and _could_use_3x(bot, prof), (tid, bot_id)
 
 
 def test_two_restricted_profiles_means_no_guess(v3):

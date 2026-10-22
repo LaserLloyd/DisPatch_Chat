@@ -155,7 +155,7 @@ async def broadcast_roster() -> None:
 async def list_characters(request: Request):
     pr = caller(request)
     bots = await asyncio.to_thread(config.load_bots)
-    return {"characters": [b.to_dict() for b in characters.visible_to(pr, bots)]}
+    return {"characters": [b.to_dict() for b in characters.usable_bots(pr, bots)]}
 
 
 def _household(bots: list[config.Bot]) -> list[config.Bot]:

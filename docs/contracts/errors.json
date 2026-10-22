@@ -170,6 +170,18 @@
       "status": 422
     },
     {
+      "code": "avatar_invalid",
+      "docs": "avatar_invalid",
+      "fix": "Send a PNG, JPEG or WebP picture.",
+      "message": "That file is not a picture DisPatch can read.",
+      "patterns": [
+        "That file is not a picture DisPatch can read.",
+        "No picture was sent.",
+        "A picture must be a raster image."
+      ],
+      "status": 422
+    },
+    {
       "code": "avatar_not_capturable",
       "docs": "avatar_not_capturable",
       "fix": "The state conflicts with the request; reload and retry.",
@@ -232,6 +244,17 @@
       "status": 400
     },
     {
+      "code": "avatar_too_large",
+      "docs": "avatar_too_large",
+      "fix": "Send a smaller picture.",
+      "message": "The picture is too large (25 MB at most).",
+      "patterns": [
+        "The picture is too large (25 MB at most).",
+        "The picture has too many pixels."
+      ],
+      "status": 413
+    },
+    {
       "code": "avatar_write_failed",
       "docs": "avatar_write_failed",
       "fix": "This is a server fault; check the logs (Settings > System) and retry.",
@@ -252,6 +275,17 @@
       "status": 422
     },
     {
+      "code": "backend_not_allowed",
+      "docs": "backend_not_allowed",
+      "fix": "Ask an Admin to allow the connection for this profile in People.",
+      "message": "Your profile may not choose a bot's backend.",
+      "patterns": [
+        "Your profile may not choose a bot's backend.",
+        "This profile may not use that connection."
+      ],
+      "status": 403
+    },
+    {
       "code": "backend_unavailable",
       "docs": "backend_unavailable",
       "fix": "ComfyUI is starting or briefly down. DisPatch retries.",
@@ -260,6 +294,25 @@
         "The image backend is unavailable."
       ],
       "status": 503
+    },
+    {
+      "code": "backends_invalid",
+      "docs": "backends_invalid",
+      "fix": "Send {\"allowed\": [connection ids]} or {} for every connection.",
+      "message": "backends must be an object.",
+      "patterns": [
+        "backends must be an object.",
+        "backends.allowed must be a list of connection ids."
+      ],
+      "status": 422
+    },
+    {
+      "code": "backends_unknown_connection",
+      "docs": "backends_unknown_connection",
+      "fix": "Use a connection id from GET /api/connections.",
+      "message": "Unknown connection.",
+      "patterns": [],
+      "status": 422
     },
     {
       "code": "backup_confirm_required",
@@ -316,6 +369,16 @@
       "message": "Bad request.",
       "patterns": [],
       "status": 400
+    },
+    {
+      "code": "basic_no_bots",
+      "docs": "basic_no_bots",
+      "fix": "Ask an Admin to add household bots to this profile, or to make it a User.",
+      "message": "A Basic profile uses the bots an Admin gives it; it has none of its own.",
+      "patterns": [
+        "A Basic profile uses the bots an Admin gives it; it has none of its own."
+      ],
+      "status": 422
     },
     {
       "code": "before_invalid",
@@ -728,6 +791,14 @@
       "status": 409
     },
     {
+      "code": "delete_stale",
+      "docs": "delete_stale",
+      "fix": "Fetch the delete preview again and confirm with its new token.",
+      "message": "What would be deleted has changed. Look at the numbers again before confirming.",
+      "patterns": [],
+      "status": 409
+    },
+    {
       "code": "device_bind_role",
       "docs": "device_bind_role",
       "fix": "Bind a Member or Restricted profile. Admins and the Owner always sign in with their credential.",
@@ -736,6 +807,26 @@
         "A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential."
       ],
       "status": 409
+    },
+    {
+      "code": "draft_failed",
+      "docs": "draft_failed",
+      "fix": "Try again, or describe the bot in more detail.",
+      "message": "The AI did not return a usable bot. Try again, or add more detail.",
+      "patterns": [
+        "The AI did not return a usable bot. Try again, or add more detail."
+      ],
+      "status": 502
+    },
+    {
+      "code": "draft_unavailable",
+      "docs": "draft_unavailable",
+      "fix": "Connect an AI in Settings (AI models), or ask an Admin to allow one for your profile.",
+      "message": "No AI connection is available for building a bot.",
+      "patterns": [
+        "No AI connection is available for building a bot."
+      ],
+      "status": 503
     },
     {
       "code": "empty_file",
@@ -957,6 +1048,29 @@
         "hidden must be a boolean"
       ],
       "status": 400
+    },
+    {
+      "code": "household_bots_invalid",
+      "docs": "household_bots_invalid",
+      "fix": "Send \"all\" or a list of household character ids (GET /api/bots/all).",
+      "message": "household_bots must be \"all\" or a list of character ids.",
+      "patterns": [
+        "household_bots must be \"all\" or a list of character ids."
+      ],
+      "status": 422
+    },
+    {
+      "code": "household_invalid",
+      "docs": "household_invalid",
+      "fix": "Send \"all\" (Users only) or a list of household bot ids; Admins use every household bot.",
+      "message": "household_bots must be a list of bot ids.",
+      "patterns": [
+        "household_bots must be a list of bot ids.",
+        "Unknown household bot {}.",
+        "An Admin uses every household bot.",
+        "A Basic profile gets an explicit list of bots, not all of them."
+      ],
+      "status": 422
     },
     {
       "code": "image_dimensions_too_large",
@@ -1382,6 +1496,26 @@
       "status": 400
     },
     {
+      "code": "lock_target_fence",
+      "docs": "lock_target_fence",
+      "fix": "Grant it to a profile of its own, or make another profile the default first.",
+      "message": "This is the shared default profile everyone lands on: agents and voice cloning cannot be switched on for it.",
+      "patterns": [
+        "This is the shared default profile everyone lands on: agents and voice cloning cannot be switched on for it."
+      ],
+      "status": 422
+    },
+    {
+      "code": "lock_target_invalid",
+      "docs": "lock_target_invalid",
+      "fix": "Choose a User or Basic profile (not an Admin) that exists and is enabled, or the profile list.",
+      "message": "Pick an existing, enabled profile.",
+      "patterns": [
+        "Pick an existing, enabled profile."
+      ],
+      "status": 422
+    },
+    {
       "code": "machine_scope_denied",
       "docs": "machine_scope_denied",
       "fix": "Send an API key whose machine scopes include the one shown in required_permission (security.yaml machine_scopes).",
@@ -1461,6 +1595,16 @@
         "Not a directory"
       ],
       "status": 400
+    },
+    {
+      "code": "not_copyable",
+      "docs": "not_copyable",
+      "fix": "Only direct-API household bots can be copied.",
+      "message": "This bot runs on an agent and cannot be copied.",
+      "patterns": [
+        "This bot runs on an agent and cannot be copied."
+      ],
+      "status": 422
     },
     {
       "code": "not_found",
@@ -1598,6 +1742,16 @@
         "A permission is invalid."
       ],
       "status": 400
+    },
+    {
+      "code": "personal_needs_direct",
+      "docs": "personal_needs_direct",
+      "fix": "Give the character a connection in its editor (personal characters run on a direct backend only).",
+      "message": "This character has no direct AI connection, so it cannot answer.",
+      "patterns": [
+        "This character has no direct AI connection, so it cannot answer."
+      ],
+      "status": 409
     },
     {
       "code": "pin_invalid",
@@ -1768,6 +1922,16 @@
       "status": 404
     },
     {
+      "code": "profile_required",
+      "docs": "profile_required",
+      "fix": "Sign in to a profile; machine callers and open installs have no profile of their own.",
+      "message": "Sign in to a profile first.",
+      "patterns": [
+        "Sign in to a profile first."
+      ],
+      "status": 409
+    },
+    {
       "code": "profile_role_invalid",
       "docs": "profile_role_invalid",
       "fix": "Use owner, admin, member or restricted.",
@@ -1894,6 +2058,24 @@
       "status": 409
     },
     {
+      "code": "reset_stale",
+      "docs": "reset_stale",
+      "fix": "Fetch the reset preview again and confirm with its new token.",
+      "message": "What would be deleted has changed. Look at the numbers again before confirming.",
+      "patterns": [
+        "What would be deleted has changed. Look at the numbers again before confirming."
+      ],
+      "status": 409
+    },
+    {
+      "code": "role_change_stale",
+      "docs": "role_change_stale",
+      "fix": "Fetch the role-change preview again and confirm with its new token.",
+      "message": "What would be deleted has changed. Look at the numbers again before confirming.",
+      "patterns": [],
+      "status": 409
+    },
+    {
       "code": "route_undeclared",
       "docs": "route_undeclared",
       "fix": "This is a bug: the endpoint has no declared permission. Report it; it is refused until it has one.",
@@ -1971,7 +2153,7 @@
     {
       "code": "signin_required",
       "docs": "signin_required",
-      "fix": "Pick your profile and enter your PIN or password. The owner can allow signed-out use with anonymous_access: restricted in security.yaml.",
+      "fix": "Pick your profile on the sign-in screen (with its PIN or password if it has one). Unsigned devices land on the default profile only when an Admin has set one (Settings, People: lock target).",
       "message": "Sign in to continue.",
       "patterns": [
         "Sign in to continue."
@@ -2141,6 +2323,14 @@
       "status": 429
     },
     {
+      "code": "too_many_bots",
+      "docs": "too_many_bots",
+      "fix": "Delete one of your bots first.",
+      "message": "A profile can have at most {} bots",
+      "patterns": [],
+      "status": 409
+    },
+    {
       "code": "too_many_entries",
       "docs": "too_many_entries",
       "fix": "Check the request and resend it.",
@@ -2243,6 +2433,36 @@
       "status": 415
     },
     {
+      "code": "use_delete_route",
+      "docs": "use_delete_route",
+      "fix": "GET /api/people/{id}/delete/preview, then POST /api/people/{id}/delete with its token.",
+      "message": "Delete a profile with POST /api/people/{id}/delete (preview the counts first).",
+      "patterns": [
+        "Delete a profile with POST /api/people/{id}/delete (preview the counts first)."
+      ],
+      "status": 409
+    },
+    {
+      "code": "use_household_route",
+      "docs": "use_household_route",
+      "fix": "Send the list to PUT /api/people/{id}/household-bots.",
+      "message": "Set the household bots with PUT /api/people/{id}/household-bots.",
+      "patterns": [
+        "Set the household bots with PUT /api/people/{id}/household-bots."
+      ],
+      "status": 409
+    },
+    {
+      "code": "use_role_route",
+      "docs": "use_role_route",
+      "fix": "GET /api/people/{id}/role/preview, then POST /api/people/{id}/role with its token.",
+      "message": "Change a profile's type with POST /api/people/{id}/role (preview first).",
+      "patterns": [
+        "Change a profile's type with POST /api/people/{id}/role (preview first)."
+      ],
+      "status": 409
+    },
+    {
       "code": "validation_error",
       "docs": "validation_error",
       "fix": "Fix the fields listed in detail and resend.",
@@ -2257,6 +2477,16 @@
       "message": "{} needs the voice add-on, which is not installed",
       "patterns": [
         "{} needs the voice add-on, which is not installed"
+      ],
+      "status": 422
+    },
+    {
+      "code": "voice_not_allowed",
+      "docs": "voice_not_allowed",
+      "fix": "Pick a built-in voice or one of your own (or a household) cloned voice.",
+      "message": "That voice is not available to you.",
+      "patterns": [
+        "That voice is not available to you."
       ],
       "status": 422
     },

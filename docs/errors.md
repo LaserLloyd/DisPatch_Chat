@@ -33,15 +33,20 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`api_key_required`](#api_key_required) | 401 | API key required |
 | [`approval_not_found`](#approval_not_found) | 404 | That approval request is not pending any more. |
 | [`approval_scope_not_allowed`](#approval_scope_not_allowed) | 422 | That approval can only be given for this one call. |
+| [`avatar_invalid`](#avatar_invalid) | 422 | That file is not a picture DisPatch can read. |
 | [`avatar_not_capturable`](#avatar_not_capturable) | 409 | The bot has no capturable avatar right now |
 | [`avatar_not_found`](#avatar_not_found) | 404 | Avatar not found |
 | [`avatar_not_raster`](#avatar_not_raster) | 400 | Avatar must be a raster image |
 | [`avatar_pool_missing`](#avatar_pool_missing) | 404 | No avatar pool for that bot |
 | [`avatar_snapshot_failed`](#avatar_snapshot_failed) | 500 | Could not store the avatar snapshot |
 | [`avatar_source_required`](#avatar_source_required) | 400 | Send an image file, or pass source=current |
+| [`avatar_too_large`](#avatar_too_large) | 413 | The picture is too large (25 MB at most). |
 | [`avatar_write_failed`](#avatar_write_failed) | 500 | Could not write the avatar |
 | [`backend_invalid`](#backend_invalid) | 422 | backend must be 'direct' or 'legacy-api' |
+| [`backend_not_allowed`](#backend_not_allowed) | 403 | Your profile may not choose a bot's backend. |
 | [`backend_unavailable`](#backend_unavailable) | 503 | The image backend is unavailable. |
+| [`backends_invalid`](#backends_invalid) | 422 | backends must be an object. |
+| [`backends_unknown_connection`](#backends_unknown_connection) | 422 | Unknown connection. |
 | [`backup_confirm_required`](#backup_confirm_required) | 422 | Restoring replaces your current data |
 | [`backup_corrupt`](#backup_corrupt) | 400 | The backup file is damaged |
 | [`backup_not_found`](#backup_not_found) | 404 | Unknown backup |
@@ -49,6 +54,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`backup_protected`](#backup_protected) | 409 | That backup is protected |
 | [`backup_wrong_key`](#backup_wrong_key) | 400 | The passphrase is wrong, or this is not a DisPatch backup |
 | [`bad_request`](#bad_request) | 400 | Bad request. |
+| [`basic_no_bots`](#basic_no_bots) | 422 | A Basic profile uses the bots an Admin gives it; it has none of its own. |
 | [`before_invalid`](#before_invalid) | 400 | before must be an ISO-8601 timestamp |
 | [`before_required`](#before_required) | 400 | before (ISO timestamp) required |
 | [`body_not_object`](#body_not_object) | 422 | body must be an object |
@@ -91,7 +97,10 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`days_not_number`](#days_not_number) | 400 | days must be a number |
 | [`days_out_of_range`](#days_out_of_range) | 400 | days must be 0–365 |
 | [`deep_check_running`](#deep_check_running) | 409 | A deep check is already running |
+| [`delete_stale`](#delete_stale) | 409 | What would be deleted has changed. Look at the numbers again before confirming. |
 | [`device_bind_role`](#device_bind_role) | 409 | A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential. |
+| [`draft_failed`](#draft_failed) | 502 | The AI did not return a usable bot. Try again, or add more detail. |
+| [`draft_unavailable`](#draft_unavailable) | 503 | No AI connection is available for building a bot. |
 | [`empty_file`](#empty_file) | 400 | Empty file |
 | [`enabled_flag_invalid`](#enabled_flag_invalid) | 422 | body must be {enabled: true\|false} |
 | [`endpoint_required`](#endpoint_required) | 400 | endpoint is required |
@@ -114,6 +123,8 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`guide_needs_atlas`](#guide_needs_atlas) | 404 | The guide needs the Atlas bot |
 | [`guide_unknown`](#guide_unknown) | 404 | Unknown guide |
 | [`hidden_flag_invalid`](#hidden_flag_invalid) | 400 | hidden must be a boolean |
+| [`household_bots_invalid`](#household_bots_invalid) | 422 | household_bots must be "all" or a list of character ids. |
+| [`household_invalid`](#household_invalid) | 422 | household_bots must be a list of bot ids. |
 | [`image_dimensions_too_large`](#image_dimensions_too_large) | 400 | Image dimensions too large (max 64 megapixels) |
 | [`image_request_failed`](#image_request_failed) | 500 | Could not start the image request |
 | [`image_requests_disabled`](#image_requests_disabled) | 403 | Image requests aren't enabled for {} |
@@ -156,6 +167,8 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`jobboard_unknown_board_bot`](#jobboard_unknown_board_bot) | 404 | Unknown board bot |
 | [`json_invalid`](#json_invalid) | 400 | invalid JSON body |
 | [`list_index_invalid`](#list_index_invalid) | 400 | list must be a small non-negative integer |
+| [`lock_target_fence`](#lock_target_fence) | 422 | This is the shared default profile everyone lands on: agents and voice cloning cannot be switched on for it. |
+| [`lock_target_invalid`](#lock_target_invalid) | 422 | Pick an existing, enabled profile. |
 | [`machine_scope_denied`](#machine_scope_denied) | 403 | This API key is not allowed to call that endpoint. |
 | [`max_tokens_invalid`](#max_tokens_invalid) | 422 | max_tokens must be a whole number |
 | [`message_no_mood`](#message_no_mood) | 404 | This message has no mood |
@@ -164,6 +177,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`multi_gpu_required`](#multi_gpu_required) | 503 | The workflow needs more GPUs than the image server has. |
 | [`not_a_checklist`](#not_a_checklist) | 400 | Message is not a checklist |
 | [`not_a_directory`](#not_a_directory) | 400 | Not a directory |
+| [`not_copyable`](#not_copyable) | 422 | This bot runs on an agent and cannot be copied. |
 | [`not_found`](#not_found) | 404 | Not found |
 | [`nothing_to_change`](#nothing_to_change) | 400 | Nothing to change |
 | [`owner_exists`](#owner_exists) | 409 | This install already has an owner. |
@@ -177,6 +191,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`payload_too_large`](#payload_too_large) | 413 | File too large |
 | [`permission_denied`](#permission_denied) | 403 | Your profile does not have permission to do that. |
 | [`permissions_invalid`](#permissions_invalid) | 400 | A permission is invalid. |
+| [`personal_needs_direct`](#personal_needs_direct) | 409 | This character has no direct AI connection, so it cannot answer. |
 | [`pin_invalid`](#pin_invalid) | 400 | Pin invalid. |
 | [`pin_not_set`](#pin_not_set) | 400 | No PIN is set |
 | [`pin_too_short`](#pin_too_short) | 400 | PIN must be at least {} characters |
@@ -194,6 +209,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`profile_name_invalid`](#profile_name_invalid) | 400 | A profile name needs 1 to 40 characters. |
 | [`profile_name_taken`](#profile_name_taken) | 409 | A profile named {} already exists. |
 | [`profile_not_found`](#profile_not_found) | 404 | No such profile. |
+| [`profile_required`](#profile_required) | 409 | Sign in to a profile first. |
 | [`profile_role_invalid`](#profile_role_invalid) | 400 | Unknown role {}. |
 | [`prompt_bank_malformed`](#prompt_bank_malformed) | 400 | Malformed prompt bank |
 | [`push_subscription_invalid`](#push_subscription_invalid) | 400 | Expected a JSON push subscription |
@@ -207,6 +223,8 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`remember_device_required`](#remember_device_required) | 403 | Notifications need a remembered device: lock, then unlock with "Remember this device" ticked. |
 | [`reply_in_progress_delete`](#reply_in_progress_delete) | 409 | Cannot delete messages while a reply is in progress |
 | [`reply_in_progress_edit`](#reply_in_progress_edit) | 409 | Cannot edit messages while a reply is in progress |
+| [`reset_stale`](#reset_stale) | 409 | What would be deleted has changed. Look at the numbers again before confirming. |
+| [`role_change_stale`](#role_change_stale) | 409 | What would be deleted has changed. Look at the numbers again before confirming. |
 | [`route_undeclared`](#route_undeclared) | 403 | This endpoint has no access policy. |
 | [`safe_mode`](#safe_mode) | 403 | Unlock for full access |
 | [`session_key_required`](#session_key_required) | 400 | session_key required |
@@ -231,6 +249,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`time_limit`](#time_limit) | 403 | Today's time for this profile is used up. |
 | [`title_required`](#title_required) | 400 | title required |
 | [`too_many_attempts`](#too_many_attempts) | 429 | Too many attempts — wait {}s. |
+| [`too_many_bots`](#too_many_bots) | 409 | A profile can have at most {} bots |
 | [`too_many_entries`](#too_many_entries) | 400 | too many entries |
 | [`tool_not_found`](#tool_not_found) | 404 | No such tool, or it has no refresh |
 | [`tools_direct_only`](#tools_direct_only) | 422 | tools only applies to direct-API bots |
@@ -241,8 +260,12 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`unknown_image_job`](#unknown_image_job) | 404 | Unknown image job |
 | [`unlock_first`](#unlock_first) | 403 | Unlock with your PIN first |
 | [`unsupported_media_type`](#unsupported_media_type) | 415 | Reaction images must be PNG, JPEG, GIF, WebP or AVIF |
+| [`use_delete_route`](#use_delete_route) | 409 | Delete a profile with POST /api/people/{id}/delete (preview the counts first). |
+| [`use_household_route`](#use_household_route) | 409 | Set the household bots with PUT /api/people/{id}/household-bots. |
+| [`use_role_route`](#use_role_route) | 409 | Change a profile's type with POST /api/people/{id}/role (preview first). |
 | [`validation_error`](#validation_error) | 422 | Validation error. |
 | [`voice_addon_missing`](#voice_addon_missing) | 422 | {} needs the voice add-on, which is not installed |
+| [`voice_not_allowed`](#voice_not_allowed) | 422 | That voice is not available to you. |
 | [`wizard_owner_required`](#wizard_owner_required) | 409 | Create the owner account first |
 | [`wizard_step_required`](#wizard_step_required) | 409 | That step cannot be skipped |
 | [`wizard_step_unknown`](#wizard_step_unknown) | 404 | Unknown wizard step |
@@ -375,6 +398,14 @@ HTTP **422** - That approval can only be given for this one call.
 
 **Fix:** Destructive tools ask every time. Choose 'once'.
 
+## avatar_invalid
+
+<a id="avatar_invalid"></a>
+
+HTTP **422** - That file is not a picture DisPatch can read.
+
+**Fix:** Send a PNG, JPEG or WebP picture.
+
 ## avatar_not_capturable
 
 <a id="avatar_not_capturable"></a>
@@ -423,6 +454,14 @@ HTTP **400** - Send an image file, or pass source=current
 
 **Fix:** Check the request and resend it.
 
+## avatar_too_large
+
+<a id="avatar_too_large"></a>
+
+HTTP **413** - The picture is too large (25 MB at most).
+
+**Fix:** Send a smaller picture.
+
 ## avatar_write_failed
 
 <a id="avatar_write_failed"></a>
@@ -439,6 +478,14 @@ HTTP **422** - backend must be 'direct' or 'legacy-api'
 
 **Fix:** Fix the fields in detail and resend.
 
+## backend_not_allowed
+
+<a id="backend_not_allowed"></a>
+
+HTTP **403** - Your profile may not choose a bot's backend.
+
+**Fix:** Ask an Admin to allow the connection for this profile in People.
+
 ## backend_unavailable
 
 <a id="backend_unavailable"></a>
@@ -446,6 +493,22 @@ HTTP **422** - backend must be 'direct' or 'legacy-api'
 HTTP **503** - The image backend is unavailable.
 
 **Fix:** ComfyUI is starting or briefly down. DisPatch retries.
+
+## backends_invalid
+
+<a id="backends_invalid"></a>
+
+HTTP **422** - backends must be an object.
+
+**Fix:** Send {"allowed": [connection ids]} or {} for every connection.
+
+## backends_unknown_connection
+
+<a id="backends_unknown_connection"></a>
+
+HTTP **422** - Unknown connection.
+
+**Fix:** Use a connection id from GET /api/connections.
 
 ## backup_confirm_required
 
@@ -502,6 +565,14 @@ HTTP **400** - The passphrase is wrong, or this is not a DisPatch backup
 HTTP **400** - Bad request.
 
 **Fix:** Check the request body against the API reference.
+
+## basic_no_bots
+
+<a id="basic_no_bots"></a>
+
+HTTP **422** - A Basic profile uses the bots an Admin gives it; it has none of its own.
+
+**Fix:** Ask an Admin to add household bots to this profile, or to make it a User.
 
 ## before_invalid
 
@@ -839,6 +910,14 @@ HTTP **409** - A deep check is already running
 
 **Fix:** The state conflicts with the request; reload and retry.
 
+## delete_stale
+
+<a id="delete_stale"></a>
+
+HTTP **409** - What would be deleted has changed. Look at the numbers again before confirming.
+
+**Fix:** Fetch the delete preview again and confirm with its new token.
+
 ## device_bind_role
 
 <a id="device_bind_role"></a>
@@ -846,6 +925,22 @@ HTTP **409** - A deep check is already running
 HTTP **409** - A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential.
 
 **Fix:** Bind a Member or Restricted profile. Admins and the Owner always sign in with their credential.
+
+## draft_failed
+
+<a id="draft_failed"></a>
+
+HTTP **502** - The AI did not return a usable bot. Try again, or add more detail.
+
+**Fix:** Try again, or describe the bot in more detail.
+
+## draft_unavailable
+
+<a id="draft_unavailable"></a>
+
+HTTP **503** - No AI connection is available for building a bot.
+
+**Fix:** Connect an AI in Settings (AI models), or ask an Admin to allow one for your profile.
 
 ## empty_file
 
@@ -1022,6 +1117,22 @@ HTTP **404** - Unknown guide
 HTTP **400** - hidden must be a boolean
 
 **Fix:** Check the request and resend it.
+
+## household_bots_invalid
+
+<a id="household_bots_invalid"></a>
+
+HTTP **422** - household_bots must be "all" or a list of character ids.
+
+**Fix:** Send "all" or a list of household character ids (GET /api/bots/all).
+
+## household_invalid
+
+<a id="household_invalid"></a>
+
+HTTP **422** - household_bots must be a list of bot ids.
+
+**Fix:** Send "all" (Users only) or a list of household bot ids; Admins use every household bot.
 
 ## image_dimensions_too_large
 
@@ -1359,6 +1470,22 @@ HTTP **400** - list must be a small non-negative integer
 
 **Fix:** Check the request and resend it.
 
+## lock_target_fence
+
+<a id="lock_target_fence"></a>
+
+HTTP **422** - This is the shared default profile everyone lands on: agents and voice cloning cannot be switched on for it.
+
+**Fix:** Grant it to a profile of its own, or make another profile the default first.
+
+## lock_target_invalid
+
+<a id="lock_target_invalid"></a>
+
+HTTP **422** - Pick an existing, enabled profile.
+
+**Fix:** Choose a User or Basic profile (not an Admin) that exists and is enabled, or the profile list.
+
 ## machine_scope_denied
 
 <a id="machine_scope_denied"></a>
@@ -1422,6 +1549,14 @@ HTTP **400** - Message is not a checklist
 HTTP **400** - Not a directory
 
 **Fix:** Check the request and resend it.
+
+## not_copyable
+
+<a id="not_copyable"></a>
+
+HTTP **422** - This bot runs on an agent and cannot be copied.
+
+**Fix:** Only direct-API household bots can be copied.
 
 ## not_found
 
@@ -1526,6 +1661,14 @@ HTTP **403** - Your profile does not have permission to do that.
 HTTP **400** - A permission is invalid.
 
 **Fix:** Use the permission names from docs/contracts/permissions.json; a Restricted profile can never hold a management permission.
+
+## personal_needs_direct
+
+<a id="personal_needs_direct"></a>
+
+HTTP **409** - This character has no direct AI connection, so it cannot answer.
+
+**Fix:** Give the character a connection in its editor (personal characters run on a direct backend only).
 
 ## pin_invalid
 
@@ -1663,6 +1806,14 @@ HTTP **404** - No such profile.
 
 **Fix:** Pick a profile from the list; it may have been deleted.
 
+## profile_required
+
+<a id="profile_required"></a>
+
+HTTP **409** - Sign in to a profile first.
+
+**Fix:** Sign in to a profile; machine callers and open installs have no profile of their own.
+
 ## profile_role_invalid
 
 <a id="profile_role_invalid"></a>
@@ -1767,6 +1918,22 @@ HTTP **409** - Cannot edit messages while a reply is in progress
 
 **Fix:** The state conflicts with the request; reload and retry.
 
+## reset_stale
+
+<a id="reset_stale"></a>
+
+HTTP **409** - What would be deleted has changed. Look at the numbers again before confirming.
+
+**Fix:** Fetch the reset preview again and confirm with its new token.
+
+## role_change_stale
+
+<a id="role_change_stale"></a>
+
+HTTP **409** - What would be deleted has changed. Look at the numbers again before confirming.
+
+**Fix:** Fetch the role-change preview again and confirm with its new token.
+
 ## route_undeclared
 
 <a id="route_undeclared"></a>
@@ -1829,7 +1996,7 @@ HTTP **403** - This DisPatch has no owner yet. Open it on the computer it runs o
 
 HTTP **401** - Sign in to continue.
 
-**Fix:** Pick your profile and enter your PIN or password. The owner can allow signed-out use with anonymous_access: restricted in security.yaml.
+**Fix:** Pick your profile on the sign-in screen (with its PIN or password if it has one). Unsigned devices land on the default profile only when an Admin has set one (Settings, People: lock target).
 
 ## stalled
 
@@ -1959,6 +2126,14 @@ HTTP **429** - Too many attempts — wait {}s.
 
 **Fix:** Wait the number of seconds in retry_after, then try again.
 
+## too_many_bots
+
+<a id="too_many_bots"></a>
+
+HTTP **409** - A profile can have at most {} bots
+
+**Fix:** Delete one of your bots first.
+
 ## too_many_entries
 
 <a id="too_many_entries"></a>
@@ -2039,6 +2214,30 @@ HTTP **415** - Reaction images must be PNG, JPEG, GIF, WebP or AVIF
 
 **Fix:** Send a PNG, JPEG, GIF, WebP or AVIF image.
 
+## use_delete_route
+
+<a id="use_delete_route"></a>
+
+HTTP **409** - Delete a profile with POST /api/people/{id}/delete (preview the counts first).
+
+**Fix:** GET /api/people/{id}/delete/preview, then POST /api/people/{id}/delete with its token.
+
+## use_household_route
+
+<a id="use_household_route"></a>
+
+HTTP **409** - Set the household bots with PUT /api/people/{id}/household-bots.
+
+**Fix:** Send the list to PUT /api/people/{id}/household-bots.
+
+## use_role_route
+
+<a id="use_role_route"></a>
+
+HTTP **409** - Change a profile's type with POST /api/people/{id}/role (preview first).
+
+**Fix:** GET /api/people/{id}/role/preview, then POST /api/people/{id}/role with its token.
+
 ## validation_error
 
 <a id="validation_error"></a>
@@ -2054,6 +2253,14 @@ HTTP **422** - Validation error.
 HTTP **422** - {} needs the voice add-on, which is not installed
 
 **Fix:** Fix the fields in detail and resend.
+
+## voice_not_allowed
+
+<a id="voice_not_allowed"></a>
+
+HTTP **422** - That voice is not available to you.
+
+**Fix:** Pick a built-in voice or one of your own (or a household) cloned voice.
 
 ## wizard_owner_required
 

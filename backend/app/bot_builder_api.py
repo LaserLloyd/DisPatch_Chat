@@ -49,10 +49,7 @@ def _allowed_connections(principal) -> list[str] | None:
     profile = getattr(principal, "profile", None)
     if profile is None:
         return None
-    try:
-        return backends_policy.allowed_backends(profile)
-    except NotImplementedError:              # WP-PROF's body is not merged yet (integration only)
-        return None
+    return backends_policy.allowed_backends(profile)
 
 
 def provider_chain(principal) -> list[dict]:

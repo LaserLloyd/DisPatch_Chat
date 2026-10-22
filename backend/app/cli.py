@@ -205,6 +205,13 @@ def cmd_users_add(args: argparse.Namespace) -> int:
     except accounts.AccountError as e:
         raise _account_error(e) from e
     _audit("profile_created", prof, f"{prof.name} ({_label(prof)})")
+    # 4.0: the same hook the People API and the wizard run (an own Atlas for an Admin or a
+    # User; none for Basic, none for the first Admin of a fresh install). Never fails the add.
+    from . import profiles_service
+    try:
+        profiles_service.on_profile_created(prof, first_admin=protected)
+    except Exception:  # the profile exists; Reset can make the Atlas later
+        pass
     print(f"Added {_label(prof)} {prof.name!r} (sign-in: {_credentials_of(prof)}).")
     if role is Role.BASIC and secret is None:
         print("No PIN was set: anyone at the lock screen can pick this profile. "
@@ -243,14 +250,22 @@ def cmd_users_delete(args: argparse.Namespace) -> int:
     if prof.protected:
         raise CliError("The owner cannot be deleted (every install keeps exactly one). To lock the "
                        "owner out and start the owner's sign-in again: python -m app owner reset")
-    _confirm(f"Delete the {_label(prof)} profile {prof.name!r}, its sessions and remembered devices?", args)
+    # 4.0: deleting a profile deletes its content first (chats, own bots, pictures, cloned
+    # voices) through the same service the People API uses, so nothing is left without an owner.
+    from . import profiles_service
+    counts = profiles_service.content_counts(prof.id)
+    what = ", ".join(f"{v} {k}" for k, v in counts.items())
+    _confirm(f"Delete the {_label(prof)} profile {prof.name!r} and everything it owns ({what}), "
+             "its sessions and remembered devices?", args)
     try:
-        auth.revoke_profile(prof.id)
-        accounts.delete_profile(prof.id)
+        token = profiles_service.delete_preview(prof.id)["token"]
+        profiles_service.delete_profile(prof.id, token)
+    except profiles_service.ProfileServiceError as e:
+        raise CliError(str(e)) from e
     except accounts.AccountError as e:
         raise _account_error(e) from e
     _audit("profile_deleted", prof, prof.name)
-    print(f"Deleted {_label(prof)} {prof.name!r}. Their chats are kept; they are signed out everywhere.")
+    print(f"Deleted {_label(prof)} {prof.name!r} and its content ({what}); it is signed out everywhere.")
     return 0
 
 

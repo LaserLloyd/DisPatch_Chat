@@ -472,7 +472,8 @@ def test_duration_and_size_presets_are_valid_values():
 
 
 def test_the_default_connection_is_a_choice_of_connections(world):
-    from app import connections, settings_schema as S
+    from app import connections
+    from app import settings_schema as S
     c = connections.create(type="openai_compatible", name="Box", base_url="http://127.0.0.1:9/v1")
     d = S.get_def("connections.default").public()
     assert d["type"] == "choice" and d["choices_from"] == "connections"

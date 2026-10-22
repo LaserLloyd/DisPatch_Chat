@@ -30,7 +30,17 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("apps/imagestudio/backend.py", "chat_images", "all_threads"): _OWNED,
     ("apps/imagestudio/backend.py", "targets", "all_threads"): _OWNED,
     ("apps/imagestudio/backend.py", "targets", "load_bots"): _FILTER,
-    ("backend/app/advisor.py", "safe_agent_ids", "load_bots"): _HOUSE,
+    ("backend/app/bot_builder_api.py", "provider_chain", "load_bots"):
+        "household bots' provider entries only (never personal); nothing about any bot is returned",
+    ("backend/app/characters.py", "_drop_voice_ack_entries", "load_bots"): _HOUSE,
+    ("backend/app/characters.py", "new_personal_id", "load_bots"): "id collision check while creating a personal bot",
+    ("backend/app/characters.py", "personal_bots", "load_bots"): "filters to scope personal + owner_profile == the given profile",
+    ("backend/app/profiles_service.py", "_household_choice", "load_bots"):
+        "household bot ids only, for an Admin's role/household change (manage_users)",
+    ("backend/app/profiles_service.py", "basic_default_household", "load_bots"):
+        "household direct bot ids only, the default list for a new Basic profile",
+    ("backend/app/profiles_service.py", "connect_unconnected_atlases", "load_bots"):
+        "housekeeping: connects personal Atlases per their owner's backends; returns a count only",
     ("backend/app/advisor.py", "advisor_bots", "load_bots"): "advisor status / digest per character; requests are owner-filtered in main.advisor_status",
     ("backend/app/apps_loader.py", "_bot_ids_lower", "load_bots"): _HOUSE,
     ("backend/app/apps_loader.py", "provision_bots", "load_bots"): _HOUSE,
@@ -80,8 +90,8 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("backend/app/main.py", "_mirror_cycle", "load_bots"): _HOUSE,
     ("backend/app/main.py", "_handle_get_threads", "list_threads"): _OWNED,
     ("backend/app/main.py", "websocket_endpoint", "load_bots"): "hello roster: filtered through visible_to",
-    ("backend/app/main.py", "_probe_chat", "load_bots"): "dashboard probe (admin_system)",
-    ("backend/app/main.py", "_probe_infoforge", "load_bots"): "dashboard probe (admin_system)",
+    ("backend/app/main.py", "_probe_chat", "load_bots"): "plugin catalog probe (manage_plugins): household bots only, personal ones filtered out",
+    ("backend/app/main.py", "_probe_infoforge", "load_bots"): "plugin catalog probe (manage_plugins): household bots only, personal ones filtered out",
     ("backend/app/reactions.py", "_bot_exists", "load_bots"): _HOUSE,
     ("backend/app/reactions.py", "default_bot_id", "load_bots"): _HOUSE,
     ("backend/app/reactions.py", "reaction_bots", "load_bots"): "household reaction flags",

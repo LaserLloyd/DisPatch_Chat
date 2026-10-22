@@ -244,7 +244,14 @@ export const api = {
   people: () => j('/api/people'),
   createPerson: (body) => j('/api/people', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body || {}) }),
   patchPerson: (id, patch) => j(`/api/people/${encodeURIComponent(id)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(patch || {}) }),
-  deletePerson: (id) => j(`/api/people/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // 4.0: a role change, the household list and deletion have their own routes (People PATCH and
+  // DELETE answer 409 use_role_route / use_household_route / use_delete_route). The previews
+  // return counts plus a short-lived token the confirming call must carry.
+  rolePreview: (id, role) => j(`/api/people/${encodeURIComponent(id)}/role/preview?role=${encodeURIComponent(role)}`),
+  changeRole: (id, body) => j(`/api/people/${encodeURIComponent(id)}/role`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body || {}) }),
+  setHouseholdBots: (id, householdBots) => j(`/api/people/${encodeURIComponent(id)}/household-bots`, { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ household_bots: householdBots }) }),
+  deletePreview: (id) => j(`/api/people/${encodeURIComponent(id)}/delete/preview`),
+  deletePerson: (id, token) => j(`/api/people/${encodeURIComponent(id)}/delete`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ confirm_token: token }) }),
   setPersonPin: (id, pin) => j(`/api/people/${encodeURIComponent(id)}/pin`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ pin }) }),
   clearPersonPin: (id) => j(`/api/people/${encodeURIComponent(id)}/pin`, { method: 'DELETE' }),
   setPersonPassword: (id, password) => j(`/api/people/${encodeURIComponent(id)}/password`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ password }) }),
@@ -252,7 +259,6 @@ export const api = {
 
   devices: () => j('/api/people/devices'),
   // Binds the CALLING browser; profileId null unbinds it.
-  bindThisDevice: (profileId, label) => j('/api/people/devices/this', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(compact({ profile_id: profileId == null ? null : profileId, label })) }),
   forgetDevice: (id) => j(`/api/people/devices/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // Counts only, never message content.

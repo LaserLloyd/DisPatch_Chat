@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from _extfake import KNOBS, ext_env, install, thread_for  # noqa: F401
+from _extfake import KNOBS, ext_env, install, thread_for
 from starlette.websockets import WebSocketDisconnect
 
 from app import accounts, apps_loader, config, extensions, main, openclaw, policy

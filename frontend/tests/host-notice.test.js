@@ -31,7 +31,8 @@ const EN = LOC.en;
 const KEYS = ['title', 'files_body', 'chats_body', 'card_title', 'card_files', 'card_chats', 'card_more', 'card_ok',
   'shared', 'pin_reset'];
 // Added in English in all eight locales (Foundation); WP-LOC translates them, then they leave this set.
-const PENDING_TRANSLATION = new Set(['shared', 'pin_reset']);
+// 4.0: card_chats was reworded at INT-1 (chats are private now); WP-LOC translates it with the other two.
+const PENDING_TRANSLATION = new Set(['shared', 'pin_reset', 'card_chats']);
 
 const require = createRequire(import.meta.url);
 let jsdom = null;

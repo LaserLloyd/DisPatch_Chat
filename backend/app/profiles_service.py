@@ -480,8 +480,29 @@ def _delete_chat_files(con: sqlite3.Connection, profile_id: str) -> int:
     return len(rows)
 
 
+def _advisor_db_paths() -> list[Path]:
+    """Every advisor ledger file to clean: ``<data>/advisor.db`` and the file
+    ``advisor.ledger()`` opens (the data dir the advisor was bound with). In production the two
+    are the same file; INT-1: reconstructing the path from ``config.DATA_DIR`` alone missed
+    the ledger whenever they differ, so both are cleaned."""
+    paths = [Path(config.DATA_DIR) / "advisor.db"]
+    try:
+        from . import advisor
+        if advisor._hooks is not None:
+            bound = Path(advisor.ledger().path)
+            if bound.resolve() != paths[0].resolve():
+                paths.append(bound)
+    except Exception:  # an unbound advisor (CLI, tests): the data-dir file only
+        pass
+    return paths
+
+
 def _delete_advisor_requests(thread_ids: list[str], bot_ids: list[str]) -> None:
-    path = Path(config.DATA_DIR) / "advisor.db"
+    for path in _advisor_db_paths():
+        _delete_advisor_requests_in(path, thread_ids, bot_ids)
+
+
+def _delete_advisor_requests_in(path: Path, thread_ids: list[str], bot_ids: list[str]) -> None:
     if not path.is_file() or not (thread_ids or bot_ids):
         return
     con = sqlite3.connect(str(path), timeout=30.0, isolation_level=None)
@@ -969,14 +990,13 @@ def lock_target_profile_id() -> str | None:
 
 def set_lock_target(profile_id: str | None) -> None:
     """Make ``profile_id`` the default profile the lock lands on, or None for the profile
-    list. (The permission fence on that profile is enforced by ``policy``.)"""
+    list. Goes through ``auth.set_lock_target``, which validates the target (exists, enabled,
+    not an Admin) and strips stored fenced grants; ``policy`` enforces the fence either way."""
     from . import auth
-    with auth._lock:
-        cfg = auth.load()
-        cfg.lock_target = "default_profile" if profile_id else "profile_list"
-        cfg.default_profile = profile_id or None
-        auth._write(cfg)
-        auth._bust_cache()
+    if profile_id:
+        auth.set_lock_target("default_profile", profile_id)
+    else:
+        auth.set_lock_target("profile_list", None)
 
 
 def ensure_default_profile(*, name: str = firstrun.DEFAULT_PROFILE_NAME) -> accounts.Profile:

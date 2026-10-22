@@ -3,6 +3,8 @@ advisor status, Image Studio lists and every parameterless GET. For each princip
 threads and the bots it may use, and no sentinel of anybody else anywhere."""
 from __future__ import annotations
 
+import json
+
 import pytest
 from privacy_fixtures import (
     ACTORS,
@@ -57,6 +59,11 @@ def test_thread_lists_search_export_unread(world, monkeypatch, actor):
         s = inst.sent("thread", owner)
         r = _get(inst, actor, "/api/search", q=s)
         body = r.content.decode("utf-8", "replace")
+        # INT-1: /api/search echoes the caller's own query back ({"query": q, "results": [...]}),
+        # so the sentinel is judged in everything EXCEPT that echo (results, snippets, titles).
+        j = json_or_none(r)
+        if isinstance(j, dict) and j.get("query") == s:
+            body = json.dumps({k: v for k, v in j.items() if k != "query"})
         if owner in readable_owners(actor) and actor in PROFILE_ACTORS:
             if r.status_code != 200 or s not in body:
                 problems.append(f"{actor}: search for own sentinel found nothing ({r.status_code})")
@@ -91,6 +98,13 @@ def test_bot_and_character_rosters(world, monkeypatch, actor):
     problems = []
     for path in ("/api/bots", "/api/bots/all", "/api/characters", "/api/characters/all"):
         r = _get(inst, actor, path)
+        if path.endswith("/all") and "manage_characters" not in actor_permissions(actor):
+            # INT-1: the "/all" rosters are the Admin's Characters manager (manage_characters);
+            # anyone else is refused outright, which leaks nothing. The body is still judged.
+            if r.status_code not in (401, 403) or leaks(inst, actor, r.text):
+                problems.append(f"{path}: expected a refusal without manage_characters, got HTTP "
+                                f"{r.status_code} {leaks(inst, actor, r.text)}")
+            continue
         if r.status_code != 200:
             problems.append(f"{path}: HTTP {r.status_code}")
             continue

@@ -62,10 +62,6 @@ export const APP_KEYS = [
   'dispatch-rail-layout',     // railmenu.js (which rail buttons sit in Tools & more)
   'dispatch-settings-last',   // main.js (the Settings section this device opened last)
   'dispatch-settings-adv',    // main.js (which Settings "Advanced" disclosures were left open)
-  // NOT 'dispatch-privacy-ack' (host-notice.js): it only records that this device
-  // dismissed the one-time "stored on the host computer" card. It is not personal
-  // data, and wiping it would show that card again on every visit of a privacy-mode
-  // device. Exempt on purpose (frontend/tests/privacy-keys.test.js EXEMPT).
   'dispatch-viewer-recent',   // main.js (recent local-viewer paths in the palette)
   'tl-collapsed',             // main.js (thread list collapsed, desktop)
   'lc-remember',              // main.js (unlock keypad "keep this device unlocked")

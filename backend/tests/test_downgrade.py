@@ -201,16 +201,14 @@ def test_an_unknown_role_is_a_422(scratch):
 
 def test_no_other_module_changes_a_role_around_the_service():
     """User -> Basic must delete the profile's private content, so every role change in the app
-    goes through ``profiles_service.change_role``. (``people_api`` still has its own PATCH path
-    until WP-CORE routes it here: listed so the gap is visible and the test goes red the moment a
-    NEW caller appears.)"""
+    goes through ``profiles_service.change_role`` (the People PATCH refuses a role change with
+    409 ``use_role_route``)."""
     import re
     from pathlib import Path
-    pending = {"people_api.py"}          # WP-CORE: the PATCH handler must delegate to change_role
     app_dir = Path(__file__).resolve().parents[1] / "app"
     offenders = []
     for path in sorted(app_dir.glob("*.py")):
-        if path.name in {"accounts.py", "profiles_service.py"} | pending:
+        if path.name in {"accounts.py", "profiles_service.py"}:
             continue
         text = path.read_text(encoding="utf-8")
         for m in re.finditer(r"update_profile\(([^)]*)\)", text):

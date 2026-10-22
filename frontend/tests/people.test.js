@@ -273,7 +273,12 @@ test('a character\'s audience follows the two switches, then the server field', 
 
 const NAMES = ['me', 'login', 'switchProfile', 'setupOwner', 'changePassword', 'apiTokenInfo', 'rotateApiToken',
   'people', 'createPerson', 'patchPerson', 'deletePerson', 'setPersonPin', 'clearPersonPin', 'setPersonPassword',
-  'signOutPerson', 'devices', 'bindThisDevice', 'forgetDevice', 'peopleActivity', 'peopleAudit', 'myActivity'];
+  'signOutPerson', 'devices', 'forgetDevice', 'peopleActivity', 'peopleAudit', 'myActivity',
+  'rolePreview', 'changeRole', 'setHouseholdBots', 'deletePreview'];
+
+test('api.js no longer binds a device to a profile (4.0: the route is gone)', () => {
+  assert.doesNotMatch(API_SRC, /bindThisDevice|devices\/this/);
+});
 
 test('api.js declares every 3.0 call the backend parity test greps for', () => {
   for (const n of NAMES) assert.match(API_SRC, new RegExp(`\\b${n}:\\s`), n);
@@ -341,7 +346,11 @@ test('api.login / switchProfile / setupOwner / changePassword post the contract 
     'GET /api/people/activity?profile_id=p1&days=7': () => [200, { summary: { days: [] } }],
     'GET /api/people/activity': () => [200, { summary: { days: [] } }],
     'GET /api/me/activity?days=7': () => [200, {}],
-    'PUT /api/people/devices/this': () => [200, {}],
+    'GET /api/people/p1/role/preview?role=basic': () => [200, { counts: {}, token: 'tk', deletes: true }],
+    'POST /api/people/p1/role': () => [200, {}],
+    'PUT /api/people/p1/household-bots': () => [200, {}],
+    'GET /api/people/p1/delete/preview': () => [200, { counts: {}, token: 'tk2' }],
+    'POST /api/people/p1/delete': () => [200, {}],
   };
   await api.login('p1', { pin: '1234', remember: true });
   await api.switchProfile('p2', { password: 'pw' });
@@ -354,8 +363,11 @@ test('api.login / switchProfile / setupOwner / changePassword post the contract 
   await api.peopleActivity({ profileId: 'p1', days: 7 });
   await api.peopleActivity();
   await api.myActivity(7);
-  await api.bindThisDevice('kid');
-  await api.bindThisDevice(null);
+  await api.rolePreview('p1', 'basic');
+  await api.changeRole('p1', { role: 'basic', confirm_token: 'tk' });
+  await api.setHouseholdBots('p1', ['b1']);
+  await api.deletePreview('p1');
+  await api.deletePerson('p1', 'tk2');
   const bodies = apiCalls.map((c) => [c.key, c.body]);
   assert.deepEqual(bodies, [
     ['POST /api/auth/login', { profile_id: 'p1', pin: '1234', remember: true }],
@@ -369,8 +381,11 @@ test('api.login / switchProfile / setupOwner / changePassword post the contract 
     ['GET /api/people/activity?profile_id=p1&days=7', null],
     ['GET /api/people/activity', null],
     ['GET /api/me/activity?days=7', null],
-    ['PUT /api/people/devices/this', { profile_id: 'kid' }],
-    ['PUT /api/people/devices/this', { profile_id: null }],
+    ['GET /api/people/p1/role/preview?role=basic', null],
+    ['POST /api/people/p1/role', { role: 'basic', confirm_token: 'tk' }],
+    ['PUT /api/people/p1/household-bots', { household_bots: ['b1'] }],
+    ['GET /api/people/p1/delete/preview', null],
+    ['POST /api/people/p1/delete', { confirm_token: 'tk2' }],
   ]);
 });
 
@@ -379,13 +394,14 @@ test('every person route encodes its id as ONE path segment', { skip: dom.skip }
   apiRoutes = {};
   const evil = 'a/../b?x=1';
   const enc = encodeURIComponent(evil);
-  for (const fn of [() => api.patchPerson(evil, {}), () => api.deletePerson(evil), () => api.setPersonPin(evil, '1234'),
+  for (const fn of [() => api.patchPerson(evil, {}), () => api.deletePerson(evil, 't'), () => api.setPersonPin(evil, '1234'),
     () => api.clearPersonPin(evil), () => api.setPersonPassword(evil, 'longenough'), () => api.signOutPerson(evil),
-    () => api.forgetDevice(evil)]) {
+    () => api.forgetDevice(evil), () => api.rolePreview(evil, 'basic'), () => api.changeRole(evil, { role: 'user' }),
+    () => api.setHouseholdBots(evil, 'all'), () => api.deletePreview(evil)]) {
     await fn().catch(() => {});
   }
   for (const c of apiCalls) assert.ok(c.key.includes(enc), c.key);
-  assert.equal(apiCalls.length, 7);
+  assert.equal(apiCalls.length, 11);
 });
 
 test('a failed call carries code, fix and retryAfter without changing err.message', { skip: dom.skip }, async () => {
@@ -637,10 +653,10 @@ function peopleRoutes(over = {}) {
     'GET /api/people/audit': () => [200, { entries: [{ ts: '2026-10-17T10:00:00Z', kind: 'profile_created', profile_id: 'o1', subject: 'r1', detail: '' }] }],
     'GET /api/auth/api-token': () => [200, { has_token: true, machine_loopback_trust: true, machine_scopes: ['read'], all_scopes: ['read'] }],
     'POST /api/auth/api-token': () => [200, { ok: true, machine_loopback_trust: true, api_token: 'dp_secret_key' }],
-    'PUT /api/people/devices/this': () => [200, {}],
     'POST /api/people': () => [201, { id: 'new' }],
     'PATCH /api/people/r1': () => [200, {}],
-    'DELETE /api/people/m1': () => [200, { ok: true }],
+    'GET /api/people/m1/delete/preview': () => [200, { counts: { bots: 1, chats: 2, pictures: 0, voices: 0 }, token: 'del-tok' }],
+    'POST /api/people/m1/delete': () => [200, { ok: true }],
     'POST /api/people/m1/sign-out': () => [200, { ok: true }],
     ...(over.routes || {}),
   };
@@ -753,27 +769,42 @@ test('People tab: editing sends only the change, and Delete asks first', { skip:
   [...pane.querySelectorAll('#people-editor button')].find((b) => b.textContent === 'Delete').click();
   await tick(); await tick();
   assert.equal(rec.confirms.length, 1);
-  assert.match(rec.confirms[0], /Delete Sam\?/);
-  assert.ok(apiCalls.some((c) => c.key === 'DELETE /api/people/m1'));
+  assert.match(rec.confirms[0], /Delete Sam\?.*2 chats/);
+  assert.ok(apiCalls.some((c) => c.key === 'POST /api/people/m1/delete' && c.body.confirm_token === 'del-tok'));
+  assert.ok(!apiCalls.some((c) => c.key === 'DELETE /api/people/m1'), 'the 3.x DELETE answers 409 in 4.0');
 });
 
-test('People tab: This device lists only Members and Restricted and binds through PUT /api/people/devices/this', { skip: dom.skip }, async () => {
-  const p = PEOPLE(); p.profiles[3].disabled = false;     // a disabled profile cannot be bound
-  const { pane } = await mountPeople('owner', { people: p });
-  const select = pane.querySelector('#people-device-select');
-  assert.deepEqual([...select.options].map((o) => o.textContent), ['Nobody (ask who\'s using it)', 'Sam (Member)', 'Kid (Restricted)']);
-  assert.equal(select.value, 'r1', 'this browser is currently bound to Kid');
+test('People tab: a role change goes through the role route, with the counts when it deletes', { skip: dom.skip }, async () => {
+  const { pane, rec } = await mountPeople('owner', { routes: {
+    'GET /api/people/m1/role/preview?role=restricted': () => [200, { counts: { bots: 2, chats: 3, pictures: 0, voices: 1 }, token: 'role-tok', deletes: true }],
+    'POST /api/people/m1/role': () => [200, { id: 'm1', role: 'basic' }],
+    'PATCH /api/people/m1': () => [200, {}],
+  } });
+  pane.querySelector('[data-person="m1"] button').click();
+  const ed = pane.querySelector('#people-editor');
+  const l = [...ed.querySelectorAll('label')].find((x) => x.textContent === 'Role');
+  const sel = ed.querySelector(`#${l.getAttribute('for')}`);
+  sel.value = 'restricted';
   apiCalls.length = 0;
-  select.value = 'm1';
-  select.dispatchEvent(new (pane.ownerDocument.defaultView.Event)('change'));
-  await tick();
-  assert.deepEqual(apiCalls[0], { key: 'PUT /api/people/devices/this', body: { profile_id: 'm1' } });
+  [...ed.querySelectorAll('button')].find((b) => b.textContent === 'Save').click();
+  await tick(); await tick(); await tick();
+  assert.equal(rec.confirms.length, 1);
+  assert.match(rec.confirms[0], /3 chats/);
+  const post = apiCalls.find((c) => c.key === 'POST /api/people/m1/role');
+  assert.deepEqual(post.body, { role: 'restricted', confirm_token: 'role-tok' });
+  assert.ok(!apiCalls.some((c) => c.key === 'PATCH /api/people/m1' && c.body && 'role' in c.body), 'no role in the PATCH');
+});
+
+test('People tab: This device lists remembered devices with Forget only (4.0: no binding)', { skip: dom.skip }, async () => {
+  const { pane } = await mountPeople('owner');
+  assert.equal(pane.querySelector('#people-device-select'), null);
   const devs = [...pane.querySelectorAll('.people-device')];
   assert.equal(devs.length, 2);
-  assert.match(devs[0].textContent, /Hall tablet \(this device\).*Opens as Kid/);
-  assert.match(devs[0].textContent, /Unbind/);
-  assert.match(devs[1].textContent, /Unnamed device.*Asks who is using it/);
-  assert.doesNotMatch(devs[1].textContent, /Unbind/);
+  assert.match(devs[0].textContent, /Hall tablet \(this device\)/);
+  for (const d of devs) {
+    assert.doesNotMatch(d.textContent, /Unbind|Opens as|Asks who/);
+    assert.match(d.textContent, /Forget/);
+  }
 });
 
 test('People tab: activity is a real table with a caption and counts only', { skip: dom.skip }, async () => {
@@ -830,9 +861,8 @@ test('People & Access: the caller\'s groups go after This device; Activity & aud
   void win;
 });
 
-test('People & Access: "Open this device as" and the activity filter are themed selects', { skip: dom.skip }, async () => {
+test('People & Access: the activity filter is a themed select', { skip: dom.skip }, async () => {
   const { pane } = await mountPeople('owner');
-  assert.ok(pane.querySelector('#people-device-select').classList.contains('ui-select'));
   assert.ok(pane.querySelector('#people-activity-who').classList.contains('ui-select'));
 });
 

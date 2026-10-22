@@ -87,6 +87,7 @@ pythonpath = ["."]
 # runs it (a later -m wins over this one).
 markers = [
     "scale: synthetic-load benchmark (tests/scale/, 20 profiles x 50k messages); opt in with -m scale",
+    "privacy_matrix: opt-in privacy matrix (DISPATCH_PRIVACY_MATRIX=1)",
 ]
 addopts = "-m 'not scale'"
 

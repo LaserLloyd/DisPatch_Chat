@@ -458,6 +458,20 @@ OWNER_SCOPED: dict[str, str] = {
     "/tools/_t/{ticket}/{rel:path}": "none: a capability URL (the ticket is the credential)",
     "/local/view/{ticket}/{rel:path}": "none: a capability URL (the ticket is the credential)",
     "/local/file/{path:path}": "none: host control (admin_system: files off the host)",
+    # WP-PROF (profiles_api.py / characters_api.py), declared at INT-1.
+    "/api/me/characters/{bot_id}": "character",
+    "/api/me/characters/{bot_id}/avatar": "character",
+    "/api/characters/{bot_id}/clone": "character",
+    "/api/characters/{bot_id}/clone-to/{profile_id}": "character",
+    "/api/characters/{character_id}/delete-preview": "none: household characters only, numbers only (manage_characters)",
+    "/api/people/{profile_id}/reset": _NONE_ADMIN,
+    "/api/people/{profile_id}/reset/preview": _NONE_ADMIN,
+    "/api/people/{profile_id}/role": _NONE_ADMIN,
+    "/api/people/{profile_id}/role/preview": _NONE_ADMIN,
+    "/api/people/{profile_id}/household-bots": _NONE_ADMIN,
+    "/api/people/{profile_id}/backends": _NONE_ADMIN,
+    "/api/people/{profile_id}/delete": _NONE_ADMIN,
+    "/api/people/{profile_id}/delete/preview": _NONE_ADMIN,
     # Unparameterised routes that read or write conversations: listed so routes.json says so.
     "/api/threads": "thread",
     "/api/unread": "thread",
@@ -622,7 +636,12 @@ def requirement_for(method: str, template: str | None, path: str) -> Requirement
     if hit is not None:
         # Per-app static pages carry the manifest's permission, not the generic one.
         if template.startswith("/apps/"):
-            return apps_loader.requirement_for(method, path) or hit
+            app_req = apps_loader.requirement_for(method, path)
+            if app_req is None:
+                return hit
+            # ...and keep the declared owner_scoped decision (routes.json publishes it).
+            return _replace(app_req, owner_scoped=hit.owner_scoped) if hit.owner_scoped and \
+                not app_req.owner_scoped else app_req
         return hit
     if template.startswith(("/ws",)):
         return WS_ROUTES.get(template)

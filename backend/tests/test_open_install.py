@@ -117,3 +117,22 @@ def test_a_pin_only_2x_install_is_claimed_on_upgrade(world, strict):
     assert lan.post("/api/auth/unlock", json={"pin": "1234"}).status_code == 200
     assert lan.get("/api/auth/me").json()["role"] == "admin"
     assert accounts.get_owner() is not None                       # created on first use
+
+
+def test_an_open_socket_is_reconnected_not_locked_once_the_install_is_claimed(world):
+    """INT-1 (scratch E2E): the first-run wizard claims the install over a socket opened while
+    it was open. That socket must be closed for a reconnect, never sent "locked": the client
+    answers "locked" with POST /api/auth/lock, which signed the brand-new Admin out."""
+    from starlette.websockets import WebSocketDisconnect
+    local = world.client(("127.0.0.1", 40000))
+    with local.websocket_connect("/ws") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        r = local.post("/api/auth/setup", json={"name": "Olive", "password": "owner-pass1"})
+        assert r.status_code == 200, r.text
+        ws.send_json({"type": "ping"})
+        with pytest.raises(WebSocketDisconnect) as e:
+            frame = ws.receive_json()
+            assert frame.get("type") != "locked", frame
+            ws.receive_json()
+        assert e.value.code == 1012
+    assert local.get("/api/auth/status").json()["signed_in"] is True    # still the new Admin

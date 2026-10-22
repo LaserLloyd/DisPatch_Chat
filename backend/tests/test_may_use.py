@@ -100,11 +100,11 @@ def test_visible_to_hides_hidden_unless_the_list_names_it(house):
     assert "hidden1" in ids(P(house.basic))           # its explicit list names it
     assert ids(P(house.owner)) == {"direct1", "direct2", "agent1", "p0000000owner"}
     assert ids(P(house.user_all)) == {"direct1", "direct2", "p00000000mine"}
-    # the two call forms agree
+    # the per-bot form agrees with the lists; usable_bots keeps hidden ones (the manager)
     b = config.get_bot("direct1")
     assert characters.visible_to(b, P(house.user_some)) is True
-    assert [x.id for x in characters.visible_to(P(house.user_some))] == ["direct1"]
-    assert "hidden1" in {x.id for x in characters.visible_to(P(house.owner))}   # compat = usable
+    assert [x.id for x in characters.usable_bots(P(house.user_some))] == ["direct1"]
+    assert "hidden1" in {x.id for x in characters.usable_bots(P(house.owner))}
 
 
 def test_the_3x_audience_and_profiles_fields_are_inert(house, tmp_path):

@@ -7473,9 +7473,6 @@ async def _run_agent_turn(thread_id: str, bot_id: str, text: str,
         kw = _direct_turn_kwargs(advisor.run_turn, opts)
         if opts.model:
             kw["model"] = opts.model
-        if opts.locked and _accepts(advisor.run_turn, "locked"):
-            # 4.0 (WP-ADV) removed the locked turn; only a 3.x advisor still takes it.
-            kw["locked"] = True
         if not opts.dispatch:
             kw["dispatch"] = False
         if opts.action:
@@ -7899,8 +7896,7 @@ advisor.bind(advisor.Hooks(
     data_dir=config.DATA_DIR,
     merge_metadata=lambda mid, patch: db.merge_message_metadata(mid, patch),
     # 4.0 (WP-ADV): the thread owner is resolved inside advisor from the thread id.
-    **({"get_thread": lambda tid: db.get_thread(tid)}
-       if "get_thread" in getattr(advisor.Hooks, "__dataclass_fields__", {}) else {}),
+    get_thread=lambda tid: db.get_thread(tid),
 ))
 
 
@@ -11443,7 +11439,7 @@ async def inject_message(request: Request, payload: InjectIn):
     pr = policy.of(request).principal
     source_id = f"inject:{payload.delivery_key}" if payload.delivery_key else None
     if source_id:
-        dup = await _inject_duplicate(pr, source_id)
+        dup = await _inject_duplicate(pr, source_id, payload.thread_id)
         if dup is not None:
             return dup
     thread: ThreadOut | None = None
@@ -11493,7 +11489,7 @@ async def inject_message(request: Request, payload: InjectIn):
         )
     except sqlite3.IntegrityError:
         # The same delivery_key raced in a moment earlier (the unique source_id index).
-        dup = await _inject_duplicate(pr, source_id) if source_id else None
+        dup = await _inject_duplicate(pr, source_id, payload.thread_id) if source_id else None
         if dup is not None:
             return dup
         raise
@@ -11508,14 +11504,20 @@ async def inject_message(request: Request, payload: InjectIn):
             "duplicate": False}
 
 
-async def _inject_duplicate(principal, source_id: str) -> dict | JSONResponse | None:
+async def _inject_duplicate(principal, source_id: str,
+                            wanted_thread: str | None = None) -> dict | JSONResponse | None:
     """The reply to an inject whose ``delivery_key`` was already delivered: the first
-    message, ``duplicate: true`` - or 409 when that message sits in a thread the caller may
-    not read (nothing of it is echoed)."""
+    message, ``duplicate: true``. When that message sits in a thread the caller may not read
+    (a machine's run result in a User's chat, §1.7): still ``duplicate: true`` if the caller
+    named that very thread, but with no message (nothing of the thread is echoed); 409 when it
+    named another thread or none (the key is someone else's delivery)."""
     prior = await db.message_by_source_id(source_id)
     if prior is None:
         return None
     exists, towner = await db.thread_owner_lookup(prior.thread_id)
+    if exists and not ownership.may_see_thread(principal, towner) and wanted_thread \
+            and wanted_thread.lower() == prior.thread_id.lower():
+        return {"thread_id": prior.thread_id, "created": False, "message": None, "duplicate": True}
     if not exists or not ownership.may_see_thread(principal, towner):
         return JSONResponse({"detail": "That delivery_key was already used.",
                              "error": errors.envelope("conflict",
@@ -11808,6 +11810,10 @@ async def export_all(
                                    principal=policy.of(request).principal)
     if thread_id:
         threads = [t for t in threads if t.id == thread_id]
+        if not threads:
+            # INT-1: one named thread that is not the caller's answers like a missing one (404),
+            # the same as every other by-id thread route.
+            raise HTTPException(404, "Thread not found")
     elif bot_id:
         threads = [t for t in threads if t.bot_id == bot_id]
     bundle = []
@@ -13974,9 +13980,14 @@ async def websocket_endpoint(ws: WebSocket):
                     auth.touch_session(session.token)
             elif principal.kind == "open" and policy.claimed():
                 # A token-less open connection (opened before the install was
-                # claimed) and an owner exists now - nudge the client to reconnect.
+                # claimed) and an owner exists now - make the client reconnect.
+                # INT-1: NOT with a "locked" frame: the tab that just claimed the
+                # install holds the new Admin's cookie, and the client answers
+                # "locked" by POSTing /api/auth/lock - which signed the first Admin
+                # out at the first ping after setup. A plain close (1012) makes the
+                # client reconnect, and the handshake then decides who it is.
                 with contextlib.suppress(Exception):
-                    await ws.send_json({"type": "locked"})
+                    await ws.close(code=1012)
                 break
             elif principal.via == "default":
                 # The lock-target default profile has no session to re-read, so the profile
@@ -14594,7 +14605,9 @@ app.include_router(maintenance_api.router)
 
 
 def _probe_chat(_: str) -> tuple[str, str]:
-    bots = config.load_bots()
+    # Household bots only: the catalog names them to Admins, and a profile's own bots are
+    # nobody else's business (INT-1, privacy matrix).
+    bots = [b for b in config.load_bots() if not characters.is_personal(b)]
     direct = [b for b in bots if config.is_direct(b) and config.direct_connected(b)]
     legacy = [b for b in bots if b.api]
     if direct or legacy:
@@ -14667,7 +14680,7 @@ def _probe_voice_rig(_: str) -> tuple[str, str]:
 def _probe_infoforge(_: str) -> tuple[str, str]:
     have = shutil.which("infoforge") is not None
     using = [b.name for b in config.load_bots()
-             if isinstance((b.advisor or {}).get("lookup"), dict)]
+             if not characters.is_personal(b) and isinstance((b.advisor or {}).get("lookup"), dict)]
     if have and using:
         return "connected", ", ".join(using[:3])
     if have:

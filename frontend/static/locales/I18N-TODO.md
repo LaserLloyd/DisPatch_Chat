@@ -197,20 +197,12 @@ New:
 - `people.load_failed`
 - `people.device_title`
 - `people.device_intro`
-- `people.device_open_as`
-- `people.device_hint`
-- `people.device_nobody`
-- `people.device_bound`
-- `people.device_unbound`
 - `people.device_unnamed`
 - `people.device_forget`
 - `people.device_forget_aria`
 - `people.device_forget_confirm`
 - `people.device_forgotten`
-- `people.device_unbind`
 - `people.device_this`
-- `people.device_opens_as`
-- `people.device_opens_ask`
 - `people.device_seen`
 - `people.activity_title`
 - `people.activity_intro`
@@ -444,20 +436,12 @@ New:
 - `people.load_failed`
 - `people.device_title`
 - `people.device_intro`
-- `people.device_open_as`
-- `people.device_hint`
-- `people.device_nobody`
-- `people.device_bound`
-- `people.device_unbound`
 - `people.device_unnamed`
 - `people.device_forget`
 - `people.device_forget_aria`
 - `people.device_forget_confirm`
 - `people.device_forgotten`
-- `people.device_unbind`
 - `people.device_this`
-- `people.device_opens_as`
-- `people.device_opens_ask`
 - `people.device_seen`
 - `people.activity_title`
 - `people.activity_intro`
@@ -691,20 +675,12 @@ New:
 - `people.load_failed`
 - `people.device_title`
 - `people.device_intro`
-- `people.device_open_as`
-- `people.device_hint`
-- `people.device_nobody`
-- `people.device_bound`
-- `people.device_unbound`
 - `people.device_unnamed`
 - `people.device_forget`
 - `people.device_forget_aria`
 - `people.device_forget_confirm`
 - `people.device_forgotten`
-- `people.device_unbind`
 - `people.device_this`
-- `people.device_opens_as`
-- `people.device_opens_ask`
 - `people.device_seen`
 - `people.activity_title`
 - `people.activity_intro`
@@ -938,20 +914,12 @@ New:
 - `people.load_failed`
 - `people.device_title`
 - `people.device_intro`
-- `people.device_open_as`
-- `people.device_hint`
-- `people.device_nobody`
-- `people.device_bound`
-- `people.device_unbound`
 - `people.device_unnamed`
 - `people.device_forget`
 - `people.device_forget_aria`
 - `people.device_forget_confirm`
 - `people.device_forgotten`
-- `people.device_unbind`
 - `people.device_this`
-- `people.device_opens_as`
-- `people.device_opens_ask`
 - `people.device_seen`
 - `people.activity_title`
 - `people.activity_intro`
@@ -1185,20 +1153,12 @@ New:
 - `people.load_failed`
 - `people.device_title`
 - `people.device_intro`
-- `people.device_open_as`
-- `people.device_hint`
-- `people.device_nobody`
-- `people.device_bound`
-- `people.device_unbound`
 - `people.device_unnamed`
 - `people.device_forget`
 - `people.device_forget_aria`
 - `people.device_forget_confirm`
 - `people.device_forgotten`
-- `people.device_unbind`
 - `people.device_this`
-- `people.device_opens_as`
-- `people.device_opens_ask`
 - `people.device_seen`
 - `people.activity_title`
 - `people.activity_intro`
@@ -1432,20 +1392,12 @@ New:
 - `people.load_failed`
 - `people.device_title`
 - `people.device_intro`
-- `people.device_open_as`
-- `people.device_hint`
-- `people.device_nobody`
-- `people.device_bound`
-- `people.device_unbound`
 - `people.device_unnamed`
 - `people.device_forget`
 - `people.device_forget_aria`
 - `people.device_forget_confirm`
 - `people.device_forgotten`
-- `people.device_unbind`
 - `people.device_this`
-- `people.device_opens_as`
-- `people.device_opens_ask`
 - `people.device_seen`
 - `people.activity_title`
 - `people.activity_intro`
@@ -1707,3 +1659,10 @@ other locales carry the SAME English text (no `[xx] ` prefix), so `check-locales
 - `archive.load_earlier`
 - `archive.show_more`
 - `media.expired`
+
+## 4.0 chat-first profiles (INT-1): reworded keys, English in all 8 locales
+
+The meaning changed (chats are private to each profile in 4.0), so the old translations were wrong, not
+just stale: replaced by the English text, as for the Foundation keys above. WP-LOC translates them.
+
+- `host_notice.card_chats`

@@ -19,8 +19,8 @@ import json
 import textwrap
 
 import pytest
-from _extfake import KNOBS, ext_env, install, thread_for  # noqa: F401
-from test_advisor import _hooks, _run_with_reply, adv_env  # noqa: F401
+from _extfake import KNOBS, ext_env, install, thread_for
+from test_advisor import _hooks, _run_with_reply, adv_env
 
 from app import accounts, advisor, apps_loader, config, extensions, main, openclaw, policy
 

@@ -181,49 +181,9 @@ class Scratch:
 
 
 def _reference_hooks(monkeypatch) -> None:
-    """The bodies WP-CORE gives the four host hooks, written out from their docstrings, so this
-    package is tested against the contract rather than against Foundation's permissive stubs.
-    (Once WP-CORE is merged the real ones do the same thing and this just restates them.)"""
-    def count(profile_id):
-        total: dict[str, int] = {}
-        for c, _p in ext_profile_hooks.registered_profile_data().values():
-            if c is None:
-                continue
-            try:
-                for k, v in dict(c(profile_id)).items():
-                    total[k] = total.get(k, 0) + int(v)
-            except Exception:
-                pass
-        return total
-
-    def purge(profile_id):
-        n = 0
-        for _c, p in ext_profile_hooks.registered_profile_data().values():
-            if p is None:
-                continue
-            try:
-                n += int(p(profile_id) or 0)
-            except Exception:
-                pass
-        return n
-
-    def allowed(voice_id, bot_owner):
-        if ext_profile_hooks.is_household_voice(voice_id):
-            return True
-        rules = ext_profile_hooks.registered_voice_access().values()
-        for fn in rules:
-            try:
-                if not fn(voice_id, bot_owner):
-                    return False
-            except Exception:
-                return False
-        return True
-
-    monkeypatch.setattr(ext_profile_hooks, "count_profile_data", count)
-    monkeypatch.setattr(ext_profile_hooks, "purge_profile_data", purge)
-    monkeypatch.setattr(ext_profile_hooks, "voice_allowed", allowed)
-    monkeypatch.setattr(ext_profile_hooks, "voice_owned_clones_active",
-                        lambda: bool(ext_profile_hooks.registered_voice_access()))
+    """Kept as a no-op since INT-1: WP-CORE's real host hooks (ext_profile_hooks) are merged,
+    so this package's tests now run against them instead of restated copies."""
+    return None
 
 
 @pytest.fixture

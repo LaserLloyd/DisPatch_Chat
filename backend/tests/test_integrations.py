@@ -240,7 +240,7 @@ def test_picture_rules_reach_the_prompt_only_when_they_can_work(monkeypatch):
     assert advisor.PICTURE_RULES not in prompt(cfg)
     monkeypatch.setattr(advisor, "pictures_available", lambda: True)
     assert advisor.PICTURE_RULES in prompt(cfg)
-    assert advisor.PICTURE_RULES not in prompt(cfg.locked_down())
+    # (the 3.x locked_down() view is gone with Safe Mode, WP-ADV; pictures are gated per owner)
     assert advisor.PICTURE_RULES not in prompt(replace(cfg, pictures=False))
     own = replace(cfg, persona="I draw with [[pic:…]] when asked.")
     assert advisor.PICTURE_RULES not in prompt(own)

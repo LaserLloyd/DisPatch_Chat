@@ -27,7 +27,7 @@ import { api as realApi } from './api.js?v=35';
 import { t, has, relTime, fullTimestamp } from './i18n.js?v=4';
 import { el } from './util.js?v=20';
 import {
-  ACTIVITY_COLUMNS, activityRows, activityTotals, bindableProfiles, budgetsToForm, canManage,
+  ACTIVITY_COLUMNS, activityRows, activityTotals, budgetsToForm, canManage,
   createPayload, patchPayload, roleOptions, avatarSpec, isAdminRole,
 } from './profiles.js?v=2';
 
@@ -198,9 +198,14 @@ function editorPanel(ctx, person) {
   if (!creating) {
     const del = el('button', { type: 'button', class: 'btn-secondary danger-text', text: t('people.delete') });
     del.addEventListener('click', async () => {
-      if (!await ctx.confirm(t('people.delete_confirm', { name: person.name }), { danger: true })) return;
       try {
-        await ctx.api.deletePerson(person.id);
+        // 4.0: deletion removes the profile's content first; the preview's counts are shown
+        // and its token confirms exactly those numbers.
+        const pv = await ctx.api.deletePreview(person.id);
+        const c = (pv && pv.counts) || {};
+        const msg = `${t('people.delete_confirm', { name: person.name })} ${t('reset.confirm_counts', { bots: c.bots || 0, chats: c.chats || 0, pictures: c.pictures || 0 })}`;
+        if (!await ctx.confirm(msg, { danger: true })) return;
+        await ctx.api.deletePerson(person.id, pv.token);
         ctx.toast(t('people.deleted', { name: person.name }));
         ctx.closeEditor();
         await ctx.reload();
@@ -284,7 +289,22 @@ function editorPanel(ctx, person) {
         const { patch, errors } = patchPayload(person, f);
         if (Object.keys(errors).length) { showErr(errorText(errors)); return; }
         if (!Object.keys(patch).length) { ctx.closeEditor(); return; }
-        await ctx.api.patchPerson(person.id, patch);
+        // 4.0: the role has its own route (preview first; to Basic deletes the profile's own
+        // bots and chats, so it is confirmed with the counts). The rest stays a PATCH.
+        const newRole = patch.role;
+        delete patch.role;
+        if (newRole) {
+          const pv = await ctx.api.rolePreview(person.id, newRole);
+          const body = { role: newRole };
+          if (pv && pv.deletes) {
+            const c = pv.counts || {};
+            const msg = `${t('people.downgrade_title', { name: person.name })} ${t('people.downgrade_confirm', { bots: c.bots || 0, chats: c.chats || 0, voices: c.voices || 0 })}`;
+            if (!await ctx.confirm(msg, { danger: true })) return;
+            body.confirm_token = pv.token;
+          }
+          await ctx.api.changeRole(person.id, body);
+        }
+        if (Object.keys(patch).length) await ctx.api.patchPerson(person.id, patch);
         ctx.toast(t('people.saved', { name: f.name.trim() || person.name }));
         ctx.closeEditor();
         await ctx.reload();
@@ -326,44 +346,11 @@ function editorPanel(ctx, person) {
 
 function deviceGroup(ctx) {
   const dv = ctx.devices || { devices: [], this_device: null };
-  const mine = dv.devices.find((d) => d.this_device) || null;
-  const bound = mine ? mine.default_profile_id : null;
-  const choices = bindableProfiles(ctx.data.people);
+  // 4.0: a device is no longer bound to a profile (unsigned devices land on the lock target,
+  // Settings -> People); only the list of remembered devices and Forget remain.
+  const rows = [];
 
-  const select = el('select', { id: 'people-device-select', class: 'ui-select' }, [
-    el('option', { value: '', text: t('people.device_nobody') }),
-    ...choices.map((p) => el('option', { value: p.id, text: `${p.name} (${roleLabel(p.role)})` })),
-  ]);
-  select.value = bound && choices.some((p) => p.id === bound) ? bound : '';
-  select.addEventListener('change', async () => {
-    const want = select.value || null;
-    select.disabled = true;
-    try {
-      await ctx.api.bindThisDevice(want);
-      ctx.toast(t(want ? 'people.device_bound' : 'people.device_unbound'));
-      await ctx.reloadDevices();
-    } catch (e) {
-      select.value = bound || '';
-      ctx.toast(errText(e), true);
-    } finally { select.disabled = false; }
-  });
-
-  const rows = [
-    el('div', { class: 'dev-row dev-row-block people-device-pick' }, [
-      el('label', { for: 'people-device-select', class: 'dev-row-text' }, [
-        el('strong', { text: t('people.device_open_as') }),
-        hintLine(t('people.device_hint')),
-      ]),
-      select,
-    ]),
-  ];
-
-  const nameOf = (id) => {
-    const p = ctx.data.people.find((x) => x.id === id);
-    return p ? p.name : null;
-  };
   for (const d of dv.devices) {
-    const who = d.default_profile_id ? nameOf(d.default_profile_id) : null;
     const label = d.label || t('people.device_unnamed');
     const forget = el('button', {
       type: 'button', class: 'btn-secondary', text: t('people.device_forget'),
@@ -377,23 +364,10 @@ function deviceGroup(ctx) {
         await ctx.reloadDevices();
       } catch (e) { ctx.toast(errText(e), true); }
     });
-    const btns = [];
-    if (d.this_device && d.default_profile_id) {
-      const unbind = el('button', { type: 'button', class: 'btn-secondary', text: t('people.device_unbind') });
-      unbind.addEventListener('click', async () => {
-        try {
-          await ctx.api.bindThisDevice(null);
-          ctx.toast(t('people.device_unbound'));
-          await ctx.reloadDevices();
-        } catch (e) { ctx.toast(errText(e), true); }
-      });
-      btns.push(unbind);
-    }
-    btns.push(forget);
+    const btns = [forget];
     rows.push(el('div', { class: 'dev-row people-device', dataset: { device: d.id } }, [
       el('span', { class: 'dev-row-text' }, [
         el('strong', {}, [label, d.this_device ? ` (${t('people.device_this')})` : '']),
-        hintLine(who ? t('people.device_opens_as', { name: who }) : t('people.device_opens_ask')),
         d.last_seen ? hintLine(t('people.device_seen', { when: relTime(d.last_seen) })) : null,
       ]),
       el('span', { class: 'people-row-actions' }, btns),

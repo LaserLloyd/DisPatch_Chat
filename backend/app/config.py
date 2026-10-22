@@ -556,6 +556,11 @@ class Bot:
     # Device, localStorage). Security is untouched — who can reach what is
     # still decided by `safe` and the session tier.
     hide_unlocked: bool = False
+    # 4.0: the Admin's "keep it off the rail" switch (migration 010 writes it for every bot whose
+    # hide_unlocked was on and keeps hide_unlocked beside it as an inert key). Display only: a
+    # hidden household bot still opens by link and is still listed for a profile whose explicit
+    # household list names it (characters.visible_to). Written to config.yaml only when true.
+    hidden: bool = False
     # Quick actions ("Proof this", "Fact-check", ...): False takes the chips, the
     # composer pill and the action itself away from this bot (the kids' science
     # animals). The server also ignores an `action` sent to it.
@@ -745,6 +750,7 @@ class Bot:
             "visible": self.visible,
             "safe": self.safe,
             "hide_unlocked": self.hide_unlocked,
+            "hidden": self.hidden,
             "audience": self.audience,
             "description": self.description,
             "quick_actions": self.quick_actions,
@@ -915,6 +921,8 @@ def _bot_entry(b: Bot) -> dict:
         entry["owner_profile"] = b.owner_profile
     if b.cloned_from:
         entry["cloned_from"] = b.cloned_from
+    if b.hidden:
+        entry["hidden"] = True
     if b.api:
         entry["api"] = dict(b.api)
     if b.advisor:
@@ -1037,6 +1045,7 @@ def load_bots() -> list[Bot]:
                         bool(e.get("safe", base.safe if base else False)),
                         bool(e.get("hide_unlocked",
                                    base.hide_unlocked if base else False)))),
+                hidden=bool(e.get("hidden", base.hidden if base else False)),
                 quick_actions=bool(e.get("quick_actions",
                                          base.quick_actions if base else True)),
                 color=str(e.get("color", base.color if base else "")),

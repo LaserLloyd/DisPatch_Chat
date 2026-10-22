@@ -218,7 +218,14 @@ class Install:
             c = sibling(w, self.base, LAN[key], origin=False)
             c.headers.update({"X-API-Key": MACHINE_TOKEN})
             self.clients[key] = c
-        if self.actor == "N":
+        if self.actor in ("N", "M", "Mi"):
+            # INT-1: a request that carries the machine key on a route with no machine scope is
+            # not a machine request - the gate treats it like any cookie-less caller, which on a
+            # default-profile install IS the shared default profile (SPEC: everyone who reaches
+            # the port without signing in lands on it). That sharing is D's own row of the
+            # matrix. M and Mi therefore run on a profile-list install, where the only thing a
+            # key can buy is the machine surface, so "a machine never reads another profile's
+            # data" is asserted without the shared profile standing in for it.
             self._security(lock_target="profile_list")
         return self
 
@@ -530,7 +537,7 @@ PROBES: tuple[Probe, ...] = (
     _t("POST feedback", "POST", "/api/messages/{m_asst}/feedback", body={"vote": "up"},
        reveals=False, mutates=True, own="any"),
     _t("POST thread avatar", "POST", "/api/threads/{thread}/avatar", files=_files_png, reveals=False,
-       mutates=True, own="any"),
+       mutates=True, own="any", machine="read"),       # INT-1: machine:avatars route; the protected Admin's only
     _t("POST message (inbound alias)", "POST", "/api/threads/{thread}/messages",
        body={"role": "assistant", "content": "posted-by-matrix"}, reveals=False, mutates=True, own="any",
        machine="write"),
@@ -579,11 +586,13 @@ PROBES: tuple[Probe, ...] = (
     Probe("advisor_request", "POST advisor dismiss", "POST", "/api/advisor/requests/{rid}/dismiss",
           body={"message_id": "card-matrix"}, reveals=False, own="any", mutates=True),
     # ---- personal bots + avatars ---------------------------------------------------------- #
-    Probe("personal_bot", "GET /api/bots/{id}/avatar", "GET", "/api/bots/{bot}/avatar", own="ok", perm=None),
-    Probe("personal_bot", "GET /api/bots/{id}/avatar/full", "GET", "/api/bots/{bot}/avatar/full"),
-    Probe("personal_bot", "GET /api/bots/{id}/avatar/thumb", "GET", "/api/bots/{bot}/avatar/thumb"),
+    # INT-1: the four avatar GETs (and the avatar POST below) are machine:avatars routes, so a
+    # machine reads the protected Admin's personal bot's avatar there (machine="read" = A0 only).
+    Probe("personal_bot", "GET /api/bots/{id}/avatar", "GET", "/api/bots/{bot}/avatar", own="ok", perm=None, machine="read"),
+    Probe("personal_bot", "GET /api/bots/{id}/avatar/full", "GET", "/api/bots/{bot}/avatar/full", machine="read"),
+    Probe("personal_bot", "GET /api/bots/{id}/avatar/thumb", "GET", "/api/bots/{bot}/avatar/thumb", machine="read"),
     Probe("personal_bot", "GET /api/bots/{id}/avatar/history", "GET", "/api/bots/{bot}/avatar/history",
-          reveals=False, own="any"),
+          reveals=False, own="any", machine="read"),
     Probe("personal_bot", "GET /api/bots/{id}/models", "GET", "/api/bots/{bot}/models", reveals=False, own="any"),
     Probe("personal_bot", "GET /static/avatars face", "GET", "/static/avatars/{face}"),
     Probe("personal_bot", "GET /static/avatars full", "GET", "/static/avatars/{full}"),
@@ -594,7 +603,7 @@ PROBES: tuple[Probe, ...] = (
     Probe("personal_bot", "PATCH /api/bots/{id}", "PATCH", "/api/bots/{bot}", body={"name": "renamed-by-matrix"},
           reveals=False, own="any", mutates=True),
     Probe("personal_bot", "POST /api/bots/{id}/avatar", "POST", "/api/bots/{bot}/avatar", files=_files_png,
-          reveals=False, own="any", mutates=True),
+          reveals=False, own="any", mutates=True, machine="read"),
     Probe("personal_bot", "DELETE /api/characters/{id}", "DELETE", "/api/characters/{bot}", reveals=False,
           own="any", destroys=True),
     Probe("personal_bot", "DELETE /api/bots/{id}", "DELETE", "/api/bots/{bot}", reveals=False, own="any",

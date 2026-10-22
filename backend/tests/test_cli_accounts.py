@@ -5,6 +5,7 @@ secret is never an argument, and the first line of output names the data directo
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import subprocess
@@ -14,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from app import accounts, auth, cli, config, credentials, migrate
+from app.database import Database
 
 BACKEND = Path(__file__).resolve().parents[1]
 
@@ -31,6 +33,12 @@ def data(tmp_path, monkeypatch):
     migrate._repoint(d)
     with accounts.connect():
         pass                                 # creates chats.db with the account tables
+
+    async def _schema():                     # and the chat tables a started install has (4.0:
+        db = Database(accounts.db_path())    # `users delete` counts and wipes the content first)
+        await db.connect()
+        await db.close()
+    asyncio.run(_schema())
     return d
 
 
@@ -309,6 +317,26 @@ def test_delete_removes_the_profile_and_its_sessions(data, run):
     assert code == 0, err
     assert accounts.get_by_name("Kit") is None and auth.get_session(tok) is None
     assert "Kit" in out and accounts.get_owner() is not None
+
+
+def test_delete_removes_the_profiles_chats_first(data, run):
+    """4.0: deleting a profile from the command line deletes what it owns, like the People API
+    (no chat is left behind without an owner)."""
+    import sqlite3
+    make_owner()
+    kit = accounts.create_profile("Kit", "user")
+    con = sqlite3.connect(accounts.db_path())
+    now = "2026-10-23T00:00:00+00:00"
+    con.execute("INSERT INTO threads (id, bot_id, title, created_at, updated_at, owner_profile_id) "
+                "VALUES ('t-kit', 'atlas', 'x', ?, ?, ?)", (now, now, kit.id))
+    con.execute("INSERT INTO threads (id, bot_id, title, created_at, updated_at, owner_profile_id) "
+                "VALUES ('t-other', 'atlas', 'x', ?, ?, NULL)", (now, now))
+    con.commit()
+    code, out, err = run("users", "delete", "Kit", "--yes")
+    assert code == 0, err
+    left = {r[0] for r in con.execute("SELECT id FROM threads")}
+    con.close()
+    assert left == {"t-other"} and "1 chats" in out
 
 
 def test_delete_asks_on_a_terminal(data, run, monkeypatch):

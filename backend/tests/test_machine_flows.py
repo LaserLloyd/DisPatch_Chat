@@ -88,7 +88,13 @@ def test_a_reused_key_in_a_thread_the_machine_cannot_read_echoes_nothing(house):
     body = {"thread_id": t["id"], "content": "SENTINEL-PRIVATE", "delivery_key": "k-uma"}
     assert house["machine"].post("/api/inject", json=body).status_code == 200
     again = house["machine"].post("/api/inject", json=body)
-    assert again.status_code == 409 and "SENTINEL-PRIVATE" not in again.text
+    # INT-1 (BUILD-PLAN-v2 §1.7: inject returns `duplicate`): the retry into the same thread is
+    # flagged a duplicate, with no message - nothing of the User's thread is echoed.
+    assert again.status_code == 200 and again.json()["duplicate"] is True
+    assert again.json()["message"] is None and "SENTINEL-PRIVATE" not in again.text
+    # The same key aimed at another thread is someone else's delivery: refused, no echo.
+    other = house["machine"].post("/api/inject", json={**body, "thread_id": "daily-elsewhere"})
+    assert other.status_code == 409 and "SENTINEL-PRIVATE" not in other.text
 
 
 def test_image_jobs_and_reactions_only_on_threads_the_machine_may_write(house, monkeypatch):

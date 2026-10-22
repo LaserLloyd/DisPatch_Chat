@@ -786,8 +786,6 @@ def profile_created(prof: accounts.Profile, *, first_admin: bool = False) -> Non
     from . import profiles_service
     try:
         profiles_service.on_profile_created(prof, first_admin=first_admin)
-    except NotImplementedError:
-        pass
     except Exception:
         log.exception("on_profile_created failed for %s", prof.id)
 

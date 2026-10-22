@@ -731,7 +731,7 @@
    "code": "signin_required",
    "status": 401,
    "message": "Sign in to continue.",
-   "fix": "Pick your profile and enter your PIN or password. The owner can allow signed-out use with anonymous_access: restricted in security.yaml.",
+   "fix": "Pick your profile on the sign-in screen (with its PIN or password if it has one). Unsigned devices land on the default profile only when an Admin has set one (Settings, People: lock target).",
    "docs": "signin_required",
    "patterns": [
     "Sign in to continue."
@@ -2574,6 +2574,166 @@
    "docs": "use_role_route",
    "patterns": [
     "Change a profile's type with POST /api/people/{id}/role (preview first)."
+   ]
+  },
+  {
+   "code": "reset_stale",
+   "status": 409,
+   "message": "What would be deleted has changed. Look at the numbers again before confirming.",
+   "fix": "Fetch the reset preview again and confirm with its new token.",
+   "docs": "reset_stale",
+   "patterns": [
+    "What would be deleted has changed. Look at the numbers again before confirming."
+   ]
+  },
+  {
+   "code": "role_change_stale",
+   "status": 409,
+   "message": "What would be deleted has changed. Look at the numbers again before confirming.",
+   "fix": "Fetch the role-change preview again and confirm with its new token.",
+   "docs": "role_change_stale",
+   "patterns": []
+  },
+  {
+   "code": "delete_stale",
+   "status": 409,
+   "message": "What would be deleted has changed. Look at the numbers again before confirming.",
+   "fix": "Fetch the delete preview again and confirm with its new token.",
+   "docs": "delete_stale",
+   "patterns": []
+  },
+  {
+   "code": "basic_no_bots",
+   "status": 422,
+   "message": "A Basic profile uses the bots an Admin gives it; it has none of its own.",
+   "fix": "Ask an Admin to add household bots to this profile, or to make it a User.",
+   "docs": "basic_no_bots",
+   "patterns": [
+    "A Basic profile uses the bots an Admin gives it; it has none of its own."
+   ]
+  },
+  {
+   "code": "household_invalid",
+   "status": 422,
+   "message": "household_bots must be a list of bot ids.",
+   "fix": "Send \"all\" (Users only) or a list of household bot ids; Admins use every household bot.",
+   "docs": "household_invalid",
+   "patterns": [
+    "household_bots must be a list of bot ids.",
+    "Unknown household bot {}.",
+    "An Admin uses every household bot.",
+    "A Basic profile gets an explicit list of bots, not all of them."
+   ]
+  },
+  {
+   "code": "not_copyable",
+   "status": 422,
+   "message": "This bot runs on an agent and cannot be copied.",
+   "fix": "Only direct-API household bots can be copied.",
+   "docs": "not_copyable",
+   "patterns": [
+    "This bot runs on an agent and cannot be copied."
+   ]
+  },
+  {
+   "code": "avatar_invalid",
+   "status": 422,
+   "message": "That file is not a picture DisPatch can read.",
+   "fix": "Send a PNG, JPEG or WebP picture.",
+   "docs": "avatar_invalid",
+   "patterns": [
+    "That file is not a picture DisPatch can read.",
+    "No picture was sent.",
+    "A picture must be a raster image."
+   ]
+  },
+  {
+   "code": "avatar_too_large",
+   "status": 413,
+   "message": "The picture is too large (25 MB at most).",
+   "fix": "Send a smaller picture.",
+   "docs": "avatar_too_large",
+   "patterns": [
+    "The picture is too large (25 MB at most).",
+    "The picture has too many pixels."
+   ]
+  },
+  {
+   "code": "profile_required",
+   "status": 409,
+   "message": "Sign in to a profile first.",
+   "fix": "Sign in to a profile; machine callers and open installs have no profile of their own.",
+   "docs": "profile_required",
+   "patterns": [
+    "Sign in to a profile first."
+   ]
+  },
+  {
+   "code": "voice_not_allowed",
+   "status": 422,
+   "message": "That voice is not available to you.",
+   "fix": "Pick a built-in voice or one of your own (or a household) cloned voice.",
+   "docs": "voice_not_allowed",
+   "patterns": [
+    "That voice is not available to you."
+   ]
+  },
+  {
+   "code": "backend_not_allowed",
+   "status": 403,
+   "message": "Your profile may not choose a bot's backend.",
+   "fix": "Ask an Admin to allow the connection for this profile in People.",
+   "docs": "backend_not_allowed",
+   "patterns": [
+    "Your profile may not choose a bot's backend.",
+    "This profile may not use that connection."
+   ]
+  },
+  {
+   "code": "too_many_bots",
+   "status": 409,
+   "message": "A profile can have at most {} bots",
+   "fix": "Delete one of your bots first.",
+   "docs": "too_many_bots",
+   "patterns": []
+  },
+  {
+   "code": "backends_invalid",
+   "status": 422,
+   "message": "backends must be an object.",
+   "fix": "Send {\"allowed\": [connection ids]} or {} for every connection.",
+   "docs": "backends_invalid",
+   "patterns": [
+    "backends must be an object.",
+    "backends.allowed must be a list of connection ids."
+   ]
+  },
+  {
+   "code": "backends_unknown_connection",
+   "status": 422,
+   "message": "Unknown connection.",
+   "fix": "Use a connection id from GET /api/connections.",
+   "docs": "backends_unknown_connection",
+   "patterns": []
+  },
+  {
+   "code": "draft_unavailable",
+   "status": 503,
+   "message": "No AI connection is available for building a bot.",
+   "fix": "Connect an AI in Settings (AI models), or ask an Admin to allow one for your profile.",
+   "docs": "draft_unavailable",
+   "patterns": [
+    "No AI connection is available for building a bot."
+   ]
+  },
+  {
+   "code": "draft_failed",
+   "status": 502,
+   "message": "The AI did not return a usable bot. Try again, or add more detail.",
+   "fix": "Try again, or describe the bot in more detail.",
+   "docs": "draft_failed",
+   "patterns": [
+    "The AI did not return a usable bot. Try again, or add more detail."
    ]
   }
  ]
