@@ -13,8 +13,9 @@ The base URL and (optional) PIN-derived session cookie are read from the
 environment:
 
   DISPATCH_URL     — default ``http://127.0.0.1:8765``
-  DISPATCH_TOKEN   — bearer token, sent as ``X-API-Key``. Optional; the
-                     default install accepts loopback without one, and a
+  DISPATCH_TOKEN   — sent as ``X-API-Key``. Optional: without it the key
+                     comes from $DISPATCH_API_KEY or ~/.config/local-chat/machine.env
+                     (loopback is not trusted since R1.5), and a
                      PIN-protected install needs an operator's session
                      cookie (the API key does NOT bypass full-session).
 
@@ -36,6 +37,54 @@ import sys
 import urllib.error
 import urllib.request
 from typing import Any
+
+# --- DisPatch machine API key (R1.5, 2026-10-22) ------------------------------
+# DisPatch no longer trusts loopback by position (security.yaml
+# machine_loopback_trust: false): a machine caller is identified by its
+# api_token, sent as X-API-Key. This urllib handler adds it to requests for the
+# local DisPatch only (127.0.0.1:8765 / localhost:8765 / $DISPATCH_URL's host),
+# so every call site below -- including bare urlopen(url) -- sends it. Key:
+# $DISPATCH_API_KEY, else ~/.config/local-chat/machine.env. Never printed.
+import os as _dp_os
+import urllib.parse as _dp_up
+import urllib.request as _dp_ur
+
+_DP_HOSTS = {"127.0.0.1:8765", "localhost:8765"}
+if _dp_os.environ.get("DISPATCH_URL"):
+    _DP_HOSTS.add(_dp_up.urlsplit(_dp_os.environ["DISPATCH_URL"]).netloc)
+
+
+def _dp_api_key() -> str:
+    k = _dp_os.environ.get("DISPATCH_API_KEY", "").strip()
+    if k:
+        return k
+    path = _dp_os.environ.get("DISPATCH_KEY_FILE") or _dp_os.path.expanduser(
+        "~/.config/local-chat/machine.env")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("DISPATCH_API_KEY="):
+                    return line.split("=", 1)[1].strip().strip("'\"")
+    except OSError:
+        pass
+    return ""
+
+
+class _DPAuthHandler(_dp_ur.BaseHandler):
+    handler_order = 100
+
+    def http_request(self, req):
+        if req.host in _DP_HOSTS and not req.has_header("X-api-key"):
+            key = _dp_api_key()
+            if key:
+                req.add_unredirected_header("X-API-Key", key)
+        return req
+
+    https_request = http_request
+
+
+_dp_ur.install_opener(_dp_ur.build_opener(_DPAuthHandler()))
+# ---------------------------------------------------------------------------
 
 DEFAULT_URL = os.environ.get("DISPATCH_URL", "http://127.0.0.1:8765")
 

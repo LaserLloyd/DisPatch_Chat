@@ -496,15 +496,29 @@
     {
       "cli": null,
       "http": [
-        "POST /api/upload",
-        "POST /api/drop"
+        "POST /api/upload"
       ],
       "id": "uploads.attach",
-      "machine": [],
+      "machine": [
+        "machine:upload"
+      ],
       "mcp": null,
       "permission": "use_chat",
       "title": "Attach a picture or file to a chat",
       "ui": "api.upload",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "http": [
+        "POST /api/drop"
+      ],
+      "id": "uploads.drop",
+      "machine": [],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "Drop a file into a chat from a signed-out device",
+      "ui": null,
       "ws": []
     },
     {

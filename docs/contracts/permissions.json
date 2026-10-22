@@ -16,7 +16,8 @@
     "machine:messages",
     "machine:openapi",
     "machine:reactions",
-    "machine:threads"
+    "machine:threads",
+    "machine:upload"
   ],
   "machine_scopes": [
     "machine:advisor",
@@ -35,7 +36,8 @@
     "machine:messages",
     "machine:openapi",
     "machine:reactions",
-    "machine:threads"
+    "machine:threads",
+    "machine:upload"
   ],
   "naming": {
     "Safe Mode": "restricted",

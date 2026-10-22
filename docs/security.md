@@ -217,7 +217,15 @@ For installs upgraded from 2.x, on-box scripts on `127.0.0.1` are still trusted
 without a key while **`machine_loopback_trust`** is `true` (the default) — the
 2.x behaviour, kept so your crons keep working. Once they send the key, set it to
 `false` and a machine is identified by its credential alone, not by where it
-runs. The API key itself is stored in `security.yaml` (mode 0600, written atomically) in
+runs. The host scripts shipped in `scripts/` (`dispatch-jobs`,
+`dispatch-avatar-rotate`, `local-chat-daily.sh`) send it from `$DISPATCH_API_KEY`,
+else from an owner-only file, `~/.config/local-chat/machine.env` (one line,
+`DISPATCH_API_KEY=<key>`; `$DISPATCH_KEY_FILE` moves it), and pass it to `curl`
+as a config file on a pipe so it never appears in a process list. Give your own
+crons the same file. An agent hands a document back with `POST /api/upload`,
+which needs `machine:upload` and shares the daily byte budget of a signed-out
+device (`DECOY_UPLOAD_QUOTA`, 200 MB a day), so a looping agent cannot fill the disk.
+A keyless upload is never a machine's: it is judged as a signed-out device's. The API key itself is stored in `security.yaml` (mode 0600, written atomically) in
 plain text, as before; it is shown once when generated and never returned by the API again. Anything that passed through a reverse proxy (`X-Forwarded-*`,
 `Tailscale-*` headers) is never treated as on-box. The image server's completion
 callback is the one other machine route; it carries its own per-job token.

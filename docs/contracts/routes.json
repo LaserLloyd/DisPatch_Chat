@@ -2243,6 +2243,9 @@
       "method": "POST",
       "path": "/api/upload",
       "requirement": {
+        "machine": [
+          "machine:upload"
+        ],
         "note": "daily byte quota for Restricted",
         "permission": "use_chat"
       }

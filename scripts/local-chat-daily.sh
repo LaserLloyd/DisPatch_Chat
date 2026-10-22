@@ -16,6 +16,20 @@ BOTS="${LOCAL_CHAT_DAILY_BOTS:-main}"            # space-separated bot ids
 DATE="${LOCAL_CHAT_DATE:-$(date +%F)}"   # overridable for testing/backfill
 SYNC_HINTS="${LOCAL_CHAT_SYNC_HINTS:-$HOME/.local/bin/local-chat-sync-model-hints.py}"
 
+# The machine API key (X-API-Key) DisPatch identifies this job by. An install
+# with security.yaml machine_loopback_trust: false (the recommended setting)
+# refuses on-box callers without it. From $DISPATCH_API_KEY, else the
+# owner-only file $DISPATCH_KEY_FILE (default ~/.config/local-chat/machine.env,
+# a DISPATCH_API_KEY=... line). Handed to curl as a config file on a pipe, so it
+# never shows in `ps`.
+DISPATCH_KEY_FILE="${DISPATCH_KEY_FILE:-$HOME/.config/local-chat/machine.env}"
+dispatch_key() {
+  if [ -n "${DISPATCH_API_KEY:-}" ]; then printf '%s' "$DISPATCH_API_KEY"; return; fi
+  [ -r "$DISPATCH_KEY_FILE" ] || return 0
+  sed -n 's/^DISPATCH_API_KEY=//p' "$DISPATCH_KEY_FILE" | head -n 1 | tr -d "\"'\r"
+}
+key_config() { k="$(dispatch_key)"; [ -n "$k" ] && printf 'header = "X-API-Key: %s"\n' "$k"; return 0; }
+
 # Optional hook: keep DisPatch's per-bot model labels (the "model_hint" under
 # each bot name) aligned with whatever actually backs that bot, by editing
 # config.yaml. Skipped silently when the script is not installed — point
@@ -53,7 +67,7 @@ if [ -x "$AVATAR_ROTATE" ]; then
 fi
 
 for bot in $BOTS; do
-  out=$(curl -sf --max-time 15 "$BASE/api/daily" \
+  out=$(curl -sf --max-time 15 -K <(key_config) "$BASE/api/daily" \
         -H 'content-type: application/json' \
         -d "{\"bot_id\":\"$bot\",\"date\":\"$DATE\"}") || { echo "daily failed for $bot" >&2; continue; }
   echo "daily thread for $bot: $(echo "$out" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["thread"]["id"],"created" if d["created"] else "existing")')"

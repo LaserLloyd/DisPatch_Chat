@@ -362,8 +362,9 @@ Rules worth knowing:
   bot's name.
 - **Three requests per bot per minute.** A render occupies a GPU for tens of
   seconds; a refusal is a `429` and is final, not queued.
-- Same access rules as the rest of the machine surface: loopback needs no
-  credential, remote needs the API key, and a locked browser tab gets a `403`.
+- Same access rules as the rest of the machine surface: the API key (loopback
+  without one only while `machine_loopback_trust` is on), and a locked browser
+  tab gets a `403`.
 - The finished picture is an ordinary chat image. It opens in the lightbox,
   it is hidden by Safe Mode, and No-Image Mode omits the row entirely — the
   job pipeline adds no exceptions to any of that.

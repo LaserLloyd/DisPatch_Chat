@@ -259,8 +259,8 @@ curl -X POST http://127.0.0.1:8765/api/inject \
 
 The field is `content` (`text` is accepted as an alias, because every other
 chat transport calls it that — an empty message is refused rather than posted
-as a blank bubble). Loopback needs no credential; remote callers need
-`X-API-Key`. Use `thread_id` to target a specific conversation, or `bot_id`
+as a blank bubble). Callers send `X-API-Key` (an on-box caller may skip it only
+while `machine_loopback_trust` is on; turn that off once your crons send it). Use `thread_id` to target a specific conversation, or `bot_id`
 (case-insensitive; the canonical roster id is used) to find-or-create that
 bot's daily thread.
 

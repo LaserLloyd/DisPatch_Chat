@@ -440,10 +440,10 @@ def repin_daily_thread(bot_id: str, today: str, log: Log) -> None:
 
     try:
         proc = subprocess.run(
-            ["curl", "-s", "-S", "--max-time", "30", "-X", "POST",
+            ["curl", "-s", "-S", "--max-time", "30", "-K", "-", "-X", "POST",
              f"{BASE_URL}/api/threads/{tid}/avatar?source=current",
              "-o", os.devnull, "-w", "%{http_code}"],
-            capture_output=True, text=True, timeout=60)
+            capture_output=True, text=True, timeout=60, input=_dp_key_config())
     except subprocess.TimeoutExpired:
         log.warn(f"{bot_id}: daily re-pin for {tid} timed out")
         return
@@ -473,6 +473,23 @@ def choose(bot_id: str, cfg: dict, today: str, history: list[str],
 
 
 # ── the app API ─────────────────────────────────────────────────────────────
+def _dp_key_config() -> str:
+    """curl config carrying DisPatch's machine API key (R1.5, 2026-10-22: loopback
+    is no longer trusted by position). Fed to curl on stdin (`-K -`) so the key
+    never appears in argv. Key: $DISPATCH_API_KEY, else
+    ~/.config/local-chat/machine.env. Empty when there is none."""
+    key = os.environ.get("DISPATCH_API_KEY", "").strip()
+    if not key:
+        try:
+            for line in (HOME / ".config/local-chat/machine.env").read_text().splitlines():
+                if line.startswith("DISPATCH_API_KEY="):
+                    key = line.split("=", 1)[1].strip().strip("'\"")
+                    break
+        except OSError:
+            pass
+    return f'header = "X-API-Key: {key}"\n' if key else ""
+
+
 def upload(bot_id: str, face: Path, full: Path, log: Log) -> bool:
     """POST the pair to the app. True on a clean {"ok": true} response.
 
@@ -483,14 +500,15 @@ def upload(bot_id: str, face: Path, full: Path, log: Log) -> bool:
     url = f"{BASE_URL}/api/bots/{bot_id}/avatar"
     with tempfile.NamedTemporaryFile(prefix="avatar-resp-", suffix=".json") as body:
         cmd = [
-            "curl", "-s", "-S", "--max-time", CURL_TIMEOUT,
+            "curl", "-s", "-S", "--max-time", CURL_TIMEOUT, "-K", "-",
             "-X", "POST", url,
             "-F", f"file=@{full}",
             "-F", f"face=@{face}",
             "-o", body.name, "-w", "%{http_code}",
         ]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
+                                  input=_dp_key_config())
         except subprocess.TimeoutExpired:
             log.error(f"{bot_id}: upload timed out")
             return False
@@ -522,10 +540,11 @@ def upload(bot_id: str, face: Path, full: Path, log: Log) -> bool:
 def verify(bot_id: str, log: Log) -> bool:
     """The avatar the app now serves must actually come back 200."""
     url = f"{BASE_URL}/api/bots/{bot_id}/avatar"
-    cmd = ["curl", "-s", "--max-time", "20", "-o", os.devnull,
+    cmd = ["curl", "-s", "--max-time", "20", "-K", "-", "-o", os.devnull,
            "-w", "%{http_code}", url]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=40,
+                              input=_dp_key_config())
     except subprocess.TimeoutExpired:
         log.error(f"{bot_id}: verification timed out")
         return False

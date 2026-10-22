@@ -9,6 +9,12 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Security
 
+- **Machines can upload again, and the host scripts carry the API key.** `POST /api/upload` has a machine
+  scope, `machine:upload`; since 3.0 an agent or cron that handed a document back got 401 `signin_required`,
+  key or not. Machine uploads share the signed-out daily byte budget; a keyless upload is still judged
+  as a signed-out device's (with its quota), never refused as a missing key. `dispatch-jobs`, `dispatch-avatar-rotate` and `local-chat-daily.sh` send the machine API key
+  (from `$DISPATCH_API_KEY` or `~/.config/local-chat/machine.env`), so `machine_loopback_trust: false` no
+  longer breaks them.
 - **Voice and app turns follow the agent rule.** A character whose turns run an agent on the host needs the
   `dispatch_agents` permission for every way a turn starts, not only a typed message: the voice socket refuses
   a profile without it on such a character (1008 with a reason; the call screen says it was refused), a voice

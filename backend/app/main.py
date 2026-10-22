@@ -1049,6 +1049,12 @@ def _scopes_for(cfg) -> set[str]:
 _DEGRADE_GET = frozenset({"/api/reactions", "/api/bots", "/api/threads", "/api/unread",
                           "/api/extensions"})
 
+# Mutations shared the same way: a signed-out device's upload (the composer's
+# attach) must stay the Restricted upload with its daily byte quota when it
+# carries no key, as it was before the route gained a machine scope. A KEYED
+# caller is a machine (machine:upload); a keyless one is never refused here.
+_DEGRADE_POST = frozenset({"/api/upload"})
+
 
 def _machine_principal(request: Request, cfg, req, method: str, path: str):
     """(principal, early_response) for a non-browser caller of a machine route."""
@@ -1066,6 +1072,8 @@ def _machine_principal(request: Request, cfg, req, method: str, path: str):
     if method == "GET" and (path in _DEGRADE_GET or _INBOUND_THREAD_ONE_RE.match(path)
                             or _INBOUND_THREAD_SUB_RE.match(path)):
         return None, None                              # falls through to Restricted
+    if method == "POST" and path in _DEGRADE_POST and not key:
+        return None, None                              # a signed-out device's upload
     return None, JSONResponse({"detail": "Invalid or missing API key",
                                "error": errors.envelope("invalid_api_key")}, status_code=401)
 
@@ -2191,8 +2199,10 @@ def _budget_limit(subject: str, kind: str, default: int) -> int:
 
 
 def _decoy_quota_left(request: Request) -> int | None:
-    """Bytes a Restricted caller may still upload today; None for everyone else."""
-    if not _is_decoy(request):
+    """Bytes a Restricted caller - or a machine (machine:upload: an agent or cron
+    handing a document back) - may still upload today; None for everyone else.
+    A looping agent must not be able to fill the disk."""
+    if not (_is_decoy(request) or policy.of(request).machine):
         return None
     subject = _request_quota_ip(request)
     limit = _budget_limit(subject, "upload_bytes", DECOY_UPLOAD_QUOTA)

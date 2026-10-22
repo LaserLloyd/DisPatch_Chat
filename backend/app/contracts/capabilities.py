@@ -114,7 +114,9 @@ CAPABILITIES: tuple[Capability, ...] = (
     _c("messages.feedback", "Rate a reply", "use_chat", http=["POST /api/messages/{message_id}/feedback"],
        ui="api.messageFeedback"),
     _c("uploads.attach", "Attach a picture or file to a chat", "use_chat",
-       http=["POST /api/upload", "POST /api/drop"], ui="api.upload"),
+       http=["POST /api/upload"], ui="api.upload", machine=["machine:upload"]),
+    _c("uploads.drop", "Drop a file into a chat from a signed-out device", "use_chat",
+       http=["POST /api/drop"]),
     _c("search", "Search every conversation", "view_activity", http=["GET /api/search"], ui="api.search"),
     _c("export", "Export all history", "admin_system", http=["GET /api/export"], ui="api.exportUrl"),
     # ---- characters -----------------------------------------------------------

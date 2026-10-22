@@ -117,6 +117,7 @@ class MachineScope(StrEnum):
     MESSAGES = "machine:messages"              # delete a message
     BOTS_READ = "machine:bots_read"            # GET /api/bots roster discovery
     FILES_LIST = "machine:files_list"          # GET /api/files (metadata only)
+    UPLOAD = "machine:upload"                  # POST /api/upload (a document an agent hands back)
     REACTIONS = "machine:reactions"            # fire / pool / prompts / settings
     AVATARS = "machine:avatars"                # one bot's / one thread's avatar
     AVATAR_POOL = "machine:avatar_pool"

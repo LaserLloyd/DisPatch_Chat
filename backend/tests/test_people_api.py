@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app import accounts, auth, limits
+from app import accounts, auth, limits, main
 
 
 @pytest.fixture
@@ -521,6 +521,40 @@ def test_machine_scopes_can_be_narrowed(world, owner):
     # With loopback trust off, an on-box process without the key is refused.
     local = world.client(("127.0.0.1", 40001), origin=False)
     assert local.post("/api/inject", json={"bot_id": "alpha", "role": "user", "content": "x"}).status_code == 401
+
+
+def test_machine_upload_needs_its_scope_and_the_key(world, owner, monkeypatch):
+    """R1.5: an agent hands a document back by uploading it (then [[doc:id]]). The
+    3.0 route table gave POST /api/upload no machine scope, so every machine caller
+    got 401 signin_required, key or not."""
+    token = owner.post("/api/auth/api-token", json={"rotate": True}).json()["api_token"]
+    owner.post("/api/auth/api-token", json={"machine_loopback_trust": False})
+    local = world.client(("127.0.0.1", 40002), origin=False)
+    files = {"file": ("report.txt", b"hello from a cron", "text/plain")}
+    r = local.post("/api/upload", headers={"X-API-Key": token}, files=files)
+    assert r.status_code == 200, r.text
+    assert r.json()["id"] and r.json()["name"] == "report.txt"
+    # A machine's uploads share the sessionless daily byte budget (an agent in a
+    # loop must not fill the disk).
+    monkeypatch.setattr(main, "DECOY_UPLOAD_QUOTA", 64)
+    big = {"file": ("big.txt", b"y" * 200, "text/plain")}
+    assert local.post("/api/upload", headers={"X-API-Key": token}, files=big).status_code == 429
+    # Without the key an on-box process is no machine (trust is off): it is a
+    # signed-out device, which this install refuses (anonymous_access: none) ...
+    with auth._lock:
+        cfg = auth.load()
+        cfg.anonymous_access = "none"
+        auth._write(cfg)
+        auth._bust_cache()
+    r = local.post("/api/upload", files=files)
+    assert r.status_code == 401 and r.json()["error"]["code"] == "signin_required", r.text
+    # ... and a WRONG key is refused outright, not downgraded.
+    r = local.post("/api/upload", headers={"X-API-Key": "not-the-key"}, files=files)
+    assert r.status_code == 401 and r.json()["error"]["code"] == "invalid_api_key", r.text
+    # ... and a key whose scopes leave upload out is refused by scope.
+    owner.post("/api/auth/api-token", json={"machine_scopes": ["machine:inject"]})
+    r = local.post("/api/upload", headers={"X-API-Key": token}, files=files)
+    assert r.status_code == 403 and r.json()["error"]["code"] == "machine_scope_denied"
 
 
 # --------------------------------------------------------------------------- #
