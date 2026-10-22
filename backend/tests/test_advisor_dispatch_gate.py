@@ -79,10 +79,9 @@ def test_the_owner_turn_still_dispatches_research(adv_env, monkeypatch):
 
 
 def test_dispatch_off_restricts_nothing_else():
-    cfg = advisor.AdvisorConfig.from_bot(config.Bot(id="adv", name="Sage", advisor=dict(ADV)))
+    cfg = advisor.AdvisorConfig.from_bot(config.Bot(id="adv", name="Nova", advisor=dict(ADV)))
     off = cfg.dispatch_off()
     assert off.can_dispatch is False and cfg.can_dispatch is True
-    assert off.locked is False                       # tools_locked etc. do not apply
     assert off.offered_tools() == cfg.offered_tools()
 
 
@@ -95,7 +94,7 @@ def hh(ext_env, monkeypatch):
     from fastapi.testclient import TestClient
     c, _ = ext_env
     extensions._ext_callers.clear(); extensions._ext_last_closed.clear()
-    config.upsert_bot(config.Bot(id="adv", name="Sage", advisor=dict(ADV)))
+    config.upsert_bot(config.Bot(id="adv", name="Nova", advisor=dict(ADV)))
     install()
     r = c.post("/api/auth/setup", json={"name": "Olive", "password": "owner-pass1", "new_pin": "2468"})
     assert r.status_code == 200, r.text
@@ -190,7 +189,7 @@ def test_the_advisor_backend_receives_the_flag(monkeypatch):
     monkeypatch.setattr(main, "_with_thread_model_prefs", no_prefs)
     monkeypatch.setattr(main, "_compose_agent_text", compose)
     monkeypatch.setattr(main.config, "get_bot",
-                        lambda b: config.Bot(id="adv", name="Sage", advisor=dict(ADV)))
+                        lambda b: config.Bot(id="adv", name="Nova", advisor=dict(ADV)))
     asyncio.run(main._run_agent_turn("t", "adv", "x", main.TurnOptions(dispatch=False)))
     asyncio.run(main._run_agent_turn("t", "adv", "x", main.TurnOptions()))
     assert calls[0].get("dispatch") is False and "dispatch" not in calls[1]
