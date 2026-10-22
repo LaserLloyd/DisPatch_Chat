@@ -367,24 +367,23 @@ def test_done_and_approval_notifications_reach_the_chat_and_the_phone(aw):
     assert aw.owner.get(f"/api/tasks/{tid}").json()["task"]["origin_message_id"] == "msg-1"
 
 
-def test_a_task_never_starts_from_a_chat_a_restricted_profile_can_read(aw):
-    """What the agent is asked and answers is posted into the originating chat. A chat with a
-    character a Restricted profile may talk to would hand both to the child."""
+def test_a_task_starts_only_from_the_dispatchers_own_chat(aw):
+    """What the agent is asked and answers is posted into the originating chat, so it must be
+    the dispatcher's own (4.0 ownership; the 3.x "a Restricted profile can read it" rule is
+    gone with the Restricted tier)."""
     a = make_agent(aw.owner, published=["*"])
-    kids_thread = aw.owner.post("/api/threads", json={"bot_id": "alpha"}).json()["id"]    # audience: all
-    r = aw.owner.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": kids_thread})
-    assert r.status_code == 409 and r.json()["error"]["code"] == "task_thread_not_allowed"
-    # 4.0: somebody else's chat is not a task's origin at all (404).
-    r = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": kids_thread})
+    owners_thread = aw.owner.post("/api/threads", json={"bot_id": "alpha"}).json()["id"]
+    r = aw.owner.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": owners_thread})
+    assert r.status_code == 201, r.text
+    # somebody else's chat is not a task's origin at all (404).
+    r = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": owners_thread})
     assert r.status_code == 404
-    assert store.list_tasks() == []
     members = aw.eve.post("/api/threads", json={"bot_id": "main"}).json()["id"]
     ok = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": members})
     assert ok.status_code == 201
-    # and the manager itself refuses to post into such a thread even if the character changes later
     mgr = agents_service.get_manager()
-    assert aw.owner.portal.call(mgr._thread_postable, kids_thread) is False
     assert aw.owner.portal.call(mgr._thread_postable, members) is True
+    assert aw.owner.portal.call(mgr._thread_postable, "no-such-thread") is False
 
 
 def test_unpublishing_an_agent_stops_follow_ups_and_resumes_but_not_the_history(aw):

@@ -71,7 +71,6 @@ def _refused(k, path):
 def hh(ext_env):
     c, _ = ext_env
     extensions._ext_callers.clear(); extensions._ext_last_closed.clear()
-    extensions._locked_threads.clear()
     config.upsert_bot(config.Bot(id="adv", name="Sage", advisor=dict(ADV)))
     install()
     client, made = _household(c)

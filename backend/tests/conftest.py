@@ -243,7 +243,7 @@ def _accounts_and_auth_state(tmp_path, tmp_path_factory, monkeypatch):
     """
     from _tmpguard import is_disposable
 
-    from app import accounts, auth, limits
+    from app import accounts, auth
 
     monkeypatch.setenv("DISPATCH_ARGON2_MEMORY_KIB", "8")
     monkeypatch.setenv("DISPATCH_ARGON2_PASSES", "1")
@@ -256,7 +256,6 @@ def _accounts_and_auth_state(tmp_path, tmp_path_factory, monkeypatch):
         if not is_disposable(getattr(auth, name), tmp_path_factory.getbasetemp()):
             monkeypatch.setattr(auth, name, base / fname)
     accounts.reset_for_tests()
-    limits.reset()
     auth._cache = None
     auth._trusted = None
     auth._trusted_sig = None

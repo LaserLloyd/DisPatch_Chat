@@ -111,7 +111,7 @@ def test_the_envelope_degrades_instead_of_raising():
 def test_lookup_matches_templates_and_prefers_the_status():
     assert errors.lookup(404, "Unknown bot: nova").code == "bot_not_found"
     assert errors.lookup(429, "Too many attempts — wait 12s.").code == "too_many_attempts"
-    assert errors.lookup(403, "Unlock for full access").code == "safe_mode"
+    assert errors.lookup(403, "Your profile does not have permission to do that.").code == "permission_denied"
     assert errors.lookup(500, "no such thing as this message") is None
 
 

@@ -26,7 +26,8 @@ def test_every_known_proxy_header_marks_the_request_as_proxied():
 
 def test_quota_key_takes_the_hop_the_proxy_appended_not_the_clients_claim():
     proxy = "127.0.0.1"
-    got = main._quota_ip({"x-forwarded-for": "8.8.8.8, 1.1.1.1, 192.0.2.77"}, proxy)
+    from app import policy
+    got = policy.quota_ip({"x-forwarded-for": "8.8.8.8, 1.1.1.1, 192.0.2.77"}, proxy)
     assert got == "192.0.2.77"
 
 

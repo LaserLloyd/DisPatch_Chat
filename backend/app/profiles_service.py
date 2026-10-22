@@ -21,12 +21,16 @@ Removes (everything keyed by the profile or by its threads):
 * the picture files those messages show (``/media/<name>``) and the avatar snapshots only
   those threads used, each deleted only when no surviving message / thread still names it;
 * its personal bots: the config.yaml entry, the avatar files, the ``voice-acks.yaml`` entry;
-* its ``source='chat'`` files (rows and blobs);
-* its Image Studio ledger rows and their pictures, and ``prompts-<profile>.json``;
+* its files, both ``source='chat'`` attachments and ``source='fileserver'`` File Server
+  files (rows and blobs) - 4.0 WP-DEL: a File Server file is the profile's private content
+  like a chat (only its owner may list or download it), so "start again" and "this profile
+  becomes Basic, which cannot read files" both take it; the confirmation counts it (``files``);
+* its Image Studio ledger rows and their pictures, and ``prompts-<profile>.json`` (for the
+  protected Admin also the 3.x shared ``prompts.json``, which was theirs);
 * the advisor-ledger requests, agent tasks (with events and approvals) and voice-chat
   cursors that belong to those threads.
 
-Keeps: ``source='fileserver'`` files, push subscriptions, audit rows, cloned voices (Reset
+Keeps: push subscriptions, audit rows, cloned voices (Reset
 keeps them; profile deletion and User -> Basic purge them through
 ``ext_profile_hooks.purge_profile_data``), and OpenClaw sessions of agent-bot threads (the
 gateway owns those; they are not DisPatch's to delete).
@@ -114,10 +118,11 @@ class ContentCounts:
     chats: int = 0          # threads owned by the profile
     pictures: int = 0       # chat images + Image Studio results owned by the profile
     voices: int = 0         # cloned voices the profile owns (ext_profile_hooks.count_profile_data)
+    files: int = 0          # File Server files the profile owns (chat attachments go with chats)
 
     def as_dict(self) -> dict[str, int]:
         return {"bots": self.bots, "chats": self.chats, "pictures": self.pictures,
-                "voices": self.voices}
+                "voices": self.voices, "files": self.files}
 
 
 # --------------------------------------------------------------------------- #
@@ -390,20 +395,24 @@ def _drop_owned_ledger(profile_id: str) -> int:
 
 
 def content_counts(profile_id: str) -> dict[str, int]:
-    """``{"bots", "chats", "pictures", "voices"}`` for ``profile_id`` (counts only)."""
+    """``{"bots", "chats", "pictures", "voices", "files"}`` for ``profile_id`` (counts only)."""
     _safe_pid(profile_id)
     with LOCK:
         bots = len(characters.personal_bots(profile_id))
         with _chats() as con:
             ids = _select_threads(con, profile_id)
             names = _thread_media(con) if ids else set()
+            where, params = _owner_clause(profile_id)
+            files = con.execute(
+                f"SELECT COUNT(*) FROM files WHERE source = 'fileserver' AND {where}", params).fetchone()[0]
         names |= _owned_ledger_media(profile_id)
         voices = 0
         try:
             voices = int(ext_profile_hooks.count_profile_data(profile_id).get("voices", 0) or 0)
         except Exception:
             log.warning("could not count cloned voices", exc_info=True)
-        return ContentCounts(bots=bots, chats=len(ids), pictures=len(names), voices=voices).as_dict()
+        return ContentCounts(bots=bots, chats=len(ids), pictures=len(names), voices=voices,
+                             files=int(files or 0)).as_dict()
 
 
 def open_image_jobs(profile_id: str) -> list[dict]:
@@ -458,12 +467,12 @@ def _delete_tasks(con: sqlite3.Connection, profile_id: str | None) -> int:
     return len(ids)
 
 
-def _delete_chat_files(con: sqlite3.Connection, profile_id: str) -> int:
-    """The profile's ``source='chat'`` attachments (rows and blobs). File Server drops
-    (``source='fileserver'``) are kept: they are the profile's files, not its conversations."""
+def _delete_profile_files(con: sqlite3.Connection, profile_id: str) -> int:
+    """The profile's files (rows and blobs): ``source='chat'`` attachments and
+    ``source='fileserver'`` File Server files alike. Returns how many File Server files went."""
     where, params = _owner_clause(profile_id)
-    rows = [(r["id"], r["stored_name"]) for r in
-            con.execute(f"SELECT id, stored_name FROM files WHERE source = 'chat' AND {where}", params)]
+    rows = [(r["id"], r["stored_name"], r["source"]) for r in
+            con.execute(f"SELECT id, stored_name, source FROM files WHERE {where}", params)]
     for chunk in _chunks(rows, 200):
         con.execute("BEGIN IMMEDIATE")
         try:
@@ -474,10 +483,10 @@ def _delete_chat_files(con: sqlite3.Connection, profile_id: str) -> int:
                 con.execute("ROLLBACK")
             raise
     files_dir = Path(config.FILES_DIR)
-    for _fid, stored in rows:
+    for _fid, stored, _src in rows:
         if stored and Path(stored).name == stored:
             _unlink(files_dir / stored)
-    return len(rows)
+    return sum(1 for r in rows if r[2] == "fileserver")
 
 
 def _advisor_db_paths() -> list[Path]:
@@ -570,10 +579,12 @@ def _scrub(con: sqlite3.Connection) -> None:
 
 
 def _delete_conversation_data(profile_id: str, bot_ids: list[str] | None, *, whole_profile: bool,
-                              extra_media: set[str] | None = None) -> tuple[int, int]:
-    """Delete the threads in scope and everything hanging off them. Returns
-    ``(threads deleted, pictures deleted)``. Caller holds LOCK."""
+                              extra_media: set[str] | None = None) -> tuple[int, int, int]:
+    """Delete the threads in scope and everything hanging off them (with ``whole_profile``
+    also the profile's files). Returns ``(threads deleted, pictures deleted, File Server
+    files deleted)``. Caller holds LOCK."""
     media_deleted = 0
+    files_deleted = 0
     with _chats(secure=True) as con:
         ids = _select_threads(con, profile_id, bot_ids)
         names = _thread_media(con) if ids else set()
@@ -585,7 +596,7 @@ def _delete_conversation_data(profile_id: str, bot_ids: list[str] | None, *, who
                 "AND avatar_snapshot IS NOT NULL", chunk)}
         _delete_tasks(con, profile_id if whole_profile else None)
         if whole_profile:
-            _delete_chat_files(con, profile_id)
+            files_deleted = _delete_profile_files(con, profile_id)
         _delete_threads(con, ids)
         # Files go after the rows: what is still shown anywhere stays.
         # A picture the Image Studio ledger still lists stays too (all rows when only one bot's
@@ -604,15 +615,15 @@ def _delete_conversation_data(profile_id: str, bot_ids: list[str] | None, *, who
     _delete_advisor_requests(ids, bot_ids or [])
     _delete_voice_cursors(ids)
     ownership.forget_all()
-    return len(ids), media_deleted
+    return len(ids), media_deleted, files_deleted
 
 
 def wipe_profile_content(profile_id: str) -> dict[str, int]:
     """Delete the profile's threads (messages, image_jobs, thread media and avatar snapshots
     cascade), personal bots (config entries, avatar files, voice-acks entries),
-    ``source='chat'`` files, Image Studio ledger rows and ``prompts-<pid>.json``,
-    advisor-ledger requests, agents_store tasks and voice cursors. Keeps
-    ``source='fileserver'`` files and push subscriptions; a ``/media/`` file is deleted only
+    files (chat attachments and File Server files), Image Studio ledger rows and
+    ``prompts-<pid>.json``, advisor-ledger requests, agents_store tasks and voice cursors.
+    Keeps push subscriptions; a ``/media/`` file is deleted only
     when no surviving message references it. Does NOT purge cloned voices (Reset keeps
     them; callers that must, call ``ext_profile_hooks.purge_profile_data``).
     Returns what was deleted, in the :class:`ContentCounts` keys.
@@ -623,12 +634,14 @@ def wipe_profile_content(profile_id: str) -> dict[str, int]:
     with LOCK:
         bots = characters.personal_bots(profile_id)
         ledger_names = _owned_ledger_media(profile_id)
-        chats, pictures = _delete_conversation_data(profile_id, None, whole_profile=True,
-                                                    extra_media=ledger_names)
+        chats, pictures, files = _delete_conversation_data(profile_id, None, whole_profile=True,
+                                                           extra_media=ledger_names)
         # Ledger rows leave AFTER their pictures were judged against the remaining messages.
         _drop_owned_ledger(profile_id)
         prompts = Path(config.DATA_DIR) / "apps-data" / "imagestudio" / f"prompts-{profile_id}.json"
         _unlink(prompts)
+        if profile_id == ownership.protected_admin_id():
+            _unlink(Path(config.DATA_DIR) / "apps-data" / "imagestudio" / "prompts.json")
         # Bots last: their chats are already gone, so nothing points at a vanished bot.
         removed = []
         for b in bots:
@@ -638,7 +651,8 @@ def wipe_profile_content(profile_id: str) -> dict[str, int]:
             except ValueError:
                 log.warning("kept the last bot on the roster; it is not removed", exc_info=True)
         characters.drop_bot_assets(removed)
-        return ContentCounts(bots=len(removed), chats=chats, pictures=pictures, voices=0).as_dict()
+        return ContentCounts(bots=len(removed), chats=chats, pictures=pictures, voices=0,
+                             files=files).as_dict()
 
 
 # --------------------------------------------------------------------------- #
@@ -1082,7 +1096,7 @@ def delete_personal(profile_id: str, bot_id: str) -> dict[str, int]:
             bot = characters.get_personal(bot_id, profile_id)
         except characters.CharacterError as e:
             raise ProfileServiceError(e.code, str(e), e.status) from e
-        chats, pictures = _delete_conversation_data(profile_id, [bot.id], whole_profile=False)
+        chats, pictures, _files = _delete_conversation_data(profile_id, [bot.id], whole_profile=False)
         try:
             characters.remove_personal(bot.id, profile_id)
         except characters.CharacterError as e:

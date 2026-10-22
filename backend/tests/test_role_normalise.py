@@ -107,6 +107,7 @@ def test_principals_use_the_new_vocabulary():
     po, pa, pb = (policy.profile_principal(x) for x in (owner, adm, bas))
     assert (po.role, po.is_admin, po.is_protected) == ("admin", True, True)
     assert (pa.role, pa.is_admin, pa.is_protected) == ("admin", True, False)
-    assert (pb.role, pb.is_admin, pb.is_restricted) == ("basic", False, True)
+    assert (pb.role, pb.is_admin, pb.is_protected) == ("basic", False, False)
+    assert not hasattr(pb, "is_restricted"), "the Restricted tier is gone (WP-DEL)"
     assert policy.open_principal().is_protected and policy.open_principal().is_admin
     assert not hasattr(po, "is_operator") and not hasattr(po, "is_owner")

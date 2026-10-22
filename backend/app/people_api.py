@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import re
 import secrets
 from typing import Any, Literal
 
@@ -27,7 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import accounts, auth, config, credentials, limits, policy
+from . import accounts, auth, config, credentials, policy
 from .contracts import errors
 from .contracts.permissions import (
     LOCK_TARGET_FENCE,
@@ -348,7 +347,7 @@ def login_profile(request: Request, payload: LoginIn, *, swap: bool) -> JSONResp
         old = request.cookies.get(SESSION_COOKIE)
         if old:
             auth.revoke(old)
-    persistent = bool(payload.remember) and cfg.remember_days > 0 and profile.role is not Role.BASIC
+    persistent = bool(payload.remember) and cfg.remember_days > 0
     body = {"ok": True, "profile": public_profile(profile), "role": profile.role.value,
             "protected": profile.protected,
             "needs_password": profile.role is Role.ADMIN and not profile.has_password}
@@ -392,16 +391,6 @@ def lock_screen_profiles() -> list[dict]:
     return out
 
 
-def default_limits() -> dict:
-    """The install-wide daily defaults a Restricted caller without its own numbers gets
-    (the DISPATCH_DECOY_* settings), in the same keys a profile's budgets use."""
-    mib = 1024 * 1024
-    return {"turns": int(config.env("DECOY_TURN_QUOTA", "200")),
-            "threads": int(config.env("DECOY_THREAD_QUOTA", "50")),
-            "feedback": int(config.env("DECOY_FEEDBACK_QUOTA", "100")),
-            "upload_mb": int(config.env("DECOY_UPLOAD_QUOTA") or 200 * mib) // mib}
-
-
 def principal_document(request: Request) -> dict:
     """Body of GET /api/auth/me."""
     pr = _caller(request)
@@ -409,12 +398,14 @@ def principal_document(request: Request) -> dict:
     cfg = auth.load()
     doc: dict[str, Any] = {
         "kind": pr.kind, "role": pr.role, "protected": pr.is_protected, "signed_in": pr.signed_in,
-        "restricted": pr.is_restricted, "name": pr.name,
+        "name": pr.name,
         "profile": public_profile(prof),
         "permissions": sorted(pr.permissions) if pr.kind != "open" else ["*"],
         "claimed": policy.claimed(cfg),
         "needs_password": bool(prof and prof.role is Role.ADMIN and not prof.has_password),
-        "disclosure": DISCLOSURE if pr.is_restricted and pr.kind != "machine" else None,
+        # What an Admin may see about this profile (counts, never content): said to every
+        # profile that is not itself an Admin (view_activity).
+        "disclosure": DISCLOSURE if pr.kind == "profile" and not pr.can(Permission.VIEW_ACTIVITY) else None,
         # 4.0: the lock target, whether this is the shared default profile, and the notices
         # the sign-in popup shows once (a PIN reset by an Admin).
         "lock_target": cfg.lock_target,
@@ -425,9 +416,6 @@ def principal_document(request: Request) -> dict:
     if dev:
         d = accounts.get_device(dev)
         doc["device"] = d.public() if d else None
-    if prof is not None and prof.role is Role.BASIC:
-        doc["today"] = accounts.usage_today(prof.id)
-        doc["limits"] = {**default_limits(), **prof.budgets}
     return doc
 
 
@@ -581,36 +569,6 @@ async def api_token_set(request: Request, payload: MachineIn):
 # People & profiles
 # --------------------------------------------------------------------------- #
 
-_BUDGET_INT_KEYS = {"minutes_per_day": (1, 1440), "turns": (0, 100000), "threads": (0, 100000),
-                    "feedback": (0, 100000), "upload_mb": (0, 100000)}
-_QUIET_RE = re.compile(r"^\d{1,2}:\d{2}-\d{1,2}:\d{2}$")
-
-
-def clean_budgets(raw: Any) -> dict:
-    if raw is None:
-        return {}
-    if not isinstance(raw, dict):
-        raise accounts.AccountError("budgets_invalid", "budgets must be an object.")
-    out: dict[str, Any] = {}
-    for k, v in raw.items():
-        if k in _BUDGET_INT_KEYS:
-            lo, hi = _BUDGET_INT_KEYS[k]
-            if v is None or v == "":
-                continue
-            if isinstance(v, bool) or not isinstance(v, int) or not (lo <= v <= hi):
-                raise accounts.AccountError("budgets_invalid", f"{k} must be a whole number {lo}..{hi}.")
-            out[k] = v
-        elif k == "quiet_hours":
-            if v in (None, ""):
-                continue
-            if not isinstance(v, str) or not _QUIET_RE.match(v) or limits.parse_window(v) is None:
-                raise accounts.AccountError("budgets_invalid", "quiet_hours must look like 20:30-07:00.")
-            out[k] = v
-        else:
-            raise accounts.AccountError("budgets_invalid", f"Unknown budget {k!r}.")
-    return out
-
-
 def clean_permissions(role: Role | str, items: Any, field_name: str, *,
                       lock_target: bool = False) -> list[str]:
     """Validate a grants/denies list for a profile of ``role`` (BUILD-PLAN-v2 §1.1).
@@ -664,7 +622,6 @@ class PersonIn(BaseModel):
     pin: str | None = Field(default=None, max_length=128)
     password: str | None = Field(default=None, max_length=256)
     avatar: str = Field(default="", max_length=120)
-    budgets: dict | None = None
     grants: list[str] | None = None
     denies: list[str] | None = None
     session_timeout: int | None = Field(default=None, ge=60, le=30 * 86400)
@@ -676,7 +633,6 @@ class PersonPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=40)
     role: RoleIn | None = None
     avatar: str | None = Field(default=None, max_length=120)
-    budgets: dict | None = None
     grants: list[str] | None = None
     denies: list[str] | None = None
     session_timeout: int | None = Field(default=None, ge=60, le=30 * 86400)
@@ -758,7 +714,7 @@ async def people_create(request: Request, payload: PersonIn):
             pin_hash = credentials.hash_secret(payload.pin)
         prof = accounts.create_profile(
             payload.name, role, pin_hash=pin_hash, password_hash=password_hash,
-            avatar=payload.avatar, budgets=clean_budgets(payload.budgets),
+            avatar=payload.avatar,
             grants=clean_permissions(role, payload.grants, "grants"),
             denies=clean_permissions(role, payload.denies, "denies"),
             session_timeout=payload.session_timeout,
@@ -821,7 +777,7 @@ def _target(request: Request, profile_id: str) -> tuple[accounts.Profile | None,
 
 @router.patch("/api/people/{profile_id}", dependencies=[_MANAGE])
 async def people_patch(request: Request, profile_id: str, payload: PersonPatch):
-    """Name, picture, grants / denies, budgets, timeout, disabled. 4.0: a role change and the
+    """Name, picture, grants / denies, timeout, disabled. 4.0: a role change and the
     household list go through ``profiles_service`` (``POST /api/people/{id}/role`` with its
     preview token - a User -> Basic change deletes content - and
     ``PUT /api/people/{id}/household-bots``), so the wipe can never be skipped."""
@@ -856,13 +812,11 @@ async def people_patch(request: Request, profile_id: str, payload: PersonPatch):
             return _problem(403, "lock_target_fence",
                             "Only an Admin changes the shared default profile's name or picture.")
         if own and set(fields) - {"name", "avatar"} and not _may_manage(caller, prof.protected):
-            # A profile edits its own name and picture, nothing else: grants, denies, budgets
+            # A profile edits its own name and picture, nothing else: grants, denies
             # and timeouts are set by someone who may manage it.
             return _problem(403, "permission_denied",
                             "You can change your own name and picture; limits and permissions are "
                             "set by an Admin.")
-        if "budgets" in fields:
-            fields["budgets"] = clean_budgets(fields["budgets"])
         if "grants" in fields:
             fields["grants"] = clean_permissions(prof.role, fields["grants"], "grants",
                                                  lock_target=lock_target)
@@ -987,8 +941,7 @@ async def people_forget_device(request: Request, device_id: str):
 async def people_activity(request: Request, profile_id: str | None = None, days: int = 7):
     days = max(1, min(days, 90))
     return {"summary": accounts.activity_summary(profile_id, days),
-            "recent": accounts.recent_activity(profile_id, limit=100),
-            "today": accounts.usage_today(profile_id) if profile_id else {}}
+            "recent": accounts.recent_activity(profile_id, limit=100)}
 
 
 @router.get("/api/people/audit", dependencies=[_VIEW])
@@ -998,10 +951,8 @@ async def people_audit(request: Request):
 
 @router.get("/api/me/activity", dependencies=[_CHAT])
 async def my_activity(request: Request, days: int = 7):
-    """A profile's own summary - the disclosure the Restricted UI links to."""
+    """A profile's own activity summary: what an Admin's activity view counts about it."""
     pr = _caller(request)
     pid = pr.profile_id
     return {"disclosure": DISCLOSURE, "visible_to_owner": True,
-            "summary": accounts.activity_summary(pid, max(1, min(days, 30))) if pid else {"days": []},
-            "today": accounts.usage_today(pid) if pid else {},
-            "limits": {**default_limits(), **(pr.profile.budgets if pr.profile else {})}}
+            "summary": accounts.activity_summary(pid, max(1, min(days, 30))) if pid else {"days": []}}

@@ -12,8 +12,8 @@ Reading an entry::
     ("POST", "/api/bots", R(MANAGE_CHARACTERS))
         needs the manage_characters permission (Owner, Admin; or a profile granted it)
     ("GET",  "/api/bots", R(USE_CHAT, scoped=True, machine=[BOTS_READ]))
-        any role that can chat; a Restricted caller is let through but the handler
-        narrows the list to audience=restricted|all characters. A machine holding the
+        any role that can chat; a caller is let through but the handler narrows the
+        list to the characters ``characters.may_use`` allows it. A machine holding the
         machine:bots_read scope may call it too.
     ("GET",  "/", public("the app shell"))
         the explicit PUBLIC marker - no credential, and the note says why.
@@ -48,7 +48,7 @@ _r("GET", "/api/health", Requirement(public=True, machine=(M.HEALTH_DETAIL.value
    note="liveness for anyone; the handler adds detail only for Owner/Admin or a machine holding machine:health_detail"))
 _r("GET", "/api/quick-actions", public("static list of built-in prompt shortcuts"))
 _r("GET", "/api/auth/status", public("the lock screen needs it; detail is added only for a signed-in caller"))
-_r("GET", "/api/auth/me", public("who am I, what may I do - answers Restricted too"))
+_r("GET", "/api/auth/me", public("who am I, what may I do - answers every caller"))
 _r("POST", "/api/auth/unlock", public("credential check; throttled per device, profile and address"))
 _r("POST", "/api/auth/login", public("credential check; throttled per device, profile and address"))
 _r("POST", "/api/auth/switch", public("quick profile switch; stepping up needs the target's credential"))
@@ -84,27 +84,27 @@ _r("GET", "/api/people/devices", _R(P.MANAGE_USERS))
 _r("DELETE", "/api/people/devices/{device_id}", _R(P.MANAGE_USERS))
 _r("GET", "/api/people/activity", _R(P.VIEW_ACTIVITY))
 _r("GET", "/api/people/audit", _R(P.VIEW_ACTIVITY))
-_r("GET", "/api/me/activity", _R(P.USE_CHAT, note="a profile's own summary - the disclosure the Restricted UI shows"))
+_r("GET", "/api/me/activity", _R(P.USE_CHAT, note="a profile's own activity summary"))
 
 # Web Push
 _r(("POST", "DELETE"), "/api/push/subscribe", _R(P.USE_NOTIFICATIONS))
 _r("GET", "/api/push/vapid", _R(P.USE_NOTIFICATIONS))
 
 # --------------------------------------------------------------------------- #
-# Chat (Restricted can do these, narrowed to the characters it may see)
+# Chat (every role; narrowed to the characters the caller may use and its own chats)
 # --------------------------------------------------------------------------- #
 _r("GET", "/api/bots", _R(P.USE_CHAT, scoped=True, machine=[M.BOTS_READ]))
 _r("GET", "/api/threads", _R(P.USE_CHAT, scoped=True, machine=[M.THREADS]))
-_r("POST", "/api/threads", _R(P.USE_CHAT, machine=[M.THREADS], note="daily thread quota for Restricted"))
+_r("POST", "/api/threads", _R(P.USE_CHAT, machine=[M.THREADS], note="a character the caller may use (characters.may_use)"))
 _r("GET", "/api/threads/{thread_id}", _R(P.USE_CHAT, scoped=True, machine=[M.THREADS]))
 _r("GET", "/api/threads/{thread_id}/messages", _R(P.USE_CHAT, scoped=True, machine=[M.THREADS]))
 _r("POST", "/api/threads/{thread_id}/messages", _R(P.USE_CHAT, machine=[M.THREADS]))
 _r("POST", "/api/threads/{thread_id}/read", _R(P.USE_CHAT, machine=[M.THREADS]))
 _r("GET", "/api/unread", _R(P.USE_CHAT, scoped=True, machine=[M.THREADS]))
-_r("POST", "/api/messages/{message_id}/feedback", _R(P.USE_CHAT, note="daily feedback quota for Restricted"))
+_r("POST", "/api/messages/{message_id}/feedback", _R(P.USE_CHAT, note="a message in the caller's own chat"))
 _r("GET", "/api/messages/{message_id}/mood-face", _R(P.USE_CHAT, scoped=True))
-_r("POST", "/api/upload", _R(P.USE_CHAT, machine=[M.UPLOAD], note="daily byte quota for Restricted"))
-_r("POST", "/api/drop", _R(P.USE_CHAT, note="daily byte quota for Restricted"))
+_r("POST", "/api/upload", _R(P.ATTACH_FILES, machine=[M.UPLOAD], note="a chat attachment; a machine has a 200 MB/day byte guard"))
+_r("POST", "/api/drop", _R(P.FILES_UPLOAD, note="a one-way File Server drop, owned by the dropper"))
 _r("GET", "/api/threads/{thread_id}/avatar", _R(P.USE_CHAT, scoped=True))
 _r("GET", "/api/bots/{bot_id}/avatar", _R(P.USE_CHAT, scoped=True, machine=[M.AVATARS]))
 _r("GET", "/api/bots/{bot_id}/avatar/thumb", _R(P.USE_CHAT, scoped=True, machine=[M.AVATARS]))
@@ -124,28 +124,31 @@ _r("PATCH", "/api/messages/{message_id}", _R(P.MANAGE_HISTORY))
 _r("PATCH", "/api/messages/{message_id}/checklist", _R(P.MANAGE_HISTORY))
 
 # Images and media
-_r("GET", "/api/bots/{bot_id}/avatar/full", _R(P.USE_IMAGES, machine=[M.AVATARS]))
-_r("GET", "/api/media", _R(P.USE_IMAGES))
+_r("GET", "/api/bots/{bot_id}/avatar/full", _R(P.USE_CHAT, machine=[M.AVATARS], note="a character the caller may use"))
+_r("GET", "/api/media", _R(P.USE_CHAT, note="the media store for everyone; agent media folders need dispatch_agents"))
 _r("POST", "/api/image-jobs", _R(P.USE_IMAGES, machine=[M.IMAGE_JOBS]))
 _r("GET", "/api/image-jobs/{job_id}", _R(P.USE_IMAGES, machine=[M.IMAGE_JOBS]))
 
-# File server (upload-only drop box, plus listing for on-box agents)
-_r("GET", "/api/files", _R(P.USE_TOOLS, machine=[M.FILES_LIST]))
-_r("POST", "/api/files", _R(P.USE_TOOLS))
-_r("GET", "/api/files/{file_id}/download", _R(P.USE_TOOLS))
-_r("GET", "/api/files/{file_id}/raw", _R(P.USE_TOOLS))
-_r("DELETE", "/api/files/{file_id}", _R(P.USE_TOOLS))
-_r("POST", "/api/files/wipe", _R(P.ADMIN_SYSTEM, note="deletes the whole File Server"))
+# File server (4.0: per owner). Upload: files_upload (every role). List, download and delete
+# File Server files: files_read and the file's owner (Users and Admins; a Basic profile uploads
+# only). A chat attachment (source='chat') is its owner's to download or delete with use_chat /
+# manage_history. A machine lists the protected Admin's files only.
+_r("GET", "/api/files", _R(P.FILES_READ, machine=[M.FILES_LIST], note="the caller's own files"))
+_r("POST", "/api/files", _R(P.FILES_UPLOAD))
+_r("GET", "/api/files/{file_id}/download", _R(P.USE_CHAT, note="owner only; a File Server file also needs files_read"))
+_r("GET", "/api/files/{file_id}/raw", _R(P.USE_CHAT, note="owner only; a File Server file also needs files_read"))
+_r("DELETE", "/api/files/{file_id}", _R(P.USE_CHAT, note="owner only; files_read (File Server) or manage_history (chat attachment)"))
+_r("POST", "/api/files/wipe", _R(P.FILES_READ, note="deletes the caller's OWN File Server files up to a date"))
 
 # Tools, apps, plugins
-_r("GET", "/api/tools", _R(P.USE_TOOLS, scoped=True, note="Restricted sees only tools flagged safe"))
+_r("GET", "/api/tools", _R(P.USE_TOOLS, scoped=True, note="lists only the panels the caller's use_tools:<id> grants name"))
 _r("GET", "/api/tools/{tool_id}/status", _R(P.USE_TOOLS, scoped=True))
 _r("PUT", "/api/tools", _R(P.MANAGE_PLUGINS))
 _r("POST", "/api/tools/{tool_id}/refresh", _R(P.MANAGE_PLUGINS))
 _r("GET", "/tools/{tool_id}", _R(P.USE_TOOLS, scoped=True))
 _r("GET", "/tools/{tool_id}/{rel:path}", _R(P.USE_TOOLS, scoped=True))
-_r("GET", "/apps/{app_id}", _R(P.USE_TOOLS, scoped=True, note="per-app permission and safe flag from its manifest"))
-_r("GET", "/apps/{app_id}/{rel:path}", _R(P.USE_TOOLS, scoped=True, note="per-app permission and safe flag from its manifest"))
+_r("GET", "/apps/{app_id}", _R(P.USE_TOOLS, scoped=True, note="per-app permission from its manifest"))
+_r("GET", "/apps/{app_id}/{rel:path}", _R(P.USE_TOOLS, scoped=True, note="per-app permission from its manifest"))
 _r("GET", "/api/plugins", _R(P.MANAGE_PLUGINS))
 _r("GET", "/api/plugins/catalog", _R(P.MANAGE_PLUGINS))
 _r("PUT", "/api/plugins/extensions/{ext_id}", _R(P.MANAGE_PLUGINS))
@@ -343,9 +346,9 @@ _r("POST", "/api/me/characters/draft", _R(P.CREATE_CHARACTERS,
 # --------------------------------------------------------------------------- #
 #: (prefix, requirement) for ``Mount`` routes - first match wins.
 MOUNTS: list[tuple[str, Requirement]] = [
-    ("/static/avatars", public("avatar files; the gate itself narrows to audience=restricted|all characters for a Restricted caller")),
+    ("/static/avatars", public("avatar files; the gate itself refuses a character the caller may not use (characters.may_use)")),
     ("/static", public("the app's own JS/CSS/icons; carries no user data")),
-    ("/media", _R(P.USE_IMAGES, note="chat media")),
+    ("/media", _R(P.USE_CHAT, note="chat media (photos a profile attached, pictures in its chats)")),
 ]
 
 #: WebSocket routes: template -> Requirement for the handshake. Individual
@@ -358,9 +361,9 @@ WS_ROUTES: dict[str, Requirement] = {
 #: Every action on ``/ws`` and the permission it needs. ``ping`` is liveness.
 WS_ACTION_PERMISSIONS: dict[str, Requirement] = {
     "ping": public("liveness"),
-    "send": _R(P.USE_CHAT, note="quota-charged for Restricted"),
-    "retry": _R(P.USE_CHAT, note="quota-charged for Restricted"),
-    "create_thread": _R(P.USE_CHAT, note="quota-charged for Restricted"),
+    "send": _R(P.USE_CHAT, note="a character the caller may use, in its own chat"),
+    "retry": _R(P.USE_CHAT, note="a character the caller may use, in its own chat"),
+    "create_thread": _R(P.USE_CHAT, note="a character the caller may use"),
     "get_threads": _R(P.USE_CHAT, scoped=True),
     "get_messages": _R(P.USE_CHAT, scoped=True),
     "abort": _R(P.MANAGE_HISTORY),
@@ -380,8 +383,8 @@ WS_ACTION_PERMISSIONS: dict[str, Requirement] = {
 #: - a resource of somebody else's is a 404. ``character``: ``characters.may_use`` - another
 #: profile's PERSONAL character is a 404 for everyone, Admins included (the gate's
 #: ``_foreign_character_item``); a household one off the caller's list is the route's 403.
-#: ``none``: the parameter is not a per-profile resource - or its ownership check lands in a
-#: later package, which the reason says (the File Server and Image Studio ledger: WP-DEL).
+#: ``file``: the File Server / chat attachment's owner (``main._file_access``), 404 otherwise.
+#: ``none``: the parameter is not a per-profile resource, and the reason says why.
 _NONE_ADMIN = "none: profile administration (manage_users, people_api rank rules)"
 OWNER_SCOPED: dict[str, str] = {
     "/api/threads/{thread_id}": "thread",
@@ -419,11 +422,11 @@ OWNER_SCOPED: dict[str, str] = {
     "/api/avatar-pool/{bot_id}": "character",
     "/api/avatar-pool/{bot_id}/prompts": "character",
     "/api/avatar-pool/{bot_id}/refill": "character",
-    "/api/files/{file_id}": "none: WP-DEL - files.owner_profile_id is stamped; the per-owner File Server checks land in wave 2",
-    "/api/files/{file_id}/download": "none: WP-DEL - per-owner File Server (see /api/files/{file_id})",
-    "/api/files/{file_id}/raw": "none: WP-DEL - per-owner File Server (see /api/files/{file_id})",
+    "/api/files/{file_id}": "file",
+    "/api/files/{file_id}/download": "file",
+    "/api/files/{file_id}/raw": "file",
     "/api/reactions/{rid}": "none: the household reaction library (manage_characters)",
-    "/api/reactions/{rid}/image": "none: a household reaction card (safe flag decides Restricted)",
+    "/api/reactions/{rid}/image": "none: a household reaction card (every signed-in role)",
     "/api/agents/{agent_id}": "none: an agent definition is household configuration (manage_agents)",
     "/api/agents/profile-budgets/{profile_id}": _NONE_ADMIN,
     "/api/agents/secrets/{name}": "none: write-only household secret (manage_agents)",
@@ -491,7 +494,7 @@ OWNER_SCOPED: dict[str, str] = {
 OWNER_SCOPED_PREFIXES: dict[str, str] = {
     "/api/apps/jobboard/": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
     "/api/jobs/": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
-    "/api/apps/imagestudio/": "none: WP-DEL - Image Studio's ledger is shared until wave 2; /targets and /chat-images read the caller's own threads",
+    "/api/apps/imagestudio/": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
 }
 
 
@@ -542,14 +545,13 @@ _EXTENSION_REQ = _R(P.MANAGE_PLUGINS, note="an installed add-on's operator API (
 
 #: The add-on routes a USER of voice chat reads (2026-10-19, the owner: "Members should have
 #: voice"): what the call screen and Settings -> Voice draw from - the status (on/off, ready, the
-#: voice list), a voice's sample, the cloned-voice list. ``use_voice`` = Member, Admin, Owner. A
-#: Restricted caller holds use_voice for its locked voice socket but not these (``not_restricted``): a
-#: locked device reads the add-on's ``locked_status`` in /api/extensions instead. Everything else under an add-on's prefix - the switch
+#: voice list), a voice's sample, the cloned-voice list. ``use_voice`` = every role by default
+#: (an Admin may switch it off per profile). Everything else under an add-on's prefix - the switch
 #: and server settings (PATCH /settings), cloning, the lab, the rig, model downloads - is voice
 #: ADMINISTRATION and stays ``manage_plugins``.
-_EXTENSION_USE_REQ = _R(P.USE_VOICE, not_restricted=True, note=(
-    "a voice user's read (Member, Admin, Owner; not a Restricted caller, whose locked device reads "
-    "locked_status in /api/extensions). The add-on's other routes are manage_plugins"))
+_EXTENSION_USE_REQ = _R(P.USE_VOICE, note=(
+    "a voice user's read (every role that holds use_voice). The add-on's other routes are "
+    "manage_plugins"))
 EXTENSION_USE_ROUTES: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/api/voice/status"),
     ("GET", "/api/voice/preview"),
@@ -655,7 +657,8 @@ def requirement_for(method: str, template: str | None, path: str) -> Requirement
 
 def requirement_for_unmatched(method: str, path: str) -> Requirement | None:
     """For a path no route matches: app-shaped paths carry the app requirement, so a
-    Restricted caller is refused (403) instead of told which apps exist (404)."""
+    caller without the app's permission is refused (403) instead of told which apps exist
+    (404)."""
     from . import apps_loader, extensions
     if extensions.owns_path(path):
         return _EXTENSION_REQ

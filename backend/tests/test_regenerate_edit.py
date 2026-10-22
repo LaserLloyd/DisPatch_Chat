@@ -499,7 +499,7 @@ def test_the_regenerate_frame_is_wired_and_reaches_the_rewind(client, monkeypatc
 
     monkeypatch.setattr(main, "_regenerate_turn", _fake)
     with client.websocket_connect("/ws") as ws:
-        assert ws.receive_json()["decoy"] is False
+        assert ws.receive_json()["type"] == "hello"
         ws.send_json({"type": "regenerate", "thread_id": tid})
         _settle(ws, lambda: seen)
     assert [s[0] for s in seen] == [tid]

@@ -65,7 +65,7 @@ def test_a_browser_still_gets_the_plain_body(client):
 
 
 def test_a_refusal_carries_a_code_the_prose_cannot_give(client):
-    """A Safe-Mode refusal and a missing thread are both "no" to a model that
+    """A sign-in refusal and a missing thread are both "no" to a model that
     can only read prose. They are different codes."""
     auth.set_pin("1234")
     r = client.post("/api/inject", json={"bot_id": "main", "content": "hi"},
@@ -73,10 +73,10 @@ def test_a_refusal_carries_a_code_the_prose_cannot_give(client):
     assert r.status_code in (401, 403)
     # Browser-shaped: the plain body, as promised - `detail` unchanged, `error` added.
     # 4.0: a signed-out browser is nobody - the sign-in refusal, its own code
-    assert r.json()["detail"] in ("Unlock for full access", "Sign in to continue.")
-    assert r.json()["error"]["code"] in ("safe_mode", "signin_required")
+    assert r.json()["detail"] == "Sign in to continue."
+    assert r.json()["error"]["code"] == "signin_required"
     assert not r.headers["content-type"].startswith(problem.MEDIA_TYPE)
-    assert problem.code_for(403, "Unlock for full access") == "safe_mode"
+    assert problem.code_for(403, "Your profile does not have permission to do that.") == "permission_denied"
     assert problem.code_for(404, "thread not found") == "thread_not_found"
 
 

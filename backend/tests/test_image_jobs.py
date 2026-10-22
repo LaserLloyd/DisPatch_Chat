@@ -6,7 +6,7 @@ there to hold that claim down: the success path, the rig's refusal, the
 deadline, and a restart in the middle. The rig itself is stubbed — the real
 one is proven separately by a smoke run — but nothing else is: the messages are
 persisted through the app's own chokepoint, the bytes go through the app's own
-media ingest, and the frames go through the real Safe-Mode redactor.
+media ingest, and the frames go through the real per-owner scoper.
 
 Run: cd backend && uv run pytest tests/test_image_jobs.py
 """
@@ -29,9 +29,8 @@ from app import auth, config, image_jobs
 from app import main as main
 from app.database import Database
 
-# A browser stamps these. The image-job routes use them for the same reason the
-# reaction fire does: to tell a locked TAB apart from an on-box agent taking
-# the machine-to-machine exemption.
+# A browser stamps these. The image-job routes use them to tell a signed-out TAB
+# apart from an on-box agent taking the machine-to-machine exemption.
 BROWSER = {"Sec-Fetch-Site": "same-origin", "Origin": "http://testserver"}
 
 ENDPOINT = "http://image-rig.invalid:8700/mcp"
@@ -221,15 +220,15 @@ def test_an_on_box_agent_may_fire(env):
     assert body["job_id"] and body["message_id"]
 
 
-def test_a_locked_tab_is_refused(env):
-    unlocked = _unlocked(env)          # sets a PIN, so Safe Mode exists
+def test_a_signed_out_tab_is_refused(env):
+    unlocked = _unlocked(env)          # sets a PIN: a cookieless tab is nobody
     tid = _thread(unlocked)
     locked = env()
     r = locked.post("/api/image-jobs",
                     json={"bot_id": "main", "thread_id": tid, "prompt": "x"},
                     headers=BROWSER)
     assert r.status_code in (401, 403)
-    assert r.json()["detail"] in ("Unlock for full access", "Sign in to continue.")
+    assert r.json()["detail"] == "Sign in to continue."
 
 
 def test_an_unknown_thread_is_404_not_a_silent_success(env):
@@ -320,7 +319,7 @@ def test_the_job_row_survives_and_is_readable(env):
     assert c.get("/api/image-jobs/nope").status_code == 404
 
 
-def test_status_is_refused_to_a_locked_tab(env):
+def test_status_is_refused_to_a_signed_out_tab(env):
     unlocked = _unlocked(env)
     tid = _thread(unlocked)
     jid = _fire(unlocked, tid).json()["job_id"]
@@ -518,38 +517,13 @@ def test_switching_the_feature_off_fails_out_what_is_open(env, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Safe Mode / the new WS frame
+# The routes' surface
 # --------------------------------------------------------------------------- #
 
 
-def test_a_message_update_from_a_non_safe_bot_is_dropped_for_a_locked_device(env):
-    frame = {"type": "message_update", "thread_id": "t", "bot_id": "main",
-             "message_id": "m",
-             "message": {"id": "m", "thread_id": "t", "role": "assistant",
-                         "content": "[[media:/media/a.png]]", "created_at": "x"}}
-    assert main.redact_for_decoy(frame) is None
-
-
-def test_a_message_update_from_a_safe_bot_keeps_the_row_but_loses_the_picture(env):
-    frame = {"type": "message_update", "thread_id": "t", "bot_id": "alpha",
-             "message_id": "m",
-             "message": {"id": "m", "thread_id": "t", "role": "assistant",
-                         "content": "[[media:/media/a.png]]", "created_at": "x",
-                         "media_url": "/media/a.png"}}
-    out = main.redact_for_decoy(frame)
-    assert out is not None, (
-        "a locked device that saw the placeholder must see it stop pending")
-    assert out["message"]["media_url"] is None
-    assert "/media/a.png" not in out["message"]["content"]
-
-
-def test_the_frame_type_is_allowed_deliberately(env):
-    assert "message_update" in main._DECOY_FRAME_ALLOW
-
-
-def test_the_routes_are_off_the_safe_mode_surface(env):
-    assert main._decoy_blocked("POST", "/api/image-jobs")
-    assert main._decoy_blocked("GET", "/api/image-jobs/abc")
+def test_the_routes_are_off_the_signed_out_surface(env):
+    assert main._signed_out_blocked("POST", "/api/image-jobs")
+    assert main._signed_out_blocked("GET", "/api/image-jobs/abc")
     assert main._is_inbound("POST", "/api/image-jobs")
     assert main._is_inbound("GET", "/api/image-jobs/abc")
 
@@ -1047,8 +1021,8 @@ def test_an_unknown_job_is_404(env, monkeypatch):
 
 
 def test_a_browser_shaped_callback_is_refused(env, monkeypatch):
-    """The credential is a per-job token held by the rig, so a locked TAB must
-    get Safe Mode's answer rather than a path into the worker."""
+    """The credential is a per-job token held by the rig, so a browser TAB is refused
+    before the token is looked at, rather than handed a path into the worker."""
     unlocked = _unlocked(env)
     _armed(monkeypatch)
     tid = _thread(unlocked)
@@ -2122,45 +2096,6 @@ def test_an_over_length_prompt_is_clamped_rather_than_dropped(env):
     assert len(job["prompt"]) == image_jobs.MAX_PROMPT_CHARS
 
 
-def test_a_locked_device_never_sees_an_image_job_row_at_all(env):
-    """Locked DisPatch is a family-safe afterthought: rather than hand-craft a
-    degraded card, an image-job placeholder (at any stage of its life) simply
-    does not exist for a locked viewer."""
-    for status, extra in [
-        ("queued", {"prompt": "a very private prompt", "caption": "",
-                    "workflow": "anima", "seed": 12345}),
-        ("failed", {"error": "CUDA 3 is leased to someone"}),
-        ("cancelled", {"error": "superseded by a newer request"}),
-        ("done", {"media_url": "/media/x.png"}),
-    ]:
-        redacted = main._redact_message_dict({
-            "id": "m1", "content": f"anything, status={status}",
-            "media_url": None,
-            "metadata": {"kind": "image_job", "status": status, **extra}})
-        assert redacted is None, f"a {status} image-job row leaked to Safe Mode"
-
-
-def test_an_image_job_frame_is_dropped_not_delivered_with_a_null_message(env):
-    frame = {"type": "message_update", "thread_id": "t", "bot_id": "main",
-             "message_id": "m",
-             "message": {"id": "m", "thread_id": "t", "role": "assistant",
-                         "content": "🖼️ Generating an image…",
-                         "metadata": {"kind": "image_job", "status": "queued",
-                                      "job_id": "j1"}}}
-    assert main.redact_for_decoy(frame) is None
-
-
-def test_an_image_job_row_is_absent_from_a_redacted_message_list(env):
-    frame = {"type": "messages", "messages": [
-        {"id": "m1", "role": "assistant", "content": "hello",
-         "metadata": None},
-        {"id": "m2", "role": "assistant", "content": "🖼️ Generating…",
-         "metadata": {"kind": "image_job", "status": "queued", "job_id": "j1"}},
-    ]}
-    out = main.redact_for_decoy(frame)
-    assert [m["id"] for m in out["messages"]] == ["m1"]
-
-
 # --------------------------------------------------------------------------- #
 # Per-bot identity injection (`image_identity_source`)
 #
@@ -2211,7 +2146,7 @@ def test_identity_injection_prepends_the_canonical_prompt(env, tmp_path):
 def test_identity_injection_keeps_the_identity_out_of_the_visible_line(env,
                                                                        tmp_path):
     """The canonical identity paragraph must never reach a chat bubble — only
-    the scene the bot actually wrote does, on a locked device too."""
+    the scene the bot actually wrote does."""
     c = env()
     _set_identity_source("main", _write_identity_file(tmp_path))
     tid = _thread(c)
@@ -2222,9 +2157,6 @@ def test_identity_injection_keeps_the_identity_out_of_the_visible_line(env,
     assert "reading by the window, morning light" in placeholder["content"]
     assert placeholder["metadata"]["prompt"].startswith(IDENTITY_PROMPT), (
         "the STORED spec is the full rig-bound prompt")
-    # ...and a locked device is redacted down to the card either way.
-    redacted = main._redact_message_dict(placeholder)
-    assert IDENTITY_PROMPT not in json.dumps(redacted)
 
 
 def test_a_bots_own_caption_survives_identity_injection(env, tmp_path):

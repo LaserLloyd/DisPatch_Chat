@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app import accounts, auth, limits, main
+from app import accounts, auth, main
 
 
 @pytest.fixture
@@ -150,15 +150,12 @@ def test_a_restricted_profile_can_never_be_granted_management(world, owner):
     assert r.status_code == 422
 
 
-def test_budgets_are_validated(world, owner):
-    bad = [{"minutes_per_day": 0}, {"quiet_hours": "late"}, {"turns": -1}, {"nonsense": 1}]
-    for b in bad:
-        assert owner.post("/api/people", json={"name": "Mia", "role": "restricted",
-                                               "budgets": b}).status_code == 400, b
-    ok = owner.post("/api/people", json={"name": "Mia", "role": "restricted",
-                                         "budgets": {"minutes_per_day": 30, "quiet_hours": "20:30-07:00",
-                                                     "turns": 40, "threads": 5, "upload_mb": 10}})
-    assert ok.status_code == 201
+def test_budgets_are_gone(world, owner):
+    """4.0 (SPEC section 5): no daily limits or budgets of any kind - the field is refused."""
+    r = owner.post("/api/people", json={"name": "Mia", "role": "basic", "budgets": {"turns": 40}})
+    assert r.status_code == 422
+    mia = world.person(owner, "Mia", "basic")
+    assert owner.patch(f"/api/people/{mia['id']}", json={"budgets": {"turns": 9}}).status_code == 422
 
 
 # --------------------------------------------------------------------------- #
@@ -349,110 +346,50 @@ def test_device_binding_is_gone(world, owner):
 
 
 # --------------------------------------------------------------------------- #
-# Restricted safeguards: budgets, time limits, the activity summary
+# The activity summary (Basic profiles have no budgets or time limits any more)
 # --------------------------------------------------------------------------- #
 
 
-def _safe_bot(world):
-    from app import config
-    return next(b.id for b in config.load_bots() if b.safe)
+def _household_bot(world):
+    from app import characters, config
+    return next(b.id for b in config.load_bots() if not characters.is_personal(b))
 
 
-def test_daily_budgets_belong_to_the_profile_and_survive_a_restart(world, owner):
-    bot = _safe_bot(world)
-    mia = world.person(owner, "Mia", "restricted", budgets={"threads": 2}, household_bots=[bot],
-                       grants=["dispatch_agents"])
-    kit = world.person(owner, "Kit", "restricted", budgets={"threads": 1}, household_bots=[bot],
-                       grants=["dispatch_agents"])
-    a, b = world.client(("203.0.113.50", 1)), world.client(("203.0.113.50", 2))   # SAME address
-    world.login(a, profile_id=mia["id"])
-    world.login(b, profile_id=kit["id"])
-    codes = [a.post("/api/threads", json={"bot_id": bot}).status_code for _ in range(3)]
-    assert codes == [200, 200, 429]
-    # Kit has her own allowance although she shares Mia's address.
-    assert [b.post("/api/threads", json={"bot_id": bot}).status_code for _ in range(2)] == [200, 429]
-    # Persisted: forget every in-memory cache and the count is still there.
-    accounts.reset_for_tests()
-    assert a.post("/api/threads", json={"bot_id": bot}).status_code == 429
-    assert accounts.usage_today(mia["id"]).get("action:thread") == 2
-
-
-def test_the_budget_resets_with_the_day(world, owner, monkeypatch):
-    bot = _safe_bot(world)
-    mia = world.person(owner, "Mia", "restricted", budgets={"threads": 1}, household_bots=[bot],
-                       grants=["dispatch_agents"])
-    c = world.client()
+def test_a_basic_profile_has_no_daily_limit(world, owner, monkeypatch):
+    bot = _household_bot(world)
+    mia = world.person(owner, "Mia", "basic", household_bots=[bot], grants=["dispatch_agents"])
+    c = world.client(("203.0.113.50", 1))
     world.login(c, profile_id=mia["id"])
-    assert c.post("/api/threads", json={"bot_id": bot}).status_code == 200
-    assert c.post("/api/threads", json={"bot_id": bot}).status_code == 429
+    codes = [c.post("/api/threads", json={"bot_id": bot}).status_code for _ in range(5)]
+    assert codes == [200] * 5
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     monkeypatch.setattr(accounts, "today", lambda: tomorrow)
-    assert c.post("/api/threads", json={"bot_id": bot}).status_code == 200
-
-
-def test_time_limits_and_quiet_hours(world, owner):
-    mia = world.person(owner, "Mia", "restricted", budgets={"minutes_per_day": 10})
-    c = world.client()
-    world.login(c, profile_id=mia["id"])
     assert c.get("/api/bots").status_code == 200
-    accounts.usage_add(mia["id"], "active_seconds", 10 * 60)
-    r = c.get("/api/bots")
-    assert r.status_code == 403 and r.json()["error"]["code"] == "time_limit"
-    # Auth routes still answer, so the child can see why and sign out.
-    assert c.get("/api/auth/me").status_code == 200
-    # Quiet hours: a window that contains "now" blocks; one that does not, does not.
-    now = datetime.now()
-    inside = f"{(now - timedelta(minutes=5)).strftime('%H:%M')}-{(now + timedelta(minutes=5)).strftime('%H:%M')}"
-    outside = f"{(now + timedelta(hours=2)).strftime('%H:%M')}-{(now + timedelta(hours=3)).strftime('%H:%M')}"
-    accounts.update_profile(mia["id"], budgets={"quiet_hours": inside})
-    c2 = world.client()
-    world.login(c2, profile_id=mia["id"])
-    r = c2.get("/api/bots")
-    assert r.status_code == 403 and r.json()["error"]["code"] == "quiet_hours"
-    accounts.update_profile(mia["id"], budgets={"quiet_hours": outside})
-    c3 = world.client()
-    world.login(c3, profile_id=mia["id"])
-    assert c3.get("/api/bots").status_code == 200
 
 
-def _at(hour, minute):
-    return datetime(2026, 1, 1, hour, minute)  # noqa: DTZ001 - local wall-clock time is the point
-
-
-def test_quiet_hours_window_arithmetic():
-    assert limits.in_quiet_hours("20:30-07:00", _at(22, 0))
-    assert limits.in_quiet_hours("20:30-07:00", _at(6, 59))
-    assert not limits.in_quiet_hours("20:30-07:00", _at(7, 0))
-    assert not limits.in_quiet_hours("20:30-07:00", _at(12, 0))
-    assert limits.in_quiet_hours("13:00-14:00", _at(13, 30))
-    assert not limits.in_quiet_hours("garbage", _at(13, 30))
-
-
-def test_the_owner_sees_an_activity_summary_and_the_child_is_told(world, owner):
-    bot = _safe_bot(world)
-    mia = world.person(owner, "Mia", "restricted", budgets={"threads": 5}, household_bots=[bot],
-                       grants=["dispatch_agents"])
+def test_the_owner_sees_an_activity_summary_and_the_profile_is_told(world, owner):
+    mia = world.person(owner, "Mia", "basic")
     c = world.client()
     world.login(c, profile_id=mia["id"])
-    assert c.post("/api/threads", json={"bot_id": bot}).status_code == 200
-    assert c.post("/api/threads", json={"bot_id": bot}).status_code == 200
-    # What the child sees: the disclosure, and its own summary.
+    # What the profile sees: the disclosure, and its own summary.
     me = c.get("/api/auth/me").json()
     assert "admin can see" in me["disclosure"].lower()
     mine = c.get("/api/me/activity").json()
-    assert mine["visible_to_owner"] is True and mine["today"]["action:thread"] == 2
+    assert mine["visible_to_owner"] is True and "today" not in mine and "limits" not in mine
     # What the owner sees: counts, not content.
     act = owner.get("/api/people/activity", params={"profile_id": mia["id"]}).json()
     counts = act["summary"]["days"][0]["counts"]
-    assert counts["login"] == 1 and counts["thread"] == 2
+    assert counts["login"] == 1
     assert all("content" not in e for e in act["recent"])
-    # A restricted child cannot read anyone's summary.
+    # A Basic profile cannot read anyone's summary (view_activity is the Admins').
     assert c.get("/api/people/activity").status_code == 403
+    # An Admin is not told it is being summarised.
+    assert owner.get("/api/auth/me").json()["disclosure"] is None
 
 
 def test_admin_actions_are_audited(world, owner):
     mia = world.person(owner, "Mia", "restricted")
-    owner.patch(f"/api/people/{mia['id']}", json={"budgets": {"turns": 9}})
+    owner.patch(f"/api/people/{mia['id']}", json={"name": "Mia B"})
     owner.post(f"/api/people/{mia['id']}/pin", json={"pin": "4321"})
     kinds = [e["kind"] for e in owner.get("/api/people/audit").json()["entries"]]
     assert {"profile_created", "profile_updated", "pin_set"} <= set(kinds)
@@ -504,9 +441,9 @@ def test_machine_upload_needs_its_scope_and_the_key(world, owner, monkeypatch):
     r = local.post("/api/upload", headers={"X-API-Key": token}, files=files)
     assert r.status_code == 200, r.text
     assert r.json()["id"] and r.json()["name"] == "report.txt"
-    # A machine's uploads share the sessionless daily byte budget (an agent in a
-    # loop must not fill the disk).
-    monkeypatch.setattr(main, "DECOY_UPLOAD_QUOTA", 64)
+    # A machine's uploads share the 200 MB/day machine guard (an agent in a loop must
+    # not fill the disk).
+    monkeypatch.setattr(main, "MACHINE_UPLOAD_QUOTA", 64)
     big = {"file": ("big.txt", b"y" * 200, "text/plain")}
     assert local.post("/api/upload", headers={"X-API-Key": token}, files=big).status_code == 429
     # Without the key an on-box process is no machine (trust is off): it is a

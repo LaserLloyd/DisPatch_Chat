@@ -17,10 +17,10 @@ Audience (the whole of the privacy rule for these frames):
   approval cards; a task is a person's work, like a chat). What an Admin keeps is the
   aggregate spend per day (``GET /api/agents/usage``), never a task's content;
 * the open, unclaimed install sees every task (everyone is the Owner);
-* a Restricted socket, a machine and a socket that has not finished its handshake NEVER
-  receive them - three independent layers: the audience predicate below, the redactor in
-  ``main.redact_for_decoy`` (these types are in ``_DECOY_FRAME_DENY``), and the fact that
-  the frames bypass the observers that feed add-ons (``ConnectionManager.broadcast_where``).
+* a machine and a socket that has not finished its handshake NEVER receive them - three
+  independent layers: the audience predicate below, the scoper in
+  ``main.scope_frame_for_principal`` (a principal-less socket gets no task frame), and the fact
+  that the frames bypass the observers that feed add-ons (``ConnectionManager.broadcast_where``).
 
 Sequence numbers (``event.seq``) are the replay cursor: a client that sees a gap refetches
 ``GET /api/tasks/{id}/events?after_seq=<last seen>``.

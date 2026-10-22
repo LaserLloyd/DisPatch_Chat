@@ -48,7 +48,7 @@ def test_profiles_service_signatures():
     }
     for name, params in want.items():
         assert _params(getattr(profiles_service, name)) == params, name
-    assert profiles_service.ContentCounts().as_dict() == {"bots": 0, "chats": 0, "pictures": 0, "voices": 0}
+    assert profiles_service.ContentCounts().as_dict() == {"bots": 0, "chats": 0, "pictures": 0, "voices": 0, "files": 0}
     assert profiles_service.TOKEN_TTL_SECONDS == 300
     assert issubclass(profiles_service.ProfileServiceError, ValueError)
 

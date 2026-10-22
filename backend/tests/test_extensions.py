@@ -233,7 +233,8 @@ def test_context_paths_and_state_dir(ext_env):
 def test_context_bots_are_views_without_provider_blocks(ext_env):
     install()
     v = KNOBS.ctx.bots.get("main")
-    assert v.id == "main" and v.backend == "gateway" and v.safe is False
+    assert v.id == "main" and v.backend == "gateway"
+    assert not hasattr(v, "safe"), "the 3.x Safe-Mode flag is not part of the 4.0 bot view"
     assert not hasattr(v, "api") and not hasattr(v, "advisor")
     assert KNOBS.ctx.bots.get("nope") is None
     assert {b.id for b in KNOBS.ctx.bots.all()} >= {"alpha", "main"}
@@ -396,7 +397,7 @@ def test_extension_routes_are_operator_only(ext_env):
     assert c.get("/api/voice/status").status_code == 200
     lock(c)
     assert c.get("/api/voice/status").status_code in (401, 403)
-    assert main._decoy_blocked("GET", "/api/voice/status")
+    assert main._signed_out_blocked("GET", "/api/voice/status")
     # (A write to those two paths is refused for everyone: there is no such route.)
     assert c.post("/api/extensions", json={}).status_code in (401, 405)
     assert c.post("/ext/voice/index.js", json={}).status_code in (401, 405)
@@ -409,7 +410,7 @@ def test_extension_routes_are_operator_only(ext_env):
 def test_other_extension_prefix_joins_the_block_list(ext_env):
     install("_extfake:OTHER")
     assert extensions.owns_path("/api/other/ping")
-    assert main._decoy_blocked("GET", "/api/other/ping")
+    assert main._signed_out_blocked("GET", "/api/other/ping")
     assert not main._is_inbound("GET", "/api/other/ping")
 
 

@@ -923,12 +923,12 @@ def test_jobboard_builtin_row_is_refused(tools_env):
         tools.validate_tools([{"id": "jobboard", "kind": "builtin", "enabled": False}])
 
 
-def test_jobs_stay_decoy_blocked(tools_env):
+def test_jobs_stay_signed_out_blocked(tools_env):
     """The Safe-Mode matrix did not change: /api/jobs is still barred for a
     locked browser, and the builtin never lists for Safe Mode."""
     make_client, site = tools_env
-    assert main._decoy_blocked("GET", "/api/jobs") is True
-    assert main._decoy_blocked("GET", "/api/jobs/months") is True
+    assert main._signed_out_blocked("GET", "/api/jobs") is True
+    assert main._signed_out_blocked("GET", "/api/jobs/months") is True
     c = _decoy(make_client)
     r = c.get("/api/tools")
     # 4.0: a signed-out browser is nobody (401); either way it lists no Job Board

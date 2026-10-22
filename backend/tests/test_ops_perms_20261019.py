@@ -158,8 +158,11 @@ def test_a_member_reads_what_voice_chat_needs_but_does_not_administer_it(ext_env
         assert member.get("/api/voice/providers").status_code in (401, 403)
         assert admin.get("/api/voice/status").status_code == 200
         assert admin.post("/api/voice/upload", content=b"x").status_code == 200
-        for k in (kid, guest):                       # a locked device has its own view
-            assert k.get("/api/voice/status").status_code in (401, 403)
+        # 4.0: a Basic profile uses voice like everyone (use_voice), never its administration;
+        # a signed-out device is nobody.
+        assert kid.get("/api/voice/status").status_code == 200
+        assert kid.post("/api/voice/upload", content=b"x").status_code in (401, 403)
+        assert guest.get("/api/voice/status").status_code in (401, 403)
         status = member.get("/api/auth/status").json()
         assert "use_voice" in status["permissions"] and "manage_plugins" not in status["permissions"]
     finally:
@@ -182,7 +185,7 @@ def test_a_member_opens_a_voice_call(ext_env):
         tid = thread_for(member, "adv")
         with member.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
             ready = json.loads(ws.receive_text())
-            assert ready["type"] == "ready" and ready["token"] is True and ready["locked"] is False
+            assert ready["type"] == "ready" and ready["token"] is True
     finally:
         for k in made:
             k.__exit__(None, None, None)

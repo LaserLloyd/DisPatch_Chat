@@ -14,7 +14,6 @@ Covers, in order:
      that caused it.
   3. PATCH /api/threads/{id} prefs: operator-only, merge-not-replace, null
      removes a key, unknown keys/bad value types 400.
-  4. _redact_thread_dict drops prefs for a locked device.
   5. GET /api/bots/{bot_id}/models: operator-only, API-bot single model,
      gateway-bot normalized list, briefly cached, 503 when disconnected.
   6. openclaw._parse_reply keeps usage input/output and contextBudgetStatus
@@ -321,10 +320,10 @@ def test_prefs_rejects_unknown_keys_and_bad_types(env):
                         json={"prefs": "nope"}).status_code == 400
 
 
-def test_a_decoy_session_cannot_set_prefs(env):
+def test_a_signed_out_caller_cannot_set_prefs(env):
     client = env()
     auth.set_pin("1234")
-    tid = _seed_thread(client, bot_id="alpha")   # safe bot, viewable decoy
+    tid = _seed_thread(client, bot_id="alpha")
 
     r = client.patch(f"/api/threads/{tid}", json={"prefs": {"model": "m-1"}},
                      headers=BROWSER_HDRS)
@@ -360,20 +359,6 @@ def test_no_pin_set_allows_prefs_same_as_everything_else(env):
     tid = _seed_thread(client)
     r = client.patch(f"/api/threads/{tid}", json={"prefs": {"model": "m-1"}})
     assert r.status_code == 200, r.text
-
-
-# --------------------------------------------------------------------------- #
-# 4: _redact_thread_dict drops prefs
-# --------------------------------------------------------------------------- #
-
-
-def test_redact_thread_dict_drops_prefs():
-    t = {"id": "t1", "bot_id": "main", "last_message": "hi",
-        "prefs": {"model": "m-1", "thinking": "high"}}
-    out = main._redact_thread_dict(t)
-    assert "prefs" not in out
-    # Everything else about the existing redaction is untouched.
-    assert out["last_message"] == "hi"
 
 
 # --------------------------------------------------------------------------- #

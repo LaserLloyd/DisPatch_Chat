@@ -31,7 +31,7 @@ def test_user_to_basic_deletes_the_bots_chats_and_clones_and_keeps_the_profile(s
     s.thread(u.id, "pack_otter", "SENT-D-chat2")
 
     preview = profiles_service.change_role_preview(u.id, "basic")
-    assert preview["counts"] == {"bots": 1, "chats": 2, "pictures": 0, "voices": 3} and preview["deletes"]
+    assert preview["counts"] == {"bots": 1, "chats": 2, "pictures": 0, "voices": 3, "files": 0} and preview["deletes"]
 
     out = profiles_service.change_role(u.id, "basic", confirm_token=preview["token"],
                                        household_bots=["pack_otter"])

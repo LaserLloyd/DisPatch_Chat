@@ -88,16 +88,16 @@ def test_mail_and_practice_404_when_disabled(route_client, monkeypatch):
     assert route_client.get("/api/practice/board").status_code == 404
 
 
-def test_decoy_blocked_prefixes_cover_mail_and_practice():
-    assert main._decoy_blocked("GET", "/api/mail/status") is True
-    assert main._decoy_blocked("GET", "/api/practice/board") is True
-    assert main._decoy_blocked("POST", "/api/practice/clients/c1/actions/build") is True
+def test_signed_out_blocked_prefixes_cover_mail_and_practice():
+    assert main._signed_out_blocked("GET", "/api/mail/status") is True
+    assert main._signed_out_blocked("GET", "/api/practice/board") is True
+    assert main._signed_out_blocked("POST", "/api/practice/clients/c1/actions/build") is True
     # The DisPatch-local "site links" overlay is a sibling feature under a
     # sibling path, not literally /api/practice/* — it must be covered by the
     # SAME belt-and-braces prefix, or a decoy session could read/write it even
     # though _require_practice's own _deny_decoy_mutation also blocks it.
-    assert main._decoy_blocked("GET", "/api/practice-links/c1") is True
-    assert main._decoy_blocked("PUT", "/api/practice-links/c1") is True
+    assert main._signed_out_blocked("GET", "/api/practice-links/c1") is True
+    assert main._signed_out_blocked("PUT", "/api/practice-links/c1") is True
 
 
 # --------------------------------------------------------------------------- #

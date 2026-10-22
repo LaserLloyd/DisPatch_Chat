@@ -2,8 +2,8 @@
 
 What a push carries is ``{kind, thread_id, title}`` — "Nova replied", "Image
 ready", "Morning brief posted". No message text, no picture, no preview: the
-phone's lock screen is readable by whoever picks the phone up, and the locked
-(Safe Mode) tier exists precisely so that what a bot said stays behind the PIN.
+phone's lock screen is readable by whoever picks the phone up, and what a bot said
+stays behind the profile's sign-in.
 Tapping the notification opens the app on that thread, where the normal
 session rules decide what is shown.
 

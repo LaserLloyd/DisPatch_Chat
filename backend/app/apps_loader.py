@@ -25,14 +25,13 @@ relatively), call ``build(ctx)`` and mount the returned router at
 Any failure is logged and that app is skipped: the shell never fails to boot
 because of an app.
 
-Gating, in three layers, each sufficient on its own for Safe Mode:
+Gating, in three layers, each sufficient on its own:
 
-  1. ``main.auth_gate`` — every app API path is on the machine-inbound surface
-     (``is_inbound``: loopback or api_token, never a browser), and every app
-     path is in ``_decoy_blocked`` (``decoy_blocked``) unless the app is
-     ``safe: true`` and the method is GET/HEAD.
+  1. ``main.auth_gate`` — every app path carries its manifest ``permission``
+     (:func:`requirement_for`); an app API path is also on the machine-inbound
+     surface (``machine:apps``: the api_token, never a browser).
   2. A router-level dependency (``_gate_for``) on every mounted route: the
-     uniform decoy 403 for a Safe-Mode caller of a non-safe app, then 404 when
+     uniform 403 for a caller without the app's permission, then 404 when
      ``tools.yaml`` switches the app off.
   3. Per route, the app's own ``ctx.require_access`` (operator or on-box
      machine) / ``ctx.require_operator`` (a real operator session only).
@@ -98,7 +97,9 @@ BOT_KEYS = frozenset({"id", "name", "emoji", "avatar", "agent", "visible"})
 RESERVED_LEGACY = ("/api/apps", "/api/tools", "/api/auth", "/api/local",
                    "/api/media", "/api/files")
 
-DECOY_BODY = {"detail": "Unlock for full access", "decoy": True}
+FORBIDDEN_BODY = {"detail": "Your profile does not have permission to do that.",
+                  "error": {"code": "permission_denied",
+                            "message": "Your profile does not have permission to do that."}}
 NOT_FOUND = {"detail": "Not found"}
 
 CACHE_ASSET = "private, max-age=0, must-revalidate"
@@ -144,8 +145,8 @@ class Manifest:
     env: tuple[str, ...]
     dir: Path
     source: str                      # "repo" | "data"
-    #: The Permission a profile needs to use this app (3.0). `safe: true` apps are
-    #: additionally readable by Restricted profiles. Default: use_tools.
+    #: The Permission a profile needs to use this app (3.0). Default: use_tools. (The
+    #: manifest's ``safe`` key is a 3.x Safe-Mode input: still accepted, never read.)
     permission: str = "use_tools"
 
     @property
@@ -315,17 +316,13 @@ def discover(repo_dir: Path | None = None) -> list[Manifest]:
 # Context handed to an app
 # --------------------------------------------------------------------------- #
 
-class AppDecoy(HTTPException):
-    """The uniform Safe-Mode refusal. An HTTPException subclass so a direct
-    call raises something ordinary; the handler :func:`load_all` registers turns
-    it into the same ``{detail, decoy: true}`` body the auth gate sends."""
+class AppForbidden(HTTPException):
+    """The uniform refusal (no app permission). An HTTPException subclass so a direct
+    call raises something ordinary; the handler :func:`load_all` registers turns it into
+    the same ``permission_denied`` body the auth gate sends, whether or not the app exists."""
 
     def __init__(self) -> None:
-        super().__init__(403, DECOY_BODY["detail"])
-
-
-def _is_decoy(request: Request) -> bool:
-    return bool(getattr(request.state, "decoy", False))
+        super().__init__(403, FORBIDDEN_BODY["detail"])
 
 
 def _is_machine(request: Request) -> bool:
@@ -361,25 +358,23 @@ def current_caller():
 
 
 def require_operator(request: Request) -> None:
-    """A person holding the app's permission. Never a machine, never Restricted."""
+    """A person holding the app's permission. Never a machine."""
     from . import policy
     pol = policy.of(request)
     _caller.set(pol)
     if not pol.can(_permission_for(request)):
-        raise AppDecoy
+        raise AppForbidden
 
 
 def require_access(request: Request) -> None:
     """A person holding the app's permission OR an authenticated machine holding the
     apps scope (the auth gate decided that and stamped ``request.state.machine``)."""
     from . import policy
-    if _is_decoy(request):
-        raise AppDecoy
     pol = policy.of(request)
     _caller.set(pol)
     if pol.machine or pol.can(_permission_for(request)):
         return
-    raise AppDecoy
+    raise AppForbidden
 
 
 @dataclass
@@ -427,8 +422,8 @@ class AppContext:
         return self._hooks.db()
 
     async def broadcast(self, frame: dict) -> None:
-        """WS broadcast. The type MUST be ``app:<id>:…``; Safe-Mode sockets
-        never receive it (the decoy redactor is an allowlist)."""
+        """WS broadcast. The type MUST be ``app:<id>:…``; only sockets holding the app's
+        manifest permission receive it (main.scope_frame_for_principal)."""
         t = frame.get("type") if isinstance(frame, dict) else None
         if not isinstance(t, str) or not t.startswith(f"app:{self.app_id}:"):
             raise ValueError(f"app frame type must start with 'app:{self.app_id}:'")
@@ -538,9 +533,8 @@ def is_inbound(method: str, path: str) -> bool:
 def requirement_for(method: str, path: str):
     """The declared Requirement for a mounted app's path (None = not an app path).
 
-    The permission comes from the manifest (default ``use_tools``); a ``safe: true``
-    app is readable by a Restricted profile (the route narrows, ``scoped``). An app's
-    API is also on the machine surface; its static page is not."""
+    The permission comes from the manifest (default ``use_tools``). An app's API is also
+    on the machine surface; its static page is not."""
     from . import policy
     from .contracts.permissions import MachineScope
     hit = _app_for_path(path)
@@ -549,22 +543,8 @@ def requirement_for(method: str, path: str):
     kind, app_id = hit
     la = _registry.get(app_id) if app_id else None
     perm = la.manifest.permission if la is not None else "use_tools"
-    safe_read = bool(la and la.manifest.safe) and method in ("GET", "HEAD")
     machine = (MachineScope.APPS.value,) if (kind != "static" and app_id) else ()
-    return policy.Requirement(permission=perm, machine=machine, scoped=safe_read,
-                              note="mounted app")
-
-
-def decoy_blocked(method: str, path: str) -> bool | None:
-    """Safe-Mode rule for app paths: None = not an app path. Blocked unless the
-    app is ``safe: true`` and the method only reads."""
-    hit = _app_for_path(path)
-    if hit is None:
-        return None
-    la = _registry.get(hit[1]) if hit[1] else None
-    if la is not None and la.manifest.safe and method in ("GET", "HEAD"):
-        return False
-    return True
+    return policy.Requirement(permission=perm, machine=machine, note="mounted app")
 
 
 # --------------------------------------------------------------------------- #
@@ -605,13 +585,9 @@ def _gate_for(app_id: str) -> Callable[[Request], None]:
     def gate(request: Request) -> None:
         la = _registry.get(app_id)
         from . import policy
-        safe_read = bool(la and la.manifest.safe) and request.method in ("GET", "HEAD")
         perm = la.manifest.permission if la is not None else "use_tools"
-        if _is_decoy(request):
-            if not safe_read:
-                raise AppDecoy
-        elif not (_is_machine(request) or policy.of(request).can(perm) or safe_read):
-            raise AppDecoy
+        if not (_is_machine(request) or policy.of(request).can(perm)):
+            raise AppForbidden
         if la is None or not la.mounted or not enabled(app_id):
             raise HTTPException(404, NOT_FOUND["detail"])
     return gate
@@ -632,14 +608,14 @@ def _legacy_collides(app: FastAPI, prefix: str, own: list) -> bool:
                for la in _registry.values())
 
 
-async def _decoy_handler(request: Request, exc: AppDecoy):
-    return JSONResponse(DECOY_BODY, status_code=403)
+async def _forbidden_handler(request: Request, exc: AppForbidden):
+    return JSONResponse(FORBIDDEN_BODY, status_code=403)
 
 
 def _wire(app: FastAPI) -> None:
     if getattr(app.state, "dispatch_apps_wired", False):
         return
-    app.add_exception_handler(AppDecoy, _decoy_handler)
+    app.add_exception_handler(AppForbidden, _forbidden_handler)
     app.include_router(static_router)
     app.state.dispatch_apps_wired = True
 
@@ -879,11 +855,10 @@ def app_static_bare(app_id: str):
                          include_in_schema=False)
 def app_static(request: Request, app_id: str, rel: str):
     la = _registry.get(app_id)
-    safe = bool(la and la.manifest.safe)
     from . import policy
     perm = la.manifest.permission if la is not None else "use_tools"
-    if (_is_decoy(request) or not policy.of(request).can(perm)) and not safe:
-        return JSONResponse(DECOY_BODY, status_code=403)
+    if not policy.of(request).can(perm):
+        return JSONResponse(FORBIDDEN_BODY, status_code=403)
     if la is None or not la.mounted or not enabled(app_id):
         return JSONResponse(NOT_FOUND, status_code=404)
     try:

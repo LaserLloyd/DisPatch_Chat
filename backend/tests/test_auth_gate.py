@@ -15,7 +15,7 @@ import stat
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth, avatar_snapshots, config, main
+from app import auth, avatar_snapshots, config, main, policy
 from app.database import Database
 
 SAFE_BOTS = {"alpha", "beta", "Atlas"}     # finalized two-tier roster
@@ -143,7 +143,7 @@ DECOY_BLOCKED = [
 
 
 @pytest.mark.parametrize("method,path", DECOY_BLOCKED)
-def test_decoy_blocked_matrix(gate_env, method, path):
+def test_signed_out_blocked_matrix(gate_env, method, path):
     client = gate_env()
     auth.set_pin("1234")                 # PIN set, never unlocked -> decoy
     r = client.request(method, path)
@@ -532,12 +532,12 @@ def test_quota_ip_ignores_forwarding_headers_from_a_remote_peer(monkeypatch):
     X-Forwarded-For itself with a same-origin fetch(). Only the socket peer
     counts unless the peer is loopback (where Tailscale Serve lands)."""
     remote = "192.0.2.77"
-    assert main._quota_ip({}, remote) == remote
-    assert main._quota_ip({"x-forwarded-for": "203.0.113.9"}, remote) == remote
-    assert main._quota_ip({"forwarded": "for=203.0.113.9"}, remote) == remote
-    assert main._quota_ip({"x-real-ip": "203.0.113.9"}, remote) == remote
+    assert policy.quota_ip({}, remote) == remote
+    assert policy.quota_ip({"x-forwarded-for": "203.0.113.9"}, remote) == remote
+    assert policy.quota_ip({"forwarded": "for=203.0.113.9"}, remote) == remote
+    assert policy.quota_ip({"x-real-ip": "203.0.113.9"}, remote) == remote
     # Forged values must all land in the SAME bucket — one quota, not many.
-    keys = {main._quota_ip({"x-forwarded-for": f"203.0.113.{i}"}, remote)
+    keys = {policy.quota_ip({"x-forwarded-for": f"203.0.113.{i}"}, remote)
             for i in range(10)}
     assert keys == {remote}, "forged XFF values minted extra quota buckets"
 
@@ -546,19 +546,19 @@ def test_quota_ip_still_splits_the_household_behind_local_serve(monkeypatch):
     """Tailscale Serve is the only fronting layer and it connects from
     loopback; there, one shared household bucket would be the worse failure."""
     proxy = "127.0.0.1"
-    assert main._quota_ip({}, proxy) == proxy                     # direct
-    assert main._quota_ip({"x-forwarded-for": "203.0.113.9"}, proxy) == "203.0.113.9"
+    assert policy.quota_ip({}, proxy) == proxy                     # direct
+    assert policy.quota_ip({"x-forwarded-for": "203.0.113.9"}, proxy) == "203.0.113.9"
     # Rightmost entry only: that is the hop the trusted proxy itself appended;
     # everything to its left is client-supplied and would let a caller pick
     # its own quota bucket.
-    assert main._quota_ip(
+    assert policy.quota_ip(
         {"x-forwarded-for": "203.0.113.9, 192.0.2.77"}, proxy) == "192.0.2.77"
     # IPv6, bracketed and with a port.
-    assert main._quota_ip({"x-forwarded-for": "[2001:db8::5]:443"}, proxy) == "2001:db8::5"
+    assert policy.quota_ip({"x-forwarded-for": "[2001:db8::5]:443"}, proxy) == "2001:db8::5"
     # Junk falls back to the peer rather than minting an arbitrary key.
-    assert main._quota_ip({"x-forwarded-for": "not-an-ip"}, proxy) == proxy
+    assert policy.quota_ip({"x-forwarded-for": "not-an-ip"}, proxy) == proxy
     # No forwarding evidence at all: nothing to read.
-    assert main._quota_ip({"x-real-ip": "203.0.113.9"}, proxy) == proxy
+    assert policy.quota_ip({"x-real-ip": "203.0.113.9"}, proxy) == proxy
 
 
 # --------------------------------------------------------------------------- #

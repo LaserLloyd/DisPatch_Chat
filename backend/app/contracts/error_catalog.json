@@ -77,17 +77,6 @@
    "seeded": true
   },
   {
-   "code": "budgets_invalid",
-   "status": 400,
-   "message": "A budget value is invalid.",
-   "fix": "Use whole numbers in range; quiet hours look like 20:30-07:00.",
-   "docs": "budgets_invalid",
-   "patterns": [
-    "A budget value is invalid."
-   ],
-   "seeded": false
-  },
-  {
    "code": "checked_not_boolean",
    "status": 400,
    "message": "checked must be a boolean for a row update",
@@ -430,7 +419,7 @@
    "code": "permissions_invalid",
    "status": 400,
    "message": "A permission is invalid.",
-   "fix": "Use the permission names from docs/contracts/permissions.json; a Restricted profile can never hold a management permission.",
+   "fix": "Use the permission names from docs/contracts/permissions.json; a profile can only be granted what its type allows (contracts.permissions ROLE_GRANTABLE).",
    "docs": "permissions_invalid",
    "patterns": [
     "A permission is invalid."
@@ -560,7 +549,7 @@
    "code": "profile_role_invalid",
    "status": 400,
    "message": "Unknown role {}.",
-   "fix": "Use owner, admin, member or restricted.",
+   "fix": "Use admin, user or basic (the 3.x words owner, member and restricted are still accepted as input).",
    "docs": "profile_role_invalid",
    "patterns": [
     "Unknown role {}."
@@ -734,7 +723,8 @@
    "fix": "Pick your profile on the sign-in screen (with its PIN or password if it has one). Unsigned devices land on the default profile only when an Admin has set one (Settings, People: lock target).",
    "docs": "signin_required",
    "patterns": [
-    "Sign in to continue."
+    "Sign in to continue.",
+    "Sign in first: forgetting devices keeps this session."
    ],
    "seeded": false
   },
@@ -757,7 +747,8 @@
    "docs": "agents_only",
    "patterns": [
     "Only agents may fire reactions",
-    "Only agents may call this."
+    "Only agents may call this.",
+    "Only the image server calls this"
    ],
    "seeded": false
   },
@@ -862,17 +853,6 @@
    "seeded": true
   },
   {
-   "code": "quiet_hours",
-   "status": 403,
-   "message": "This profile is not available right now.",
-   "fix": "This profile is not available at this time of day. Ask the Owner to change quiet hours.",
-   "docs": "quiet_hours",
-   "patterns": [
-    "This profile is not available right now."
-   ],
-   "seeded": false
-  },
-  {
    "code": "recovery_needs_new_pin",
    "status": 409,
    "message": "Choose a new PIN: other people have profiles here, so the lock cannot simply be removed.",
@@ -888,7 +868,8 @@
    "fix": "Sign out and in again with \"Remember this device\" ticked to get notifications.",
    "docs": "remember_device_required",
    "patterns": [
-    "Notifications need a remembered device: lock, then unlock with \"Remember this device\" ticked."
+    "Notifications need a remembered device: lock, then unlock with \"Remember this device\" ticked.",
+    "Notifications need a signed-in, remembered device."
    ],
    "seeded": false
   },
@@ -900,17 +881,6 @@
    "docs": "route_undeclared",
    "patterns": [
     "This endpoint has no access policy."
-   ],
-   "seeded": false
-  },
-  {
-   "code": "safe_mode",
-   "status": 403,
-   "message": "Unlock for full access",
-   "fix": "Sign in as a profile that is allowed to do this (Settings > People & Access), or ask the Owner. Restricted profiles and signed-out devices can only chat with characters made for them.",
-   "docs": "safe_mode",
-   "patterns": [
-    "Unlock for full access"
    ],
    "seeded": false
   },
@@ -946,17 +916,6 @@
     "That thread belongs to another bot"
    ],
    "seeded": true
-  },
-  {
-   "code": "time_limit",
-   "status": 403,
-   "message": "Today's time for this profile is used up.",
-   "fix": "This profile has used today's time. Ask the Owner to change the limit, or try tomorrow.",
-   "docs": "time_limit",
-   "patterns": [
-    "Today's time for this profile is used up."
-   ],
-   "seeded": false
   },
   {
    "code": "unlock_first",
@@ -1387,17 +1346,6 @@
     "A deep check is already running"
    ],
    "seeded": true
-  },
-  {
-   "code": "device_bind_role",
-   "status": 409,
-   "message": "A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential.",
-   "fix": "Bind a Member or Restricted profile. Admins and the Owner always sign in with their credential.",
-   "docs": "device_bind_role",
-   "patterns": [
-    "A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential."
-   ],
-   "seeded": false
   },
   {
    "code": "extensions_yaml_unreadable",
@@ -1911,24 +1859,13 @@
    "seeded": false
   },
   {
-   "code": "daily_limit",
-   "status": 429,
-   "message": "Daily limit reached on this device",
-   "fix": "This profile or device reached today's limit. It resets at local midnight; the Owner can raise it.",
-   "docs": "daily_limit",
-   "patterns": [
-    "Daily limit reached on this device"
-   ],
-   "seeded": false
-  },
-  {
    "code": "daily_upload_limit",
    "status": 429,
-   "message": "Daily upload limit reached — try again tomorrow or unlock",
-   "fix": "Today's upload allowance is used. It resets at local midnight; the Owner can raise it.",
+   "message": "Daily machine upload limit reached — try again tomorrow",
+   "fix": "Programs holding the API key may upload 200 MB a day together (the machine guard, people have no limit). It resets at local midnight; an Admin can change it in Settings > People & Access > Machines.",
    "docs": "daily_upload_limit",
    "patterns": [
-    "Daily upload limit reached — try again tomorrow or unlock"
+    "Daily machine upload limit reached — try again tomorrow"
    ],
    "seeded": false
   },
@@ -2496,17 +2433,6 @@
    "seeded": false
   },
   {
-   "code": "task_thread_not_allowed",
-   "status": 409,
-   "message": "Tasks cannot be assigned from a chat that Restricted profiles can read.",
-   "fix": "Assign the task from a chat with a character that only Members and above can see, or from the Tasks page.",
-   "docs": "task_thread_not_allowed",
-   "patterns": [
-    "Tasks cannot be assigned from a chat that Restricted profiles can read."
-   ],
-   "seeded": false
-  },
-  {
    "code": "household_bots_invalid",
    "status": 422,
    "message": "household_bots must be \"all\" or a list of character ids.",
@@ -2734,6 +2660,26 @@
    "docs": "draft_failed",
    "patterns": [
     "The AI did not return a usable bot. Try again, or add more detail."
+   ]
+  },
+  {
+   "code": "image_minor_sexual",
+   "status": 422,
+   "message": "That picture can't be made: images show adults only, and nothing sexual can involve anyone under 18. Rewrite the request with adult characters.",
+   "fix": "Describe adult characters only. This rule cannot be switched off.",
+   "docs": "image_minor_sexual",
+   "patterns": [
+    "That picture can't be made: images show adults only, and nothing sexual can involve anyone under 18. Rewrite the request with adult characters."
+   ]
+  },
+  {
+   "code": "image_real_person_sexual",
+   "status": 422,
+   "message": "That picture can't be made: sexual images of real, identifiable people aren't allowed. Remove the real person's name or likeness, or describe an original character instead.",
+   "fix": "Remove the real person's name or likeness, or describe an original character. This rule cannot be switched off.",
+   "docs": "image_real_person_sexual",
+   "patterns": [
+    "That picture can't be made: sexual images of real, identifiable people aren't allowed. Remove the real person's name or likeness, or describe an original character instead."
    ]
   }
  ]

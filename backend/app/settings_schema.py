@@ -51,7 +51,7 @@ GROUPS: tuple[tuple[str, str, str], ...] = (
     ("connections", "Connections", "The models and servers DisPatch talks to, and how it finds them."),
     ("voice", "Voice", "Speech recognition and voices (provided by the voice add-on)."),
     ("tools", "Tools & Modules", "Plugins, agent runtimes and the optional panes."),
-    ("people", "People & Profiles", "Sign-in, session lengths and what a Restricted profile may do in a day."),
+    ("people", "People & Profiles", "Sign-in, session lengths, and what programs holding the API key may do."),
     ("appearance", "Appearance", "Defaults for a new device: theme, language and avatar style."),
     ("system", "System", "Network, backups, logs and limits."),
 )
@@ -233,21 +233,10 @@ _CORE: tuple[SettingDef, ...] = (
        "Let programs running on the same computer (agents, cron jobs) call the API without a key. "
        "Turn off once every program uses the machine API key.", "people", section="Machines",
        level="advanced", binding="file:security"),
-    _d("people.restricted_daily_turns", "integer", 200, "Restricted: replies per day",
-       "How many messages one Restricted device or profile may send per day.", "people",
-       section="Restricted limits", env="DISPATCH_DECOY_TURN_QUOTA", restart_required=True,
-       min=0, max=100000),
-    _d("people.restricted_daily_threads", "integer", 50, "Restricted: new chats per day",
-       "How many new conversations one Restricted device or profile may start per day.", "people",
-       section="Restricted limits", env="DISPATCH_DECOY_THREAD_QUOTA", restart_required=True,
-       min=0, max=100000),
-    _d("people.restricted_daily_feedback", "integer", 100, "Restricted: ratings per day",
-       "How many reply ratings one Restricted device or profile may give per day.", "people",
-       section="Restricted limits", level="advanced", env="DISPATCH_DECOY_FEEDBACK_QUOTA",
-       restart_required=True, min=0, max=100000),
-    _d("people.restricted_daily_upload_bytes", "integer", 200 * 1024 ** 2, "Restricted: uploads per day",
-       "How much in pictures and files one Restricted device or profile may upload per day.",
-       "people", section="Restricted limits", level="advanced", env="DISPATCH_DECOY_UPLOAD_QUOTA",
+    _d("people.machine_daily_upload_bytes", "integer", 200 * 1024 ** 2, "Machine uploads per day",
+       "How much programs holding the API key (agents, cron jobs) may upload through /api/upload "
+       "per day, all together, so a looping agent cannot fill the disk. People have no daily limit.",
+       "people", section="Machines", level="advanced", env="DISPATCH_MACHINE_UPLOAD_QUOTA",
        restart_required=True, min=0, unit="bytes"),
 
     # ========================== CHARACTERS =============================== #
@@ -449,8 +438,7 @@ UI_SECTIONS: tuple[tuple[str, str], ...] = (
     ("people.remember_device_days", "people#signin-rules"),
     ("people.lock_target", "people#signin-rules"),
     ("people.default_profile", "people#signin-rules"),
-    ("people.machine_loopback_trust", "people#machine"),
-    ("people.restricted_daily_", "people#restricted-limits"),
+    ("people.machine_", "people#machine"),
     ("characters.", "characters"),
     ("connections.default", "connections#list"),
     ("connections.image_jobs", "connections#images"),
@@ -481,7 +469,7 @@ PRESETS: dict[str, tuple[int, ...]] = {
     "people.session_timeout_user": (900, 1800, 3600, 2 * 3600, 4 * 3600, 8 * 3600, 86400, 7 * 86400),
     "people.session_timeout_basic": (600, 900, 1800, 3600, 2 * 3600, 4 * 3600),
     "people.remember_device_days": (0, 7, 30, 90, 180, 365),
-    "people.restricted_daily_upload_bytes": (0, *(n * 1024 ** 2 for n in (50, 100, 200, 500, 1024))),
+    "people.machine_daily_upload_bytes": (0, *(n * 1024 ** 2 for n in (50, 100, 200, 500, 1024))),
     "connections.image_cli_timeout": (60, 120, 300, 600, 1200),
     "tools.agent_timeout": (120, 300, 600, 900, 1800, 3600, 2 * 3600),
     "tools.mirror_poll": (2, 4, 10, 30, 60),
@@ -787,7 +775,7 @@ _SECTION_NAMES = {"appearance": "Appearance", "account": "Account", "voice": "Vo
                   "characters": "Characters", "connections": "AI & Connections",
                   "people": "People & Access", "plugins": "Plugins & Apps", "system": "System"}
 _ANCHOR_NAMES = {"network": "Network", "backups": "Backups", "signin-rules": "Sign-in rules",
-                 "machine": "Machine access", "restricted-limits": "Restricted limits",
+                 "machine": "Machine access",
                  "list": "Connections", "images": "Image generation", "agents": "Agents",
                  "lookups": "Built-in lookups"}
 

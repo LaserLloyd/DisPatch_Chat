@@ -6,8 +6,9 @@
 id: imagestudio
 title: Image Studio
 icon: images
-safe: false                     # operator only; Safe Mode never sees it
+safe: false                     # 3.x Safe-Mode key: accepted, never read
 order: 60
-# 3.0: who may use it. Members and up (Restricted profiles never see it).
+# Who may use it: Users and Admins by default; an Admin may switch it on for a Basic profile.
+# Each profile sees only its own pictures (the ledger carries owner_profile_id).
 permission: use_images
 env: []

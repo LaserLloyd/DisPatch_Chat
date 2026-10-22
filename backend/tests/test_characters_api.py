@@ -145,7 +145,7 @@ def test_only_manage_characters_may_change_characters(world, owner):
         assert c.patch("/api/characters/atlas", json={"name": "Nope"}).status_code in (401, 403)
         assert c.get("/api/characters/all").status_code in (401, 403)
         assert c.get("/api/starter-packs").status_code in (401, 403)
-        assert c.post("/api/starter-packs/animal_friends/install").status_code in (401, 403)
+        assert c.post("/api/starter-packs/assistants/install").status_code in (401, 403)
 
 
 # --------------------------------------------------------------------------- #
@@ -158,7 +158,7 @@ _PERSONAL = re.compile(r"(?i)\b(lisbon|portugal|wikka|nova|scout|atlas|lloyd|las
 
 def test_the_packs_load_and_every_character_fits_the_character_manifest():
     packs = starter_packs._load_all()
-    assert set(packs) == {"animal_friends", "assistants"}
+    assert set(packs) == {"assistants"}
     for p in packs.values():
         assert p["characters"]
         for c in p["characters"]:
@@ -166,28 +166,14 @@ def test_the_packs_load_and_every_character_fits_the_character_manifest():
             assert re.fullmatch(r"[A-Za-z0-9_-]{1,48}", c.id)
 
 
-def test_animal_friends_is_gentle_restricted_and_free_of_personal_references():
-    pack = starter_packs.get_pack("animal_friends")
-    assert pack["audience"] == "restricted" and len(pack["characters"]) == 6
-    for c in pack["characters"]:
-        assert c.audience == "restricted" and c.voice.startswith("builtin:"), c.id
-        blob = " ".join([c.name, c.description, c.persona, c.emoji, c.voice])
-        assert not _PERSONAL.search(blob), f"{c.id}: personal reference {_PERSONAL.search(blob).group(0)!r}"
-        low = " ".join(c.persona.lower().split())
-        assert "grown-up" in low and "personal detail" in low and "appropriate for young children" in low
-    raw = (ROOT / "backend" / "app" / "starter_packs" / "animal_friends.yaml").read_text(encoding="utf-8")
-    assert not _PERSONAL.search(raw.replace("`audience: restricted`", ""))
-
-
-def test_a_pack_can_be_installed_on_a_connection_for_chosen_profiles(world, owner, conn):
-    mia = world.person(owner, "Mia", "restricted")
-    r = owner.post("/api/starter-packs/animal_friends/install",
-                   json={"connection": conn, "model": "qwen", "only": ["otto", "pip"], "profiles": [mia["id"]]})
-    assert r.json()["installed"] == ["otto", "pip"]
-    e = _roster()["otto"]
-    assert e["profiles"] == [mia["id"]] and e["advisor"]["providers"][0]["connection"] == conn
-    assert "hazel" not in _roster()
-    assert owner.post("/api/starter-packs/animal_friends/install", json={"only": ["ghost"]}).status_code == 404
+def test_a_pack_can_be_installed_on_a_connection(world, owner, conn):
+    r = owner.post("/api/starter-packs/assistants/install",
+                   json={"connection": conn, "model": "qwen", "only": ["scribe", "dev"]})
+    assert r.json()["installed"] == ["scribe", "dev"]
+    e = _roster()["scribe"]
+    assert e["advisor"]["providers"][0]["connection"] == conn
+    assert "planner" not in _roster()
+    assert owner.post("/api/starter-packs/assistants/install", json={"only": ["ghost"]}).status_code == 404
     assert owner.post("/api/starter-packs/ghost/install").json()["error"]["code"] == "starter_pack_not_found"
 
 

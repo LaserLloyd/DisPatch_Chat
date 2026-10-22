@@ -1,9 +1,9 @@
 """Image Studio's backend (``apps/imagestudio/backend.py``).
 
-Mounted by the shell's app loader at ``/api/apps/imagestudio``. Every route is
-operator-only (``ctx.require_operator``) on top of the loader's own gate, so a
-locked (Safe-Mode) device, a cookieless caller and a forged cookie all get the
-uniform decoy 403 before any of this runs.
+Mounted by the shell's app loader at ``/api/apps/imagestudio``. Every route needs
+the app's permission (``use_images``, ``ctx.require_operator``) on top of the
+loader's own gate, so a profile without it, a cookieless caller and a forged
+cookie all get the uniform 403 before any of this runs.
 
 WHAT IT IS
 ----------
@@ -19,12 +19,21 @@ STORAGE
 -------
 Pictures are written into the same media store every generated chat picture
 uses (``config.MEDIA_DIR``, ``/media/<uuid>.<ext>``), so "send to chat" is the
-ordinary inject path and No-Image Mode / Safe Mode strip them by the rules they
-already have. Each picture gets one row in ``<data>/apps-data/imagestudio/
-images.jsonl`` (prompt, provider, model, ratio, seed, ...). The per-day count is
-read from that ledger. ``prompts.json`` holds the recent prompts; when it does
-not exist yet, an optional ``seed-prompts.json`` (never shipped in the repo)
-supplies the first list.
+ordinary inject path and No-Image Mode strips them by the rules it already has.
+Each picture gets one row in ``<data>/apps-data/imagestudio/images.jsonl``
+(prompt, provider, model, ratio, seed, ..., and ``owner_profile_id``: the profile
+that made it). The per-day count is read from that ledger.
+
+OWNERSHIP (4.0)
+---------------
+A profile's pictures are its own, Admins included: ``/state``, ``/images``,
+``/clear`` and a ``result`` reference read only the caller's rows (``_mine``). A
+row from before rows had an owner is the protected Admin's (``ownership``'s rule
+for an unassigned row). ``prompts-<profile id>.json`` holds a profile's recent
+prompts (the protected Admin falls back to the 3.x ``prompts.json``); when neither
+exists, an optional ``seed-prompts.json`` (never shipped in the repo) supplies the
+first list. Reset / downgrade (``profiles_service``) drop a profile's rows and its
+prompts file.
 
 CLEARING
 --------
@@ -38,7 +47,8 @@ back as ``expect``: if the set changed in between (a picture made in another
 tab), nothing is deleted and the answer is 409 ``changed`` so the page counts
 again and asks again.
 It needs ``manage_history`` on top of the app's ``use_images`` (the permission
-that lets a profile delete its conversations); Restricted never holds either.
+that lets a profile delete its conversations), and clears the caller's own
+pictures only.
 
 COST
 ----
@@ -119,19 +129,50 @@ def _load_json_list(path: Path) -> list[str] | None:
     return [s.strip() for s in doc if isinstance(s, str) and s.strip()][:RECENT_MAX]
 
 
-def _recent_prompts() -> list[str]:
-    own = _load_json_list(_dir() / "prompts.json")
+#: A profile id as it may appear in a file name (accounts mint hex/uuid ids).
+_PID_RE = re.compile(r"\A[A-Za-z0-9_-]{1,64}\Z")
+
+
+def _owner_of(request: Request) -> str | None:
+    """Whose pictures a request's new rows are (the uploader's profile; a machine's or an
+    open install's are the protected Admin's, as for every stamped resource)."""
+    from app import ownership
+    return ownership.for_request(request)
+
+
+def _mine(rows: list[dict], request: Request) -> list[dict]:
+    """The rows the caller may see: its own (``ownership.may_see_thread`` semantics - a row
+    with no owner is the protected Admin's; an open install sees all)."""
+    from app import ownership, policy
+    pr = policy.of(request).principal
+    return [r for r in rows if ownership.may_see_thread(pr, r.get("owner_profile_id"), write=True)]
+
+
+def _prompts_path(owner: str | None) -> Path:
+    if owner and _PID_RE.match(owner):
+        return _dir() / f"prompts-{owner}.json"
+    return _dir() / "prompts.json"
+
+
+def _recent_prompts(owner: str | None) -> list[str]:
+    from app import ownership
+    own = _load_json_list(_prompts_path(owner))
     if own is not None:
         return own
+    if owner and owner == ownership.protected_admin_id():
+        legacy = _load_json_list(_dir() / "prompts.json")     # the 3.x shared list was theirs
+        if legacy is not None:
+            return legacy
     return _load_json_list(_dir() / "seed-prompts.json") or []
 
 
-def _remember_prompt(prompt: str) -> None:
-    items = [p for p in _recent_prompts() if p != prompt]
+def _remember_prompt(prompt: str, owner: str | None) -> None:
+    items = [p for p in _recent_prompts(owner) if p != prompt]
     items.insert(0, prompt)
-    tmp = _dir() / "prompts.json.tmp"
+    dest = _prompts_path(owner)
+    tmp = dest.with_name(dest.name + ".tmp")
     tmp.write_text(json.dumps(items[:RECENT_MAX], ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, _dir() / "prompts.json")
+    os.replace(tmp, dest)
 
 
 def _today() -> str:
@@ -234,7 +275,7 @@ def _media_file(name: str) -> Path | None:
     return path if path.is_file() else None
 
 
-def _reference_data_url(ref: dict) -> str:
+def _reference_data_url(ref: dict, request: Request) -> str:
     kind = str(ref.get("kind") or "")
     if kind == "data_url":
         s = str(ref.get("data") or "")
@@ -253,7 +294,8 @@ def _reference_data_url(ref: dict) -> str:
         return _to_reference(path.read_bytes())
     if kind == "result":
         iid = str(ref.get("id") or "")
-        row = next((r for r in _read_ledger() if r["id"] == iid), None) if IMAGE_ID_RE.match(iid) else None
+        row = (next((r for r in _mine(_read_ledger(), request) if r["id"] == iid), None)
+               if IMAGE_ID_RE.match(iid) else None)
         m = MEDIA_URL_RE.match(str((row or {}).get("url") or ""))
         path = _media_file(m.group(1)) if m else None
         if path is None:
@@ -316,7 +358,7 @@ def build(ctx):
     async def state(request: Request):
         from app import policy
         providers, default = _provider_rows()
-        rows = await asyncio.to_thread(_read_ledger)
+        rows = _mine(await asyncio.to_thread(_read_ledger), request)
         days: dict[str, int] = {}
         for r in rows:
             days[r.get("day", "")] = days.get(r.get("day", ""), 0) + 1
@@ -327,7 +369,7 @@ def build(ctx):
             "prompt_max": PROMPT_MAX,
             "today": _today(), "today_count": days.get(_today(), 0),
             "days": recent_days, "total": len(rows),
-            "prompts": await asyncio.to_thread(_recent_prompts),
+            "prompts": await asyncio.to_thread(_recent_prompts, _owner_of(request)),
             "busy": _lock.locked(),
             # "Clear from here down" is offered only to a profile that may delete.
             "can_clear": policy.of(request).can("manage_history"),
@@ -337,12 +379,12 @@ def build(ctx):
         }
 
     @router.get("/images", dependencies=op)
-    async def images(limit: int = Query(60, ge=1, le=200)):
-        rows = await asyncio.to_thread(_read_ledger)
+    async def images(request: Request, limit: int = Query(60, ge=1, le=200)):
+        rows = _mine(await asyncio.to_thread(_read_ledger), request)
         return {"images": [_public_row(r) for r in rows[-limit:]]}   # newest last
 
     @router.post("/generate", dependencies=op)
-    async def generate(body: GenerateIn):
+    async def generate(body: GenerateIn, request: Request):
         prompt = body.prompt.strip()
         if not prompt:
             raise HTTPException(422, "Write a prompt first")
@@ -372,7 +414,7 @@ def build(ctx):
         wants_ref = bool(body.reference)
         if wants_ref and not caps["reference"]:
             raise HTTPException(422, "This provider does not take a reference image")
-        reference = _reference_data_url(body.reference) if wants_ref else None
+        reference = _reference_data_url(body.reference, request) if wants_ref else None
         if _lock.locked():
             raise HTTPException(409, "A generation is already running")
         async with _lock:
@@ -388,7 +430,7 @@ def build(ctx):
             rows = await asyncio.to_thread(
                 _store, blobs, prompt, pid, res.model, ratio,
                 body.seed if caps["seed"] else None,
-                bool(body.optimizer and caps["optimizer"]), wants_ref)
+                bool(body.optimizer and caps["optimizer"]), wants_ref, _owner_of(request))
         return {"images": [_public_row(r) for r in rows], "asked": n}
 
     @router.post("/clear", dependencies=op)
@@ -402,10 +444,15 @@ def build(ctx):
             raise HTTPException(409, "A generation is running; try again when it is done")
         async with _lock:
             rows = await asyncio.to_thread(_read_ledger)
-            split = _clear_rows(rows, body.id, body.order)
+            # The caller's own pictures only: "this one and everything after it" in the
+            # order the caller's page shows them. Everyone else's rows are kept untouched.
+            mine = _mine(rows, request)
+            split = _clear_rows(mine, body.id, body.order)
             if split is None:
                 raise HTTPException(404, "That picture is already gone")
-            kept, removed = split
+            _kept_mine, removed = split
+            gone = {id(r) for r in removed}
+            kept = [r for r in rows if id(r) not in gone]
             urls = [str(r.get("url") or "") for r in removed]
             in_chat = await ctx.db.media_urls_in_messages(urls)
             still_used = in_chat | {str(r.get("url") or "") for r in kept}
@@ -470,8 +517,9 @@ def build(ctx):
 
 
 def _store(blobs: list[bytes], prompt: str, provider: str, model: str, ratio: str,
-           seed: int | None, optimizer: bool, reference: bool) -> list[dict]:
-    """Write the pictures into the media store and the ledger (one row each)."""
+           seed: int | None, optimizer: bool, reference: bool, owner: str | None) -> list[dict]:
+    """Write the pictures into the media store and the ledger (one row each, stamped with
+    ``owner_profile_id``)."""
     from app import config
 
     config.MEDIA_DIR.mkdir(parents=True, exist_ok=True)
@@ -489,9 +537,10 @@ def _store(blobs: list[bytes], prompt: str, provider: str, model: str, ratio: st
             "id": iid, "url": f"/media/{name}", "prompt": prompt, "provider": provider,
             "model": model, "ratio": ratio, "seed": seed, "optimizer": optimizer,
             "reference": reference, "batch": batch,
-            "created_at": now.isoformat(timespec="seconds"), "day": _today()})
+            "created_at": now.isoformat(timespec="seconds"), "day": _today(),
+            "owner_profile_id": owner})
     with _ledger().open("a", encoding="utf-8") as f:
         f.write("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
-    _remember_prompt(prompt)
+    _remember_prompt(prompt, owner)
     log.info("image studio: %d picture(s) from %s/%s", len(rows), provider, model)
     return rows

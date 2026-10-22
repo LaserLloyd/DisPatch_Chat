@@ -33,10 +33,10 @@ everything it registered is rolled back. **The shell never fails to boot
 because of an extension.**
 
 Security: every gate stays here. ``include_router`` puts the operator
-dependency on every route, refuses websocket routes and adds the prefix to the
-Safe-Mode block list and the machine-inbound exclusion. ``thread_websocket``
-runs Origin==Host → unlocked session → thread and non-safe bot → slots, all
-before ``accept`` (HTTP middleware never sees a websocket), and hands the
+dependency on every route, refuses websocket routes and keeps the prefix off the
+machine-inbound surface. ``thread_websocket`` runs Origin==Host → the caller
+(a session, else the lock-target default profile) → its thread and a character it
+may use → slots, all before ``accept`` (HTTP middleware never sees a websocket), and hands the
 extension only a gated socket. ``/ext/<id>/…`` serves an allowlist of asset
 types, operator only. This module does not import ``main``; main lends what an
 extension may reach through :class:`Hooks`.
@@ -96,7 +96,9 @@ BOT_FIELDS = {"voice": 80, "voice_rp": 32}
 MODELS_DIRNAME = "models"
 LEGACY_MODELS_DIRNAME = "speech-models"
 
-DECOY_BODY = {"detail": "Unlock for full access", "decoy": True}
+FORBIDDEN_BODY = {"detail": "Your profile does not have permission to do that.",
+                  "error": {"code": "permission_denied",
+                            "message": "Your profile does not have permission to do that."}}
 NOT_FOUND = {"detail": "Not found"}
 
 #: /ext/<id>/<path>: what may be served, and as what. Documents (html, htm,
@@ -156,12 +158,9 @@ FRAME_QUEUE_MAX = 256
 #: replayed to every voice chat for the rest of the process).
 STREAM_STALE_S = 15 * 60
 STREAM_TEXT_MAX = 64 * 1024
-#: ``ctx.locked_status``: what a locked device may read about an extension.
-LOCKED_STATUS_KEYS = 16
-LOCKED_STATUS_STR = 80
-#: A thread stays "locked" this long after its last locked extension socket
-#: closed: a spoken turn committed on hang-up still runs locked (fail closed).
-LOCKED_GRACE_S = 120.0
+#: A thread's last extension caller is remembered this long after its socket closed: a
+#: spoken turn committed on hang-up is still checked against that person's dispatch_agents.
+HANGUP_GRACE_S = 120.0
 
 
 # --------------------------------------------------------------------------- #
@@ -199,7 +198,6 @@ class BotView:
     """The only bot shape an extension sees: no api/provider blocks."""
     id: str
     name: str
-    safe: bool
     voice: str
     voice_rp: str
     backend: Backend | None
@@ -254,11 +252,6 @@ class ThreadSocket:
     #: half-open client never answers the close frame, so the extension's
     #: receive loop may not wake on its own.
     on_replaced: Callable[[Callable[[], Any]], None] = lambda fn: None
-    #: Additive (2.3.4): the socket came from a LOCKED (Safe-Mode) device — a
-    #: `safe` bot's thread, ``token`` None. The host stamps every turn submitted
-    #: for its thread ``locked`` itself (:func:`turn_locked`); an extension
-    #: reads this only to show less (no settings, nothing that writes).
-    locked: bool = False
     #: Additive (4.0): the profile behind the socket - the principal's profile id, which is
     #: the thread's owner by construction (WP-CORE fills it; None until then, and for an
     #: open install). The voice add-on resolves a personal bot's voice with it.
@@ -294,7 +287,7 @@ def bot_view(bot) -> BotView | None:
         return None
     backend = bot_backend_of(bot)
     owner, has_persona = _persona_facts(bot, backend)
-    return BotView(id=bot.id, name=bot.name, safe=bool(bot.safe),
+    return BotView(id=bot.id, name=bot.name,
                    voice=str(getattr(bot, "voice", "") or ""),
                    voice_rp=str(getattr(bot, "voice_rp", "") or ""),
                    backend=backend, owner=owner, has_persona=has_persona,
@@ -331,11 +324,6 @@ class Hooks:
     replies_after: Callable[..., Awaitable[list | None]] | None = None
     note_heard: Callable[..., Awaitable[bool]] | None = None
     counters: Callable[[], dict] = dict
-    #: The budget identity of a websocket's client (main._ws_client_ip: the
-    #: same forwarded-header rule the REST quotas use). A locked device's
-    #: extension turns are charged to it (locked_client_ip).
-    client_ip: Callable[[Any], str] = lambda ws: (
-        ws.client.host if getattr(ws, "client", None) else "?")
 
 
 _hooks = Hooks()
@@ -387,7 +375,6 @@ class Extension:
     validators: dict[str, Callable[[str], None]] = field(default_factory=dict)
     startup: list[tuple[Callable[[], Any], bool]] = field(default_factory=list)
     shutdown: list[Callable[[], Any]] = field(default_factory=list)
-    locked_status: Callable[[], Any] | None = None
     ctx: ExtensionContext | None = None
     _assets: tuple[tuple, str] | None = None
 
@@ -432,41 +419,6 @@ class Extension:
             d["detail"] = scrub_detail(self.detail)
         return d
 
-    def locked_public(self) -> dict:
-        """The row a LOCKED device gets (2.3.4): what the loader needs to mount
-        the frontend, plus the extension's own ``locked_status`` — never a
-        detail, a tools list or anything an operator page shows."""
-        d = self.public(operator=False)
-        d.pop("tools", None)
-        d.pop("live_tools", None)
-        d["locked_status"] = self.read_locked_status() if self.ok else None
-        return d
-
-    def read_locked_status(self) -> dict | None:
-        """``ctx.locked_status(fn)``'s answer, cut to flat scalars (bool, int,
-        float, a string ≤ LOCKED_STATUS_STR chars) under string keys, at most
-        LOCKED_STATUS_KEYS of them. None when unset or when it raises."""
-        fn = self.locked_status
-        if fn is None:
-            return None
-        try:
-            raw = fn()
-        except Exception:
-            log.exception("ext %s: locked_status failed", self.id)
-            return None
-        if not isinstance(raw, Mapping):
-            return None
-        out: dict = {}
-        for k, v in raw.items():
-            if len(out) >= LOCKED_STATUS_KEYS or not isinstance(k, str) or len(k) > 40:
-                continue
-            if isinstance(v, bool) or v is None:
-                out[k] = v
-            elif isinstance(v, (int, float)):
-                out[k] = v
-            elif isinstance(v, str):
-                out[k] = v[:LOCKED_STATUS_STR]
-        return out
 
 
 _all: list[Extension] = []
@@ -517,8 +469,8 @@ def _ok() -> list[Extension]:
 
 
 def owns_path(path: str) -> bool:
-    """Does an extension own this API path? (Safe-Mode block list, and never
-    on the machine-inbound surface: voice recordings are not agent business.)"""
+    """Does an extension own this API path? (Its routes carry the add-on requirement, and
+    are never on the machine-inbound surface: voice recordings are not agent business.)"""
     for e in _ok():
         for p in e.prefixes:
             if path == p or path.startswith(p + "/"):
@@ -1037,16 +989,6 @@ class ExtensionContext:
         self._check_open("on_startup")
         self._ext.startup.append((fn, bool(thread)))
 
-    def locked_status(self, fn: Callable[[], Mapping[str, Any]]) -> None:
-        """Additive (2.3.4): what a LOCKED device may read about this
-        extension, served in its ``GET /api/extensions`` row as
-        ``locked_status`` (flat scalars only, see Extension.read_locked_status).
-        Called per request, so keep it cheap; never put a secret in it."""
-        self._check_open("locked_status")
-        if not callable(fn):
-            raise ValueError("locked_status needs a callable")
-        self._ext.locked_status = fn
-
     def on_shutdown(self, fn: Callable[[], Any]) -> None:
         self._check_open("on_shutdown")
         self._ext.shutdown.append(fn)
@@ -1120,8 +1062,8 @@ SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 def require_operator(request: Request) -> None:
-    """The dependency on every extension route: a live PIN session, or anyone
-    when no PIN exists. Never Safe Mode, never the machine-inbound tier.
+    """The dependency on every extension operator route: ``manage_plugins`` (an Admin), or
+    anyone when no PIN exists. Never the machine-inbound tier.
 
     For every method that can change something (POST, PUT, PATCH, DELETE) a
     browser request must also come from DisPatch's own page: a present Origin
@@ -1145,8 +1087,7 @@ def require_extension_route(request: Request) -> None:
     The same Origin rule as :func:`require_operator`, then the requirement the route
     table declares for this add-on path (``route_policy.extension_requirement``): the
     reads a voice user needs (``use_voice``, 2026-10-19: Members have voice) or, for
-    everything else, ``manage_plugins``. A Restricted caller is refused even the reads: a
-    locked device has its own view (``locked_status`` in /api/extensions)."""
+    everything else, ``manage_plugins``."""
     if request.method not in SAFE_METHODS:
         if not origin_ok(request.headers) or \
                 request.headers.get("sec-fetch-site", "").lower() in ("cross-site", "same-site"):
@@ -1722,8 +1663,8 @@ _subs: dict[str, list[_Subscription]] = {}
 
 def _deliverable(sub: _Subscription, frame: dict) -> dict | None:
     """The frame as the chat UI of the subscriber's session would get it: the
-    ConnectionManager's Safe-Mode redaction applies the instant that session
-    lapses (or a PIN appears on a PIN-less install)."""
+    ConnectionManager drops thread and character frames the instant that session lapses
+    (or a PIN appears on a PIN-less install)."""
     mgr = _hooks.manager()
     if mgr is None or not hasattr(mgr, "frame_for_token"):
         return frame
@@ -1873,27 +1814,20 @@ _NOT_GIVEN: Any = object()
 
 
 def _session_live_fn(token: str | None, thread_id: str, bot_id: str,
-                     locked: bool = False, *, device_id: str | None = None,
+                     *, device_id: str | None = None,
                      who: tuple[str, str | None] | None = None,
                      owner: Any = _NOT_GIVEN) -> Callable[[], bool]:
     """``ThreadSocket.session_live``: may this socket go on? The add-on asks it all through a
-    call (before each turn and while listening), so it also carries the Restricted rules that
-    change with the clock: a Restricted profile's quiet hours or used-up minutes end the call
-    (2026-10-19: no state - a voice call included - is less restricted than a Restricted
-    profile). ``who`` is (kind, profile id) of the caller at the handshake; a device-bound
-    caller (no session) is resolved again from its device, as the main /ws does."""
+    call (before each turn and while listening): the session (or the lock-target default
+    profile) must still resolve to the same caller, who must still own the thread and be able
+    to use its character. ``who`` is (kind, profile id) of the caller at the handshake."""
     def session_live() -> bool:
         if thread_id in _deleted_threads:
             return False
         bot = config.get_bot(bot_id)
         if bot is None:
             return False
-        if locked and not locked_may_see(bot):
-            # A locked device may stay as long as it could still see the
-            # thread: the bot is still `safe` and listed (what its chat list
-            # shows — main._safe_bot_ids).
-            return False
-        from . import policy
+        from . import characters, policy
         if who is None:
             # Opened on an unclaimed install; claimed since = refuse (the client reconnects).
             return not policy.claimed()
@@ -1913,16 +1847,11 @@ def _session_live_fn(token: str | None, thread_id: str, bot_id: str,
             from . import ownership
             if not ownership.may_see_thread(pr, owner, write=True):
                 return False
-        return _restricted_limits_ok(pr)
+        # The character rule, re-asked: taken off the profile's household list mid-call (or a
+        # use_voice switched off) ends the call, as it would refuse a new one.
+        return pr.can(Permission.USE_VOICE) and (characters.may_use(bot, pr)
+                                                 or _only_agents_missing(bot, pr))
     return session_live
-
-
-def _restricted_limits_ok(principal) -> bool:
-    """False while a Restricted PROFILE is in its quiet hours or out of minutes (app/limits.py)."""
-    if principal is None or principal.kind != "profile" or not principal.is_restricted:
-        return True
-    from . import limits
-    return limits.check(principal) is None
 
 
 def _ws_device_id(ws) -> str | None:
@@ -1933,44 +1862,6 @@ def _ws_device_id(ws) -> str | None:
     except Exception:
         tok = None
     return auth.device_hash(tok) if tok and 16 <= len(tok) <= 128 else None
-
-
-def locked_may_see(bot) -> bool:
-    """May a LOCKED device use this bot's threads? The same rule its chat list
-    and the main /ws follow (main._safe_bot_ids): flagged `safe` (the Bots
-    tab's "Show locked"). Any other bot's thread is not one a locked device
-    can see, so it gets no extension socket on it either."""
-    return bool(bot is not None and bot.safe)
-
-
-#: thread id -> [open locked extension sockets, monotonic time the last
-#: closed, the budget identity (client ip) of the last locked socket opened].
-_locked_threads: dict[str, list] = {}
-
-
-def _locked_open(thread_id: str, client_ip: str = "?") -> None:
-    row = _locked_threads.setdefault(thread_id, [0, 0.0, "?"])
-    row[0] += 1
-    row[2] = client_ip or "?"
-
-
-def _locked_closed(thread_id: str) -> None:
-    row = _locked_threads.get(thread_id)
-    if row is None:
-        return
-    row[0] = max(0, row[0] - 1)
-    row[1] = time.monotonic()
-
-
-def locked_client_ip(thread_id: str) -> str | None:
-    """The budget identity to charge an extension turn on this thread to: the
-    client ip of the locked device whose extension socket is OPEN on it, else
-    None. Only while one is open — a turn in the LOCKED_GRACE_S window after
-    it closed runs locked (turn_locked) but is nobody's budget to spend."""
-    row = _locked_threads.get(thread_id)
-    if row is None or row[0] <= 0:
-        return None
-    return str(row[2] or "?")
 
 
 def runs_agent(bot) -> bool:
@@ -1984,9 +1875,8 @@ def runs_agent(bot) -> bool:
 
 def caller_may_dispatch(principal) -> bool:
     """Does the person whose turn it is hold ``dispatch_agents``? None (an unclaimed /
-    open install) and a machine (a cron, an on-box script) count as yes; a Restricted
-    caller never does (its turns run locked anyway). An advisor acts on its research /
-    handoff markers only when this is true (advisor.run_turn(dispatch=...))."""
+    open install) and a machine (a cron, an on-box script) count as yes. An advisor acts on
+    its research / handoff markers only when this is true (advisor.run_turn(dispatch=...))."""
     if principal is None or principal.kind in ("open", "machine"):
         return True
     return bool(principal.can(Permission.DISPATCH_AGENTS))
@@ -1996,18 +1886,10 @@ def may_dispatch(principal, bot) -> bool:
     """May ``principal`` start a turn on ``bot``? The ONE rule every turn entry point
     applies (typed /ws sends, retries, regenerate, edit & re-run, extension turns, app
     turns): an agent-backed character needs ``dispatch_agents``. No principal = an
-    unclaimed/open install, where everyone is the owner.
-
-    A Restricted caller is exempt, and that is NOT because its turn is harmless: on a
-    gateway character ``TurnOptions.locked`` changes nothing - the agent runs with its
-    own OpenClaw configuration (tools included). What protects a Restricted caller is
-    audience curation: it only ever reaches characters the Owner marked for it
-    (audience ``restricted``/``all``, ``safe``), and a gateway character there must be
-    one whose agent is safe to hand to a child (docs/security.md). An advisor's locked
-    turn does drop research/handoff and narrows its tools."""
+    unclaimed/open install, where everyone is the owner. Every role asks the same
+    question (4.0: a Basic profile has no exemption; an Admin switches dispatch_agents on
+    for a profile, with the warning that agents run on the host)."""
     if principal is None or not runs_agent(bot):
-        return True
-    if principal.is_restricted:
         return True
     return bool(principal.can(Permission.DISPATCH_AGENTS))
 
@@ -2018,7 +1900,7 @@ DISPATCH_REFUSED = ("Your profile may not run agents. Ask the Owner for the "
 #: Extension turns (``ctx.submit_turn``) carry no caller, so the host remembers WHO has a
 #: socket on each thread: thread id -> {socket key: (principal kind, profile id)} for the
 #: open sockets, and thread id -> (monotonic close time, (kind, profile id)) for the last
-#: one that closed (a turn committed on hang-up, LOCKED_GRACE_S). The permission is
+#: one that closed (a turn committed on hang-up, HANGUP_GRACE_S). The permission is
 #: re-checked on every submit, so a mid-call grant or revocation takes effect at once.
 _ext_callers: dict[str, dict[int, tuple[str, str | None]]] = {}
 _ext_last_closed: dict[str, tuple[float, tuple[str, str | None]]] = {}
@@ -2054,7 +1936,7 @@ def _who_may_dispatch(who: tuple[str, str | None]) -> bool:
 def turn_dispatch_refused(thread_id: str) -> bool:
     """Is an extension turn on this thread asked for by someone without dispatch_agents?
     While sockets are open: True if any open socket's person lacks it NOW. With none
-    open: the person whose socket closed last, within LOCKED_GRACE_S (the turn a hang-up
+    open: the person whose socket closed last, within HANGUP_GRACE_S (the turn a hang-up
     commits). Otherwise False (no extension caller: the extension's own doing)."""
     open_ = _ext_callers.get(thread_id)
     if open_:
@@ -2062,24 +1944,9 @@ def turn_dispatch_refused(thread_id: str) -> bool:
     last = _ext_last_closed.get(thread_id)
     if last is None:
         return False
-    if time.monotonic() - last[0] < LOCKED_GRACE_S:
+    if time.monotonic() - last[0] < HANGUP_GRACE_S:
         return not _who_may_dispatch(last[1])
     _ext_last_closed.pop(thread_id, None)
-    return False
-
-
-def turn_locked(thread_id: str) -> bool:
-    """Must an extension turn on this thread run locked? True while a locked
-    device's extension socket is open on it, and for LOCKED_GRACE_S after the
-    last one closed (a turn committed on hang-up). Fail closed: an unlocked
-    device's voice turn on the same thread in that window runs locked too —
-    the restricted answer, never the reverse."""
-    row = _locked_threads.get(thread_id)
-    if row is None:
-        return False
-    if row[0] > 0 or time.monotonic() - row[1] < LOCKED_GRACE_S:
-        return True
-    _locked_threads.pop(thread_id, None)
     return False
 
 
@@ -2107,12 +1974,10 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
     if not origin_ok(ws.headers):
         await ws.close(code=POLICY)
         return
-    # 2. The tier, as the main /ws decides it: a live unlocked session when a
-    # PIN is set, else a LOCKED (Safe-Mode) device (pre-accept).
+    # 2. The caller, as the main /ws decides it (pre-accept).
     from . import characters, policy
     cfg = auth.load()
     token = None
-    locked = False
     principal = None
     device_id = None
     if not policy.claimed(cfg):
@@ -2140,31 +2005,21 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
         if not principal.can(Permission.USE_VOICE):
             await ws.close(code=POLICY)        # a profile without voice
             return
-        if not _restricted_limits_ok(principal):
-            await ws.close(code=POLICY)        # quiet hours / today's minutes are up
-            return
         token = session.token if session is not None else None
-        # A Restricted caller (a profile or an anonymous guest) is the old locked device:
-        # same redaction, same safe-character rule; a profile's budget is its own.
-        locked = principal.is_restricted
-    # 3. The thread exists, and a locked device can see it: only a `safe`
-    # bot's threads, the same rule its chat list follows (pre-accept, the same
-    # 1008 as an unknown thread). Since 2.3.4 a locked device may use voice on
-    # them (the owner: "if it's enabled it also works in safe mode"); its turns
-    # run locked like a typed Safe-Mode send (turn_locked).
+    # 3. The thread exists, the caller owns it and may use its character (pre-accept, the
+    # same 1008 as an unknown thread).
     db = _hooks.db()
     thread = await db.get_thread(thread_id) if db is not None else None
     bot = config.get_bot(thread.bot_id) if thread is not None else None
     from . import ownership
     if (thread is None or bot is None or thread_id in _deleted_threads
-            or (locked and not locked_may_see(bot))
             or (principal is not None and not characters.may_use(bot, principal)
                 and not _only_agents_missing(bot, principal))
             or (principal is not None
                 and not ownership.may_see_thread(principal, getattr(thread, "owner_profile_id", None),
                                                  write=True))):
-        # may_use: a character made for other profiles (its `profiles` list) is closed to
-        # this one here exactly as in the roster, /ws and the REST thread routes.
+        # may_use: a character this profile may not use (off its household list, another
+        # profile's personal one) is closed here exactly as in the roster, /ws and REST.
         # ownership (4.0): a voice call runs turns and hears every reply in the thread, so it
         # is the thread OWNER's only - the same 1008 as a thread that does not exist.
         await ws.close(code=POLICY)
@@ -2207,46 +2062,27 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
     slots.append(me)
     _open_total[name] = _open_total.get(name, 0) + 1
 
-    restricted_profile = principal is not None and principal.kind == "profile" and principal.is_restricted
-
     def touch() -> None:
         if token is not None:
             auth.touch_session(token)
-        if restricted_profile:
-            # A voice call is active time like any request: count it toward minutes per day.
-            from . import limits
-            with contextlib.suppress(Exception):
-                limits.note_active(principal)
 
     sock = ThreadSocket(
         thread=thread, bot=bot_view(bot), token=token,
         session_live=_session_live_fn(
-            token, thread_id, bot.id, locked, device_id=device_id if principal is not None else None,
+            token, thread_id, bot.id, device_id=device_id if principal is not None else None,
             who=(principal.kind, principal.profile_id) if principal is not None else None,
             owner=getattr(thread, "owner_profile_id", None)),
         touch=touch,
         close_unavailable=lambda reason: _accept_then_close(ws, UNAVAILABLE, reason),
-        on_replaced=me.replaced.append, locked=locked,
+        on_replaced=me.replaced.append,
         # 4.0 voice host contract: the principal's profile, which is the thread's owner by
         # construction (the ownership check above). None on an open install.
         profile_id=(principal.profile_id or None) if principal is not None else None)
-    if locked:
-        # Whose daily budget this socket's turns spend: a Restricted profile's own (it follows
-        # the person), else the anonymous device's address (main._budget_subject).
-        if restricted_profile:
-            client_ip = str(principal.profile_id)
-        else:
-            try:
-                client_ip = str(_hooks.client_ip(ws) or "?")
-            except Exception:
-                client_ip = "?"
-        _locked_open(thread_id, client_ip)
     # Remembered for ctx.submit_turn, which is told no caller: whose socket this is, so an
     # extension turn is checked against that person's dispatch_agents at submit time (an
-    # advisor's markers; defence in depth behind 3b for an agent character). Restricted
-    # callers run locked and are not recorded.
+    # advisor's markers; defence in depth behind 3b for an agent character).
     who = None
-    if principal is not None and not principal.is_restricted:
+    if principal is not None:
         who = (principal.kind, principal.profile_id)
         _caller_open(thread_id, id(me), who)
     try:
@@ -2270,8 +2106,6 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
                 else:
                     await ws.close(code=INTERNAL)
     finally:
-        if locked:
-            _locked_closed(thread_id)
         if who is not None:
             _caller_closed(thread_id, id(me))
         cur = _slots.get((name, key))
@@ -2288,16 +2122,13 @@ async def thread_websocket_endpoint(ws: WebSocket, name: str, thread_id: str):
 
 @router.get("/api/extensions")
 def api_extensions(request: Request):
-    """Operator, or an authenticated on-box machine (the deploy check reads it
-    with a plain loopback curl); ``detail`` operators only. A locked device
-    (2.3.4) gets the mount rows and each one's ``locked_status`` only."""
-    if getattr(request.state, "decoy", False):
-        return {"extensions": [e.locked_public() for e in _all if e.ok], "api": EXT_API}
+    """Anyone who may chat, or an authenticated on-box machine (the deploy check reads it
+    with a plain loopback curl); ``detail`` operators only."""
     from . import policy
     operator = tools._is_operator(request)
     pol = policy.of(request)
     if not operator and not pol.machine and not pol.can(Permission.USE_CHAT):
-        return JSONResponse(DECOY_BODY, status_code=403)
+        return JSONResponse(FORBIDDEN_BODY, status_code=403)
     return {"extensions": [e.public(operator=operator) for e in _all], "mode": _mode,
             "api": EXT_API}
 
@@ -2374,10 +2205,9 @@ def _etag(p: Path, st: os.stat_result) -> str:
 def ext_static(request: Request, ext_id: str, rel: str):
     from . import policy
     if not policy.of(request).can(Permission.USE_VOICE):
-        # Anyone who may use voice downloads the add-on's public frontend (a
-        # Restricted profile too, since 2.3.4: voice on the characters it can see);
-        # a machine caller never does.
-        return JSONResponse(DECOY_BODY, status_code=403)
+        # Anyone who may use voice downloads the add-on's public frontend; a machine
+        # caller never does.
+        return JSONResponse(FORBIDDEN_BODY, status_code=403)
     ext = get(ext_id)
     if ext is None or ext.static_dir is None:
         return JSONResponse(NOT_FOUND, status_code=404)

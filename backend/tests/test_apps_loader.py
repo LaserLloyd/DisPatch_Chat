@@ -4,7 +4,7 @@ Contract: docs/design/2026-09-25-apps.md. An app is REPO code (or a data-dir
 package the operator explicitly trusted in tools.yaml) imported into the
 server process, so the interesting cases are the boundaries around it: a
 manifest that says more than the schema allows, a package that fails to
-import, a Safe-Mode caller, a disabled app, a static path that tries to leave
+import, a caller without the permission, a disabled app, a static path that tries to leave
 the package, a roster the operator already owns.
 
 Same hermetic style as the rest of tests/: throwaway data dir, nothing touches
@@ -320,20 +320,20 @@ def test_app_id_may_equal_its_own_bot_id(env):
 
 
 # --------------------------------------------------------------------------- #
-# Gating: decoy matrix, disabled, safe apps, machine callers
+# Gating: signed-out callers, disabled apps, machine callers
 # --------------------------------------------------------------------------- #
 
-def test_decoy_blocked_rules():
+def test_signed_out_blocked_rules():
     for method, path in (("GET", "/api/apps"), ("GET", "/api/apps/x"),
                          ("GET", "/api/apps/x/y"), ("POST", "/api/apps/x/y"),
                          ("GET", "/apps/x/"), ("GET", "/apps/x/app.js"),
                          ("HEAD", "/apps/x/"), ("GET", "/apps"),
                          ("GET", "/api/jobs"), ("POST", "/api/jobs/find"),
                          ("GET", "/api/apps/jobboard/months")):
-        assert main._decoy_blocked(method, path) is True, (method, path)
+        assert main._signed_out_blocked(method, path) is True, (method, path)
     # Not app paths at all — untouched by the app rule.
-    assert main._decoy_blocked("GET", "/api/appsettings") is False
-    assert main._decoy_blocked("GET", "/applesauce") is False
+    assert main._signed_out_blocked("GET", "/api/appsettings") is False
+    assert main._signed_out_blocked("GET", "/applesauce") is False
 
 
 def test_remote_machine_without_token_is_refused(env):
@@ -356,7 +356,7 @@ def test_loopback_machine_gets_require_access_but_not_require_operator(env):
     assert c.post("/api/apps/mach-test/echo", json={"a": 1}).json() == {"echo": {"a": 1}}
     assert c.post("/api/machtest/echo", json={"a": 2}).status_code == 200
     r = c.post("/api/apps/mach-test/admin")
-    assert r.status_code == 403 and r.json().get("decoy") is True
+    assert r.status_code == 403 and r.json()["error"]["code"] == "permission_denied"
 
 
 def test_operator_session_reaches_everything(env):
@@ -368,7 +368,7 @@ def test_operator_session_reaches_everything(env):
     assert c.get("/apps/op-test/").status_code == 200
 
 
-def test_disabled_app_is_404_for_the_operator_and_403_for_safe_mode(env):
+def test_disabled_app_is_404_for_the_operator_and_refused_signed_out(env):
     repo, load, make_client = env
     _write_app(repo, "off-test", {"api": {"legacy_prefix": "/api/offtest"}})
     load()
@@ -532,7 +532,7 @@ def test_app_context_data_dir_env_and_db(env, monkeypatch):
     assert ctx.log.name.endswith("ctx-test")
 
 
-def test_broadcast_requires_the_app_prefix_and_safe_mode_drops_it(env, monkeypatch):
+def test_broadcast_requires_the_app_prefix_and_the_scoper_needs_its_permission(env, monkeypatch):
     repo, load, _ = env
     _write_app(repo, "bc-test")
     (la,) = load()
@@ -546,8 +546,12 @@ def test_broadcast_requires_the_app_prefix_and_safe_mode_drops_it(env, monkeypat
     for bad in ({"type": "message"}, {"type": "app:other:x"}, {"x": 1}):
         with pytest.raises(ValueError):
             asyncio.run(la.ctx.broadcast(bad))
-    assert main.redact_for_decoy({"type": "app:bc-test:changed", "x": 1}) is None
-    assert main.redact_for_decoy({"type": "app:jobboard:job_updated", "job": {}}) is None
+    from app import policy
+    basic = policy.Principal(kind="profile", role="basic", profile_id="b", name="B",
+                             permissions=frozenset({"use_chat"}))
+    assert main.scope_frame_for_principal({"type": "app:bc-test:changed", "x": 1}, basic) is None
+    assert main.scope_frame_for_principal({"type": "app:jobboard:job_updated", "job": {}}, basic) is None
+    assert main.scope_frame_for_principal({"type": "app:bc-test:changed", "x": 1}, None) is None
 
 
 # --------------------------------------------------------------------------- #

@@ -620,11 +620,9 @@ async def create_task(body: AgentTaskIn, request: Request, _=_DISPATCH):
         # same rule for every role, Admins included.
         if info is None or not characters.may_use_id(info.get("bot_id"), pr):
             raise HTTPException(404, "Thread not found")
-        if info.get("restricted_visible", True):
-            # What the agent is asked and what it answers is posted into this chat; a Restricted
-            # profile can read this one, so the task cannot start from here.
-            return _problem(409, "task_thread_not_allowed",
-                            "Tasks cannot be assigned from a chat that Restricted profiles can read.")
+        # (3.x refused a chat a Restricted profile could read. 4.0: what the agent is asked and
+        # answers lands in the dispatcher's OWN chat - the ownership check above - and the shared
+        # default profile can never dispatch: the lock-target fence removes dispatch_agents.)
     try:
         row = await mgr.dispatch(agent=agent, prompt=body.prompt, owner=agents_service.principal_key(pr),
                                  origin_thread_id=thread_id, origin_message_id=body.origin_message_id,

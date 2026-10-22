@@ -92,12 +92,6 @@ def test_the_writer_drops_the_old_key_and_a_reload_round_trips(env):
 # Who sees what
 # --------------------------------------------------------------------------- #
 
-def test_extension_locked_gate_follows_safe_alone():
-    assert extensions.locked_may_see(config.Bot(id="a", name="A", safe=True, hide_unlocked=True))
-    assert not extensions.locked_may_see(config.Bot(id="b", name="B", hide_unlocked=True))
-    assert not extensions.locked_may_see(config.Bot(id="c", name="C"))
-
-
 # --------------------------------------------------------------------------- #
 # Writers: the two flags, and the old `visible` key from older clients
 # --------------------------------------------------------------------------- #

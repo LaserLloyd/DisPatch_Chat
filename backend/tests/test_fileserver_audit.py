@@ -3,7 +3,7 @@
 Covers the abuse surface flagged in review ("gets used a lot"): concurrent
 multi-file uploads, filename collisions + traversal + weird names, zero-byte
 files, the one-way-drop 403 gate across verbs, MIME/XSS defang on served
-files, chat-media Range support, and the Safe-Mode upload quota.
+files, chat-media Range support, and the machine upload guard.
 
 Hermetic style mirrors test_auth_gate.py: throwaway DB + monkeypatched data
 dirs, nothing touches the live data dir or ~/.openclaw.
@@ -46,9 +46,6 @@ def fs_env(tmp_path, monkeypatch):
     auth._cache = None
     auth._fail_count = 0
     auth._fail_until = 0.0
-    # reset the in-memory decoy quota accounting between tests
-    main._decoy_upload_used.clear()
-    main._decoy_upload_day = ""
     config._invalidate_bots_cache()
 
     temp_db = Database(tmp_path / "chats.db")
@@ -152,30 +149,31 @@ def _upload_fileserver(client):
     ("GET", "/download", {"Range": "bytes=0-3"}),
     ("OPTIONS", "/download", {}),
 ])
-def test_decoy_fileserver_read_blocked(fs_env, verb, suffix, headers):
-    """Safe Mode (PIN set, no session) can never pull a fileserver blob.
+def test_signed_out_fileserver_read_blocked(fs_env, verb, suffix, headers):
+    """A signed-out caller (PIN set, no session, no default profile) can never pull a
+    fileserver blob.
 
     One client: upload while no PIN is set (open), then set a PIN. The same
-    client carries no session cookie, so it is now a decoy — no second
+    client carries no session cookie, so it is now nobody — no second
     TestClient (which would bind the shared DB to a second event loop)."""
     make_client, _ = fs_env
     client = make_client()
     fid = _upload_fileserver(client)    # upload while open (no PIN yet)
-    auth.set_pin("1234")                # cookieless client is now a decoy
+    auth.set_pin("1234")                # cookieless client is now nobody
     r = client.request(verb, f"/api/files/{fid}{suffix}", headers=headers)
     assert r.status_code in (401, 403), f"{verb} {suffix} leaked: {r.status_code}"
 
 
 def test_unlocked_session_can_download_fileserver_blob(fs_env):
-    """The one-way drop is a SAFE-MODE rule, not a global one: an unlocked
-    (full-session) operator gets view + download — deliberate, README-advertised
-    behavior. Pinned here so a docs-driven 'fix' can't quietly delete the
-    feature (DP-AUTH-6: the docs, not the code, were wrong)."""
+    """The File Server is not write-only for its owner: a signed-in owner holding
+    files_read gets view + download — deliberate, README-advertised behavior.
+    Pinned here so a docs-driven 'fix' can't quietly delete the feature
+    (DP-AUTH-6: the docs, not the code, were wrong)."""
     make_client, _ = fs_env
     client = make_client()
     fid = _upload_fileserver(client)    # upload while open (no PIN yet)
     auth.set_pin("1234")
-    assert client.get(f"/api/files/{fid}/download").status_code in (401, 403)  # decoy
+    assert client.get(f"/api/files/{fid}/download").status_code in (401, 403)  # signed out
     assert client.post("/api/auth/unlock", json={"pin": "1234"}).status_code == 200
     r = client.get(f"/api/files/{fid}/download")
     assert r.status_code == 200, r.text
@@ -248,25 +246,36 @@ def test_media_serving_supports_range(fs_env):
 
 
 # --------------------------------------------------------------------------- #
-# Safe-Mode upload quota
+# The machine upload guard (people have no daily limit)
 # --------------------------------------------------------------------------- #
 
-def test_decoy_quota_enforced_sequentially(fs_env, monkeypatch):
-    """Serial decoy uploads stop at the daily byte budget (this DOES work)."""
+def _machine_request():
+    from types import SimpleNamespace
+
+    from app import policy
+    return SimpleNamespace(state=SimpleNamespace(policy=policy.Policy(policy.machine_principal("api_token"))),
+                           client=SimpleNamespace(host="1.2.3.4"))
+
+
+def test_machine_quota_enforced_sequentially(fs_env, monkeypatch):
+    """Serial machine uploads stop at the daily byte guard."""
     make_client, _ = fs_env
-    monkeypatch.setattr(main, "DECOY_UPLOAD_QUOTA", 3 * 1024 * 1024)  # 3MB
-    auth.set_pin("1234")
+    monkeypatch.setattr(main, "MACHINE_UPLOAD_QUOTA", 3 * 1024 * 1024)  # 3MB
     client = make_client()
+    token = client.post("/api/auth/api-token", json={"rotate": True}).json()["api_token"]
+    auth.set_pin("1234")
+    machine = make_client(("127.0.0.1", 50009))
+    machine.headers.update({"X-API-Key": token})
     chunk = b"z" * (1024 * 1024)   # 1MB each
-    codes = [client.post("/api/upload",
-                         files={"file": (f"s{i}.bin", chunk, "application/octet-stream")}
-                         ).status_code for i in range(6)]
+    codes = [machine.post("/api/upload",
+                          files={"file": (f"s{i}.bin", chunk, "application/octet-stream")}
+                          ).status_code for i in range(6)]
     assert 429 in codes, f"quota never tripped serially: {codes}"
 
 
 @pytest.mark.asyncio
-async def test_decoy_quota_not_bypassable_by_concurrency(fs_env, monkeypatch):
-    """FINDING F2 (FIXED): two decoy uploads from the same client that actually
+async def test_machine_quota_not_bypassable_by_concurrency(fs_env, monkeypatch):
+    """FINDING F2 (FIXED): two machine uploads that actually
     INTERLEAVE (each yields the loop between chunks) must not both admit a full
     quota's worth. The fix charges a shared live counter per-chunk and refunds
     on failure, so combined committed bytes stay within the budget.
@@ -276,12 +285,8 @@ async def test_decoy_quota_not_bypassable_by_concurrency(fs_env, monkeypatch):
     the concurrency the live server sees. Pre-fix this over-committed to ~4MB;
     post-fix one upload wins and the other is rejected 429."""
     _, tmp_path = fs_env
-    monkeypatch.setattr(main, "DECOY_UPLOAD_QUOTA", 3 * 1024 * 1024)  # 3MB
+    monkeypatch.setattr(main, "MACHINE_UPLOAD_QUOTA", 3 * 1024 * 1024)  # 3MB
     monkeypatch.setattr(main, "FILES_TOTAL_MAX", 0)   # isolate: only test the daily quota
-    main._decoy_upload_used.clear()
-    main._decoy_upload_day = ""
-
-    from types import SimpleNamespace
 
     class FakeUpload:
         def __init__(self, total, chunk):
@@ -295,8 +300,7 @@ async def test_decoy_quota_not_bypassable_by_concurrency(fs_env, monkeypatch):
             self.rem -= take
             return b"z" * take
 
-    req = SimpleNamespace(state=SimpleNamespace(decoy=True),
-                          client=SimpleNamespace(host="1.2.3.4"))  # same client
+    req = _machine_request()
     two_mb, half_mb = 2 * 1024 * 1024, 512 * 1024
 
     async def one(name):
@@ -310,8 +314,9 @@ async def test_decoy_quota_not_bypassable_by_concurrency(fs_env, monkeypatch):
     assert any(r.status_code == 429 for r in rejected), (
         f"quota bypassed by concurrency: {results}")
     # After failed uploads refund, the shared counter must never exceed budget.
-    used = main._decoy_upload_used.get("1.2.3.4", 0)
-    assert used <= main.DECOY_UPLOAD_QUOTA, f"overcommitted: {used} > quota"
+    from app import accounts
+    used = accounts.usage_get("machine", "upload_bytes")
+    assert used <= main.MACHINE_UPLOAD_QUOTA, f"overcommitted: {used} > quota"
 
 
 # --------------------------------------------------------------------------- #
@@ -355,8 +360,8 @@ def test_failed_upload_leaves_no_part(fs_env, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_operator_routes_deny_a_decoy_in_the_handler_itself(fs_env):
-    """These routes used to be protected ONLY by the `_decoy_blocked` prefix
+async def test_operator_routes_deny_nobody_in_the_handler_itself(fs_env):
+    """These routes used to be protected ONLY by the `_signed_out_blocked` prefix
     tuple in the middleware — their security was a string list in another
     function. Each now re-derives it, so calling the handler directly (a route
     remounted at a new path, a refactored middleware) still refuses. /api/files
@@ -364,19 +369,20 @@ async def test_operator_routes_deny_a_decoy_in_the_handler_itself(fs_env):
     from types import SimpleNamespace
 
     auth.set_pin("1234")
-    decoy = SimpleNamespace(state=SimpleNamespace(decoy=True, session=None,
-                                                  machine=False),
+    from app import policy
+    nobody = SimpleNamespace(state=SimpleNamespace(policy=policy.Policy(policy.nobody()),
+                                                  session=None, machine=False),
                             cookies={})
     calls = [
-        main.file_list(decoy),
-        main.file_delete("x", decoy),
-        main.file_wipe(decoy, {"before": "2026-01-01T00:00:00"}),
-        main.search_messages(decoy, q="secret"),
-        main.export_all(decoy),
-        main.recover_transcript(decoy, {"all": True}),
-        main.openclaw_sessions(decoy, bot_id="main"),
-        main.openclaw_transcript(decoy, bot_id="main", thread_id="t"),
-        main.openclaw_import_session(decoy, {"bot_id": "main", "session_key": "k"}),
+        main.file_list(nobody),
+        main.file_delete("x", nobody),
+        main.file_wipe(nobody, {"before": "2026-01-01T00:00:00"}),
+        main.search_messages(nobody, q="secret"),
+        main.export_all(nobody),
+        main.recover_transcript(nobody, {"all": True}),
+        main.openclaw_sessions(nobody, bot_id="main"),
+        main.openclaw_transcript(nobody, bot_id="main", thread_id="t"),
+        main.openclaw_import_session(nobody, {"bot_id": "main", "session_key": "k"}),
     ]
     for call in calls:
         with pytest.raises(main.HTTPException) as e:
@@ -389,13 +395,9 @@ async def test_client_disconnect_leaves_no_part_and_refunds_quota(fs_env, monkey
     """The cleanup used to live in `except HTTPException` / `except OSError`,
     and the two exceptions this path actually sees are neither: Starlette's
     ClientDisconnect (a phone walking out of range) and CancelledError. Both
-    left the .part on disk forever AND left the decoy's day charged."""
+    left the .part on disk forever AND left the machine's day charged."""
     _, tmp_path = fs_env
     monkeypatch.setattr(main, "FILES_TOTAL_MAX", 0)
-    main._decoy_upload_used.clear()
-    main._decoy_upload_day = ""
-
-    from types import SimpleNamespace
 
     class Disconnecting:
         def __init__(self):
@@ -407,13 +409,13 @@ async def test_client_disconnect_leaves_no_part_and_refunds_quota(fs_env, monkey
                 return b"z" * (256 * 1024)
             raise RuntimeError("client disconnected")   # not HTTPException/OSError
 
-    req = SimpleNamespace(state=SimpleNamespace(decoy=True),
-                          client=SimpleNamespace(host="9.9.9.9"))
+    req = _machine_request()
     with pytest.raises(RuntimeError):
         await main._stream_upload(Disconnecting(), tmp_path / "files", "gone.bin",
                                   max_size=100 * 1024 * 1024, request=req, quota=True)
     assert list((tmp_path / "files").glob("*.part")) == [], "leaked .part file"
-    assert main._decoy_upload_used.get("9.9.9.9", 0) == 0, "quota was not refunded"
+    from app import accounts
+    assert accounts.usage_get("machine", "upload_bytes") == 0, "quota was not refunded"
 
 
 @pytest.mark.asyncio

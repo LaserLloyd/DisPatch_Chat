@@ -275,8 +275,12 @@ def test_not_installed_is_reported_not_500(route_client, fake_svc, monkeypatch):
     assert r.json()["installed"] is False
 
 
-def test_redactor_drops_harness_state_frames():
-    assert main.redact_for_decoy({"type": "harness_state", "jobs": {}}) is None
+def test_the_scoper_drops_harness_state_frames_without_admin_system():
+    from app import policy
+    user = policy.Principal(kind="profile", role="user", profile_id="u", name="U",
+                            permissions=frozenset({"use_chat", "use_images"}))
+    assert main.scope_frame_for_principal({"type": "harness_state", "jobs": {}}, user) is None
+    assert main.scope_frame_for_principal({"type": "harness_state", "jobs": {}}, None) is None
 
 
 def test_status_reports_remote_url_only_when_configured(route_client, fake_svc, monkeypatch):

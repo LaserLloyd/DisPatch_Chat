@@ -492,6 +492,20 @@ def _owner_where(principal: Any, owner_ids: set[str | None] | None) -> tuple[str
     return ("" if frag == "1=1" else frag), params
 
 
+def _file_owner_where(owner_ids: set[str | None] | None) -> tuple[str, list]:
+    """The owner filter for a files query: ``None`` = no filter; a set = exactly those owners
+    (``None`` in it = the NULL-owner rows); an empty set matches nothing."""
+    if owner_ids is None:
+        return "", []
+    named = sorted(i for i in owner_ids if i is not None)
+    parts: list[str] = []
+    if named:
+        parts.append(f"owner_profile_id IN ({','.join('?' * len(named))})")
+    if None in owner_ids:
+        parts.append("owner_profile_id IS NULL")
+    return ("(" + " OR ".join(parts) + ")" if parts else "0=1"), named
+
+
 def _public_file(row) -> dict:
     """A files row as every caller has always seen it: without the owner column, which
     stays server-side (ask :meth:`Database.file_owner`)."""
@@ -1947,10 +1961,13 @@ class Database:
                 "size": size, "mime": mime, "created_at": created_at,
                 "source": source}
 
-    async def list_files(self) -> list[dict]:
+    async def list_files(self, *, owner_ids: set[str | None] | None = None) -> list[dict]:
+        """Every file - or, with ``owner_ids`` (4.0; ``ownership.readable_owner_ids``), only
+        those owners' (``None`` in the set = the NULL-owner rows, the protected Admin's)."""
+        frag, params = _file_owner_where(owner_ids)
         cur = await self.db.execute(
-            "SELECT * FROM files ORDER BY created_at DESC, rowid DESC"
-        )
+            f"SELECT * FROM files{' WHERE ' + frag if frag else ''} "
+            "ORDER BY created_at DESC, rowid DESC", params)
         rows = await cur.fetchall()
         return [_public_file(r) for r in rows]
 
@@ -1979,17 +1996,18 @@ class Database:
             await self.db.commit()
         return f
 
-    async def delete_files_before(self, cutoff_iso: str) -> list[dict]:
-        """Delete all files with created_at <= cutoff (inclusive). Returns them
-        so the caller can remove the blobs from disk."""
-        cur = await self.db.execute(
-            "SELECT * FROM files WHERE created_at <= ?", (cutoff_iso,)
-        )
+    async def delete_files_before(self, cutoff_iso: str, *,
+                                  owner_ids: set[str | None] | None = None) -> list[dict]:
+        """Delete all files with created_at <= cutoff (inclusive) - with ``owner_ids``, only
+        those owners' (see :meth:`list_files`). Returns them so the caller can remove the
+        blobs from disk."""
+        frag, params = _file_owner_where(owner_ids)
+        where = "created_at <= ?" + (f" AND {frag}" if frag else "")
+        args = [cutoff_iso, *params]
+        cur = await self.db.execute(f"SELECT * FROM files WHERE {where}", args)
         rows = [_public_file(r) for r in await cur.fetchall()]
         if rows:
-            await self.db.execute(
-                "DELETE FROM files WHERE created_at <= ?", (cutoff_iso,)
-            )
+            await self.db.execute(f"DELETE FROM files WHERE {where}", args)
             await self.db.commit()
         return rows
 

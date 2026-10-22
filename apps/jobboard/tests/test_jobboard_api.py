@@ -13,9 +13,8 @@ board became an app. Plan §10:
   * Profile recompute fires after each vote; GETs do not mutate
     profile.
   * Auth matrix: machine gets 200 on inbound-exempt, browser-with-
-    session gets 200 on session-only, decoy gets 403.
-  * Safe-Mode decoy on ``GET /api/jobs`` returns the empty shape
-    (no data leak).
+    session gets 200 on session-only, a caller without the permission
+    gets 403.
 
 Why both unit AND integration cover the same property: the unit
 suite (``test_jobboard_scoring.py``) keeps the score / dedup modules honest in
@@ -68,15 +67,18 @@ def sample_job_payload():
 class _FakeRequest:
     """Minimal stand-in for fastapi.Request used by the tier helpers.
 
-    Only the cookies / state attributes are read by the app's
-    ``_is_decoy`` and the shell's ``ctx.require_access`` — keep the surface
-    narrow and the rest fakeable. ``decoy``/``machine`` mirror what the auth
-    gate stamps on ``request.state``.
+    Only the cookies / state attributes are read by the shell's
+    ``ctx.require_access`` — keep the surface narrow and the rest fakeable.
+    ``machine`` mirrors what the auth gate stamps on ``request.state``;
+    ``nobody=True`` stamps the gate's verdict for a caller with no principal.
     """
-    def __init__(self, cookie=None, decoy=False, machine=False):
+    def __init__(self, cookie=None, machine=False, nobody=False):
         self.cookies = {"lc_session": cookie} if cookie else {}
         from types import SimpleNamespace
-        self.state = SimpleNamespace(decoy=decoy, machine=machine, session=None)
+        self.state = SimpleNamespace(machine=machine, session=None)
+        if nobody:
+            from app import policy
+            self.state.policy = policy.Policy(policy.nobody())
         self.method = "GET"
 
 
@@ -207,10 +209,10 @@ def test_require_access_passes_a_machine_caller(wired):
     jobs.CTX.require_access(_FakeRequest(machine=True))
 
 
-def test_require_access_rejects_a_decoy(wired):
+def test_require_access_rejects_a_caller_without_the_permission(wired):
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as ei:
-        jobs.CTX.require_access(_FakeRequest(decoy=True))
+        jobs.CTX.require_access(_FakeRequest(nobody=True))
     assert ei.value.status_code == 403
 
 
@@ -262,22 +264,13 @@ async def test_profile_recompute_fires_after_vote_not_after_get(wired,
 
 
 # --------------------------------------------------------------------------- #
-# Safe-Mode decoy -> empty shape on GET, 403 on write.
+# A caller without the app's permission -> 403 on write (the loader's gate refuses reads).
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio
-async def test_decoy_get_returns_empty_shape(wired, sample_job_payload, monkeypatch):
-    from dispatch_app_jobboard import create_job_from_dict, list_jobs
-    await create_job_from_dict(sample_job_payload)
-    req = _FakeRequest(decoy=True)
-    out = await list_jobs(req)
-    assert out == {"jobs": [], "next_cursor": None}
-
-
-@pytest.mark.asyncio
-async def test_decoy_write_is_403(wired, sample_job_payload):
-    """A decoy caller hitting the WRITE path gets 403 from
+async def test_a_caller_without_the_permission_cannot_write(wired, sample_job_payload):
+    """A caller without the app's permission hitting the WRITE path gets 403 from
     ``ctx.require_access`` (the auth gate refuses it a layer earlier too)."""
     from dispatch_app_jobboard import create_job_from_dict, vote
     from fastapi import HTTPException
@@ -285,7 +278,7 @@ async def test_decoy_write_is_403(wired, sample_job_payload):
     db = wired["_db"]
     job_id = (await db.list_jobs())[0]["job_id"]
     with pytest.raises(HTTPException) as ei:
-        await vote(job_id, jobs.VoteIn(signal="yes"), _FakeRequest(decoy=True))
+        await vote(job_id, jobs.VoteIn(signal="yes"), _FakeRequest(nobody=True))
     assert ei.value.status_code == 403
     assert (await db.get_job(job_id))["state"] == "pending"
 
@@ -311,9 +304,9 @@ def test_inbound_allowlist_includes_job_writes():
 def test_inbound_allowlist_includes_manage_verbs():
     """2026-09-15 — the OpenClaw audit lifts vote/applied/tags/archive
     onto the inbound tier so an on-box agent can manage a job end-to-end
-    without first obtaining a PIN-derived session cookie. The decoy
-    block at the ``/api/jobs`` prefix still keeps Safe-Mode browsers
-    out (see test_decoy_blocked_bars_jobs_paths). 2026-09-16 adds
+    without first obtaining a PIN-derived session cookie. The app's
+    permission still keeps signed-out browsers out (see
+    test_signed_out_blocked_bars_jobs_paths). 2026-09-16 adds
     ``feedback`` to the same tier.
     """
     assert main._is_inbound("POST", "/api/jobs/abc/vote") is True
@@ -337,16 +330,16 @@ def test_inbound_allowlist_includes_find():
     assert main._is_inbound("POST", "/api/jobs/find") is True
 
 
-def test_decoy_blocked_bars_jobs_paths():
-    """``_decoy_blocked`` belt-and-braces: a locked session must not
+def test_signed_out_blocked_bars_jobs_paths():
+    """``_signed_out_blocked`` belt-and-braces: a locked session must not
     reach ``/api/jobs*`` even if auth_gate misses it."""
-    assert main._decoy_blocked("GET", "/api/jobs") is True
-    assert main._decoy_blocked("GET", "/api/jobs/abc") is True
-    assert main._decoy_blocked("POST", "/api/jobs") is True
-    assert main._decoy_blocked("GET", "/api/jobs/feedback") is True
-    assert main._decoy_blocked("POST", "/api/jobs/abc/feedback") is True
-    assert main._decoy_blocked("GET", "/api/apps/jobboard") is True
-    assert main._decoy_blocked("GET", "/apps/jobboard/") is True
+    assert main._signed_out_blocked("GET", "/api/jobs") is True
+    assert main._signed_out_blocked("GET", "/api/jobs/abc") is True
+    assert main._signed_out_blocked("POST", "/api/jobs") is True
+    assert main._signed_out_blocked("GET", "/api/jobs/feedback") is True
+    assert main._signed_out_blocked("POST", "/api/jobs/abc/feedback") is True
+    assert main._signed_out_blocked("GET", "/api/apps/jobboard") is True
+    assert main._signed_out_blocked("GET", "/apps/jobboard/") is True
 
 
 # --------------------------------------------------------------------------- #
@@ -642,16 +635,6 @@ async def test_feedback_feed_merges_votes_and_comments(
     assert len(since_all["feedback"]) == len(out["feedback"])
     since_none = await list_feedback(_FakeRequest(), since="2999-01-01T00:00:00Z", limit=100)
     assert since_none["feedback"] == []
-
-
-@pytest.mark.asyncio
-async def test_feedback_feed_decoy_gets_empty_shape(wired, sample_job_payload,
-                                                    monkeypatch):
-    from dispatch_app_jobboard import create_job_from_dict, list_feedback
-
-    await create_job_from_dict(sample_job_payload)
-    out = await list_feedback(_FakeRequest(decoy=True), since=None, limit=100)
-    assert out == {"feedback": []}
 
 
 # --------------------------------------------------------------------------- #

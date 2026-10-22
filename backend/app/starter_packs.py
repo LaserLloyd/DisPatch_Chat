@@ -2,11 +2,12 @@
 
 A pack is a YAML file in ``app/starter_packs/`` (``schema: 1``, ``id``, ``name``, ``description``,
 ``audience``, optional ``defaults``, and ``characters``, each of which is a *Character manifest*
-- ``docs/contracts/manifests/character.schema.json``). Two ship with DisPatch:
+- ``docs/contracts/manifests/character.schema.json``). One ships with DisPatch:
 
-``animal_friends``  six gentle animal characters for children; ``audience: restricted``, no
-                    lookups, no quick actions, gentle built-in voices, no personal references
-``assistants``      four general helpers (explain, write, code, plan); ``audience: members``
+``assistants``      four general helpers (explain, write, code, plan)
+
+(``audience`` is a 3.x input, still accepted and stored, never used to decide who sees a
+character: 4.0 decides that with each profile's household list, ``characters.may_use``.)
 
 Installing a pack creates its characters as ordinary roster entries (so they can be edited,
 reordered and removed like any other) and is idempotent: a character whose id already exists is

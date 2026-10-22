@@ -145,7 +145,7 @@ def test_locking_shuts_the_route_again(route_client, no_real_probe):
 def test_prefix_is_in_the_full_session_deny_list():
     """Second, independent gate: the Safe-Mode path check refuses the whole
     /api/studioforge prefix regardless of what the route handler does."""
-    assert main._decoy_blocked("GET", "/api/studioforge/status") is True
+    assert main._signed_out_blocked("GET", "/api/studioforge/status") is True
 
 
 # --------------------------------------------------------------------------- #

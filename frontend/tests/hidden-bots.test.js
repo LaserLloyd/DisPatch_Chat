@@ -28,22 +28,22 @@ globalThis.localStorage = {
 
 const { hiddenHere, showHiddenBots, setShowHiddenBots } = await import('../static/js/menubots.js');
 
-const KID = { id: 'kids_lobster', name: 'Lulu', safe: true, hide_unlocked: true };
+const HIDDEN_BOT = { id: 'basic_bot', name: 'Pebble', safe: true, hide_unlocked: true };
 const ATLAS = { id: 'atlas', name: 'Atlas', safe: true, hide_unlocked: false };
 const reset = () => { store.clear(); broken = false; };
 
 test('an unlocked device hides a flagged bot and keeps the rest', () => {
   reset();
-  assert.equal(hiddenHere(KID, false), true);
+  assert.equal(hiddenHere(HIDDEN_BOT, false), true);
   assert.equal(hiddenHere(ATLAS, false), false);
   assert.equal(hiddenHere({ id: 'old' }, false), false, 'a bot without the field is shown');
 });
 
 test('Safe Mode ignores the flag: a locked device shows every safe bot it was sent', () => {
   reset();
-  assert.equal(hiddenHere(KID, true), false);
+  assert.equal(hiddenHere(HIDDEN_BOT, true), false);
   setShowHiddenBots(false);
-  assert.equal(hiddenHere(KID, true), false);
+  assert.equal(hiddenHere(HIDDEN_BOT, true), false);
 });
 
 test('the per-device opt-in brings hidden bots back, and is remembered', () => {
@@ -51,10 +51,10 @@ test('the per-device opt-in brings hidden bots back, and is remembered', () => {
   assert.equal(showHiddenBots(), false, 'off by default');
   assert.equal(setShowHiddenBots(true), true);
   assert.equal(store.get('dispatch-show-hidden-bots'), '1');
-  assert.equal(hiddenHere(KID, false), false);
+  assert.equal(hiddenHere(HIDDEN_BOT, false), false);
   assert.equal(setShowHiddenBots(false), false);
   assert.equal(store.has('dispatch-show-hidden-bots'), false, 'off removes the key');
-  assert.equal(hiddenHere(KID, false), true);
+  assert.equal(hiddenHere(HIDDEN_BOT, false), true);
 });
 
 test('storage that throws means hidden, never a crash', () => {
@@ -63,7 +63,7 @@ test('storage that throws means hidden, never a crash', () => {
   broken = true;
   assert.equal(showHiddenBots(), false);
   assert.equal(setShowHiddenBots(true), false);
-  assert.equal(hiddenHere(KID, false), true);
+  assert.equal(hiddenHere(HIDDEN_BOT, false), true);
   broken = false;
 });
 

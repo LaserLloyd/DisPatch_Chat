@@ -202,9 +202,9 @@ def test_sessionless_caller_is_refused_when_a_pin_is_set(llm_env, method, path, 
 
 @pytest.mark.parametrize("method,path,body", LLM_ROUTES)
 def test_decoy_is_blocked_by_the_middleware_too(llm_env, method, path, body):
-    """Belt-and-braces: the prefix is in _decoy_blocked, so a limited session is
+    """Belt-and-braces: the prefix is in _signed_out_blocked, so a limited session is
     turned away one layer before the route's own dependency runs."""
-    assert main._decoy_blocked(method, path) is True
+    assert main._signed_out_blocked(method, path) is True
     client = llm_env()
     _unlock(client)
     client.cookies.clear()
@@ -1058,14 +1058,14 @@ def test_a_turn_timeout_still_quotes_the_turn_timeout():
     assert f"{int(llm_api.READ_TIMEOUT_S)}s" in err.detail
 
 
-def test_default_prompt_is_family_framed_only_for_safe_bots():
-    """Content policy by tier: only a Safe-Mode bot gets the family framing;
-    an unlocked-only bot gets no content framing of ours."""
+def test_the_default_prompt_has_no_content_framing_whatever_the_safe_flag():
+    """4.0: no Restricted tier, so no tier-dependent framing - the 3.x ``safe`` flag changes
+    nothing about what a bot is told."""
     api = {"provider": "custom", "base_url": "http://127.0.0.1:9/v1", "model": "m"}
     safe = llm_api.resolve(config.Bot(id="s", name="S", safe=True, api=api))
-    private = llm_api.resolve(config.Bot(id="p", name="P", safe=False, api=api))
-    assert "family" in safe.system_prompt
-    assert "family" not in private.system_prompt.lower()
+    private = llm_api.resolve(config.Bot(id="p", name="S", safe=False, api=api))
+    assert safe.system_prompt == private.system_prompt
+    assert "family" not in safe.system_prompt.lower()
     # An operator's own prompt always wins, on either tier.
     own = llm_api.resolve(config.Bot(id="o", name="O", safe=True,
                                      api={**api, "system_prompt": "Be terse."}))

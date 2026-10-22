@@ -26,8 +26,9 @@ Nobody (4.0): an unsigned device on an install whose lock target is the profile 
 whose default profile is gone) is :func:`nobody` - not a principal kind but the absence of
 one (``kind="none"``). It holds nothing; every non-public route answers it 401
 ``signin_required`` and the client shows the sign-in screen with the profile tiles. The 3.x
-``anonymous`` guest and device binding are gone. ``Principal.is_restricted`` (= a
-Basic profile) lives until WP-DEL removes the Restricted tier.
+``anonymous`` guest and device binding are gone, and so is the Restricted tier: a Basic
+profile is an ordinary profile whose role holds fewer permissions (``contracts.permissions``),
+refused only by the named permission a route or handler asks for.
 """
 
 from __future__ import annotations
@@ -59,9 +60,8 @@ from .contracts.permissions import (
 SESSION_COOKIE = "lc_session"
 DEVICE_COOKIE = "lc_device"
 
-#: What every denied browser sees for a Restricted caller: the 2.x wording, so the
-#: frontend's lock handling and every existing client keep working.
-UNLOCK_DETAIL = "Unlock for full access"
+#: What a caller is told when its profile lacks the permission a route needs.
+DENIED_DETAIL = "Your profile does not have permission to do that."
 
 
 # --------------------------------------------------------------------------- #
@@ -78,16 +78,12 @@ class Requirement:
     public: bool = False                   # no credential needed (explicit PUBLIC marker)
     authenticated: bool = False            # any signed-in profile, whatever its role
     #: The role may lack ``permission`` and still reach the handler, which then MUST
-    #: narrow the answer to what the principal may see (a Restricted profile lists
-    #: only audience=restricted|all characters, only ``safe`` tools). The G5 test
-    #: exercises every scoped route with a Restricted session.
+    #: narrow the answer to what the principal may see (only the characters
+    #: ``characters.may_use`` allows, only the tools its ``use_tools:<id>`` grants name).
     scoped: bool = False
     note: str = ""
     #: What a signed-in person is told when the route is machine-only.
     denied_detail: str = ""
-    #: A Restricted caller is refused even though its role holds ``permission`` (the voice
-    #: add-on's user reads: a locked device has its own, reduced view).
-    not_restricted: bool = False
     #: 4.0 ownership: which owned thing the route's path parameter names, and so which owner
     #: check the handler runs - ``thread`` | ``message`` | ``character`` | ``file`` | ``task``
     #: - or ``none: <why>`` for a parameter that is not a per-profile resource. Set from
@@ -112,8 +108,6 @@ class Requirement:
             d["machine"] = list(self.machine)
         if self.scoped:
             d["scoped"] = True
-        if self.not_restricted:
-            d["not_restricted"] = True
         if self.owner_scoped:
             d["owner_scoped"] = self.owner_scoped
         if self.note:
@@ -125,11 +119,11 @@ PUBLIC = Requirement(public=True)
 
 
 def R(permission: Permission | str | None = None, *, machine: Iterable[MachineScope | str] = (),
-      scoped: bool = False, note: str = "", not_restricted: bool = False) -> Requirement:
+      scoped: bool = False, note: str = "") -> Requirement:
     perm = permission.value if isinstance(permission, Permission) else permission
     return Requirement(permission=perm,
                        machine=tuple(m.value if isinstance(m, MachineScope) else m for m in machine),
-                       scoped=scoped, note=note, not_restricted=not_restricted)
+                       scoped=scoped, note=note)
 
 
 def public(note: str) -> Requirement:
@@ -186,12 +180,6 @@ class Principal:
     @property
     def is_machine(self) -> bool:
         return self.kind == "machine"
-
-    @property
-    def is_restricted(self) -> bool:
-        """TRANSITIONAL shim until WP-DEL removes the Restricted tier: a Basic profile (the
-        3.x Restricted role). New code must not use it: ask for a named permission instead."""
-        return self.kind == "profile" and self.role == Role.BASIC.value
 
     @property
     def is_admin(self) -> bool:
@@ -329,24 +317,17 @@ def authorize(principal: Principal, req: Requirement) -> Decision:
     if req.authenticated:
         if principal.signed_in:
             return ALLOW
-        return Decision(False, 403, "safe_mode", UNLOCK_DETAIL, required="authenticated")
+        return Decision(False, 403, "permission_denied", DENIED_DETAIL, required="authenticated")
     if req.permission is None:
         # machine-only route, or a declaration bug: no human role satisfies it.
-        if principal.is_restricted:
-            return Decision(False, 403, "safe_mode", UNLOCK_DETAIL, required=need)
         return Decision(False, 403, "agents_only" if req.machine else "route_undeclared",
                         (req.denied_detail or "Only agents may call this.") if req.machine
-                        else UNLOCK_DETAIL, required=need)
-    if req.not_restricted and principal.is_restricted:
-        return Decision(False, 403, "safe_mode", UNLOCK_DETAIL, required=req.permission)
+                        else "This endpoint has no access policy.", required=need)
     if principal.can(req.permission):
         return ALLOW
     if req.scoped:
         return Decision(True, scoped=True)
-    if principal.is_restricted:
-        return Decision(False, 403, "safe_mode", UNLOCK_DETAIL, required=req.permission)
-    return Decision(False, 403, "permission_denied",
-                    "Your profile does not have permission to do that.", required=req.permission)
+    return Decision(False, 403, "permission_denied", DENIED_DETAIL, required=req.permission)
 
 
 # --------------------------------------------------------------------------- #
@@ -362,10 +343,6 @@ class Policy:
         self.scoped = scoped            # the gate let a non-holder through a scoped route
 
     # compat names for the old booleans
-    @property
-    def restricted(self) -> bool:
-        return self.principal.is_restricted
-
     @property
     def machine(self) -> bool:
         return self.principal.is_machine
@@ -391,13 +368,10 @@ class Policy:
         if not self.principal.is_protected:
             raise denied(self.principal, "protected_admin")
 
-    def can_use_tool(self, tool_id: str, *, safe: bool = False) -> bool:
-        """Blanket ``use_tools``, an explicit ``use_tools:<id>`` grant, or - for the
-        Restricted role only - a tool the owner flagged ``safe: true``."""
-        p = self.principal
-        if p.can(tool_permission(tool_id)):
-            return True
-        return bool(safe) and p.is_restricted
+    def can_use_tool(self, tool_id: str) -> bool:
+        """Blanket ``use_tools`` or an explicit ``use_tools:<id>`` grant (Admins only in 4.0:
+        tool panels are never in a User's or Basic profile's column)."""
+        return self.principal.can(tool_permission(tool_id))
 
 
 def tool_permission(tool_id: str) -> str:
@@ -406,10 +380,7 @@ def tool_permission(tool_id: str) -> str:
 
 def denied(principal: Principal, required: Permission | str, detail: str | None = None) -> HTTPException:
     req = required.value if isinstance(required, Permission) else required
-    if principal.is_restricted:
-        exc = HTTPException(403, detail or UNLOCK_DETAIL)
-    else:
-        exc = HTTPException(403, detail or "Your profile does not have permission to do that.")
+    exc = HTTPException(403, detail or DENIED_DETAIL)
     exc.required_permission = req          # type: ignore[attr-defined]
     return exc
 

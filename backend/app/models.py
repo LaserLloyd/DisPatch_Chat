@@ -45,8 +45,7 @@ class ThreadOut(BaseModel):
     avatar_url: str = ""              # resolved snapshot URL, "" when none
     # Per-thread UI choices: {"model": str, "thinking": str, "scene": str}.
     # None means "the bot's own defaults" — which is every thread that predates
-    # the feature. REDACTED for a locked device (see _redact_thread_dict): a
-    # model name is operator configuration, not family-facing.
+    # the feature.
     prefs: dict | None = None
     # Which profile this conversation belongs to (4.0 ownership). SERVER-SIDE ONLY:
     # ``exclude=True`` keeps it out of every model_dump / JSON response and WS frame, so
@@ -73,7 +72,7 @@ class BotOrderItem(BaseModel):
     id: str
     order: int = 0
     visible: bool | None = None   # pre-2.4.2 clients: False = "neither", True = no change
-    safe: bool | None = None      # None = leave unchanged ("Show locked", Safe-Mode gate)
+    safe: bool | None = None      # None = leave unchanged (3.x "Show locked" flag; inert in 4.0)
     hide_unlocked: bool | None = None  # None = leave unchanged (NOT "Show unlocked", 2.4.0)
     # 3.0: who the character is for. Wins over `safe`/`hide_unlocked` when present.
     audience: Literal["all", "members", "restricted"] | None = None
@@ -260,15 +259,15 @@ class FireReactionIn(BaseModel):
     """Fire a reaction overlay onto every connected device.
 
     `reaction` is an id, alias, or name. Target a thread (so the collapsed trace
-    lands in the right conversation and Safe-Mode scoping can be applied) or
+    lands in the right conversation and its owner's sockets get it) or
     leave it off for an app-wide pop.
     """
     reaction: str = Field(..., max_length=64)
     thread_id: str | None = Field(default=None, max_length=128)
     bot_id: str | None = Field(default=None, max_length=64)
     actor: str | None = Field(default=None, max_length=60)   # display name
-    # Drives the overlay's byline + icon. View-tier decisions still come from
-    # the session/decoy state, but "agent" fires must also resolve actor/bot_id
+    # Drives the overlay's byline + icon. Who sees it is the WS scoper's decision,
+    # but "agent" fires must also resolve actor/bot_id
     # to a reactions-enabled bot (fire_reaction) so bot names can't be spoofed.
     actor_kind: Literal["user", "agent"] | None = None
     caption: str | None = Field(default=None, max_length=120)
@@ -355,10 +354,10 @@ class MessageFeedbackIn(BaseModel):
     """Thumbs feedback on one of the bot's own replies.
 
     Literal enums ONLY, never free text — that is the whole security property.
-    This route is reachable from a locked Safe-Mode device, and the vote it
-    records is later quoted back into the agent's own prompt (see
-    main._pending_feedback_lines): if `reason` were a free string, a Safe-Mode
-    caller could inject arbitrary prompt text through it. Closed vocabularies
+    Any profile that may chat can vote, and the vote it records is later quoted
+    back into the agent's own prompt (see main._pending_feedback_lines): if
+    `reason` were a free string, a caller could inject arbitrary prompt text
+    through it. Closed vocabularies
     can't do that no matter who is asking.
     """
     vote: Literal["up", "down"]
