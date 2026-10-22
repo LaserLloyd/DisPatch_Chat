@@ -297,3 +297,19 @@ def test_months_ago_clamps_the_day():
     assert mi.months_ago(datetime(2026, 3, 31, tzinfo=UTC), 1).day == 28
     assert mi.months_ago(datetime(2026, 1, 15, tzinfo=UTC), 13).strftime("%Y-%m") == "2024-12"
     assert epoch(0) > epoch(1)
+
+
+def test_old_reaction_traces_are_indexed_once_even_after_the_011_backfill_set_the_watermark(scratch):
+    """011 backfilled only /media names and left the watermark at the table's end; the first
+    maintenance scan still folds the old reaction traces in (once)."""
+    scratch.admin()
+    con = db(scratch)
+    scratch.thread(None, "pack_otter", "t", messages=[("system", "trace", None, {"kind": "reaction", "reaction_id": "pool-joy-x"})])
+    mi.ensure_schema(con)
+    mx = con.execute("SELECT MAX(rowid) FROM messages").fetchone()[0]
+    mi.state_set(con, "media_refs.rowid", str(mx))                     # what 011 leaves behind
+    mi.scan_refs(con, recheck_tail=0)
+    assert [r[0] for r in con.execute("SELECT name FROM media_refs")] == ["reaction:pool-joy-x"]
+    con.execute("DELETE FROM media_refs")
+    mi.scan_refs(con, recheck_tail=0)
+    assert con.execute("SELECT COUNT(*) FROM media_refs").fetchone()[0] == 0        # done once, not every night

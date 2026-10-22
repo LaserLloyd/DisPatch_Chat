@@ -236,6 +236,38 @@ def _upsert_refs(con: sqlite3.Connection, refs: dict[str, str]) -> None:
         list(refs.items()))
 
 
+def backfill_reaction_refs(con: sqlite3.Connection, *, chunk: int = 5000, sleep: float = 0.0) -> int:
+    """One time: fold every reaction trace's id into ``media_refs`` (``reaction:<id>``). Migration
+    011 backfilled the ``/media`` names only, and the rowid watermark it left would never revisit an
+    old trace. Resumable (its own cursor); marks itself done."""
+    if state_get(con, "media_refs.reactions_done") == "1":
+        return 0
+    last = int(state_get(con, "media_refs.reactions_rowid", "0") or 0)
+    found = 0
+    while True:
+        rows = con.execute(
+            "SELECT rowid, created_at, metadata FROM messages WHERE rowid > ? AND instr(metadata,'reaction_id') > 0 "
+            "ORDER BY rowid LIMIT ?", (last, chunk)).fetchall()
+        if not rows:
+            break
+        refs: dict[str, str] = {}
+        for _rowid, created, metadata in rows:
+            for key in extract_refs(None, None, metadata):
+                if created and created > refs.get(key, ""):
+                    refs[key] = created
+        last = rows[-1][0]
+        with _txn(con):
+            _upsert_refs(con, refs)
+            state_set(con, "media_refs.reactions_rowid", str(last))
+        found += len(refs)
+        if len(rows) < chunk:
+            break
+        if sleep:
+            time.sleep(sleep)
+    state_set(con, "media_refs.reactions_done", "1")
+    return found
+
+
 def scan_refs(con: sqlite3.Connection, *, chunk: int = 5000, sleep: float = 0.0,
               recheck_tail: int = 20000, deadline: float | None = None) -> dict[str, int]:
     """Bring ``media_refs`` up to date from messages added since the stored rowid watermark.
@@ -244,6 +276,7 @@ def scan_refs(con: sqlite3.Connection, *, chunk: int = 5000, sleep: float = 0.0,
     the last scan, because an image job rewrites an *older* message when its picture arrives.
     Resumable: the watermark moves after every chunk. A watermark above the table's highest
     rowid (VACUUM can renumber) restarts from zero."""
+    backfill_reaction_refs(con, chunk=chunk, sleep=sleep)
     mx = con.execute("SELECT COALESCE(MAX(rowid),0) FROM messages").fetchone()[0]
     wm = int(state_get(con, "media_refs.rowid", "0") or 0)
     if wm > mx:
