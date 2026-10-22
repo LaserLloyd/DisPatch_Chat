@@ -427,6 +427,209 @@ def prune_archives(keep: int) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# Snapshot tiers (4.0 scale and retention, BUILD-PLAN-v2 1.13.3)
+# --------------------------------------------------------------------------- #
+#
+# The rotating ``chats-<stamp>.db`` snapshots are written every 6 hours and trimmed by
+# ``main._prune_backups`` to the newest N. At 1-2 GB each that is too much disk for too little
+# history, so the daily maintenance task replaces "keep 12" with tiers:
+#
+#   recent   the newest ``keep_recent`` snapshots (default 8 = two days at 6-hourly)
+#   daily    the last snapshot of each of the newest ``keep_daily`` days (default 7)
+#   weekly   the last snapshot of each of the newest ``keep_weekly`` ISO weeks older than the
+#            oldest kept day (default 4)
+#
+# never fewer than ``MIN_SNAPSHOTS`` in total. A daily or weekly keeper is hard-linked into
+# ``backups/tiers/{daily,weekly}/`` (same bytes, no extra disk), which is what protects it from
+# ``main._prune_backups``'s newest-N rule; the root copy of everything that is not "recent" is then
+# dropped. ``list_backups`` and ``resolve_id`` see the tier folders, so a daily or weekly keeper can
+# be restored like any snapshot.
+
+MIN_SNAPSHOTS = 4
+TIER_DIRNAME = "tiers"
+TIERS = ("daily", "weekly")
+_SNAP_STAMP = re.compile(r"^chats-(\d{8})-(\d{6})\.db$")
+
+
+def tier_dir(tier: str) -> Path:
+    return backup_root() / TIER_DIRNAME / tier
+
+
+def _snap_time(name: str) -> datetime | None:
+    m = _SNAP_STAMP.match(name)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")  # noqa: DTZ007  (the rotation stamps local time)
+    except ValueError:
+        return None
+
+
+def plan_snapshot_tiers(names: list[str], *, keep_recent: int = 8, keep_daily: int = 7,
+                        keep_weekly: int = 4, min_total: int = MIN_SNAPSHOTS) -> dict[str, list[str]]:
+    """Which snapshot names each tier keeps. Pure: ``names`` are ``chats-YYYYMMDD-HHMMSS.db``
+    (anything else is ignored). Returns ``{"recent", "daily", "weekly", "keep", "drop"}``; the
+    lists are newest first."""
+    stamped = sorted(((t, n) for n in names if (t := _snap_time(n)) is not None), reverse=True)
+    ordered = [n for _t, n in stamped]
+    recent = ordered[:max(0, keep_recent)]
+    by_day: dict[str, str] = {}
+    for t, n in stamped:                      # newest first: the first seen of a day is its last
+        by_day.setdefault(t.strftime("%Y-%m-%d"), n)
+    days = sorted(by_day, reverse=True)[:max(0, keep_daily)]
+    daily = [by_day[d] for d in days]
+    oldest_day = days[-1] if days else None
+    by_week: dict[str, str] = {}
+    for t, n in stamped:
+        if oldest_day is not None and t.strftime("%Y-%m-%d") >= oldest_day:
+            continue
+        iso = t.isocalendar()
+        by_week.setdefault(f"{iso[0]}-{iso[1]:02d}", n)
+    weeks = sorted(by_week, reverse=True)[:max(0, keep_weekly)]
+    weekly = [by_week[w] for w in weeks]
+    keep = list(dict.fromkeys(recent + daily + weekly))
+    if len(keep) < min_total:
+        for n in ordered:
+            if n not in keep:
+                keep.append(n)
+            if len(keep) >= min_total:
+                break
+    keep_set = set(keep)
+    return {"recent": recent, "daily": daily, "weekly": weekly,
+            "keep": [n for n in ordered if n in keep_set],
+            "drop": [n for n in ordered if n not in keep_set]}
+
+
+def _link_or_copy(src: Path, dst: Path) -> None:
+    if dst.exists():
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_name(dst.name + ".part")
+    with contextlib.suppress(OSError):
+        tmp.unlink()
+    try:
+        os.link(src, tmp)
+    except OSError:
+        shutil.copy2(src, tmp)
+    os.replace(tmp, dst)
+
+
+def _usable_snapshot(p: Path) -> bool:
+    try:
+        if p.stat().st_size <= 0:
+            return False
+        with open(p, "rb") as fh:
+            return fh.read(16) == b"SQLite format 3\x00"
+    except OSError:
+        return False
+
+
+def prune_snapshot_tiers(*, keep_recent: int = 8, keep_daily: int = 7, keep_weekly: int = 4,
+                         dry_run: bool = False) -> dict[str, Any]:
+    """Apply :func:`plan_snapshot_tiers` to ``backups/``: link the daily and weekly keepers into
+    ``backups/tiers/``, drop the root copies that are no longer "recent" and every tier file the
+    plan no longer keeps. Only the rotation's own stamped files are ever touched. A snapshot that is
+    empty or not a database never counts as a keeper (a failed ``VACUUM INTO`` leaves one)."""
+    root = backup_root()
+    out: dict[str, Any] = {"removed": 0, "bytes": 0, "kept": 0, "plan": {}}
+    if not root.is_dir():
+        return out
+    names: dict[str, Path] = {}
+    for tier_name in ("", *TIERS):
+        d = root if not tier_name else tier_dir(tier_name)
+        if not d.is_dir():
+            continue
+        for p in d.iterdir():
+            if p.is_file() and _SNAP_RE.match(p.name) and p.name not in names and _usable_snapshot(p):
+                names[p.name] = p
+    plan = plan_snapshot_tiers(list(names), keep_recent=keep_recent, keep_daily=keep_daily,
+                               keep_weekly=keep_weekly)
+    out["plan"] = plan
+    out["kept"] = len(plan["keep"])
+    if dry_run:
+        out["removed"] = len(plan["drop"])
+        out["bytes"] = sum(names[n].stat().st_size for n in plan["drop"] if n in names)
+        return out
+    want = {"daily": set(plan["daily"]) - set(plan["recent"]),
+            "weekly": (set(plan["weekly"]) | set()) - set(plan["recent"]) - set(plan["daily"])}
+    # link first (a keeper must exist in its tier before any root copy goes)
+    for tier, keepers in want.items():
+        for n in keepers:
+            _link_or_copy(names[n], tier_dir(tier) / n)
+    recent = set(plan["recent"])
+    drop = set(plan["drop"])
+
+    def _unlink(p: Path) -> None:
+        try:
+            st = p.stat()
+            p.unlink()
+        except OSError:
+            return
+        if st.st_nlink <= 1:                       # the last link: the bytes are really freed
+            out["bytes"] += st.st_size
+
+    # a tier file the plan no longer keeps in that tier (never the only copy of a kept snapshot)
+    for tier in TIERS:
+        d = tier_dir(tier)
+        if not d.is_dir():
+            continue
+        for p in d.iterdir():
+            if not (p.is_file() and _SNAP_RE.match(p.name)) or p.name in want[tier]:
+                continue
+            if p.name in drop or (p.name in recent and (root / p.name).exists()):
+                _unlink(p)
+    # a root file that is not "recent": its tier link exists, or the plan drops it
+    for p in root.iterdir():
+        if not (p.is_file() and _SNAP_RE.match(p.name)) or p.name in recent:
+            continue
+        if p.name in drop or any((tier_dir(t) / p.name).exists() for t in TIERS):
+            _unlink(p)
+    out["removed"] = sum(1 for n in drop
+                         if not (root / n).exists() and not any((tier_dir(t) / n).exists() for t in TIERS))
+    return out
+
+
+def prune_premigration(keep: int = 3, *, dry_run: bool = False) -> dict[str, int]:
+    """Keep the newest ``keep`` ``<version>-<stamp>/`` pre-migration copies (``migrate.KEEP_BACKUPS``
+    is 5; at the size a year-old database reaches, three is enough)."""
+    root = backup_root()
+    rows = {"removed": 0, "bytes": 0}
+    if not root.is_dir():
+        return rows
+    dirs = sorted((p for p in root.iterdir() if p.is_dir() and _PRE_RE.match(p.name)),
+                  key=lambda p: p.stat().st_mtime)
+    for p in dirs[:-keep] if keep > 0 else dirs:
+        size = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+        rows["bytes"] += size
+        rows["removed"] += 1
+        if not dry_run:
+            shutil.rmtree(p, ignore_errors=True)
+    return rows
+
+
+def backup_in_progress() -> bool:
+    """True while a backup is being written: an unfinished ``.part`` archive or work folder, or a
+    snapshot file touched in the last two minutes that is not yet a database."""
+    root = backup_root()
+    now = datetime.now(UTC).timestamp()
+    try:
+        for d in (root, archive_dir()):
+            if not d.is_dir():
+                continue
+            for p in d.iterdir():
+                name = p.name
+                if name.endswith(".part") or name.startswith("dispatch-bk-"):
+                    if now - p.stat().st_mtime < 6 * 3600:
+                        return True
+                elif p.is_file() and _SNAP_RE.match(name) and now - p.stat().st_mtime < 120:
+                    if not _usable_snapshot(p):
+                        return True
+    except OSError:
+        return False
+    return False
+
+
+# --------------------------------------------------------------------------- #
 # Reading an archive
 # --------------------------------------------------------------------------- #
 
@@ -522,11 +725,24 @@ def list_backups() -> list[dict]:
             created = datetime.fromtimestamp(st.st_mtime, UTC).isoformat(timespec="seconds")
             if p.is_file() and _SNAP_RE.match(p.name):
                 rows.append({"id": f"snapshot:{p.name}", "kind": "snapshot", "name": p.name,
-                             "size": st.st_size, "created": created, "encrypted": False, "restorable": True})
+                             "size": st.st_size, "created": created, "encrypted": False, "restorable": True,
+                             "tier": "recent"})
             elif p.is_dir() and _PRE_RE.match(p.name):
                 size = sum(f.stat().st_size for f in p.iterdir() if f.is_file())
                 rows.append({"id": f"premigration:{p.name}", "kind": "premigration", "name": p.name,
                              "size": size, "created": created, "encrypted": False, "restorable": True})
+        seen = {r["name"] for r in rows if r["kind"] == "snapshot"}
+        for tier in TIERS:
+            d = tier_dir(tier)
+            if not d.is_dir():
+                continue
+            for p in d.iterdir():
+                if p.is_file() and _SNAP_RE.match(p.name) and p.name not in seen:
+                    st = p.stat()
+                    seen.add(p.name)
+                    rows.append({"id": f"snapshot:{p.name}", "kind": "snapshot", "name": p.name,
+                                 "size": st.st_size, "encrypted": False, "restorable": True, "tier": tier,
+                                 "created": datetime.fromtimestamp(st.st_mtime, UTC).isoformat(timespec="seconds")})
     rows.sort(key=lambda r: r["created"], reverse=True)
     return rows
 
@@ -537,6 +753,11 @@ def resolve_id(backup_id: str) -> tuple[str, Path]:
         raise BackupError("backup_not_found", "Unknown backup", 404)
     base = {"archive": archive_dir(), "snapshot": backup_root(), "premigration": backup_root()}[kind]
     p = base / name
+    if kind == "snapshot" and not p.exists():       # a daily or weekly keeper lives in backups/tiers/
+        for tier in TIERS:
+            if (tier_dir(tier) / name).is_file():
+                p = tier_dir(tier) / name
+                break
     ok = {"archive": p.is_file() and p.suffix == EXT,
           "snapshot": p.is_file() and bool(_SNAP_RE.match(name)),
           "premigration": p.is_dir() and bool(_PRE_RE.match(name))}[kind]
