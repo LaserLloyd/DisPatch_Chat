@@ -329,6 +329,25 @@ and `state_dir` = `<data>/ext/<id>/`, owner-only — never the data directory it
 `bot_backend(bot_id)`, `socket_count(name)`, `touch_session(token)`,
 `counters` (host-side counters such as `speculation_stale`).
 
+> **`db()` writes need an owner (ownership groundwork, Unreleased).** The
+> database `db()` returns now takes a required keyword-only owner on the calls
+> that create a record: `create_thread(..., owner_profile_id=)`,
+> `add_file(..., owner_profile_id=)`, `adopt_file(..., owner_profile_id=)` and
+> `find_or_create_daily_thread(..., owner=)`. Omitting it is a `TypeError`.
+> Pass the profile the record belongs to; for a machine-made record (an
+> extension's own drop, a daily thread) pass the Owner's id
+> (`app.ownership.owner_id()`), or `None` on an install without an Owner yet.
+> `EXT_API` stays 1: the voice add-on never calls these, and nothing else in
+> the extension API changed shape.
+
+**Turns** — `submit_turn` runs under the same rules as a typed message. It
+raises `PermissionError` (no row is stored, no turn runs) when the thread's
+socket belongs to a caller who may not start this turn: a Restricted caller
+on a character it cannot see or out of budget, or a profile without
+`dispatch_agents` on a character whose turns run an agent on the host. The
+thread socket itself refuses that last caller after accept with 1008 and a
+reason, so a client stops instead of retrying.
+
 **HTTP** — `include_router(router, prefix, body_limits=)`: the prefix must be
 `/api/<id>` or below it. Every route gets the host's extension dependency
 (`extensions.require_extension_route`): the requirement the route table declares

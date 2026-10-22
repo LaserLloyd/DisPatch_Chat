@@ -7,6 +7,22 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- **Voice and app turns follow the agent rule.** A character whose turns run an agent on the host needs the
+  `dispatch_agents` permission for every way a turn starts, not only a typed message: the voice socket refuses
+  a profile without it on such a character (1008 with a reason; the call screen says it was refused), a voice
+  or typed-on-the-voice-screen turn is refused server-side, a resent message passes the same check as a fresh
+  one, and an app's `ctx.dispatch_turn` checks the person whose request asked. The Owner, Admins, Members
+  granted `dispatch_agents`, and Members on direct-model characters are unchanged.
+- **The boot File Server sweep no longer purges on missing storage.** When the blob directory is gone, or
+  resolves but more than 20% (and more than 10) of the records have no blob, nothing is deleted; the journal
+  gets an ERROR and `/api/health` goes `degraded` with `file_sweep_skipped` (counts only). A few phantom
+  records are still cleaned up as before.
+- Extensions: `ctx.db()`'s `create_thread`, `add_file`, `adopt_file` (`owner_profile_id=`) and
+  `find_or_create_daily_thread` (`owner=`) require the owner keyword since the ownership groundwork below
+  (docs/extensions.md). `EXT_API` stays 1.
+
 ### Ownership groundwork (data model only)
 
 Groundwork for per-profile privacy. **Nothing anyone can see or do changes in this step**: who may read a chat,
