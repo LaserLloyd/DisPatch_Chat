@@ -230,6 +230,20 @@ plain text, as before; it is shown once when generated and never returned by the
 `Tailscale-*` headers) is never treated as on-box. The image server's completion
 callback is the one other machine route; it carries its own per-job token.
 
+## Image generation hard lines
+
+DisPatch does not filter what you ask for in general; image generation has two
+hard lines, and the server enforces only those. A prompt is refused, with a
+plain message, when it asks for (1) anything sexual involving a person under
+18 (depictions are adult-only), or (2) sexual imagery of a real, identifiable
+person (a named person, a celebrity, someone the requester knows, or
+deepfake/face-swap wording). The check (`app/image_guard.py`) runs on every
+image prompt, whether it comes from a bot's `[[pic:]]` marker, the image-jobs
+API or the Image Studio, before a provider or the image server is contacted. It
+is a text heuristic with narrow triggers, so it is one layer, not a guarantee:
+the provider's own moderation still applies, and everything outside these two
+lines stays unrestricted.
+
 ## Connections, keys and backups (3.0)
 
 - **Provider keys** live in the secret store (the OS keyring, else a `0600` file) behind a [connection](connections.md);

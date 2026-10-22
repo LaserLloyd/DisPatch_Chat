@@ -13,6 +13,7 @@ import json
 
 import httpx
 import pytest
+
 from app import config, image_providers
 from tests.test_image_jobs import _png, _say, _thread, _unlocked
 from tests.test_image_jobs import env as env

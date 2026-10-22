@@ -83,7 +83,7 @@ from typing import Any, ClassVar
 
 import httpx
 
-from . import openclaw_text
+from . import image_guard, openclaw_text
 
 log = logging.getLogger("local-chat.image_jobs")
 
@@ -1193,6 +1193,11 @@ class ImageSpec:
             raise ValueError("prompt is required")
         if len(self.prompt) > MAX_PROMPT_CHARS:
             raise ValueError(f"prompt is longer than {MAX_PROMPT_CHARS} characters")
+        # The two hard lines (adult-only; no sexual imagery of real people).
+        # Here, so the inline marker, the REST route, a spec re-read off a
+        # queued row and the Image Studio all share one rule. Raises
+        # ImageGuardError, a ValueError with a user-facing message.
+        image_guard.check_prompt(self.prompt)
         self.workflow = (self.workflow or "").strip()[:80]
         self.negative = (self.negative or "").strip()[:MAX_PROMPT_CHARS]
         # Square brackets are REMOVED from the caption, not rejected, and it
