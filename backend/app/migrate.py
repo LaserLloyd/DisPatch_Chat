@@ -55,6 +55,15 @@ Steps (each idempotent; ``schema_migrations`` in chats.db records what ran):
                        same computed list. Members, Admins and the Owner keep ``"all"``. Roles and
                        lists are raw writes: nobody is signed out. Always recorded on its first
                        run, even with nothing to change, so the auto-run rule never fires later
+``011_scale``          (4.0 scale and retention, BUILD-PLAN-v2 §1.13; additive, idempotent,
+                       ``IF NOT EXISTS`` only) the maintenance tables (``maintenance_runs``,
+                       ``media_refs``, ``media_expired``, ``storage_stats``,
+                       ``maintenance_state``), ``profiles.archive_after_months`` (NULL = off),
+                       the indexes of ``database.SCALE_INDEXES`` (per-owner thread lists and
+                       unread, File Server, foreign-key children, the time columns the daily
+                       maintenance prunes by), ``media_refs`` backfilled from every message,
+                       and ``auto_vacuum = INCREMENTAL`` made real by one ``VACUUM`` (the one
+                       long step on a large database; logged). Recorded when it ran
 
 Backup: before the first applied step, ``<data>/backups/<version>-<UTC stamp>/`` gets a
 consistent copy of chats.db (the SQLite backup API, WAL-safe), config.yaml, security.yaml,
@@ -285,6 +294,9 @@ def plan(*, assign: dict[str, str] | None = None, all_to_owner: bool = False,
         p10 = profiles_plan(default_profile=default_profile)
         rep.actions.extend(Action("010_profiles", line) for line in p10.lines())
         rep.profiles = p10
+
+    if "011_scale" not in done:
+        rep.actions.extend(Action("011_scale", line) for line in scale_plan())
     return rep
 
 
@@ -604,6 +616,128 @@ def apply_profiles(*, default_profile: str | None = None) -> None:
                 if bid in fold:
                     e.pop("profiles", None)
             config._write_bots(roster)
+
+
+# --------------------------------------------------------------------------- #
+# 011_scale (4.0 scale and retention, BUILD-PLAN-v2 §1.13)
+# --------------------------------------------------------------------------- #
+
+#: maintenance_state key of the media_refs watermark: the highest messages.rowid already
+#: folded into media_refs (the nightly job continues from there).
+MEDIA_REFS_WATERMARK = "media_refs.rowid"
+#: Rows per backfill batch (one short transaction each).
+_SCALE_BATCH = 5000
+#: SQLite's PRAGMA auto_vacuum value for INCREMENTAL.
+_AUTO_VACUUM_INCREMENTAL = 2
+
+
+def scale_plan() -> list[str]:
+    """What 011 would do, read only (the dry run)."""
+    from . import database
+    dbp = _db_file()
+    lines: list[str] = []
+    tables = _table_names(dbp)
+    new_tables = [t for t in ("maintenance_runs", "media_refs", "media_expired", "storage_stats",
+                              "maintenance_state") if t not in tables]
+    if new_tables:
+        lines.append("create tables: " + ", ".join(new_tables))
+    if not dbp.exists():
+        lines.append("add column: profiles.archive_after_months (NULL = off)")
+        lines.append(f"indexes: {len(database.SCALE_INDEXES)} (as their tables are created)")
+        return lines
+    con = sqlite3.connect(_ro_uri(dbp), uri=True)
+    try:
+        if "profiles" not in tables or "archive_after_months" not in _columns(con, "profiles"):
+            lines.append("add column: profiles.archive_after_months (NULL = off: no chat is archived)")
+        todo = database.missing_scale_indexes(con)
+        if todo:
+            lines.append(f"create {len(todo)} index(es): " + ", ".join(n for _t, n, _d in todo))
+        if "messages" in tables:
+            n = con.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            lines.append(f"backfill media_refs from {n} message(s)")
+        mode = con.execute("PRAGMA auto_vacuum").fetchone()[0]
+        if mode != _AUTO_VACUUM_INCREMENTAL:
+            size = dbp.stat().st_size
+            lines.append(f"auto_vacuum -> INCREMENTAL: one VACUUM of chats.db ({size / 1e6:.1f} MB)")
+    finally:
+        con.close()
+    if not lines:
+        lines.append("record the step (nothing left to change)")
+    return lines
+
+
+def _backfill_media_refs(con: sqlite3.Connection) -> int:
+    """Fold every message's /media/ references into media_refs, in rowid batches; set the
+    watermark. Re-runnable: last_ref_at only moves forward."""
+    from . import database
+    if "messages" not in database.sqlite_tables(con):
+        return 0
+    row = con.execute("SELECT value FROM maintenance_state WHERE key = ?",
+                      (MEDIA_REFS_WATERMARK,)).fetchone()
+    last = int(row[0]) if row and str(row[0]).isdigit() else 0
+    names_total = 0
+    while True:
+        rows = con.execute(
+            "SELECT rowid, media_url, content, metadata, created_at FROM messages "
+            "WHERE rowid > ? ORDER BY rowid LIMIT ?", (last, _SCALE_BATCH)).fetchall()
+        if not rows:
+            break
+        refs: dict[str, str] = {}
+        for rid, media_url, content, metadata, created in rows:
+            last = rid
+            for name in database.media_names_in(media_url, content, metadata):
+                if created and created > refs.get(name, ""):
+                    refs[name] = created
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            con.executemany(
+                "INSERT INTO media_refs (name, last_ref_at) VALUES (?, ?) "
+                "ON CONFLICT(name) DO UPDATE SET last_ref_at = "
+                "MAX(media_refs.last_ref_at, excluded.last_ref_at)", list(refs.items()))
+            con.execute("INSERT INTO maintenance_state (key, value) VALUES (?, ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        (MEDIA_REFS_WATERMARK, str(last)))
+            con.execute("COMMIT")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+        names_total += len(refs)
+    return names_total
+
+
+def apply_scale() -> None:
+    """Apply 011_scale (``run`` took the backup). Every part is idempotent, so an interrupted
+    run simply runs again on the next start."""
+    import time
+    from . import database
+    dbp = _db_file()
+    with accounts.connect():             # the accounts tables (and the archive column) exist
+        pass
+    con = sqlite3.connect(str(dbp), timeout=30, isolation_level=None)
+    try:
+        con.execute("PRAGMA busy_timeout=30000")
+        if "archive_after_months" not in _columns(con, "profiles"):
+            with contextlib.suppress(sqlite3.OperationalError):     # a racing writer added it
+                con.execute("ALTER TABLE profiles ADD COLUMN archive_after_months INTEGER")
+        t0 = time.monotonic()
+        built = database.ensure_scale_schema(con)
+        log.info("011_scale: %d index(es) built in %.1f s", built, time.monotonic() - t0)
+        t0 = time.monotonic()
+        names = _backfill_media_refs(con)
+        log.info("011_scale: media_refs backfilled (%d name(s)) in %.1f s", names,
+                 time.monotonic() - t0)
+        if con.execute("PRAGMA auto_vacuum").fetchone()[0] != _AUTO_VACUUM_INCREMENTAL:
+            size = dbp.stat().st_size
+            log.info("011_scale: auto_vacuum -> INCREMENTAL, VACUUM of %.1f MB (one time)",
+                     size / 1e6)
+            t0 = time.monotonic()
+            con.execute(f"PRAGMA auto_vacuum = {_AUTO_VACUUM_INCREMENTAL}")
+            con.execute("VACUUM")
+            con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+            log.info("011_scale: VACUUM done in %.1f s (%.1f MB now)", time.monotonic() - t0,
+                     dbp.stat().st_size / 1e6)
+    finally:
+        con.close()
 
 
 # --------------------------------------------------------------------------- #
@@ -1104,6 +1238,9 @@ def run(*, dry_run: bool = False, take_backup: bool = True,
         # practice it runs (and is recorded) on the first start of every data directory.
         apply_profiles(default_profile=default_profile)
         _record("010_profiles")
+    if "011_scale" in steps:
+        apply_scale()
+        _record("011_scale")
     rep.applied = sorted(steps)
     return rep
 

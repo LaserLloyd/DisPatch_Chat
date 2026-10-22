@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     disabled       INTEGER NOT NULL DEFAULT 0,
     epoch          INTEGER NOT NULL DEFAULT 0, -- bumped to invalidate every session of the profile
     backends       TEXT NOT NULL DEFAULT '{}', -- 4.0: JSON {allowed}; {} = every household connection
-    household_bots TEXT DEFAULT '"all"'        -- 4.0: JSON "all" or a list of household bot ids
+    household_bots TEXT DEFAULT '"all"',       -- 4.0: JSON "all" or a list of household bot ids
+    archive_after_months INTEGER               -- 4.0 (011_scale): archive own chats older than N months; NULL = off
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_profiles_name ON profiles(lower(name));
 CREATE UNIQUE INDEX IF NOT EXISTS ux_profiles_one_owner ON profiles(role) WHERE role = 'owner';
@@ -144,6 +145,8 @@ _ADDED_COLUMNS = (
     # 4.0 (migration 010_profiles reports it; added here too so no reader ever meets a
     # profiles table without it, exactly like ``backends``).
     "ALTER TABLE profiles ADD COLUMN household_bots TEXT DEFAULT '\"all\"'",
+    # 4.0 (migration 011_scale): the profile's own "archive chats older than N months"; NULL = off.
+    "ALTER TABLE profiles ADD COLUMN archive_after_months INTEGER",
 )
 
 #: Tables this module owns, in drop-safe (children first) order.
@@ -234,6 +237,9 @@ class Profile:
     #: 4.0: the household bots this profile may use - ``"all"`` or a list of bot ids
     #: (``characters.may_use``). A Basic profile's list is what an Admin picked for it.
     household_bots: str | list[str] = "all"
+    #: 4.0 (011_scale): the profile's own "archive chats older than N months" (1..120); None =
+    #: off. Set by the profile itself (maintenance_api); the maintenance task reads it.
+    archive_after_months: int | None = None
     #: 4.0: the protected first Admin (stored role ``owner``): cannot be demoted, disabled or
     #: deleted; only it changes its own credentials.
     protected: bool = False
@@ -290,7 +296,22 @@ def _row_profile(r: sqlite3.Row) -> Profile:
         session_timeout=r["session_timeout"], created=r["created"],
         disabled=bool(r["disabled"]), epoch=int(r["epoch"] or 0),
         backends=_j(r["backends"], {}) if "backends" in keys else {},
-        household_bots=_household_bots(hb))
+        household_bots=_household_bots(hb),
+        archive_after_months=_archive_months(r["archive_after_months"])
+        if "archive_after_months" in keys else None)
+
+
+#: Bounds of ``archive_after_months`` (the same as the image-retention ``months``).
+ARCHIVE_MONTHS_MIN, ARCHIVE_MONTHS_MAX = 1, 120
+
+
+def _archive_months(value) -> int | None:
+    """The stored ``archive_after_months`` as the model reads it: an int in range, else None."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if ARCHIVE_MONTHS_MIN <= n <= ARCHIVE_MONTHS_MAX else None
 
 
 def _household_bots(value) -> str | list[str]:
@@ -474,7 +495,8 @@ def _adopt_unowned(con: sqlite3.Connection, owner_id: str) -> None:
 
 
 _UPDATABLE = {"name", "role", "pin_hash", "password_hash", "avatar", "grants",
-              "denies", "session_timeout", "disabled", "backends", "household_bots"}
+              "denies", "session_timeout", "disabled", "backends", "household_bots",
+              "archive_after_months"}
 
 
 def _household_value(value) -> str | list[str]:
@@ -513,6 +535,12 @@ def update_profile(profile_id: str, **fields) -> Profile:
             v = stored_role(r, protected=cur.protected)
         if k == "household_bots":
             v = json.dumps(_household_value(v))
+        elif k == "archive_after_months":
+            if v is not None and (isinstance(v, bool) or not isinstance(v, int)
+                                  or not ARCHIVE_MONTHS_MIN <= v <= ARCHIVE_MONTHS_MAX):
+                raise AccountError("profile_field_invalid",
+                                   f"archive_after_months must be null or "
+                                   f"{ARCHIVE_MONTHS_MIN}..{ARCHIVE_MONTHS_MAX}.")
         elif k == "backends":
             if not isinstance(v or {}, dict):
                 raise AccountError("profile_field_invalid", "backends must be an object.")
