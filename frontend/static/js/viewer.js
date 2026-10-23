@@ -1,6 +1,6 @@
 // DisPatch Chat — the local viewer overlay.
 //
-// An unlocked operator taps a local path (a message link, a `[[view:]]` card, a
+// An Admin taps a local path (a message link, a `[[view:]]` card, a
 // rail button, the command palette) and the thing opens INSIDE the app: a
 // full-screen lightbox with an ✕, a back arrow, and a body that renders by
 // kind. The server serves the bytes (see backend/app/localview.py), so this

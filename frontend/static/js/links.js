@@ -14,13 +14,11 @@
 // built-in deny list, checked again on every request. A link button cannot
 // widen that — it can only ask.
 //
-// The tier gate is stricter than the pins', on purpose: custom links are
-// UNLOCKED-ONLY, with no per-link opt-in. The URLs people put here are exactly
-// the ones Safe Mode exists to not advertise — internal panels, tailnet hosts,
-// admin dashboards — and a family tablet has no business rendering them. The
-// rail is rebuilt on every tier change (main.js renderPins), so locking the
-// device removes the buttons on the spot. The Settings editor follows the same
-// rule: it is simply not built for a Safe-Mode session.
+// Custom links are kept per device. The 3.x rule that showed them only to an
+// unlocked session went with the tiers: in 4.0 main.js builds the link rail for
+// whoever uses the device, so keep internal panels, tailnet hosts and admin
+// dashboards off a shared tablet's list. The rail is rebuilt on every
+// sign-in change (main.js renderPins).
 //
 // Storage is localStorage, like the pins: a link is a per-device convenience,
 // not an account preference. The key is in privacy.js APP_KEYS — privacy
@@ -151,8 +149,8 @@ export function removeLink(id) {
 /** Render the link buttons into the rail, after the pins, before ⚙.
  *
  *  Same contract as renderPinnedRail: rebuilt wholesale on every call, and the
- *  caller (main.js renderPins) invokes it on every tier change — which is what
- *  makes the unlocked-only rule hold without this module watching anything.
+ *  caller (main.js renderPins) invokes it on every sign-in change, so this
+ *  module watches nothing itself.
  *
  *  `openViewer` is the local-viewer entry point (viewer.js `openViewer`),
  *  injected rather than imported so this module keeps no opinion about the
@@ -199,7 +197,7 @@ export function renderLinkRail(container, { openViewer = null } = {}) {
 /** The Settings → Device editor: current links, each with a remove ✕, and an
  *  add row (glyph · label · URL). Built fresh on every Device-pane mount, like
  *  its neighbours; `onChange` is how the rail finds out (main.js passes
- *  renderPins). Never built for a Safe-Mode session — the caller checks. */
+ *  renderPins). Which profiles get the editor is the caller's decision. */
 export function linksSection(t, { onChange = null } = {}) {
   const wrap = el('div', { class: 'bm-links', id: 'links-row' });
   wrap.append(el('span', {}, [

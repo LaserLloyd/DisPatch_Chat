@@ -4,8 +4,7 @@
 // two targets. "Insert into chat" is the paperclip's flow (main.js handleFiles:
 // the same caps, the upload, the composer preview; the person still presses
 // send). "Upload to File Server" is the File Server's own upload for a profile
-// that has it, or, on a Restricted device, the one-way "Send a file" drop that
-// device already has. A target the profile may not use is not drawn; with
+// that has it. A target the profile may not use is not drawn; with
 // neither there is no overlay at all. Dropping anywhere but on a target, or
 // Escape, cancels.
 //

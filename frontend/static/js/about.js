@@ -4,9 +4,8 @@
 // the network and never sees the repository, so the app itself is the only
 // place that can tell them what they are running and where its source is. MIT
 // does not oblige the offer — it is made because a user of a program should be
-// able to find out what it is. It lives in the DEVICE pane, the one settings
-// tab a Safe-Mode session can open, so it reaches every user and not just the
-// operator.
+// able to find out what it is. It lives in a settings pane every profile can
+// open, including Basic, so it reaches every user and not just the operator.
 //
 // One constant, one place to change it.
 
@@ -27,7 +26,7 @@ export const VOICE_REPO_URL = 'https://github.com/LaserLloyd/DisPatch_Voice';
 /** Kept in step with backend/app/__init__.py `__version__`.
  *
  *  Deliberately a constant rather than a fetch: the version has to be readable
- *  from a Safe-Mode session, and the endpoint that reports it (/api/dashboard)
+ *  by every profile, including Basic, and the endpoint that reports it (/api/dashboard)
  *  is admin-only by design. frontend/tests/about.test.js fails if the two
  *  numbers drift.
  */

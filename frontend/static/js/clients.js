@@ -5,8 +5,8 @@
 // own api.js client, i18n and CSS tokens (app.css `.clients-*` rules).
 //
 // Full-session only: main.js only ever calls openClientsView() when
-// state.auth.features.practice is true, which the server only sets for an
-// unlocked session — see _require_practice in backend/app/main.py.
+// state.auth.features.practice is true, which the server only sets for a
+// signed-in session — see _require_practice in backend/app/main.py.
 //
 // Hash routing lives INSIDE this panel's own state (clientsRoute), not the
 // document hash, so it doesn't collide with DisPatch's own #chat/#threads
@@ -61,11 +61,11 @@ function healthGlyph(health) {
 // --------------------------------------------------------------------------
 
 /** Stop the job poll. Called when the Clients pane closes, including on a
- *  drop to Safe Mode.
+ *  sign-out.
  *
  *  pollJob() reschedules ITSELF, and closing the pane only hid the view — so
  *  the timer kept firing GET /api/practice/jobs/<id> for the rest of the
- *  session. On a locked device those requests 403, which is the gate doing its
+ *  session. On a signed-out device those requests are refused, which is the gate doing its
  *  job, but a background loop talking to the practice box from a device
  *  somebody has just locked is not something to leave running. The pane is
  *  also the only thing that would ever show the answer.

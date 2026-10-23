@@ -6,8 +6,8 @@
 //                   trace row, holds for its duration, then collapses it back
 //                   to the one-line chip. Clicking the chip pops the picture
 //                   back up in place.
-//   2. the MANAGER — upload / generate / edit / delete the pack (Owner and
-//                    Admin; Settings → Characters → Reactions). Firing is a bot
+//   2. the MANAGER — upload / generate / edit / delete the pack (Admins;
+//                    Settings → Characters → Reactions). Firing is a bot
 //                    trait: there is no user-facing picker, and the manager's
 //                    Test button fires AS the enabled reaction bot.
 //
@@ -42,7 +42,6 @@ const R = {
 // Injected by main.js so this module holds no app state of its own.
 let ctx = {
   toast: () => {},
-  isDecoy: () => false,
   threadCtx: () => ({ thread_id: null, bot_id: null }),
   onChanged: () => {},
   confirm: async (msg) => window.confirm(msg),   // main.js swaps in uiConfirm
@@ -88,7 +87,7 @@ export async function loadReactions(force = false) {
   return R.loading;
 }
 
-// Called on lock/unlock: the visible pack differs between Safe Mode and full.
+// Called on sign-in and sign-out: the visible pack can differ per profile.
 export function resetReactions() {
   R.loaded = false;
   R.items = [];
@@ -98,7 +97,7 @@ export function resetReactions() {
   // in a backdrop this module creates lazily, so main.js's closeAllOverlays
   // (which enumerates fixed dom[] keys) never saw it and it survived a lock
   // with all of that still on screen. Closing it here covers every path that
-  // resets reaction state, including the drop to Safe Mode.
+  // resets reaction state, including a sign-out.
   closeManager();
   R.queue.length = 0;
   // Live embeds are children of the message list; drop their auto-collapse
@@ -380,8 +379,8 @@ export async function mountManager(host) {
   host.innerHTML = '';
   host.append(el('p', { class: 'muted modal-hint', text: t('common.loading') }));
   await loadReactions(true);
-  // Belt-and-braces with the tab's own visibility rule: curation is full-session
-  // only server-side, so a Safe-Mode caller would only ever collect 403s.
+  // Belt-and-braces with the tab's own visibility rule: curation is Admin-only
+  // server-side, so any other caller would only ever collect 403s.
   if (!R.canManage) {
     host.innerHTML = '';
     host.append(el('p', { class: 'muted modal-hint', text: t('reactions.locked') }));
@@ -743,7 +742,7 @@ async function withBusy(fn, errPrefix) {
 //   * clicking the picture → collapses back to the chip
 // Returns null when the message isn't a reaction trace.
 export function reactionMessageEl(msg, { noImage, decoy = false } = {}) {
-  // `noImage` (No-Image Mode) is the 4.0 name; `decoy` is the old one main.js still passes.
+  // `noImage` (No-Image Mode) is the 4.0 name; `decoy` is kept for old callers.
   const hideImage = noImage === undefined ? !!decoy : !!noImage;
   const meta = msg && msg.metadata;
   if (!meta || meta.kind !== 'reaction') return null;

@@ -51,7 +51,7 @@ export function roleOptions(actorRole, protectedHasPassword) {
 
 /** What a lock-screen tile asks for. credential is "password" | "pin_or_password"
  *  | "pin" | "none". `modes` lists the inputs on offer, first = the default; a
- *  Restricted profile with no PIN needs nothing at all and signs in at once. */
+ *  profile with no credential (the shared default) needs nothing at all and signs in at once. */
 export function credentialModes(kind) {
   switch (kind) {
     case 'password': return ['password'];

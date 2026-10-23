@@ -9,7 +9,7 @@
 // main.js) can change without breaking an app:
 //
 //   api(path, {method, body, query, signal})   same-origin JSON fetch
-//   DecoyError                                  thrown on the Safe-Mode 403
+//   DecoyError                                  deprecated, never thrown
 //   t(key, vars) / ready() / has(key)           the app's own locale files
 //   theme()                                     the shell's palette + light/dark
 //   openThread(id, hint?) / close() / toast(text, isError?) / setTitle(text)

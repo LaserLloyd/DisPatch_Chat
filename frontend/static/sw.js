@@ -384,8 +384,8 @@ const SHELL = [
   '/static/js/push.js', '/static/js/quick-actions.js',
   // 2.3.5: the edge buttons + wheel of the Settings tab strip (main.js imports it).
   '/static/js/lightbox-nav.js',
-  // 3.0 profiles, roles and policy: pure helpers, the sign-in / setup / Restricted
-  // DOM and Settings -> People & Profiles, all statically imported by main.js.
+  // 3.0 profiles, roles and policy: pure helpers, the sign-in / setup DOM and
+  // Settings -> People & Access, all statically imported by main.js.
   '/static/js/profiles.js', '/static/js/newchat.js', '/static/js/signin.js', '/static/js/people.js',
   // 3.0 W5: Connections, the schema-driven settings page, backups, character details and the
   // first-run wizard, all statically imported by main.js, plus the REST calls they share.
@@ -440,7 +440,8 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   // Cache ONLY the same-origin app shell. Everything else (API, websocket,
   // media, avatar images, cross-origin embeds) stays strictly network-only —
-  // chat media must never persist in Cache Storage (Safe Mode relies on it),
+  // chat media must never persist in Cache Storage (No-Image Mode and
+  // per-profile media rely on it),
   // and opaque cross-origin responses bloat the quota.
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   const p = url.pathname;

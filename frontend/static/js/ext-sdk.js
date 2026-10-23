@@ -22,7 +22,7 @@
 //       button + pane for you, after Voice and before Plugins, titled by
 //       `title` (text) or `titleKey` (a key in your merged locale bundle);
 //       also `glyph` (a short emoji, default a puzzle piece) and
-//       `public: true` (visible in Safe Mode too; default admin-only).
+//       `public: true` (visible to every profile; default admin-only).
 //       dispose() removes the tab again.
 //   settings.open(id) / settings.close()
 //   bots.rowExtra(fn(bot, onChange) → Node|null)        → dispose()
@@ -93,7 +93,7 @@ function emit(set, arg) {
 
 /** Fired by js/extensions.js after the extensions' bundles were re-merged. */
 export function emitLocale(langCode) { emit(localeFns, langCode); }
-/** Fired by main.js when the device locks or logs out (Safe Mode). */
+/** Fired by main.js when the device locks or signs out. */
 export function emitLocked() { emit(lockedFns); }
 /** Fired by main.js when the open chat changes (or closes). */
 export function emitThreadChange(thread) { emit(threadFns, thread || null); }

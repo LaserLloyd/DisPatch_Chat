@@ -7,7 +7,7 @@
 //   Support bundle      a redacted zip for a bug report; prompts are left out unless ticked.
 //   Profile data        export or erase what DisPatch holds about one profile.
 //
-// Owner and Admins server side (admin_system); this module only decides what to OFFER. Everything that can
+// Admins server side (admin_system); this module only decides what to OFFER. Everything that can
 // lose data asks first, and a recovery key is shown exactly once.
 
 import { w5 as realApi, saveBlob, errorText } from './w5-api.js?v=2';

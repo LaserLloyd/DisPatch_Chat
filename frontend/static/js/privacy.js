@@ -63,8 +63,8 @@ export const APP_KEYS = [
   'dispatch-settings-adv',    // main.js (which Settings "Advanced" disclosures were left open)
   'dispatch-viewer-recent',   // main.js (recent local-viewer paths in the palette)
   'tl-collapsed',             // main.js (thread list collapsed, desktop)
-  'lc-remember',              // main.js (unlock keypad "keep this device unlocked")
-  'dp-firstrun-dismissed',    // main.js (the "create the owner account" card was put away here)
+  'lc-remember',              // main.js (sign-in keypad "keep this device signed in")
+  'dp-firstrun-dismissed',    // main.js (the "create the first Admin account" card was put away here)
   // DELIBERATELY ABSENT: 'dispatch-nim'. No-Image Mode is a RATCHET — once on,
   // it takes the PIN to turn off (js/nim.js canDisableNim). Wiping it here
   // would make "clear this device" a one-click way around that gate on a

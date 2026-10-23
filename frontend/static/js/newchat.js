@@ -2,7 +2,7 @@
 //
 // No DOM, no fetch, no imports, so frontend/tests/newchat.test.js drives it
 // under plain node. NOT a security decision: the server still checks the
-// profile (POST /api/threads is use_chat, quota-charged for Restricted);
+// profile (POST /api/threads is use_chat);
 // this only decides what the tab OFFERS and where a tap goes.
 
 /** May this session start a chat? `permissions` is /api/auth/status
@@ -49,8 +49,7 @@ export function currentCharacter({ view, activeBotId, selectedId }) {
 }
 
 /** The newest thread when it is still empty (no messages), so a second tap
- *  opens it instead of stacking blank chats (and spending a Restricted
- *  profile's daily thread quota). Archived threads never count. */
+ *  opens it instead of stacking blank chats. Archived threads never count. */
 export function reusableEmptyThread(threads) {
   let newest = null;
   for (const th of threads || []) {

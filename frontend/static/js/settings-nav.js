@@ -1,8 +1,8 @@
 // Settings: its sections, the old tab ids that still lead to them, and the
 // search box that finds any setting by name.
 //
-// 3.2 replaced the thirteen-tab strip with seven sections in two groups (you,
-// the household) plus one for add-ons. Every id the strip used to have is an
+// 3.2 replaced the thirteen-tab strip with sections in two groups (4.0: four for
+// you, five for the household) plus one for add-ons. Every id the strip used to have is an
 // ALIAS here, so a caller written against the old tabs (a pinned Theme button,
 // the voice add-on's settings.open('voice'), a deep link in a guide) lands on
 // the section that holds the same controls now. `section#anchor` opens a
@@ -18,7 +18,7 @@ import { renderAccountReset } from './account-reset.js?v=1';
 import { renderPeoplePerms } from './people-perms.js?v=1';
 
 /** The sections, in nav order. `group`: you (this person / device), household
- *  (Owner and Admin), addons (tabs an add-on adds; none built in). `perm` is
+ *  (Admins), addons (tabs an add-on adds; none built in). `perm` is
  *  what main.js asks sessionCan()/canAdmin() before showing one. */
 export const SECTIONS = [
   { id: 'appearance', group: 'you', icon: 'palette', label: 'settings.sec_appearance', perm: null },
@@ -38,8 +38,7 @@ export const SECTION_IDS = SECTIONS.map((s) => s.id);
  *  main.js setSettingsTab() calls runSectionHooks(id, pane, deps) once per mount, after
  *  the section's own code, so a package fills its part of a section by editing ITS module
  *  only (account-reset.js: Account; people-perms.js: People; my-bots.js: the You -> My
- *  bots section, which WP-FE-YOU adds to SECTIONS with its pane - until then nothing calls
- *  it). Foundation: every render is a no-op. */
+ *  bots section). */
 export const SECTION_HOOKS = Object.freeze({
   account: [renderAccountReset],
   people: [renderPeoplePerms],

@@ -617,7 +617,7 @@ function activityGroup(ctx) {
     ]));
 }
 
-// ---- Machine access (Owner and Admins) -----------------------------------------------
+// ---- Machine access (Admins) ---------------------------------------------------------
 
 async function machineGroup(ctx) {
   let info;

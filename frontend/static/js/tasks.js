@@ -13,8 +13,8 @@
 //
 // What it does not own: who may do what. The server decides (manage_agents / dispatch_agents /
 // approve_agent_actions, route_policy.py); this module only decides what to OFFER, from
-// GET /api/auth/me. A Restricted profile is never offered any of it, and every call it could
-// make would answer 403 anyway.
+// GET /api/auth/me. A profile without those permissions is offered none of it, and every call
+// it could make would answer 403 anyway.
 //
 // Wording: UI verbs are "Assign task" / "Send to agent" (the brief); the backend is "OpenClaw" or
 // "Claude Agent" as the server names it; costs are always "estimate".

@@ -4,7 +4,7 @@
 // and can hand work to agents. Research goes out on its own; anything that
 // DOES something is proposed instead: the server posts the brief as an
 // ordinary assistant message whose metadata carries `advisor_handoff`, and
-// nothing runs until somebody with an unlocked session presses Send here.
+// nothing runs until a signed-in profile allowed to start agents presses Send here.
 //
 // The card's text comes from the SERVER-STAMPED metadata
 // (`advisor_handoff.brief`), never from the message body: a body is whatever

@@ -59,7 +59,7 @@
          viewer, and the server refuses its routes to everyone else. -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
-    script-src 'self' 'sha256-fOcZiNX5zINBrez16W209dN/kABWeXQFS78UGnrDO4U=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-B/4P8AyGy4SqUiBYgvGoQKCc5tVl0U48Z9aEDREIG1U=' 'sha256-7p2Z9i8YCoczeqRLKfpXnpWpYZ2VNrK/yQNeWQcc1nE=';
+    script-src 'self' 'sha256-fOcZiNX5zINBrez16W209dN/kABWeXQFS78UGnrDO4U=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-smnZXf5LCCUarhFqEYhDX9TJKEB5PkNgBpsrJo4mgW8=' 'sha256-7p2Z9i8YCoczeqRLKfpXnpWpYZ2VNrK/yQNeWQcc1nE=';
     style-src 'self';
     img-src 'self' data: blob:;
     media-src 'self' blob:;
@@ -201,7 +201,7 @@
     //
     // It used to fire unconditionally, which meant a slow boot got UNCOVERED
     // at 9s -- exposing the raw, half-assembled shell (empty roster, the "pick
-    // a bot" placeholder, no Safe-Mode chrome applied yet) while the fetches
+    // a bot" placeholder, no profile chrome applied yet) while the fetches
     // it was waiting on were still in flight. That is the opposite of the
     // veil's own job. Now it re-checks: if boot is still making progress the
     // veil stays, and the window extends rather than tearing open.
@@ -722,7 +722,7 @@
           </div>
           <!-- Roving-tabindex tablist, vertical: only the selected section is in the
                Tab order; ↑/↓/Home/End move between the visible ones (main.js
-               wireSettingsTabs). Household sections are the Owner's and Admins'
+               wireSettingsTabs). Household sections are the Admins'
                (canAdmin); add-on tabs land before #snav-addons-end. -->
           <div class="settings-tabs" id="settings-tabs" role="tablist" aria-orientation="vertical" aria-label="Settings sections" data-i18n-attr="aria-label=settings.tabs_aria">
             <h3 class="snav-heading" id="snav-h-you" data-i18n="settings.group_you">You</h3>
@@ -730,7 +730,7 @@
             <button class="settings-tab" id="stab-account" role="tab" data-tab="account" aria-selected="false" aria-controls="spane-account" tabindex="-1"><span class="stab-glyph" data-icon="user" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="settings.sec_account">Account</span><span class="stab-summary" id="ssum-account"></span></span><span class="stab-chevron" aria-hidden="true"></span></button>
             <!-- My bots (4.0): a profile's own bots; shown to whoever holds create_characters (main.js). -->
             <button class="settings-tab hidden" id="stab-mybots" role="tab" data-tab="mybots" aria-selected="false" aria-controls="spane-mybots" tabindex="-1"><span class="stab-glyph" data-icon="bots" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="mybots.title">My bots</span><span class="stab-summary" id="ssum-mybots" data-i18n="mybots.sum">Bots only you can see</span></span><span class="stab-chevron" aria-hidden="true"></span></button>
-            <!-- Voice: an add-on. Shown to the Owner and Admins always (the absent page
+            <!-- Voice: an add-on. Shown to Admins always (the absent page
                  says how to add it) and to anyone with use_voice once it is mounted. -->
             <button class="settings-tab hidden" id="stab-voice" role="tab" data-tab="voice" aria-selected="false" aria-controls="spane-voice" tabindex="-1"><span class="stab-glyph stab-glyph-mic" aria-hidden="true"></span><span class="stab-text"><span class="stab-label" data-i18n="settings.sec_voice">Voice</span><span class="stab-summary" id="ssum-voice" data-i18n="settings.sum_voice">Voice chat and voices</span></span><span class="stab-chevron" aria-hidden="true"></span></button>
             <h3 class="snav-heading admin-only" id="snav-h-household" data-i18n="settings.group_household">Household</h3>
@@ -777,8 +777,8 @@
           <p class="dev-group-hint" data-i18n="settings.dev_bar_hint">A pinned setting gets its own button on the menu bar, one tap away. Use the Pin button on any row.</p>
           <div class="dev-group-body" id="dev-body-bar"></div>
         </section>
-        <!-- Advanced (Owner and Admin): show hidden characters on this device, and the
-             defaults a NEW device starts with. Hidden altogether for anyone else. -->
+        <!-- Advanced (Admins): the defaults a NEW device starts with. Hidden altogether
+             for anyone else. -->
         <details class="settings-adv" id="app-adv" data-adv="appearance" data-anchor="advanced" hidden>
           <summary data-i18n="settings.advanced">Advanced</summary>
           <div class="dev-group-body" id="app-adv-device"></div>
@@ -798,7 +798,7 @@
         <section class="dev-group" id="acct-signin" data-anchor="signin" aria-labelledby="acct-h-signin">
           <h3 class="dev-group-title" id="acct-h-signin" data-i18n="acct.signin_title">Sign-in</h3>
           <p class="muted acct-status" id="sec-status-line"></p>
-          <!-- 3.0: filled by main.js (js/signin.js builds the forms): "Create owner account"
+          <!-- 3.0: filled by main.js (js/signin.js builds the forms): "Create the first Admin account"
                while the install is unclaimed, or the dismissible "set a password" prompt. -->
           <div class="sec-body sec-account" id="sec-account" hidden></div>
           <!-- One change at a time: the select opens exactly one form below it, so a
@@ -833,9 +833,9 @@
           <div class="bm-actions sec-lock-row">
             <button class="btn-secondary danger-text hidden" id="bm-lock"><span class="icn" data-icon="lock" aria-hidden="true"></span><span data-i18n="settings.lock_now">Lock now</span></button>
           </div>
-          <!-- security.note carries markup we own (a <br> and the two <code id=…> path
-               elements the recovery instructions point at), so renderSecurityNote() renders
-               it as HTML with the server's paths escaped. The Owner's only: a Member can
+          <!-- security.recovery_note carries markup we own (a <br> and the two <code id=…> path
+               elements the recovery instructions point at), so main.js renders it as HTML
+               with the server's paths escaped. Admins only: a User or Basic profile can
                neither use nor should see those paths. -->
           <p class="muted sec-note" id="sec-note" hidden>
             Lost your PIN? Use the recovery code in
@@ -1026,7 +1026,7 @@
       <h2 id="lock-title" data-i18n="lock.locked">Locked</h2>
       <p class="lock-sub" id="lock-sub" data-i18n="lock.enter_pin">Enter your PIN</p>
       <!-- Profile tiles + credential form (js/signin.js) replace the keypad when
-           the install has more than the Owner's PIN. See lockMode in main.js. -->
+           the install has more than the main Admin's PIN. See lockMode in main.js. -->
       <div class="lock-tiles" id="lock-tiles" hidden></div>
       <div class="lock-dots" id="lock-dots" aria-hidden="true"></div>
       <div class="lock-error" id="lock-error" role="alert" aria-live="assertive" hidden></div>
@@ -1097,10 +1097,10 @@
   <!-- Rail chip menu: Switch profile / Lock. -->
   <div class="menu profile-menu" id="profile-menu" role="menu" aria-label="Profile" data-i18n-attr="aria-label=chip.menu_aria" hidden></div>
 
-  <!-- First-run card: dismissible, loopback installs that have no Owner yet. -->
+  <!-- First-run card: dismissible, loopback installs that have no Admin yet. -->
   <div class="firstrun-card" id="firstrun-card" role="region" aria-labelledby="firstrun-title" hidden>
     <strong id="firstrun-title" data-i18n="setup.card_title">Set up your account</strong>
-    <p data-i18n="setup.card_body">Create the owner account so this install can be locked and shared with your household.</p>
+    <p data-i18n="setup.card_body">Create your account so this install can be locked and shared with other people.</p>
     <div class="bm-actions">
       <button class="btn-primary" id="firstrun-open" data-i18n="setup.card_open">Set up now</button>
       <button class="btn-secondary" id="firstrun-dismiss" data-i18n="setup.not_now">Not now</button>
