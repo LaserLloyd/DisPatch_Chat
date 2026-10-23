@@ -271,3 +271,34 @@ test('an app page can send details, strings only and capped', () => {
   assert.ok(!('evil' in g.items[0].info) && !('bot' in g.items[0].info));
   assert.deepEqual(cleanInfo(null), {});
 });
+
+// ---- review #2 (LB-1..LB-6) -------------------------------------------------
+
+test('a mouse press never focuses a viewer control (a later key would pin the faded chrome)', () => {
+  assert.match(MAIN, /addEventListener\('mousedown', \(e\) => \{ if \(e\.target\.closest\('button, a'\)\) e\.preventDefault\(\); \}\)/);
+});
+
+test('copy confirmations show above the viewer', () => {
+  const z = (sel) => Number(new RegExp(`\\n${sel.replace('.', '\\.')} \\{[^}]*z-index: (\\d+)`).exec(CSS)[1]);
+  assert.ok(z('.toast') > z('.lightbox'), 'toast z-index must beat .lightbox');
+});
+
+test('RTL: the counter takes the page direction (no dir=ltr on the box) and the left arrow clears the panel', () => {
+  assert.doesNotMatch(MAIN, /lightbox-counter \$\{chromeCls\}`, 'aria-live': 'polite', dir: 'ltr'/);
+  assert.match(MAIN, /el\('bdi', \{ dir: 'ltr', text: nav\.label\(\) \}\)/);
+  assert.match(CSS, /:root\[dir="rtl"\] \.lightbox\.details-open \.lightbox-prev \{ left: 354px; \}/);
+});
+
+test('opening the viewer closes the thread menu; Esc leaves Details alone while a dialog is open', () => {
+  const fn = MAIN.slice(MAIN.indexOf('function openLightbox('));
+  assert.match(fn.slice(0, 400), /toggleThreadMenu\(false\)/);
+  assert.match(fn, /if \(e\.key !== 'Escape' \|\| !detailsOpen\) return;[\s\S]{0,140}dialog\[open\]/);
+});
+
+test('the Details toggle has a name when its text is hidden on a phone', () => {
+  assert.match(MAIN, /lb-details-toggle', type: 'button', 'aria-expanded': 'false',\s*'aria-label': t\('lightbox\.details'\)/);
+});
+
+test('a viewer button tapped right after a pan answers its own tap (Chrome sends no click then)', () => {
+  assert.match(MAIN, /lb\.addEventListener\('touchend', \(e\) => \{[\s\S]{0,500}e\.preventDefault\(\);\s*s\.ctl\.click\(\);/);
+});

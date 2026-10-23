@@ -3506,6 +3506,7 @@ async function copyImageToClipboard(url) {
 
 function openLightbox(src, { video = false, downloadUrl = null, downloadName = null,
                              gallery = null, index = 0, info = null } = {}) {
+  toggleThreadMenu(false);   // a thumbnail click skips the document closer (capture stopPropagation)
   const useGallery = Array.isArray(gallery) && gallery.length > 0 && !nimEnabled();
   const items = useGallery ? gallery : [{ src, video, downloadUrl, downloadName, info: info || {} }];
   const nav = createGallery(items, useGallery ? index : 0);
@@ -3524,7 +3525,7 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
   const closeBtn = el('button', { class: `lightbox-close ${chromeCls}`, type: 'button', 'aria-label': t('common.close'), title: t('common.close') }, [railIcon(RAIL_ICONS.close)]);
   const prevBtn = btn('lightbox-nav lightbox-prev', t('lightbox.previous'), railIcon(RAIL_ICONS.back));
   const nextBtn = btn('lightbox-nav lightbox-next', t('lightbox.next'), railIcon(RAIL_ICONS.back));
-  const counter = el('div', { class: `lightbox-counter ${chromeCls}`, 'aria-live': 'polite', dir: 'ltr' });
+  const counter = el('div', { class: `lightbox-counter ${chromeCls}`, 'aria-live': 'polite' });
 
   // The toolbar: zoom out · 100% (fit) · zoom in | Details | Download.
   const zoomOut = el('button', { class: 'lb-tool', type: 'button', 'aria-label': t('lightbox.zoom_out'), title: t('lightbox.zoom_out') }, [railIcon(['M5 12h14'])]);
@@ -3532,13 +3533,19 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
   const zoomIn = el('button', { class: 'lb-tool', type: 'button', 'aria-label': t('lightbox.zoom_in'), title: t('lightbox.zoom_in') }, [spriteIcon('plus', 18)]);
   const zoomGroup = el('div', { class: 'lb-group lb-zoom' }, [zoomOut, zoomFit, zoomIn]);
   let detailsChev = spriteIcon('chevron-up', 16);
-  const detailsBtn = el('button', { class: 'lb-tool lb-details-toggle', type: 'button', 'aria-expanded': 'false' },
+  const detailsBtn = el('button', { class: 'lb-tool lb-details-toggle', type: 'button', 'aria-expanded': 'false',
+    'aria-label': t('lightbox.details'), title: t('lightbox.details') },
     [spriteIcon('info', 18), el('span', { class: 'lb-tool-text', text: t('lightbox.details') }), detailsChev]);
   const dl = el('a', { class: 'lb-tool lb-download', 'aria-label': t('common.download'), title: t('common.download') },
     [spriteIcon('download', 18), el('span', { class: 'lb-tool-text', text: t('common.download') })]);
   const bar = el('div', { class: `lightbox-bar ${chromeCls}`, role: 'toolbar', 'aria-label': t('lightbox.toolbar') },
     [zoomGroup, detailsBtn, dl]);
-  for (const n of [bar, closeBtn, prevBtn, nextBtn, counter]) n.addEventListener('click', (e) => e.stopPropagation());
+  for (const n of [bar, closeBtn, prevBtn, nextBtn, counter]) {
+    n.addEventListener('click', (e) => e.stopPropagation());
+    // A mouse press must not focus the control: Chrome makes a mouse-focused button
+    // :focus-visible on the next key press, which pins the faded chrome on screen.
+    n.addEventListener('mousedown', (e) => { if (e.target.closest('button, a')) e.preventDefault(); });
+  }
 
   // The details panel (not chrome: it stays until closed).
   const panelId = `lb-details-${Math.random().toString(36).slice(2, 8)}`;
@@ -3739,6 +3746,11 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
     renderDetails();
     // The picture area changed size: keep the zoom inside it.
     requestAnimationFrame(() => setView(view));
+    // Opening from the toolbar on a phone hides the toolbar (the sheet covers it):
+    // keep focus inside the viewer instead of letting it drop to <body>.
+    if (detailsOpen && document.activeElement === detailsBtn && detailsBtn.offsetParent === null) {
+      (panel.querySelector('button') || lb).focus();
+    }
   };
   detailsBtn.addEventListener('click', () => setDetails(!detailsOpen));
 
@@ -3761,7 +3773,7 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
       dl.setAttribute('href', href);
       dl.setAttribute('download', it.downloadName || '');
     }
-    counter.textContent = nav.label();
+    counter.replaceChildren(...(nav.label() ? [el('bdi', { dir: 'ltr', text: nav.label() })] : []));
     prevBtn.disabled = !nav.canStep(-1);
     nextBtn.disabled = !nav.canStep(1);
     renderDetails();
@@ -3791,6 +3803,7 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
   const onEsc = (e) => {
     if (e.key !== 'Escape' || !detailsOpen) return;
     if ([...document.querySelectorAll('.lightbox')].at(-1) !== lb) return;
+    if (document.querySelector('dialog[open]')) return;
     e.preventDefault(); e.stopImmediatePropagation();
     setDetails(false);
     lb.focus();
@@ -3832,6 +3845,24 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
     if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && e.target !== lb) chrome.tap();
   });
   lb.addEventListener('pointercancel', () => { tapStart = null; });
+  // A control tapped right after a pan or pinch gets no click from Chrome (the tap is read as
+  // the end of the gesture), so a viewer button answers its own tap: the browser's click is
+  // cancelled and the button is clicked once, here.
+  let ctlTouch = null;
+  lb.addEventListener('touchstart', (e) => {
+    const t0 = e.touches[0];
+    ctlTouch = e.touches.length === 1 && e.target.closest?.('button, a')
+      ? { ctl: e.target.closest('button, a'), x: t0.clientX, y: t0.clientY } : null;
+  }, { passive: true });
+  lb.addEventListener('touchend', (e) => {
+    const s = ctlTouch; ctlTouch = null;
+    const t1 = e.changedTouches[0];
+    if (!s || !t1 || e.touches.length || s.ctl.disabled || !lb.contains(s.ctl)) return;
+    if (Math.abs(t1.clientX - s.x) > 10 || Math.abs(t1.clientY - s.y) > 10) return;
+    if (document.elementFromPoint(t1.clientX, t1.clientY)?.closest('button, a') !== s.ctl) return;
+    e.preventDefault();
+    s.ctl.click();
+  });
   lb.addEventListener('focusin', (e) => {
     if (e.target.closest?.(`.${chromeCls}`) && e.target.matches?.(':focus-visible')) chrome.focusIn();
   });

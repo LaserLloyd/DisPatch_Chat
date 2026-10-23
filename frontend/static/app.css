@@ -826,7 +826,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   /* Sits above a single-line composer, not on top of it. */
   position: fixed; bottom: 118px; left: 50%; transform: translateX(-50%);
   background: var(--bg-tertiary); border: 1px solid var(--border-light); color: var(--text-primary);
-  padding: 11px 18px; border-radius: var(--radius-md); z-index: 200; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  padding: 11px 18px; border-radius: var(--radius-md); z-index: 350;   /* above .lightbox (300): its copy confirmations */ box-shadow: 0 8px 24px rgba(0,0,0,.5);
   max-width: 90vw; font-size: 14px;
 }
 .toast.error { border-color: var(--error); }
@@ -1066,6 +1066,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .lightbox.details-open { padding-inline-end: 340px; }
 .lightbox.details-open .lightbox-bar { left: calc((100vw - 340px) / 2); }
 .lightbox.details-open .lightbox-next { right: 354px; }
+/* RTL: the panel sits on the left, so the left arrow moves instead. */
+:root[dir="rtl"] .lightbox.details-open .lightbox-next { right: 14px; }
+:root[dir="rtl"] .lightbox.details-open .lightbox-prev { left: 354px; }
 .lightbox.details-open .lightbox-close { inset-inline-end: 356px; }
 :root[dir="rtl"] .lightbox.details-open .lightbox-bar { left: calc(340px + (100vw - 340px) / 2); }
 @media (max-width: 720px) {
@@ -1077,6 +1080,8 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   .lightbox.details-open { padding-inline-end: 0; padding-bottom: 55vh; }
   .lightbox.details-open img, .lightbox.details-open video { max-width: 94vw; max-height: calc(45vh - 72px); }
   .lightbox.details-open .lightbox-next { right: 6px; }
+  :root[dir="rtl"] .lightbox.details-open .lightbox-prev { left: 6px; }
+  :root[dir="rtl"] .lightbox.details-open .lightbox-next { right: 6px; }
   .lightbox.details-open .lightbox-close { inset-inline-end: 16px; }
   /* The sheet has Download, and a pinch zooms: the toolbar would sit on the picture. */
   .lightbox.details-open .lightbox-bar { display: none; }
