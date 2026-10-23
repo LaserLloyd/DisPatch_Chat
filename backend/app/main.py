@@ -1871,12 +1871,19 @@ def scope_frame_for_principal(frame: dict, principal, targeted: bool = False) ->
         bot = _frame_bot(frame)
         if bot is not None and not characters.may_use_id(bot, principal):
             return None
-    if t == "error" and frame.get("detail") and not getattr(principal, "is_admin", False):
-        # A turn error's detail names the provider's address and what it said (llm_api
-        # ApiError.detail): an Admin's to read, never a User's, a Basic profile's or the
-        # shared landing's (SPEC §5: connections are the Admin's). The short message stays.
-        return {k: v for k, v in frame.items() if k != "detail"}
+    if t == "error" and frame.get("detail"):
+        return _error_detail_for(frame, principal)
     return frame
+
+
+def _error_detail_for(frame: dict, principal) -> dict:
+    """A turn error's ``detail`` names the provider's address and what it said (llm_api
+    ApiError.detail): for the Admin role to read, never a User's, a Basic profile's or the
+    shared landing's (SPEC §5: connections are the Admin's). This only ever REMOVES a field
+    (it lets nothing through that the ownership rule dropped); the short message stays."""
+    if getattr(principal, "kind", "") == "open" or getattr(principal, "role", "") == Role.ADMIN.value:
+        return frame
+    return {k: v for k, v in frame.items() if k != "detail"}
 
 
 def _roster_row_visible(row: dict, principal) -> bool:
