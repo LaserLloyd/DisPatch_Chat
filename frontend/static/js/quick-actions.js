@@ -23,7 +23,7 @@
 // textContent, never innerHTML, because the labels come from an operator file.
 
 import { el, railIcon, RAIL_ICONS } from './util.js?v=21';
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 
 const ICON_BOLT = RAIL_ICONS.bolt;
 const ICON_CLOSE = ['M6 6l12 12', 'M18 6 6 18'];

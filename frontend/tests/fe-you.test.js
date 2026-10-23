@@ -58,7 +58,7 @@ async function setup(extra = {}) {
     const [status, out] = h ? h(body) : [404, { detail: 'Not Found' }];
     return { ok: status >= 200 && status < 300, status, headers: new win.Headers(), json: async () => out, blob: async () => new Blob(['x']) };
   };
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   calls.length = 0;
   const editor = await import('../static/js/bot-editor.js?v=1');

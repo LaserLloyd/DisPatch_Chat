@@ -15,7 +15,7 @@ import {
   t, tHtml, init as i18nInit, onChange as onI18nChange, languageSelect, localeLoadFailed, hasDictionary,
   relTime, clockTime, dayLabel, dayKey, fileSize,
   n as fmtNumber, percent as fmtPercent, mergeBundle, removeBundle, lang as i18nLang, LANGUAGES,
-} from './i18n.js?v=4';
+} from './i18n.js?v=5';
 import {
   initReactions, loadReactions, resetReactions, handleReactionFrame, handlePoolFrame,
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
@@ -99,7 +99,7 @@ import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './vi
 import { aboutRow } from './about.js?v=23';
 // Profiles (Admin / User / Basic): pure decisions (profiles.js), the sign-in /
 // setup DOM (signin.js) and Settings -> People (people.js).
-import { newChatAllowed, pickNewChatTarget, latestByBot, currentCharacter, reusableEmptyThread, readLastCharacter, rememberCharacter } from './newchat.js?v=2';
+import { newChatAllowed, pickNewChatTarget, latestByBot, currentCharacter, reusableEmptyThread, readLastCharacter, rememberCharacter } from './newchat.js?v=3';
 import { normalizeRole, isAdminRole, signInMode, wsErrorKind, avatarSpec, railGroups, isMineBot } from './profiles.js?v=3';
 import {
   renderSignIn, renderSetup, setupPage, renderPasswordForm, paintChip, chipLabel, attachChipMenu,

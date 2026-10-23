@@ -11,7 +11,7 @@
 // main.js calls initMyBots() once at boot; settings-nav.js SECTION_HOOKS runs
 // renderMyBots() when the section mounts. Nothing runs at import time.
 
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 import { el } from './util.js?v=21';
 import {
   can, profileReq, renderAiBuild, renderBotEditor, loadEditorOptions, withShell, initBotEditor,

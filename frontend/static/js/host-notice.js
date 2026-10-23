@@ -27,7 +27,7 @@
 // the next normal page shows the popup once more. Keep every claim TRUE for the
 // code -- docs/security.md "What you are trusting".
 
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 import { el, spriteIcon } from './util.js?v=21';
 
 /** The line a non-Admin profile is told about what an Admin sees. The server sends a code

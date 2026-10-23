@@ -43,7 +43,7 @@ async function setup({ quickOpen } = {}) {
     const [status, body] = h ? h(opts) : [404, { detail: 'Not Found' }];
     return { ok: status >= 200 && status < 300, status, statusText: String(status), headers: new win.Headers(), json: async () => body };
   };
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   const mod = await import(`../static/js/llm.js?t=${Math.random()}`);
   const rec = { tabs: [] };

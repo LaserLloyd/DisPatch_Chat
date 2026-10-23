@@ -44,7 +44,7 @@
 // imported by main.js). main.js injects everything app-shaped via wireTools().
 
 import { api } from './api.js?v=36';
-import { t, relTimeLong } from './i18n.js?v=4';
+import { t, relTimeLong } from './i18n.js?v=5';
 import { el, railIcon, RAIL_ICONS, spriteIcon } from './util.js?v=21';
 
 // Builtin ids are the pseudo-bot ids main.js has always used, in rail order.

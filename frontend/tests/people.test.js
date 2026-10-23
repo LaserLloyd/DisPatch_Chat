@@ -375,7 +375,7 @@ async function boot(url = 'http://127.0.0.1:18765/') {
     const [status, body] = h ? h(opts) : [404, { detail: 'Not Found' }];
     return { ok: status >= 200 && status < 300, status, statusText: String(status), headers: new win.Headers(), json: async () => body };
   };
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   return win;
 }
@@ -663,7 +663,7 @@ test('ws.js: a 1008 close is not retried in a loop', async () => {
 
 test('sw.js: the three new modules are precached and the cache name moved on', () => {
   for (const f of ['profiles', 'signin', 'people']) assert.ok(SW.includes(`'/static/js/${f}.js'`), f);
-  assert.match(SW, /const CACHE = 'local-chat-v184'/);
+  assert.match(SW, /const CACHE = 'local-chat-v185'/);
 });
 
 test('the retired terms are gone from the strings a user reads', () => {

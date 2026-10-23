@@ -13,7 +13,7 @@
 //
 // Everything is a text node (el() has no innerHTML). Nothing runs at import time.
 
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 import { el } from './util.js?v=21';
 
 export const NAME_MAX = 40;

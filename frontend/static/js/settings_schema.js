@@ -20,7 +20,7 @@
 // rows go in which slot) so the tests drive them without a DOM. Nothing runs at import time.
 
 import { w5 as realApi, errorText } from './w5-api.js?v=2';
-import { t, lang } from './i18n.js?v=4';
+import { t, lang } from './i18n.js?v=5';
 import { el } from './util.js?v=21';
 
 // ------------------------------------------------------------------ pure
@@ -529,7 +529,7 @@ export async function applyDeviceDefaults({ api = realApi, win = typeof window =
       } else if (what === 'avatar_style' && value === 'minimal') {
         win.document.documentElement.setAttribute('data-avatar-style', 'minimal'); done.push(what);
       } else if (what === 'language') {
-        const i18n = await import('./i18n.js?v=4');
+        const i18n = await import('./i18n.js?v=5');
         if (value !== i18n.lang()) { await i18n.setLocale(value); drop('dispatch-lang'); done.push(what); }
       }
     } catch { /* a default must never break the page */ }

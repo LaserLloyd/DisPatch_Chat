@@ -87,7 +87,7 @@ function withDom(fn) {
     globalThis.window = win;
     try {
       const en = JSON.parse(readFileSync(join(STATIC, 'locales', 'en.json'), 'utf8'));
-      const i18n = await import('../static/js/i18n.js?v=4');
+      const i18n = await import('../static/js/i18n.js?v=5');
       globalThis.fetch = async () => ({ ok: true, json: async () => en });
       await i18n.init('en');
       await fn(win, win.document.getElementById('root'));
@@ -225,7 +225,7 @@ test('disabled by the operator in Settings -> Plugins says so, not "DISPATCH_EXT
 }));
 
 test('every locale renders the page without a missing key', dom, withDom(async (win, root) => {
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   const m = await load();
   for (const lang of LANGS) {
     const d = JSON.parse(readFileSync(join(STATIC, 'locales', `${lang}.json`), 'utf8'));

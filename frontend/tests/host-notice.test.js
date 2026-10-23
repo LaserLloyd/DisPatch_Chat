@@ -50,7 +50,7 @@ async function boot() {
   globalThis.fetch = async (u) => (String(u).startsWith('/static/locales/en.json')
     ? { ok: true, status: 200, json: async () => EN, headers: new win.Headers() }
     : { ok: false, status: 404, json: async () => ({}), headers: new win.Headers() });
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   return { win, mod: await load() };
 }

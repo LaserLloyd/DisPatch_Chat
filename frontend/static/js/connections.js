@@ -10,7 +10,7 @@
 // answers into plain sentences and decides what to offer. Pure helpers are exported for the tests.
 
 import { w5 as realApi, errorText } from './w5-api.js?v=2';
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 import { el } from './util.js?v=21';
 
 // ------------------------------------------------------------------ pure

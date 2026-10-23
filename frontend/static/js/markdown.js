@@ -5,7 +5,7 @@ import { loadScript, loadStyle, escapeHtml, spriteIconHtml } from './util.js?v=2
 // markdown.js builds HTML as STRINGS rather than DOM nodes, so the two
 // user-facing attributes below can't be reached by the data-i18n pass — they are
 // translated inline instead. i18n.js imports nothing, so there is no cycle.
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 //
 // The rendering rules here are a port of the OpenClaw Control UI's markdown
 // module (openclaw 2026.7.1, `dist/control-ui/assets/markdown-*.js`) so the same

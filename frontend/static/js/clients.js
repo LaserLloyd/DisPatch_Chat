@@ -14,7 +14,7 @@
 // an internal history-less stack (Back always returns to the list).
 
 import { api } from './api.js?v=36';
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 import { acquireInert, releaseInert, spriteIconHtml } from './util.js?v=21';
 
 const JOB_POLL_MS = 1500;

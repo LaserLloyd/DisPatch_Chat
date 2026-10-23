@@ -14,7 +14,7 @@
 // and every route it calls is operator-only on the server. A key typed here is
 // sent once and never comes back (the server answers `has_key` only).
 
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 import { el, spriteIcon } from './util.js?v=21';
 
 async function json(url, opts = {}) {

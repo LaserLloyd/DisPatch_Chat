@@ -176,7 +176,7 @@ async function boot() {
     return { ok: status >= 200 && status < 300, status, statusText: String(status), headers: new win.Headers(),
       json: async () => body, clone() { return this; } };
   };
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   return win;
 }

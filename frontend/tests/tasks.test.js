@@ -50,7 +50,7 @@ async function boot() {
     }
     return { ok: false, status: 404, json: async () => ({}), headers: new win.Headers() };
   };
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   return win;
 }

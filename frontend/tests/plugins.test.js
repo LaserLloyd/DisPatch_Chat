@@ -114,7 +114,7 @@ async function setup(over = {}) {
       headers: new win.Headers(), json: async () => body,
     };
   };
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   const mod = await import(`../static/js/plugins.js?t=${Math.random()}`);
   const rec = { toasts: [], tools: [], tabs: [] };

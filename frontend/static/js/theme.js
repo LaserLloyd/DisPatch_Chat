@@ -16,7 +16,7 @@
 //      main.js); there is no toggle.
 //
 // Theme names are proper nouns and are deliberately NOT translated.
-import { applyDom, hasDictionary } from './i18n.js?v=4';
+import { applyDom, hasDictionary } from './i18n.js?v=5';
 import { el, railIcon, RAIL_ICONS, spriteIcon } from './util.js?v=21';
 
 // The badge labels are the only translated strings on a card. Literal keys,

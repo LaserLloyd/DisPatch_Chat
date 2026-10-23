@@ -18,7 +18,7 @@
 //
 import { api } from './api.js?v=36';
 import { el, railIcon, RAIL_ICONS, iconLabel, glyphless, spriteIcon } from './util.js?v=21';
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 import { nimEnabled } from './nim.js?v=6';
 
 // ===================== State =====================

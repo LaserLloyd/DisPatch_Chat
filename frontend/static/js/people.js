@@ -26,7 +26,7 @@
 
 import { api as realApi } from './api.js?v=36';
 import { w5 as realW5 } from './w5-api.js?v=2';
-import { t, has, relTime, fullTimestamp } from './i18n.js?v=4';
+import { t, has, relTime, fullTimestamp } from './i18n.js?v=5';
 import { el } from './util.js?v=21';
 import { disclosureText } from './host-notice.js?v=3';
 import { ACTIVITY_COLUMNS, activityRows, activityTotals, avatarSpec } from './profiles.js?v=3';

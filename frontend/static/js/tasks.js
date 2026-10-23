@@ -20,7 +20,7 @@
 // "Claude Agent" as the server names it; costs are always "estimate".
 
 import { api as realApi } from './api.js?v=36';
-import { t, relTime } from './i18n.js?v=4';
+import { t, relTime } from './i18n.js?v=5';
 import { el, spriteIcon } from './util.js?v=21';
 import { createTaskCard, stateLabel, costLabel } from './task_card.js?v=2';
 

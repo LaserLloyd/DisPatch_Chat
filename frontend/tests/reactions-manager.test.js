@@ -47,7 +47,7 @@ async function setup() {
     else if (key === 'PUT /api/reactions/settings') res = [200, { settings: { ...PACK().settings, ...JSON.parse(opts.body).values } }];
     return { ok: res[0] < 300, status: res[0], statusText: String(res[0]), headers: new win.Headers(), json: async () => res[1] };
   };
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   const mod = await import(`../static/js/reactions.js?t=${Math.random()}`);
   const toasts = [];

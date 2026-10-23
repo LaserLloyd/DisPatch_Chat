@@ -11,7 +11,7 @@
 // lose data asks first, and a recovery key is shown exactly once.
 
 import { w5 as realApi, saveBlob, errorText } from './w5-api.js?v=2';
-import { t, fileSize, fullTimestamp } from './i18n.js?v=4';
+import { t, fileSize, fullTimestamp } from './i18n.js?v=5';
 import { el } from './util.js?v=21';
 
 // ------------------------------------------------------------------ pure

@@ -22,7 +22,7 @@
 // an approval card is never torn down by an unrelated delta arriving.
 
 import { el, spriteIcon } from './util.js?v=21';
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 import { approvalCardEl, approvalView } from './approval_card.js?v=2';
 
 export const TERMINAL = new Set(['succeeded', 'failed', 'cancelled']);

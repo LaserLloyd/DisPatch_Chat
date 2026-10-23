@@ -384,7 +384,7 @@ test('Settings → Tools: table, add, toggle, PUT, inline 422', { skip: dom.skip
   // Real English strings for this case, so the hint's {path} is checkable.
   const en = JSON.parse(readFileSync(join(STATIC, 'locales', 'en.json'), 'utf8'));
   routes['GET /static/locales/en.json'] = () => [200, en];
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   const pane = doc.createElement('div');   // the Tools table's host inside Settings → Plugins
   doc.getElementById('spane-plugins').append(pane);

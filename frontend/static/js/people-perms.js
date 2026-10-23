@@ -21,7 +21,7 @@
 
 import { api as realApi } from './api.js?v=36';
 import { w5 as realW5, failure, errorText } from './w5-api.js?v=2';
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 import { el } from './util.js?v=21';
 
 // ------------------------------------------------------------------ words

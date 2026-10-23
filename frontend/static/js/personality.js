@@ -15,7 +15,7 @@
 // Like the rest of js/bots-edit.js, a Save is a server fact (PATCH at once),
 // not part of the Bots tab's Save-button draft. Every string is a text node.
 
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 import { el, railIcon, RAIL_ICONS } from './util.js?v=21';
 
 export const MAX_CHARS = 8000;

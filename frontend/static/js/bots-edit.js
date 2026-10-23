@@ -23,7 +23,7 @@
 // Every string is a text node; no markup is ever parsed.
 
 import { api as realApi } from './api.js?v=36';
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 import { el, railIcon, RAIL_ICONS } from './util.js?v=21';
 import { personaButton, personaPanel } from './personality.js?v=3';
 

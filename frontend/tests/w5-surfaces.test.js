@@ -61,7 +61,7 @@ async function boot() {
     HTMLInputElement: win.HTMLInputElement,
   })) put(k, v);
   installFetch(win);
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   return win;
 }

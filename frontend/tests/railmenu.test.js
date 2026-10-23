@@ -38,7 +38,7 @@ async function boot() {
   globalThis.fetch = async (u) => (String(u).startsWith('/static/locales/en.json')
     ? { ok: true, status: 200, json: async () => EN, headers: new win.Headers() }
     : { ok: false, status: 404, json: async () => ({}), headers: new win.Headers() });
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   win.HTMLDialogElement.prototype.showModal = function showModal() { this.open = true; };
   return win;
@@ -155,7 +155,7 @@ test('"Arrange the bar" moves without dragging, and Reset restores the default',
   const win = await boot();
   const M = await R();
   const { el } = await import('../static/js/util.js?v=21');
-  const { t } = await import('../static/js/i18n.js?v=4');
+  const { t } = await import('../static/js/i18n.js?v=5');
   let changes = 0;
   const { dialog } = M.openArrangeDialog({ t, el, labelOf: (id) => id, visible: () => true, onChange: () => { changes++; } });
   const rowOf = (id) => dialog.querySelector(`.rail-arrange-row[data-id="${id}"]`);

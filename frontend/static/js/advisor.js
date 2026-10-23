@@ -16,7 +16,7 @@
 // device — shows the same state without asking.
 
 import { el } from './util.js?v=21';
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 
 const STATES = ['proposed', 'running', 'done', 'failed', 'dismissed'];
 
