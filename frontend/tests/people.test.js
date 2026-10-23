@@ -674,3 +674,19 @@ test('the retired terms are gone from the strings a user reads', () => {
   for (const gone of ['owner', 'member', 'restricted']) assert.equal(EN.role[gone], undefined, `role.${gone}`);
   for (const ns of ['restricted', 'companions', 'drop']) assert.equal(EN[ns], undefined, `the ${ns} namespace left with its screen`);
 });
+
+test('sign-in: picked() names the tile whose PIN form is up, so "Forgot PIN?" can tell who needs help', { skip: dom.skip }, async () => {
+  const win = await boot();
+  const { renderSignIn } = await import(`../static/js/signin.js?t=${Math.random()}`);
+  const host = win.document.getElementById('lock-tiles');
+  const ctl = renderSignIn(host, { profiles: PROFILES, onSubmit: async () => {} });
+  assert.equal(ctl.picked(), null);
+  host.querySelector('[data-profile="m1"]').click();
+  assert.equal(ctl.picked().id, 'm1');
+  ctl.reset();
+  assert.equal(ctl.picked(), null);
+  const MAIN = (await import('node:fs')).readFileSync(new URL('../static/js/main.js', import.meta.url), 'utf8');
+  const fn = MAIN.slice(MAIN.indexOf('function showRecover()'), MAIN.indexOf('function showRecover()') + 900);
+  assert.match(fn, /const other = !!\(p && !p\.protected\);/);
+  assert.match(fn, /t\('lock\.recover_ask_admin'\)/);
+});

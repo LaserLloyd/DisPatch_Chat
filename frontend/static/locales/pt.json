@@ -579,6 +579,7 @@
     "forgot": "Esqueceste-te do PIN?",
     "cancel": "Cancelar",
     "recover_hint": "Encontra o código de recuperação em {path} na máquina e introduz-o aqui.",
+    "recover_ask_admin": "Só um administrador pode repor o PIN deste perfil: pede-lhe que abra Definições → Pessoas e acesso.",
     "recover_placeholder": "LC-XXXX-XXXX",
     "recover_back": "Voltar",
     "recover_submit": "Repor o PIN",

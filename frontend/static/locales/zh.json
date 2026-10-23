@@ -566,6 +566,7 @@
     "forgot": "忘记 PIN 了？",
     "cancel": "取消",
     "recover_hint": "在这台机器的 {path} 里找到恢复码，然后输入到这里。",
+    "recover_ask_admin": "只有管理员可以重置此个人资料的 PIN：请管理员打开“设置 → 人员与访问”。",
     "recover_placeholder": "LC-XXXX-XXXX",
     "recover_back": "返回",
     "recover_submit": "重置 PIN",

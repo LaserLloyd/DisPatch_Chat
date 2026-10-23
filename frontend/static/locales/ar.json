@@ -601,6 +601,7 @@
     "forgot": "نسيت رمز PIN؟",
     "cancel": "إلغاء",
     "recover_hint": "ابحث عن رمز الاسترداد في {path} على الجهاز، ثم أدخله هنا.",
+    "recover_ask_admin": "لا يستطيع إعادة تعيين رمز PIN لهذا الملف الشخصي إلا مشرف: اطلب من أحدهم فتح الإعدادات ← الأشخاص والوصول.",
     "recover_placeholder": "LC-XXXX-XXXX",
     "recover_back": "رجوع",
     "recover_submit": "إعادة تعيين رمز PIN",

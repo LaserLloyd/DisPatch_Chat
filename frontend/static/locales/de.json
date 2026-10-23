@@ -573,6 +573,7 @@
     "forgot": "PIN vergessen?",
     "cancel": "Abbrechen",
     "recover_hint": "Den Wiederherstellungscode findest du in {path} auf dem Rechner — gib ihn dann hier ein.",
+    "recover_ask_admin": "Nur ein Admin kann die PIN dieses Profils zurücksetzen: Bitte einen Admin, Einstellungen → Personen & Zugriff zu öffnen.",
     "recover_placeholder": "LC-XXXX-XXXX",
     "recover_back": "Zurück",
     "recover_submit": "PIN zurücksetzen",

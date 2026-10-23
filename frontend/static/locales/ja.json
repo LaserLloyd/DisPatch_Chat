@@ -566,6 +566,7 @@
     "forgot": "PIN を忘れましたか？",
     "cancel": "キャンセル",
     "recover_hint": "マシン上の {path} にあるリカバリーコードを確認して、ここに入力してください。",
+    "recover_ask_admin": "このプロフィールの PIN をリセットできるのは管理者だけです。管理者に「設定 → ユーザーとアクセス」を開いてもらってください。",
     "recover_placeholder": "LC-XXXX-XXXX",
     "recover_back": "戻る",
     "recover_submit": "PIN をリセット",

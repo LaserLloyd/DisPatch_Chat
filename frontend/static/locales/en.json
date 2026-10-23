@@ -573,6 +573,7 @@
     "forgot": "Forgot PIN?",
     "cancel": "Cancel",
     "recover_hint": "Find the recovery code in {path} on the machine, then enter it here.",
+    "recover_ask_admin": "Only an Admin can reset this profile's PIN: ask one to open Settings → People & Access.",
     "recover_placeholder": "LC-XXXX-XXXX",
     "recover_back": "Back",
     "recover_submit": "Reset PIN",

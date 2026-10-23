@@ -48,12 +48,14 @@ function errMessage(e, fallbackKey) {
 export function renderSignIn(host, { profiles, currentId = null, onSubmit, remember = () => false }) {
   let countdown = null;
   let busy = false;
+  let picked = null;              // the tile whose credential form is up (null on the tile list)
   const tiles = sortTiles(profiles);
 
   const stopCountdown = () => { if (countdown) { countdown.stop(); countdown = null; } };
 
   function showTiles() {
     stopCountdown();
+    picked = null;
     const list = el('ul', { class: 'signin-tiles', role: 'list' }, tiles.map((p) => {
       const b = el('button', {
         type: 'button', class: 'signin-tile', 'data-profile': p.id,
@@ -102,6 +104,7 @@ export function renderSignIn(host, { profiles, currentId = null, onSubmit, remem
     const profile = typeof profileOrId === 'string' ? tiles.find((p) => p.id === profileOrId) : profileOrId;
     if (!profile) return;
     const modes = credentialModes(profile.credential);
+    picked = modes.length ? profile : null;
     if (!modes.length) {
       // Nothing to type: picking the tile IS the sign-in.
       const ui = {
@@ -193,6 +196,8 @@ export function renderSignIn(host, { profiles, currentId = null, onSubmit, remem
   return {
     reset: showTiles,
     pick,
+    /** The profile whose PIN/password form is showing, or null. */
+    picked: () => picked,
     destroy: () => { stopCountdown(); host.replaceChildren(); },
   };
 }

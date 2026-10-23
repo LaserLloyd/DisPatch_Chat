@@ -579,6 +579,7 @@
     "forgot": "PIN oublié ?",
     "cancel": "Annuler",
     "recover_hint": "Trouve le code de récupération dans {path} sur la machine, puis saisis-le ici.",
+    "recover_ask_admin": "Seul un admin peut réinitialiser le PIN de ce profil : demande-lui d’ouvrir Réglages → Personnes et accès.",
     "recover_placeholder": "LC-XXXX-XXXX",
     "recover_back": "Retour",
     "recover_submit": "Réinitialiser le PIN",

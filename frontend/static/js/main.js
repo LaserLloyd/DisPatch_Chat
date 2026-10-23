@@ -9299,13 +9299,26 @@ async function submitPin() {
 
 function showRecover() {
   dom['lock-recover'].classList.remove('hidden');
+  // The recovery code resets the MAIN Admin's (install) PIN. Someone on another profile's
+  // tile is told who can help instead, with no code fields to fill in.
+  const p = signInCtl && signInCtl.picked ? signInCtl.picked() : null;
+  const other = !!(p && !p.protected);
+  for (const id of ['recover-code', 'recover-new-pin', 'recover-submit']) dom[id].hidden = other;
+  if (other) {
+    dom['lock-recover-hint'].textContent = t('lock.recover_ask_admin');
+    setTimeout(() => dom['recover-cancel'].focus(), 30);
+    return;
+  }
   dom['lock-recover-hint'].textContent =
     t('lock.recover_hint', { path: state.auth.recoveryPath || 'RECOVERY-CODE.txt' });
   dom['recover-code'].value = '';
   dom['recover-new-pin'].value = '';
   setTimeout(() => dom['recover-code'].focus(), 30);
 }
-function hideRecover() { dom['lock-recover'].classList.add('hidden'); }
+function hideRecover() {
+  dom['lock-recover'].classList.add('hidden');
+  for (const id of ['recover-code', 'recover-new-pin', 'recover-submit']) dom[id].hidden = false;
+}
 
 // POST /api/auth/recover with the optional new PIN (3.0). Kept here rather than in api.js so
 // the dozen api.js importers keep their ?v=; errors carry the 3.0 envelope via w5's failure().

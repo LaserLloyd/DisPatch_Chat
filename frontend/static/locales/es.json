@@ -579,6 +579,7 @@
     "forgot": "¿Olvidaste el PIN?",
     "cancel": "Cancelar",
     "recover_hint": "Busca el código de recuperación en {path} del equipo y escríbelo aquí.",
+    "recover_ask_admin": "Solo un administrador puede restablecer el PIN de este perfil: pídele que abra Ajustes → Personas y acceso.",
     "recover_placeholder": "LC-XXXX-XXXX",
     "recover_back": "Atrás",
     "recover_submit": "Restablecer el PIN",
