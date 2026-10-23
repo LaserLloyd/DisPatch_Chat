@@ -2152,6 +2152,7 @@
   "reset": {
     "title": "Rétablir par défaut",
     "desc": "Supprime tous les bots que tu as créés et tous les chats de ce profil.",
+    "desc_basic": "Supprime tous les chats de ce profil.",
     "button": "Rétablir par défaut…",
     "confirm_title": "Réinitialiser {name} ?",
     "confirm_counts": "Cela supprime : bots {bots}, chats {chats}, images {pictures}, fichiers du File Server {files}. Irréversible.",

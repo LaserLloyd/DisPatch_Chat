@@ -2127,6 +2127,7 @@
   "reset": {
     "title": "Auf Standard zurücksetzen",
     "desc": "Löscht jeden von dir erstellten Bot und jeden Chat in diesem Profil.",
+    "desc_basic": "Löscht jeden Chat in diesem Profil.",
     "button": "Auf Standard zurücksetzen…",
     "confirm_title": "{name} zurücksetzen?",
     "confirm_counts": "Das löscht: Bots {bots}, Chats {chats}, Bilder {pictures}, Dateiserver-Dateien {files}. Das lässt sich nicht rückgängig machen.",

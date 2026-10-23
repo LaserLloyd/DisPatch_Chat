@@ -2099,6 +2099,7 @@
   "reset": {
     "title": "恢复默认",
     "desc": "删除你制作的所有机器人和此个人资料中的所有对话。",
+    "desc_basic": "删除此个人资料中的所有对话。",
     "button": "恢复默认…",
     "confirm_title": "重置 {name}？",
     "confirm_counts": "将删除：机器人 {bots}、对话 {chats}、图片 {pictures}、文件服务器文件 {files}。此操作无法撤销。",

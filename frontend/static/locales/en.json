@@ -2127,6 +2127,7 @@
   "reset": {
     "title": "Reset to default",
     "desc": "Deletes every bot you made and every chat in this profile.",
+    "desc_basic": "Deletes every chat in this profile.",
     "button": "Reset to default…",
     "confirm_title": "Reset {name}?",
     "confirm_counts": "This deletes: bots {bots}, chats {chats}, pictures {pictures}, File Server files {files}. It can't be undone.",

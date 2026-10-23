@@ -366,3 +366,12 @@ test('wiring: every locale key these modules use exists, and the section is decl
   assert.match(HTML, /id="stab-mybots"/);
   assert.match(HTML, /id="spane-mybots"/);
 });
+
+test('Reset: "cloned voices are kept" only when there are clones; a Basic profile reads the Basic description', { skip: dom.skip }, async () => {
+  const { reset } = await setup();
+  const base = { counts: { bots: 0, chats: 2, pictures: 0, files: 0, voices: 0 }, keeps_voices: true, outcome: 'household' };
+  assert.ok(!reset.confirmLines(base).includes(EN.reset.voices_kept), 'no clones: nothing to keep');
+  assert.ok(reset.confirmLines({ ...base, counts: { ...base.counts, voices: 1 } }).includes(EN.reset.voices_kept));
+  assert.match(SRC['account-reset'], /t\(auth && auth\.role === 'basic' \? 'reset\.desc_basic' : 'reset\.desc'\)/);
+  assert.ok(EN.reset.desc_basic && !/bot/i.test(EN.reset.desc_basic));
+});

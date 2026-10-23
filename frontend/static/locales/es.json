@@ -2152,6 +2152,7 @@
   "reset": {
     "title": "Restablecer valores predeterminados",
     "desc": "Elimina todos los bots que creaste y todos los chats de este perfil.",
+    "desc_basic": "Borra todos los chats de este perfil.",
     "button": "Restablecer valores predeterminados…",
     "confirm_title": "¿Restablecer {name}?",
     "confirm_counts": "Se eliminará: bots {bots}, chats {chats}, imágenes {pictures}, archivos del Servidor de archivos {files}. No se puede deshacer.",

@@ -2152,6 +2152,7 @@
   "reset": {
     "title": "Repor predefinição",
     "desc": "Elimina todos os bots que criaste e todas as conversas deste perfil.",
+    "desc_basic": "Apaga todas as conversas deste perfil.",
     "button": "Repor predefinição…",
     "confirm_title": "Repor {name}?",
     "confirm_counts": "Isto elimina: bots {bots}, conversas {chats}, imagens {pictures}, ficheiros do Servidor de ficheiros {files}. Não é possível anular.",

@@ -31,7 +31,8 @@ export function confirmLines(preview, { name = '', shared = false } = {}) {
     }),
     preview && preview.outcome === 'household' ? t('reset.confirm_basic') : t('reset.confirm_atlas'),
   ];
-  if (preview && preview.keeps_voices !== false) lines.push(t('reset.voices_kept'));
+  // Only when there is something to keep (a Basic profile, or one that never cloned, has none).
+  if (preview && preview.keeps_voices !== false && Number(c.voices || 0) > 0) lines.push(t('reset.voices_kept'));
   if (shared) lines.push(t('reset.shared_warning'));
   void name;
   return lines;
@@ -104,7 +105,7 @@ export function renderAccountReset(host, deps = {}) {
 
   const resetGroup = el('section', { class: 'dev-group', 'data-anchor': 'reset', 'aria-labelledby': 'ar-h-reset' }, [
     el('h3', { class: 'dev-group-title', id: 'ar-h-reset', text: t('reset.title') }),
-    el('p', { class: 'muted', text: t('reset.desc') }),
+    el('p', { class: 'muted', text: t(auth && auth.role === 'basic' ? 'reset.desc_basic' : 'reset.desc') }),
     shared ? el('p', { class: 'muted', text: t('reset.shared_warning') }) : null,
     openBtn, panel, status,
   ]);
