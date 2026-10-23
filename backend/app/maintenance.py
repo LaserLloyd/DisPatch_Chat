@@ -192,20 +192,16 @@ TARGET_BATCH_SECONDS = 0.05
 MIN_BATCH = 200
 
 
-def _delete_batches(ctx: Ctx, table: str, where: str, params: tuple = ()) -> int:
-    """Delete rows of ``table`` matching ``where`` in batches (each its own transaction). The batch
-    starts at 1,000 rows and grows toward ``ctx.batch`` (5,000) while a batch stays well inside
-    :data:`TARGET_BATCH_SECONDS`, and shrinks when a table with many indexes is slower. Dry run: the
-    count. Idempotent: a second run finds nothing."""
-    if ctx.dry:
-        return _count(ctx, table, where, params)
+def _write_batches(ctx: Ctx, stmt: str, params: tuple = ()) -> int:
+    """Run ``stmt`` (a DELETE or UPDATE whose row choice ends in ``LIMIT ?``) until it touches
+    fewer rows than asked, each batch its own transaction. The batch starts at 1,000 rows and grows
+    toward ``ctx.batch`` (5,000) while a batch stays well inside :data:`TARGET_BATCH_SECONDS`, and
+    shrinks when a table with many indexes is slower."""
     total = 0
     size = min(1000, ctx.batch)
     while True:
         t0 = time.perf_counter()
-        cur = ctx.con.execute(
-            f"DELETE FROM {table} WHERE rowid IN (SELECT rowid FROM {table} WHERE {where} LIMIT ?)",
-            (*params, size))
+        cur = ctx.con.execute(stmt, (*params, size))
         n = cur.rowcount
         took = time.perf_counter() - t0
         total += n
@@ -219,6 +215,15 @@ def _delete_batches(ctx: Ctx, table: str, where: str, params: tuple = ()) -> int
         elif took > TARGET_BATCH_SECONDS:
             size = max(MIN_BATCH, int(size * TARGET_BATCH_SECONDS / took))
         time.sleep(ctx.sleep)
+
+
+def _delete_batches(ctx: Ctx, table: str, where: str, params: tuple = ()) -> int:
+    """Delete rows of ``table`` matching ``where`` in adaptive batches (:func:`_write_batches`).
+    Dry run: the count. Idempotent: a second run finds nothing."""
+    if ctx.dry:
+        return _count(ctx, table, where, params)
+    return _write_batches(
+        ctx, f"DELETE FROM {table} WHERE rowid IN (SELECT rowid FROM {table} WHERE {where} LIMIT ?)", params)
 
 
 def _table_exists(con: sqlite3.Connection, name: str) -> bool:
@@ -415,14 +420,11 @@ def step_archive_chats(ctx: Ctx) -> tuple[int, int]:
         if ctx.dry:
             total += _count(ctx, "threads", where, tuple(params))
             continue
-        while True:
-            cur = ctx.con.execute(
-                f"UPDATE threads SET is_archived = 1 WHERE rowid IN (SELECT rowid FROM threads WHERE {where} LIMIT ?)",
-                (*params, 1000))
-            total += cur.rowcount
-            if cur.rowcount < 1000:
-                break
-            time.sleep(ctx.sleep)
+        # the same adaptive batches as the deletes (a 1,000-row UPDATE that also has to find its rows
+        # through the NOT EXISTS checks can hold the write lock for seconds on a slow disk)
+        total += _write_batches(
+            ctx, f"UPDATE threads SET is_archived = 1 WHERE rowid IN (SELECT rowid FROM threads WHERE {where} LIMIT ?)",
+            tuple(params))
     return total, 0
 
 
@@ -541,6 +543,9 @@ def step_incremental_vacuum(ctx: Ctx) -> tuple[int, int]:
 def step_wal_checkpoint(ctx: Ctx) -> tuple[int, int]:
     if ctx.dry:
         return 0, 0
+    # copy first without holding writers off; TRUNCATE (which blocks them while it copies and syncs)
+    # then has almost nothing left to do
+    ctx.con.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchall()
     for attempt in (1, 2):
         busy, log_pages, ckpt = ctx.con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
         if not busy:
@@ -655,7 +660,9 @@ def scan_storage(data: Path, con: sqlite3.Connection | None = None) -> dict[str,
                 with it:
                     for e in it:
                         try:
-                            if e.is_dir(follow_symlinks=False):
+                            # a store the data dir links elsewhere (media -> ~/.openclaw/media/...) is
+                            # walked too; links further down are not followed
+                            if e.is_dir(follow_symlinks=False) or (d == data and e.is_symlink() and e.is_dir()):
                                 stack.append(Path(e.path))
                                 continue
                             st = e.stat(follow_symlinks=False)

@@ -226,6 +226,19 @@ def test_the_storage_numbers_match_du(scratch):
     assert report["total_bytes"] == total and report["measured_at"]
 
 
+def test_a_store_the_data_dir_links_elsewhere_is_counted(scratch, tmp_path):
+    """media/ may be a symlink to a folder outside the data dir (the blob store lives elsewhere):
+    the Storage card counts what is behind it, and follows no link further down."""
+    scratch.admin()
+    outside = tmp_path / "blob-store"
+    put(outside / "a.png", b"x" * 4321)
+    put(outside / "deeper" / "b.png", b"y" * 1000)
+    (scratch.root / "media").symlink_to(outside, target_is_directory=True)
+    (outside / "loop").symlink_to(outside, target_is_directory=True)     # never followed
+    area = maintenance.scan_storage(scratch.root)
+    assert area["media"]["bytes"] == 5321 and area["media"]["files"] == 2
+
+
 def test_a_hard_linked_keeper_is_counted_once(snaps):
     d, names = snaps
     backups.prune_snapshot_tiers()
