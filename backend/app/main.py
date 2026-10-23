@@ -1860,6 +1860,11 @@ def scope_frame_for_principal(frame: dict, principal, targeted: bool = False) ->
         bot = _frame_bot(frame)
         if bot is not None and not characters.may_use_id(bot, principal):
             return None
+    if t == "error" and frame.get("detail") and not getattr(principal, "is_admin", False):
+        # A turn error's detail names the provider's address and what it said (llm_api
+        # ApiError.detail): an Admin's to read, never a User's, a Basic profile's or the
+        # shared landing's (SPEC §5: connections are the Admin's). The short message stays.
+        return {k: v for k, v in frame.items() if k != "detail"}
     return frame
 
 
