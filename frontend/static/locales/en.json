@@ -2266,7 +2266,13 @@
     "running": "Running…",
     "refresh": "Refresh",
     "step_failed": "{step} failed: {error}",
-    "step_rows": "{rows} rows"
+    "step_rows": "{rows} rows",
+    "total": "Total",
+    "measured": "Measured {when}",
+    "blocked": "Paused: a backup or maintenance window is active.",
+    "by_area": "Disk use by area",
+    "started": "Clean-up started.",
+    "scanning": "Measuring…"
   },
   "retention": {
     "title": "Clean-up",
@@ -2280,7 +2286,9 @@
     "preview_first": "Check first, then save.",
     "save": "Save",
     "saved": "Saved.",
-    "trash_note": "Expired images stay in the trash for 14 days before they are deleted."
+    "trash_note": "Expired images stay in the trash for 14 days before they are deleted.",
+    "months_label": "Months",
+    "hint": "Applies to every picture DisPatch generated: chat pictures, Image Studio, reactions and avatars. Pictures still in use are never removed."
   },
   "archive": {
     "older_than": "Archive chats older than",
@@ -2292,7 +2300,10 @@
     "empty": "No archived chats.",
     "unarchive": "Move back",
     "load_earlier": "Load earlier",
-    "show_more": "Show more"
+    "show_more": "Show more",
+    "back": "Back to chats",
+    "would": "{count} chats would be archived now.",
+    "moved_back": "Moved back to your chats."
   },
   "media": {
     "expired": "image expired"
