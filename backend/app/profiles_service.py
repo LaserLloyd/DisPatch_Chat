@@ -805,9 +805,11 @@ def _normalise(role: str) -> Role:
 def basic_default_household() -> list[str]:
     """The household bots a new Basic profile gets when nobody picked: every household bot a
     Basic profile can use (direct ones; an agent bot also needs a permission an Admin must
-    grant on purpose), frozen as an explicit list so bots added later are not handed out."""
+    grant on purpose) that is not hidden (a hidden bot is kept off rails on purpose; an Admin
+    who wants it on a Basic profile picks it by name), frozen as an explicit list so bots
+    added later are not handed out."""
     return [b.id for b in config.load_bots()
-            if b.scope == "household" and characters.backend_kind(b) == "direct"]
+            if b.scope == "household" and not b.hidden and characters.backend_kind(b) == "direct"]
 
 
 def _household_choice(profile: accounts.Profile,

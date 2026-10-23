@@ -168,6 +168,21 @@ def test_without_a_pick_the_new_basic_profile_gets_the_bots_it_can_use(scratch):
     assert _downgrade(kept.id).household_bots == ["pack_heron"]        # an explicit list is kept
 
 
+def test_without_a_pick_a_hidden_household_bot_is_not_handed_out(scratch):
+    """A hidden household bot is off every rail on purpose: a downgrade without a pick does not
+    put it on the new Basic profile (an Admin who wants it there picks it by name)."""
+    from app import config
+    s = scratch
+    s.admin()
+    config.upsert_bot(config.Bot(id="pack_wren", name="Wren", hidden=True,
+                                 advisor={"providers": [{"provider": "openai_compatible", "model": "m1"}]}))
+    assert "pack_wren" not in profiles_service.basic_default_household()
+    u = s.profile("Cleo")
+    assert _downgrade(u.id).household_bots == ["pack_otter", "pack_heron"]
+    picked = s.profile("Gus")
+    assert "pack_wren" in _downgrade(picked.id, household_bots=["pack_wren"]).household_bots
+
+
 def test_overrides_are_trimmed_to_the_basic_table(scratch):
     s = scratch
     s.admin()
