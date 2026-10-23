@@ -554,6 +554,7 @@ async def _lifespan_startup(app: FastAPI) -> None:
     firstrun.bind_server(asyncio.get_running_loop(), db, _deliver_assistant_text)
     await asyncio.to_thread(firstrun.backfill_guides_once)
     await firstrun.drain_guides(db, _deliver_assistant_text)
+    await firstrun.backfill_house_guides(db, _deliver_assistant_text)
     # After an update: a "What's new" chat on every Admin's and User's Atlas, posted last so
     # it sits on top of the guides an upgrade backfills.
     await firstrun.post_release_notes(db, _deliver_assistant_text, fresh=fresh_install)

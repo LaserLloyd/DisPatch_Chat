@@ -65,6 +65,7 @@ DEFAULT_AVATARS: tuple[str, ...] = ("atlas-face.png", "atlas-full.png", "atlas-t
 #: Created in REVERSE so the first one is the newest and sits on top.
 THREADS: tuple[tuple[str, str], ...] = (
     ("Meet Atlas", "meet-atlas.md"),
+    ("Using DisPatch", "using-dispatch.md"),
     ("How DisPatch works", "how-dispatch-works.md"),
     ("Set up add-ons", "set-up-add-ons.md"),
 )
@@ -458,6 +459,47 @@ async def count_threads(db: Any) -> int:
     cur = await db.db.execute("SELECT COUNT(*) FROM threads")
     row = await cur.fetchone()
     return int(row[0]) if row else 0
+
+
+HOUSE_FLAG = ".atlas-house-guides"
+#: What the main Admin's household Atlas gets on an upgrade (the 4.0 tour; Meet Atlas and
+#: Set up add-ons are the first-run ones and did not change in substance).
+HOUSE_GUIDES: tuple[tuple[str, str], ...] = (
+    ("Using DisPatch", "using-dispatch.md"),
+    ("How DisPatch works", "how-dispatch-works.md"),
+)
+
+
+async def backfill_house_guides(db: Any, deliver: Callable[..., Awaitable[Any]]) -> list[str]:
+    """Once per install: the protected Admin who still talks to the household Atlas (no copy
+    of its own) gets the current guides there, in its own chats - an upgrade from 3.x left it
+    only the old ones. A guide already posted by the first-run seed (or by this, before) is
+    skipped. Never raises."""
+    from . import accounts
+    flag = config.DATA_DIR / HOUSE_FLAG
+    if not guides_enabled() or flag.exists():
+        return []
+    made: list[str] = []
+    try:
+        prof = accounts.get_protected_admin()
+        if prof is None:
+            return []                       # an open install: the first-run seed covers it
+        if _atlas_of(prof) == BOT_ID:
+            for title, fname in reversed(HOUSE_GUIDES):
+                source = f"guide:{BOT_ID}:{prof.id}:{fname}"
+                if await db.source_id_seen(f"firstrun:{fname}") or await db.source_id_seen(source):
+                    continue
+                text = _read_guide(fname)
+                if not text:
+                    continue
+                thread = await db.create_thread(BOT_ID, title=title, owner_profile_id=prof.id)
+                await deliver(thread.id, text, metadata={"seeded": True}, source_id=source,
+                              dedup_recent_window=False)
+                made.append(thread.id)
+        flag.write_text("done\n", encoding="utf-8")
+    except Exception:
+        log.warning("could not post the main Admin's guides", exc_info=True)
+    return made
 
 
 def release_notes_file(version: str) -> Path:

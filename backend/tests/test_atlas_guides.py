@@ -260,3 +260,26 @@ def test_the_guides_name_only_what_their_readers_have():
             assert stale not in text, (f.name, stale)
     notes = firstrun.release_notes_file(__version__).read_text(encoding="utf-8")
     assert not notes.lstrip().startswith("## What's new"), "the thread title already says it"
+
+
+def test_the_main_admin_on_the_household_atlas_gets_the_current_guides_once_after_an_upgrade(scratch, on):
+    s = scratch
+    owner = s.admin()
+    config.upsert_bot(firstrun.atlas_template())
+    # 3.x left an old tour there (not from the first-run seed, so no firstrun: source id)
+    s.run(lambda db: db.create_thread(firstrun.BOT_ID, title="How DisPatch works", owner_profile_id=owner.id))
+    made = s.run(lambda db: firstrun.backfill_house_guides(db, _deliver(db)))
+    assert len(made) == 2
+    titles = sorted(t for t, o in _threads(s, firstrun.BOT_ID) if o == owner.id)
+    assert titles == ["How DisPatch works", "How DisPatch works", "Using DisPatch"]
+    assert s.run(lambda db: firstrun.backfill_house_guides(db, _deliver(db))) == []
+
+
+def test_a_fresh_install_seeds_using_dispatch_too_and_the_backfill_adds_nothing(scratch, on, monkeypatch):
+    s = scratch
+    config.upsert_bot(firstrun.atlas_template())
+    monkeypatch.setattr(firstrun, "flag_path", lambda: config.DATA_DIR / ".firstrun-test-flag")
+    seeded = s.run(lambda db: firstrun.seed_if_first_run(db, _deliver(db)))
+    assert len(seeded) == len(firstrun.THREADS) == 4
+    s.admin()
+    assert s.run(lambda db: firstrun.backfill_house_guides(db, _deliver(db))) == []
