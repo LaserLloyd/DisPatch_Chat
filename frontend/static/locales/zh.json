@@ -1653,6 +1653,8 @@
     "audit_owner_created": "已创建主管理员",
     "audit_profile_created": "已创建个人资料",
     "audit_profile_updated": "已更新个人资料",
+    "audit_profile_avatar_set": "已更改头像",
+    "audit_profile_avatar_removed": "已移除头像",
     "audit_profile_deleted": "已删除个人资料",
     "audit_pin_set": "已设置 PIN",
     "audit_pin_cleared": "已移除 PIN",

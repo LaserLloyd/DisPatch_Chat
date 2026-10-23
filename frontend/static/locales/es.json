@@ -1704,6 +1704,8 @@
     "audit_owner_created": "Administrador principal creado",
     "audit_profile_created": "Perfil creado",
     "audit_profile_updated": "Perfil actualizado",
+    "audit_profile_avatar_set": "Foto de perfil cambiada",
+    "audit_profile_avatar_removed": "Foto de perfil eliminada",
     "audit_profile_deleted": "Perfil eliminado",
     "audit_pin_set": "PIN definido",
     "audit_pin_cleared": "PIN quitado",

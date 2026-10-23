@@ -251,3 +251,16 @@ test('Account and People hand the row the shell face picker; Esc and a lock clos
     assert.equal(typeof L.picture.crop_hint, 'string', loc);
   }
 });
+
+test('every audit kind the People routes write has words in the audit log, the picture ones included', () => {
+  const src = readFileSync(join(HERE, '..', '..', 'backend', 'app', 'people_api.py'), 'utf8');
+  const kinds = new Set([
+    ...[...src.matchAll(/_audit\(request, "([a-z_.]+)"/g)].map((m) => m[1]),
+    ...[...src.matchAll(/_avatar_(?:upload|remove)\([^)]*?"([a-z_]+)"/g)].map((m) => m[1]),
+  ]);
+  assert.ok(kinds.has('profile_avatar_set') && kinds.has('profile_avatar_removed'));
+  for (const loc of ['ar', 'de', 'en', 'es', 'fr', 'ja', 'pt', 'zh']) {
+    const L = JSON.parse(readFileSync(join(STATIC, 'locales', `${loc}.json`), 'utf8'));
+    for (const k of kinds) assert.equal(typeof L.people[`audit_${k.replace(/\./g, '_')}`], 'string', `${loc} ${k}`);
+  }
+});

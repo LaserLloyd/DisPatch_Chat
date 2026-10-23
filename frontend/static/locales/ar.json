@@ -1783,6 +1783,8 @@
     "audit_owner_created": "أُنشئ المشرف الرئيسي",
     "audit_profile_created": "أُنشئ ملف شخصي",
     "audit_profile_updated": "حُدّث ملف شخصي",
+    "audit_profile_avatar_set": "تم تغيير صورة الملف الشخصي",
+    "audit_profile_avatar_removed": "تمت إزالة صورة الملف الشخصي",
     "audit_profile_deleted": "حُذف ملف شخصي",
     "audit_pin_set": "عُيّن PIN",
     "audit_pin_cleared": "أُزيل PIN",

@@ -1653,6 +1653,8 @@
     "audit_owner_created": "メイン管理者を作成",
     "audit_profile_created": "プロファイルを作成",
     "audit_profile_updated": "プロファイルを更新",
+    "audit_profile_avatar_set": "プロフィール画像を変更",
+    "audit_profile_avatar_removed": "プロフィール画像を削除",
     "audit_profile_deleted": "プロファイルを削除",
     "audit_pin_set": "PIN を設定",
     "audit_pin_cleared": "PIN を削除",

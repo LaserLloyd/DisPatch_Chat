@@ -1679,6 +1679,8 @@
     "audit_owner_created": "Main Admin created",
     "audit_profile_created": "Profile created",
     "audit_profile_updated": "Profile updated",
+    "audit_profile_avatar_set": "Profile picture changed",
+    "audit_profile_avatar_removed": "Profile picture removed",
     "audit_profile_deleted": "Profile deleted",
     "audit_pin_set": "PIN set",
     "audit_pin_cleared": "PIN removed",
