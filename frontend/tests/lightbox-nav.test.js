@@ -1,5 +1,5 @@
 // The lightbox's navigation + auto-hiding chrome (js/lightbox-nav.js): the
-// order the arrows step in, where they stop, the lower-zone rule, the touch
+// order the arrows step in, where they stop, the over-the-picture rule, the touch
 // toggle and the swipe verdict. The DOM half (openLightbox in main.js) is
 // pinned by source below and driven in a real browser by the release check.
 
@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  clampIndex, createGallery, keyDirection, inBottomZone, swipeDirection,
+  clampIndex, createGallery, keyDirection, overMedia, swipeDirection,
   createChrome, safeGalleryUrl, normalizeGalleryRequest,
 } from '../static/js/lightbox-nav.js';
 
@@ -60,17 +60,16 @@ test('swiping left reveals the newer picture, right the older; zoomed or vertica
   assert.equal(swipeDirection(-300, 0, { zoomed: true }), 0, 'a zoomed picture pans instead');
 });
 
-// ---- the bottom zone ------------------------------------------------------
+// ---- over the picture ----------------------------------------------------
 
-test('the zone is the lower quarter of the picture (at least 120 px) down to the screen edge', () => {
-  const tall = { top: 100, bottom: 900, height: 800 };      // quarter = 200
-  assert.equal(inBottomZone(650, tall, 1000), false);
-  assert.equal(inBottomZone(701, tall, 1000), true);
-  assert.equal(inBottomZone(960, tall, 1000), true, 'below the picture, where the controls sit');
-  const small = { top: 100, bottom: 300, height: 200 };     // quarter = 50 -> 120 floor
-  assert.equal(inBottomZone(170, small, 1000), false);
-  assert.equal(inBottomZone(181, small, 1000), true);
-  assert.equal(inBottomZone(50, null), false);
+test('the controls show only while the pointer is over the picture', () => {
+  const r = { left: 100, right: 900, top: 100, bottom: 700, width: 800, height: 600 };
+  assert.equal(overMedia(500, 400, r), true);
+  assert.equal(overMedia(100, 100, r), true, 'the edge counts');
+  assert.equal(overMedia(50, 400, r), false, 'beside the picture');
+  assert.equal(overMedia(500, 760, r), false, 'below the picture');
+  assert.equal(overMedia(500, 400, null), false);
+  assert.equal(overMedia(500, 400, { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 }), false);
 });
 
 // ---- the chrome state machine --------------------------------------------
@@ -94,7 +93,7 @@ function chromeHarness() {
   return { c, tm, log };
 }
 
-test('the chrome shows near the bottom or on a control, and fades 1.5 s after the pointer leaves', () => {
+test('the chrome shows over the picture or on a control, and fades 1.5 s (default) after the pointer leaves', () => {
   const { c, tm, log } = chromeHarness();
   assert.equal(c.visible, false);
   c.pointer(false, false);                 // away from the zone while hidden: nothing happens

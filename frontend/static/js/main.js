@@ -91,7 +91,7 @@ import {
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp, api as appApi } from './app-sdk.js?v=4';
 import { renderLinkRail, linksSection } from './links.js?v=8';
-import { createGallery, createChrome, keyDirection, inBottomZone, swipeDirection, normalizeGalleryRequest } from './lightbox-nav.js?v=1';
+import { createGallery, createChrome, keyDirection, overMedia, swipeDirection, normalizeGalleryRequest } from './lightbox-nav.js?v=2';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
 // same closeAllOverlays route). main.js only decides WHEN it may open: host paths
 // are an Admin surface, so refuse() is a live callback ("not an Admin") rather than a boolean.
@@ -3487,7 +3487,10 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
   // — a keyboard user who opened a thumbnail lands back on that thumbnail, not
   // at the top of the document.
   const returnFocus = document.activeElement;
-  const chrome = createChrome({ onChange: (on) => lb.classList.toggle('chrome-on', on) });
+  // The controls and caption follow the mouse: up while it is over the picture or a control,
+  // gone a moment after it leaves. Only keyboard focus pins them (a click focuses too, and
+  // used to leave the caption stuck over the picture).
+  const chrome = createChrome({ delay: 350, onChange: (on) => lb.classList.toggle('chrome-on', on) });
   const close = () => {
     try { if (itemVideo(nav.current())) media.pause(); } catch {}
     chrome.dispose();
@@ -3581,7 +3584,7 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
     prevBtn.disabled = !nav.canStep(-1);
     nextBtn.disabled = !nav.canStep(1);
   };
-  const stepBy = (dir) => { if (nav.step(dir)) { show(); chrome.flash(); } };
+  const stepBy = (dir, { flash = false } = {}) => { if (nav.step(dir)) { show(); if (flash) chrome.flash(); } };
   caption.addEventListener('click', (e) => { e.stopPropagation(); caption.classList.toggle('open'); });
   prevBtn.addEventListener('click', (e) => { e.stopPropagation(); stepBy(-1); });
   nextBtn.addEventListener('click', (e) => { e.stopPropagation(); stepBy(1); });
@@ -3594,7 +3597,7 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
     const dir = keyDirection(e.key);
     if (!dir || !multi) return;
     e.preventDefault();
-    stepBy(dir);
+    stepBy(dir, { flash: true });
   };
   window.addEventListener('keydown', onKey);
   cleanups.push(() => window.removeEventListener('keydown', onKey));
@@ -3603,7 +3606,7 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
   const onPointerMove = (e) => {
     if (e.pointerType === 'touch') return;
     const onCtl = !!e.target.closest?.(`.${chromeCls}`);
-    chrome.pointer(inBottomZone(e.clientY, media.getBoundingClientRect(), window.innerHeight), onCtl);
+    chrome.pointer(overMedia(e.clientX, e.clientY, media.getBoundingClientRect()), onCtl);
   };
   lb.addEventListener('pointermove', onPointerMove);
   lb.addEventListener('pointerleave', () => chrome.leave());
@@ -3621,7 +3624,9 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
     if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && e.target !== lb) chrome.tap();
   });
   lb.addEventListener('pointercancel', () => { tapStart = null; });
-  lb.addEventListener('focusin', (e) => { if (e.target.closest?.(`.${chromeCls}`)) chrome.focusIn(); });
+  lb.addEventListener('focusin', (e) => {
+    if (e.target.closest?.(`.${chromeCls}`) && e.target.matches?.(':focus-visible')) chrome.focusIn();
+  });
   lb.addEventListener('focusout', (e) => { if (e.target.closest?.(`.${chromeCls}`)) chrome.focusOut(); });
 
   // Ref-counted: a lightbox opened OVER another modal (an avatar from the Bot
@@ -3632,7 +3637,6 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
   // The dialog itself takes focus, not ✕: a focused control would pin the
   // chrome open (focus keeps it up), and Tab still walks into the controls.
   lb.focus();
-  chrome.flash();
 }
 
 // Full-resolution avatar viewer (click any bot avatar).
@@ -5697,13 +5701,16 @@ function setThreadListCollapsed(collapsed) {
 // ===================== Avatar crop modal =====================
 // Crop state: displayed image rect + a draggable square. Fractions of the
 // source image are sent to the server, which crops from the full-res original.
-const crop = { botId: null, file: null, boxX: 0, boxY: 0, boxSize: 0 };
+// `resolve` set = chooseFace() mode: Save hands back the fractions instead of uploading (the
+// personal-bot editor uploads them with the bot).
+const crop = { botId: null, file: null, boxX: 0, boxY: 0, boxSize: 0, resolve: null };
 
-function openCropModal(botId, file) {
-  const bot = botById(botId) || (bmBots.find((b) => b.id === botId));
+function openCropModal(botId, file, name) {
+  const bot = botId ? (botById(botId) || (bmBots.find((b) => b.id === botId))) : null;
   crop.botId = botId;
   crop.file = file;
-  dom['crop-title'].textContent = t('crop.title_for', { name: bot ? bot.name : botId });
+  const who = name || (bot ? bot.name : botId) || '';
+  dom['crop-title'].textContent = who ? t('crop.title_for', { name: who }) : t('crop.title');
   const url = URL.createObjectURL(file);
   dom['crop-img'].onload = () => {
     URL.revokeObjectURL(url);
@@ -5767,17 +5774,28 @@ function wireCropModal() {
     clampCropBox(); applyCropBox();
   });
 
-  const closeCrop = () => { dom['crop-backdrop'].classList.add('hidden'); crop.file = null; };
+  const closeCrop = () => {
+    dom['crop-backdrop'].classList.add('hidden'); crop.file = null;
+    const r = crop.resolve; crop.resolve = null;
+    if (r) r(null);                          // closed without saving
+  };
   dom['crop-close'].addEventListener('click', closeCrop);
   dom['crop-backdrop'].addEventListener('click', (e) => { if (e.target === dom['crop-backdrop']) closeCrop(); });
 
   dom['crop-save'].addEventListener('click', async () => {
-    if (!crop.file || !crop.botId) return;
+    if (!crop.file) return;
     const r = imgRect();
     // Fractions of the source image (same for displayed and natural size).
     const fx = (crop.boxX - r.left) / r.w;
     const fy = (crop.boxY - r.top) / r.h;
     const fs = crop.boxSize / Math.min(r.w, r.h);
+    if (crop.resolve) {
+      const done = crop.resolve; crop.resolve = null;
+      done({ x: fx, y: fy, size: fs });
+      closeCrop();
+      return;
+    }
+    if (!crop.botId) return;
     dom['crop-save'].disabled = true;
     try {
       await api.uploadAvatar(crop.botId, crop.file, fx, fy, fs);
@@ -5789,6 +5807,16 @@ function wireCropModal() {
       }
     } catch (e) { toast(e.message, true); }
     finally { dom['crop-save'].disabled = false; }
+  });
+}
+
+/** Let the user place the face square on `file` (a Blob) and resolve to the crop fractions
+ *  `{x, y, size}`, or null when they close the dialog. Nothing is uploaded. */
+function chooseFace(file, name) {
+  if (crop.resolve) { const r = crop.resolve; crop.resolve = null; r(null); }
+  return new Promise((resolve) => {
+    crop.resolve = resolve;
+    openCropModal(null, file, name);
   });
 }
 
@@ -10477,7 +10505,7 @@ async function init() {
     }
   }, 60_000);
   // 4.0 chat-first profiles: the new modules get the shell's helpers once (no-ops for now).
-  const profileDeps = { t, toast, confirm: (msg, o) => uiConfirm(msg, o), api, state };
+  const profileDeps = { t, toast, confirm: (msg, o) => uiConfirm(msg, o), api, state, chooseFace };
   for (const init of [initMyBots, initBotEditor, initAccountReset, initPeoplePerms]) {
     try { init(profileDeps); } catch (e) { console.warn('profiles module init failed', e); }
   }

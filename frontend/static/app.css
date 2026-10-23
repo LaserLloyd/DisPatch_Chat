@@ -987,9 +987,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 
 /* ---- Lightbox chrome + gallery (2.3.9) -------------------------------------
    The close button, Download pill, caption, counter and side arrows (all
-   `.lightbox-chrome`) show only while the pointer is near the bottom of the
-   picture or on a control, fade ~1.5 s after it leaves, toggle on a touch tap
-   and show on keyboard focus (js/lightbox-nav.js decides; `.chrome-on` is the
+   `.lightbox-chrome`) show only while the pointer is over the picture or on a
+   control, fade a moment after it leaves, toggle on a touch tap and show on
+   keyboard focus (never on a mouse click) (js/lightbox-nav.js decides; `.chrome-on` is the
    verdict). Hidden chrome keeps pointer-events off but stays focusable, so Tab
    brings it back; Esc and the arrow keys never depend on it. */
 .lightbox { touch-action: none; }

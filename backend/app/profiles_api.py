@@ -346,14 +346,25 @@ async def my_character_delete(request: Request, bot_id: str):
 
 
 @router.post("/api/me/characters/{bot_id}/avatar", dependencies=[_CREATE])
-async def my_character_avatar(request: Request, bot_id: str, file: UploadFile = File(...)):
+async def my_character_avatar(request: Request, bot_id: str, file: UploadFile = File(...),
+                              crop_x: float | None = None, crop_y: float | None = None,
+                              crop_size: float | None = None):
+    """``crop_x``/``crop_y``/``crop_size``: the face square the user placed in the face picker,
+    as fractions of the picture (top-left corner, side of the shorter edge); a centred square
+    without them."""
     pid = _my_id(request)
+    crop = None
+    if crop_x is not None or crop_y is not None or crop_size is not None:
+        if crop_x is None or crop_y is None or crop_size is None or not (
+                0 <= crop_x <= 1 and 0 <= crop_y <= 1 and 0 < crop_size <= 1):
+            raise fail(422, "avatar_crop_invalid", "The face square must be given as fractions from 0 to 1.")
+        crop = (crop_x, crop_y, crop_size)
     ctype = (file.content_type or "").lower()
     if not ctype.startswith("image/") or ctype == "image/svg+xml":
         raise fail(400, "avatar_invalid", "A picture must be a raster image.")
     raw = await file.read(profiles_service.MAX_AVATAR_BYTES + 1)
     try:
-        bot = await asyncio.to_thread(profiles_service.set_personal_avatar, pid, bot_id, raw)
+        bot = await asyncio.to_thread(profiles_service.set_personal_avatar, pid, bot_id, raw, crop)
     except ProfileServiceError as e:
         raise _err(e) from e
     audit(request, "character.avatar", bot_id)

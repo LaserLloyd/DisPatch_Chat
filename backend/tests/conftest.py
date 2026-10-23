@@ -22,6 +22,11 @@ os.environ.setdefault("DISPATCH_EXT_BOOT_MARKER", "0")
 # developer's real OS keyring (app/secret_store.py).
 os.environ.setdefault("DISPATCH_SECRET_STORE", "file")
 
+# A new Atlas copy opens with guide chats, and an update posts a "What's new" chat: both would add
+# threads to every profile a test makes. Off for the suite; tests/test_atlas_guides.py turns them on.
+os.environ.setdefault("DISPATCH_ATLAS_GUIDES", "0")
+os.environ.setdefault("DISPATCH_RELEASE_NOTES", "0")
+
 from app import config as config_module
 from app import openclaw
 

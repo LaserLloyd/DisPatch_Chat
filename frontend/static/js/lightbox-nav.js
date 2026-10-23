@@ -1,6 +1,6 @@
 // Lightbox navigation + auto-hiding chrome — the pure half of openLightbox
 // (main.js). No DOM, no timers of its own: everything a test needs to pin
-// (step order, the end stops, the lower-zone rule, the touch toggle, the swipe
+// (step order, the end stops, the over-the-picture rule, the touch toggle, the swipe
 // verdict) is a plain function or a small state machine driven by the caller.
 //
 // ORDER. A gallery is listed oldest -> newest, the way a thread reads and the
@@ -48,14 +48,12 @@ export function keyDirection(key) {
 }
 
 /**
- * The "near the bottom" zone: the lower quarter of the picture, never less than
- * 120 px tall, and everything below the picture down to the screen edge (the
- * controls sit there). `rect` is the media element's bounding rect.
+ * Is the pointer over the picture? The controls show only then (or while it is on one of
+ * them), and hide a moment after it leaves. `rect` is the media element's bounding rect.
  */
-export function inBottomZone(clientY, rect, viewportHeight = Infinity) {
-  if (!rect || !(rect.height > 0)) return false;
-  const zone = Math.max(rect.height * 0.25, 120);
-  return clientY >= rect.bottom - zone && clientY <= Math.max(rect.bottom, viewportHeight);
+export function overMedia(clientX, clientY, rect) {
+  if (!rect || !(rect.width > 0) || !(rect.height > 0)) return false;
+  return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
 }
 
 /**
@@ -73,15 +71,15 @@ export function swipeDirection(dx, dy, { zoomed = false, min = 50 } = {}) {
  * The visibility of the lightbox chrome (close, download, caption, counter,
  * arrows). One boolean out, `onChange(visible)`, and three ways in:
  *
- *   pointer(inZone, onControl)  a mouse/pen moved: stay up while it is in the
- *                               bottom zone or on a control, else fade after
+ *   pointer(inZone, onControl)  a mouse/pen moved: stay up while it is over the
+ *                               picture or on a control, else fade after
  *                               `delay` ms
  *   tap()                       a touch tap on the picture: toggle, and STAY
  *                               (no hover on a phone, so no timer either)
  *   focusIn()/focusOut()        keyboard focus on a control keeps it up
  *
- * `flash()` shows it once at open so the controls are discoverable, then lets
- * it fade like a pointer that left. Timers are injectable for the tests.
+ * `flash()` shows it briefly (a keyboard step), then lets it fade like a
+ * pointer that left. Nothing shows at open until the mouse is over the picture. Timers are injectable for the tests.
  */
 export function createChrome({ onChange, delay = 1500, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
   let visible = false;

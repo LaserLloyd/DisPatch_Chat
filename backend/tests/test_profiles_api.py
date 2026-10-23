@@ -225,6 +225,12 @@ def test_avatar_upload(team):
     assert corrupt.status_code == 422
     other = team["Eve"].post(f"/api/me/characters/{bot['id']}/avatar", files={"file": ("a.png", buf.getvalue(), "image/png")})
     assert other.status_code == 404
+    placed = max_.post(f"/api/me/characters/{bot['id']}/avatar?crop_x=0.1&crop_y=0.2&crop_size=0.5",
+                       files={"file": ("a.png", buf.getvalue(), "image/png")})
+    assert placed.status_code == 200
+    for q in ("crop_x=0.1", "crop_x=2&crop_y=0&crop_size=0.5", "crop_x=0&crop_y=0&crop_size=0"):
+        r = max_.post(f"/api/me/characters/{bot['id']}/avatar?{q}", files={"file": ("a.png", buf.getvalue(), "image/png")})
+        assert r.status_code == 422, q
 
 
 # ---- copies ----------------------------------------------------------------- #

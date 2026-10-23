@@ -18,7 +18,7 @@ Turn it on: Settings → Characters lists every bot. Add one, rename it, or remo
 
 ## Connect an AI
 
-Atlas works the moment he has a model behind him.
+Atlas works the moment she has a model behind her.
 
 1. Open Settings → AI & Connections and press Add a connection.
 2. Choose a provider. For a local server, enter its address instead of a key.

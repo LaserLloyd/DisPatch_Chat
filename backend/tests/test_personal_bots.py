@@ -382,3 +382,25 @@ def test_the_avatar_upload(scratch):
     with pytest.raises(ProfileServiceError) as e:
         profiles_service.set_personal_avatar(s.profile("Cy").id, bot.id, buf.getvalue())
     assert e.value.status == 404
+
+
+def test_the_avatar_face_is_the_square_the_user_placed(scratch):
+    """The face picker's square (fractions) becomes the face, not a centred square."""
+    from io import BytesIO
+
+    from PIL import Image
+    s = scratch
+    s.connection()
+    s.admin()
+    u = s.profile("Bram")
+    bot = profiles_service.create_personal(u.id, {"name": "Mine"})
+    im = Image.new("RGB", (800, 400), (0, 0, 255))
+    im.paste((255, 0, 0), (0, 0, 200, 200))            # the "face": top-left corner, red
+    buf = BytesIO()
+    im.save(buf, "PNG")
+    profiles_service.set_personal_avatar(u.id, bot.id, buf.getvalue(), (0.0, 0.0, 0.5))
+    face = Image.open(config.AVATAR_DIR / f"{bot.id}-face.png").convert("RGB")
+    assert face.size == (512, 512) and face.getpixel((256, 256)) == (255, 0, 0)
+    profiles_service.set_personal_avatar(u.id, bot.id, buf.getvalue())
+    centre = Image.open(config.AVATAR_DIR / f"{bot.id}-face.png").convert("RGB")
+    assert centre.getpixel((256, 256)) == (0, 0, 255), "no crop = a centred square"

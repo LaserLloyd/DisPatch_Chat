@@ -27,6 +27,24 @@ export function initBotEditor(deps = {}) { shell = deps || {}; }
 /** The helpers handed to init, overlaid by whatever the caller passes. */
 export function withShell(deps = {}) { return { ...shell, ...(deps || {}) }; }
 
+/** The face square `crop` ({x, y, size}, fractions as the server reads them) of `blob`, as a
+ *  PNG Blob for the preview; null where the browser cannot draw it (the server crops anyway). */
+export async function faceBlob(blob, crop, px = 144) {
+  try {
+    const makeBitmap = globalThis.createImageBitmap;
+    if (typeof makeBitmap !== 'function' || typeof document === 'undefined') return null;
+    const bmp = await makeBitmap(blob);
+    const side = Math.max(1, crop.size * Math.min(bmp.width, bmp.height));
+    const sx = Math.max(0, Math.min(crop.x * bmp.width, bmp.width - side));
+    const sy = Math.max(0, Math.min(crop.y * bmp.height, bmp.height - side));
+    const c = document.createElement('canvas');
+    c.width = c.height = px;
+    c.getContext('2d').drawImage(bmp, sx, sy, side, side, 0, 0, px, px);
+    if (bmp.close) bmp.close();
+    return await new Promise((res) => c.toBlob(res, 'image/png'));
+  } catch { return null; }
+}
+
 // ------------------------------------------------------------------ requests
 
 /** A failed profile call: `status`, `code` (the 3.0 error envelope) and a plain `message`. */
@@ -232,6 +250,7 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
     connection: original ? String((original.backend && original.backend.connection) || original.connection || '') : '',
   };
   let picture = null;          // a Blob chosen but not uploaded yet
+  let pictureCrop = null;      // {x, y, size}: the face square the user placed on it (fractions)
   let previewUrl = original && original.avatar_url ? original.avatar_url : '';
   let busy = false;
 
@@ -258,11 +277,25 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
     const showPreview = () => {
       if (previewUrl) { previewImg.src = previewUrl; previewBox.hidden = false; } else previewBox.hidden = true;
     };
-    const setPicture = (blob) => {
-      picture = blob;
+    const setPreview = (blob) => {
       if (previewUrl && previewUrl.startsWith('blob:')) URL.revokeObjectURL(previewUrl);
       previewUrl = URL.createObjectURL(blob);
       showPreview();
+    };
+    // Every new picture (uploaded, picked or generated) goes through the face picker, as the
+    // household bots' pictures do: the user drags the square over the face, and that square
+    // becomes the avatar (the full picture is kept too). `keepOnCancel`: a closed picker keeps
+    // the picture with a centred square (a generated one cost a render) instead of dropping it.
+    const setPicture = async (blob, { keepOnCancel = false } = {}) => {
+      let chosen = null;
+      if (typeof d.chooseFace === 'function') {
+        chosen = await d.chooseFace(blob, nameIn.value.trim());
+        if (!chosen && !keepOnCancel) return false;
+      }
+      picture = blob;
+      pictureCrop = chosen;
+      setPreview((chosen && await faceBlob(blob, chosen)) || blob);
+      return true;
     };
     const updateCounter = () => {
       const n = [...personaIn.value].length;
@@ -318,6 +351,7 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
     // picture controls
     fileIn.addEventListener('change', () => {
       const f = fileIn.files && fileIn.files[0];
+      fileIn.value = '';                    // the same file can be chosen again
       if (f) setPicture(f);
     });
     const uploadBtn = el('button', { class: 'ui-btn', type: 'button', text: t('editor.picture_upload'),
@@ -330,7 +364,7 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
         const errs = validateBot({ name: nameIn.value });
         if (errs.name) { nameIn.focus(); banner.textContent = errs.name; banner.hidden = false; return; }
         busy = true; genBtn.disabled = true; genBtn.textContent = t('aibuild.working');
-        try { setPicture(await generatePicture(nameIn.value.trim(), personaIn.value)); banner.hidden = true; }
+        try { await setPicture(await generatePicture(nameIn.value.trim(), personaIn.value), { keepOnCancel: true }); banner.hidden = true; }
         catch (e) { banner.textContent = e.message || t('aibuild.failed'); banner.hidden = false; }
         finally { busy = false; genBtn.disabled = false; genBtn.textContent = t('editor.picture_generate'); }
       } });
@@ -339,7 +373,7 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
       if (!h.avatar_url) continue;
       pickGrid.append(el('button', { class: 'yo-pick', type: 'button', title: h.name || '',
         'aria-label': h.name || '', onclick: async () => {
-          try { setPicture(await blobFromUrl(h.avatar_url)); pickGrid.hidden = true; }
+          try { if (await setPicture(await blobFromUrl(h.avatar_url))) pickGrid.hidden = true; }
           catch { banner.textContent = t('aibuild.failed'); banner.hidden = false; }
         } }, [el('img', { src: h.avatar_url, alt: '', width: '48', height: '48', loading: 'lazy' })]));
     }
@@ -384,7 +418,8 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
           const fd = new FormData();
           fd.append('file', picture, picture.name || 'avatar.png');
           try {
-            const r = await profileReq('POST', `/api/me/characters/${encodeURIComponent(saved.id)}/avatar`, { form: fd });
+            const q = pictureCrop ? `?${new URLSearchParams({ crop_x: pictureCrop.x, crop_y: pictureCrop.y, crop_size: pictureCrop.size })}` : '';
+            const r = await profileReq('POST', `/api/me/characters/${encodeURIComponent(saved.id)}/avatar${q}`, { form: fd });
             if (r && r.avatar_url) saved = { ...saved, avatar_url: r.avatar_url };
           } catch (e) {
             // The bot is saved; only the picture failed. Say so and keep the editor open on it.

@@ -663,7 +663,8 @@ def wipe_profile_content(profile_id: str) -> dict[str, int]:
 def spawn_atlas(profile_id: str) -> str:
     """Copy the shipped Atlas template into ``profile_id`` as a personal bot with an opaque
     ``p<12hex>`` id (direct backend on the household default connection, no knowledge_dir,
-    image_jobs off, tools on, the Atlas avatar copied). Returns the new bot id."""
+    image_jobs off, tools on, the Atlas avatar copied) and queue its guide chats
+    (:func:`firstrun.request_guides`). Returns the new bot id."""
     _safe_pid(profile_id)
     with LOCK:
         prof = _profile(profile_id)
@@ -686,6 +687,8 @@ def spawn_atlas(profile_id: str) -> str:
         face = firstrun.copy_atlas_avatar(bot.id)
         if face:
             config.save_bot_avatar(bot.id, face)
+        # Every Atlas opens with the "how to use DisPatch" chats (posted by the server).
+        firstrun.request_guides(profile_id, bot.id)
         return bot.id
 
 
@@ -1119,9 +1122,12 @@ def delete_personal(profile_id: str, bot_id: str) -> dict[str, int]:
         return {"chats": chats, "pictures": pictures}
 
 
-def set_personal_avatar(profile_id: str, bot_id: str, raw: bytes) -> Any:
+def set_personal_avatar(profile_id: str, bot_id: str, raw: bytes,
+                        crop: tuple[float, float, float] | None = None) -> Any:
     """Replace one of the profile's own bots' picture: a 512 px square face, a 128 px thumb and
-    the full image, written as ``<id>-face.png`` / ``-thumb.png`` / ``-full.png``."""
+    the full image, written as ``<id>-face.png`` / ``-thumb.png`` / ``-full.png``. ``crop`` =
+    ``(x, y, size)``: the face square from the face picker, as fractions (x/y of the width/height,
+    size of the shorter side); None = a centred square."""
     _safe_pid(profile_id)
     with LOCK:
         try:
@@ -1140,7 +1146,13 @@ def set_personal_avatar(profile_id: str, bot_id: str, raw: bytes) -> Any:
                 im = ImageOps.exif_transpose(im)
                 im = im.convert("RGBA" if "A" in im.getbands() else "RGB")
                 side = min(im.size)
-                left, top = (im.width - side) // 2, (im.height - side) // 2
+                if crop is None:
+                    left, top = (im.width - side) // 2, (im.height - side) // 2
+                else:
+                    cx, cy, cs = crop
+                    side = max(8, min(side, int(cs * side)))
+                    left = max(0, min(int(cx * im.width), im.width - side))
+                    top = max(0, min(int(cy * im.height), im.height - side))
                 square = im.crop((left, top, left + side, top + side))
                 face = square.resize((512, 512), Image.LANCZOS)
                 thumb = square.resize((128, 128), Image.LANCZOS)

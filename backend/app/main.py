@@ -545,7 +545,15 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # First run only: the two explainer threads on the default bot (never on
     # an install that already has threads; see app/firstrun.py). Non-fatal.
     await asyncio.to_thread(firstrun.install_default_avatars)
+    # After an update: a "What's new" chat on every Admin's and User's Atlas (before the
+    # first-run seed, so a fresh install reads as one and gets none).
+    await firstrun.post_release_notes(db, _deliver_assistant_text)
     await firstrun.seed_if_first_run(db, _deliver_assistant_text)
+    # Every Atlas copy opens with the guide chats: post the queue (copies made by the CLI or
+    # while the server was down) and from now on post each new one at once.
+    firstrun.bind_server(asyncio.get_running_loop(), db, _deliver_assistant_text)
+    await asyncio.to_thread(firstrun.backfill_guides_once)
+    await firstrun.drain_guides(db, _deliver_assistant_text)
     # Extensions (app/extensions.py): each one's on_startup hooks — the voice
     # add-on warms its speech models here, on a daemon thread, so the first
     # voice chat after a restart neither waits to accept nor pays the model
@@ -559,6 +567,7 @@ async def _lifespan_startup(app: FastAPI) -> None:
 async def _lifespan_shutdown() -> None:
     global _shutting_down
     _shutting_down = True
+    firstrun.unbind_server()
     with contextlib.suppress(Exception):
         await extensions.run_shutdown()
     with contextlib.suppress(Exception):
