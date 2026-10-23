@@ -10403,25 +10403,29 @@ async def serve_media(request: Request, path: str = Query(...)):
     serves). The agents' own media folders hold what agent bots produced, so they need
     ``dispatch_agents`` (Admins always)."""
     _require_full_access(request)      # second lock, see _require_full_access
+    # One answer (404) for everything that is not served, whether it exists or not: a 403 for
+    # an existing file outside the bases would tell any profile which host paths exist.
+    bases = _allowed_media_bases()
+    if not policy.of(request).can(Permission.DISPATCH_AGENTS):
+        store = MEDIA_DIR.resolve()
+        bases = [b for b in bases if b == store]
+
+    def served(p: Path) -> bool:
+        return p.suffix.lower() in MEDIA_EXTS and any(p == b or b in p.parents for b in bases)
+    try:
+        lexical = Path(path).resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(404, "Not found") from None
+    if not served(lexical):
+        raise HTTPException(404, "Not found")
     try:
         candidate = Path(path).resolve(strict=True)
     except (OSError, RuntimeError):
         gone = _expired_media_response(await _expired_media_name(path))
         if gone is not None:
             return gone
-        raise HTTPException(404, "Not found")
-    if candidate.suffix.lower() not in MEDIA_EXTS:
-        raise HTTPException(403, "Forbidden")
-    bases = _allowed_media_bases()
-    if not policy.of(request).can(Permission.DISPATCH_AGENTS):
-        store = MEDIA_DIR.resolve()
-        bases = [b for b in bases if b == store]
-    if not any(
-        candidate == base or base in candidate.parents
-        for base in bases
-    ):
-        raise HTTPException(403, "Forbidden")
-    if not candidate.is_file():
+        raise HTTPException(404, "Not found") from None
+    if not served(candidate) or not candidate.is_file():
         raise HTTPException(404, "Not found")
     return FileResponse(candidate)
 
