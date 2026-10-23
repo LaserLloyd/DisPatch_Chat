@@ -860,10 +860,11 @@ function railGroupLabel(group) {
     text: t(group === 'mine' ? 'profiles.rail_mine' : 'profiles.rail_household'),
   });
 }
-function railMakeBotButton() {
+function railMakeBotButton(hasMine = false) {
   const b = el('button', {
     type: 'button', class: 'bot-make-btn', title: t('profiles.rail_make_bot'),
-    'aria-label': `${t('profiles.rail_mine_empty')} ${t('profiles.rail_make_bot')}`,
+    // "You haven't made any bots yet" only while that is true.
+    'aria-label': hasMine ? t('profiles.rail_make_bot') : `${t('profiles.rail_mine_empty')} ${t('profiles.rail_make_bot')}`,
   }, [railIcon(RAIL_ICONS.plus)]);
   b.addEventListener('click', () => openSettingsTab(MY_BOTS_SECTION));
   return b;
@@ -896,8 +897,8 @@ function renderSidebarInner() {
   if (showGroups) bots = [...bots.filter(isMineBot), ...bots.filter((b) => !isMineBot(b))];
   let lastGroup = null;
   if (offerMake) {
-    if (showGroups) { list.append(railGroupLabel('mine'), railMakeBotButton()); lastGroup = 'mine'; }
-    else list.append(railMakeBotButton());
+    if (showGroups) { list.append(railGroupLabel('mine'), railMakeBotButton(hasMine)); lastGroup = 'mine'; }
+    else list.append(railMakeBotButton(hasMine));
   }
   bots.forEach((bot, idx) => {
     if (showGroups) {
@@ -4137,6 +4138,7 @@ async function openModelPicker() {
   const th = state.activeThread;
   const bot = th && (botById(th.bot_id) || botById(state.selectedBotId));
   if (!th || !bot) return;
+  if (!sessionCan('manage_characters')) { toggleThreadMenu(false); return; }   // an Admin's setting
   toggleThreadMenu(false);
   toggleModelPicker(true);
 
@@ -5872,6 +5874,14 @@ async function renderFileServer() {
   const list = dom['fs-list'];
   list.innerHTML = '';
   let files = [];
+  // Upload only (a Basic profile): there is no list to read, so none is asked for.
+  if (!sessionCan('files_read')) {
+    list.append(el('div', { class: 'empty-list' }, [
+      el('div', { class: 'empty-emoji' }, [railIcon(RAIL_ICONS.folder)]),
+      el('p', { text: t('files.upload_only') }),
+    ]));
+    return;
+  }
   try { files = (await api.files()).files || []; }
   catch (e) { toast(e.message, true); return; }
 
@@ -8296,6 +8306,9 @@ function applyAuthChrome() {
   // Host maintenance in a chat's menu (re-pull a transcript from the agent runtime) is an Admin surface.
   document.querySelectorAll('#thread-menu [data-act="sync"], #thread-menu [data-act="transcript"]')
     .forEach((b) => { b.hidden = !canAdmin(); });
+  // "Model & thinking" reads the bot's model list, which only a character manager may.
+  const modelItem = document.getElementById('thread-menu-model');
+  if (modelItem) modelItem.hidden = !sessionCan('manage_characters');
   // 🎨 is a pin like any other, just one that ships pinned and keeps its own
   // markup (pins.js `kind: 'rail'`). Unpinning it in Settings → Device hides
   // the button; the Theme tab itself is untouched, so nothing becomes
@@ -10026,6 +10039,10 @@ async function openSearchHit(h) {
 function openRecovery() {
   dom['botmanager-backdrop'].classList.add('hidden');
   dom['recover-result'].textContent = '';
+  // Restoring from the agent runtime's transcripts is host maintenance: an Admin's (the routes
+  // refuse anyone else). Everyone exports their own chats.
+  const adminPart = document.getElementById('recover-admin');
+  if (adminPart) adminPart.hidden = !canAdmin();
   dom['recover-backdrop'].classList.remove('hidden');
 }
 function closeRecovery() { dom['recover-backdrop'].classList.add('hidden'); }

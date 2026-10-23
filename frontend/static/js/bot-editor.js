@@ -19,6 +19,7 @@ import { el } from './util.js?v=21';
 export const NAME_MAX = 40;
 export const EMOJI_MAX = 8;
 export const PERSONA_MAX = 4000;
+export const BOT_DESCRIPTION_MAX = 400;      // a bot's subtitle (My bots), as the server keeps it
 export const DESCRIPTION_MAX = 1000;       // POST /api/me/characters/draft: 1..1000
 
 let shell = {};
@@ -116,6 +117,7 @@ export function botPayload(form, original = null, presets = []) {
   const text = String(form.persona || '');
   const voice = String(form.voice || '');
   const conn = form.connection == null ? '' : String(form.connection);
+  const desc = String(form.description == null ? '' : form.description).trim().slice(0, BOT_DESCRIPTION_MAX);
   const body = {};
   const origText = original ? String((original.personality && original.personality.text) || original.persona || '') : '';
   const origVoice = original ? String(original.voice || '') : '';
@@ -123,6 +125,7 @@ export function botPayload(form, original = null, presets = []) {
   if (!original || name !== original.name) body.name = name;
   if (!original || emoji !== String(original.emoji || '')) body.emoji = emoji;
   if (!original || voice !== origVoice) body.voice = voice;
+  if (form.description != null && (!original || desc !== String(original.description || '').trim())) body.description = desc;
   if (conn && (!original || conn !== origConn)) body.connection = conn;
   if (!original || text.trim() !== origText.trim()) {
     const preset = (presets || []).find((p) => p && p.text && p.text.trim() === text.trim());
@@ -150,6 +153,7 @@ export function draftToForm(draft) {
     name: [...String(d.name || '')].slice(0, NAME_MAX).join(''),
     emoji: [...String(d.emoji || '')].slice(0, EMOJI_MAX).join(''),
     persona: String(d.persona || '').slice(0, PERSONA_MAX),
+    description: String(d.description || '').trim().slice(0, BOT_DESCRIPTION_MAX),
   };
 }
 
@@ -185,6 +189,7 @@ export async function loadEditorOptions(deps = {}) {
     .filter((v) => v && v.id).map((v) => ({ id: String(v.id), name: String(v.name || v.id) }));
   const list = (conns && conns.may_choose !== false && conns.connections) || [];
   return {
+    voiceOn,
     presets: (personas && personas.presets) || [],
     voices: { ...voiceGroups(rows), builtin },
     connections: (Array.isArray(list) ? list : [])
@@ -246,6 +251,7 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
     name: original ? original.name : (pre.name || ''),
     emoji: original ? String(original.emoji || '') : (pre.emoji || ''),
     persona: original ? text0 : (pre.persona || ''),
+    description: original ? String(original.description || '') : (pre.description || ''),
     voice: original ? String(original.voice || '') : '',
     connection: original ? String((original.backend && original.backend.connection) || original.connection || '') : '',
   };
@@ -263,6 +269,7 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
 
     const nameIn = el('input', { class: 'ui-input', id: 'yo-name', type: 'text', maxlength: String(NAME_MAX), value: form.name, autocomplete: 'off' });
     const emojiIn = el('input', { class: 'ui-input yo-emoji', id: 'yo-emoji', type: 'text', maxlength: String(EMOJI_MAX), value: form.emoji, autocomplete: 'off' });
+    const descIn = el('input', { class: 'ui-input', id: 'yo-description', type: 'text', maxlength: String(BOT_DESCRIPTION_MAX), value: form.description, autocomplete: 'off' });
     const personaIn = el('textarea', { class: 'ui-input yo-persona', id: 'yo-persona', rows: '7' });
     personaIn.value = form.persona;
     const counter = el('div', { class: 'yo-counter muted', 'aria-live': 'polite' });
@@ -412,7 +419,7 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
       ev.preventDefault();
       if (busy) return;
       const current = { name: nameIn.value, emoji: emojiIn.value, persona: personaIn.value,
-        voice: voiceSel.value, connection: showBackend ? connSel.value : form.connection };
+        description: descIn.value, voice: voiceSel.value, connection: showBackend ? connSel.value : form.connection };
       const errs = validateBot(current);
       showErrors(errs);
       if (Object.keys(errs).length) return;
@@ -451,6 +458,7 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
         field(t('editor.name'), nameIn, { id: 'yo-name' }),
         field(t('editor.emoji'), emojiIn, { id: 'yo-emoji' }),
       ]),
+      field(t('editor.description'), descIn, { id: 'yo-description' }),
       el('div', { class: 'yo-field' }, [
         el('div', { class: 'yo-label', text: t('editor.picture') }),
         previewBox,
@@ -460,7 +468,8 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
       options.presets.length ? field(t('editor.preset'), presetSel, { id: 'yo-preset' }) : null,
       field(t('editor.personality'), el('div', {}, [personaIn, counter]),
         { id: 'yo-persona', hint: t('editor.own_text_hint') }),
-      field(t('editor.voice'), voiceSel, { id: 'yo-voice' }),
+      // Without the voice add-on there is nothing to choose (only the default voice).
+      options.voiceOn !== false || form.voice ? field(t('editor.voice'), voiceSel, { id: 'yo-voice' }) : null,
       showBackend ? field(t('editor.backend'), connSel, { id: 'yo-conn' }) : null,
       el('div', { class: 'yo-actions yo-foot' }, [cancelBtn, saveBtn]),
     ].filter(Boolean));

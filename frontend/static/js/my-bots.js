@@ -13,6 +13,7 @@
 
 import { t } from './i18n.js?v=5';
 import { el } from './util.js?v=21';
+import { isHidden } from './characters.js?v=4';
 import {
   can, profileReq, renderAiBuild, renderBotEditor, loadEditorOptions, withShell, initBotEditor,
 } from './bot-editor.js?v=1';
@@ -142,7 +143,9 @@ export function renderMyBots(host, deps = {}) {
   function paint() {
     list.replaceChildren(...mine.map((b) => botRow(b, ctx)));
     empty.hidden = mine.length > 0;
-    const copyable = household.filter((b) => canCopyBot(b, d, mine));
+    // A household bot an Admin hid is not offered here (hidden = kept off the lists); one on
+    // the profile's rail can still be copied from its chat's menu.
+    const copyable = household.filter((b) => !isHidden(b) && canCopyBot(b, d, mine));
     copyList.replaceChildren(...copyable.map((b) => el('li', { class: 'mb-row', dataset: { bot: b.id } }, [
       b.avatar_url ? el('img', { class: 'mb-avatar', src: b.avatar_url, alt: '', width: '40', height: '40', loading: 'lazy' })
         : el('span', { class: 'mb-avatar mb-avatar-emoji', 'aria-hidden': 'true', text: b.emoji || '•' }),
