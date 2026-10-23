@@ -230,12 +230,15 @@ def test_starting_the_server_migrates_and_the_owner_unlocks_with_the_old_pin(leg
         assert accounts.get_owner() is not None
         assert list((legacy / "backups").iterdir())
         st = c.get("/api/auth/status").json()
-        assert st["claimed"] and st["decoy"] and not st["authenticated"]
+        assert st["claimed"] and not st["authenticated"] and "decoy" not in st
         assert c.post("/api/auth/unlock", json={"pin": "1234"}).status_code == 200
         me = c.get("/api/auth/me").json()
         assert me["role"] == "admin" and me["needs_password"] is True
-        # Characters kept their audience across the upgrade.
-        bots = {b["id"]: b["audience"] for b in c.get("/api/bots/all").json()["bots"]}
+        # Characters kept their (legacy, inert) audience in config.yaml across the upgrade, so a
+        # rollback finds it; 4.0 no longer sends it in any payload.
+        assert all("audience" not in b for b in c.get("/api/bots/all").json()["bots"])
+        from app import config as _cfg
+        bots = {b.id: b.audience for b in _cfg.load_bots()}
         assert {k: bots[k] for k in ("kid", "helper", "work")} == {
             "kid": "restricted", "helper": "all", "work": "members"}
     asyncio.run(temp_db.close())

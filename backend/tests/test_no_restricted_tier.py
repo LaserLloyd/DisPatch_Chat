@@ -149,4 +149,4 @@ def test_a_basic_profile_meets_named_checks_not_a_decoy(world):
     assert rx.status_code == 200 and rx.json()["can_manage"] is False
     assert len(rx.json()["reactions"]) == len(owner.get("/api/reactions").json()["reactions"])
     st = c.get("/api/auth/status").json()
-    assert st["authenticated"] is True and st["decoy"] is False
+    assert st["authenticated"] is True and "decoy" not in st   # 4.0: the 3.x key is gone

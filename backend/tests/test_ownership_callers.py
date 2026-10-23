@@ -46,7 +46,8 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("backend/app/apps_loader.py", "provision_bots", "load_bots"): _HOUSE,
     ("backend/app/avatar_pool.py", "enabled_bots", "load_bots"): "household pools only (personal characters never have a pool)",
     ("backend/app/backup_api.py", "export_user", "load_bots"): "Admin export of one account's metadata (manage_users); lists characters limited to it",
-    ("backend/app/backup_api.py", "run", "load_bots"): "the encrypted full backup (admin_system), documented as holding everything",
+    ("backend/app/media_inventory.py", "find_orphans", "load_bots"):
+        "maintenance orphan sweep: avatar file names of every bot, so no live avatar counts as an orphan; never returned to a caller",
     ("backend/app/backups.py", "build_support_bundle", "load_bots"): "support bundle (admin_system)",
     ("backend/app/characters.py", "visible_bots", "load_bots"): _FILTER,
     ("backend/app/characters.py", "usable_bots", "load_bots"): _FILTER,

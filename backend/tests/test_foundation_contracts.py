@@ -59,7 +59,8 @@ def test_backends_and_maintenance_signatures():
     assert _params(maintenance.start) == ["app"]
     assert _params(maintenance.stop) == ["app"]
     assert inspect.iscoroutinefunction(maintenance.stop)
-    assert _params(maintenance.run_nightly) == ["now", "steps"]
+    # Foundation's two keyword parameters stay first; WP-SCALE-OPS added the rest.
+    assert _params(maintenance.run_nightly)[:2] == ["now", "steps"]
     maintenance.start(object())                     # a no-op today, and it must never raise
 
 
