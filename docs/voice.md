@@ -67,9 +67,33 @@ You also need `ffmpeg` (voice cloning) and, optionally, libopus on the host; Set
 
 | Who | What |
 |---|---|
-| Owner, Admin | Everything: the switch, server settings, voices and cloning, the lab, the GPU rig, models. |
-| Member | Voice calls with the characters they can chat with, Settings → Voice (once the add-on is installed), the voice list and samples (`use_voice`). Changing the server's voice setup is refused (`manage_plugins`). |
-| Restricted (a signed-in child, a device bound to one, or a guest) | Voice calls on the characters their audience allows, from the call screen only; every turn runs locked and counts against that profile's (or, for a guest, the default) budgets and quiet hours. |
+| Admin | Everything: the switch, server settings, household voices, the lab, the GPU rig, models. |
+| User | Voice calls with the characters they can chat with, Settings → Voice (once the add-on is installed), the voice list and samples (`use_voice`), and cloning their own voices (`voice_lab`). Changing the server's voice setup is refused (`manage_plugins`). |
+| Basic | Voice calls (`use_voice`), the built-in voices and samples. Cloning (`voice_lab`) is off until an Admin switches it on. |
+| The shared DisPatch profile (what a locked or unsigned device lands on) | Voice calls and the built-in voices. Voice cloning is never effective there, whatever its role says. |
+
+Voice has no quiet hours or minute limits any more: nothing is metered per profile.
+
+### Whose voice is it (per-profile clones)
+
+With **DisPatch Voice 1.6.0 or later**, a cloned voice belongs to the profile that made it (older add-ons
+keep every clone route Admin-only, so nobody can create a household-wide clone by accident). DisPatch gates the
+coarse permission and hands the add-on who is calling; the add-on enforces ownership.
+
+| Action | Who |
+|---|---|
+| List, pick, hear a sample | household voices and your own clones; never another profile's, not even an Admin's |
+| Create | a profile with `voice_lab`; the clone is yours (an Admin can make one household-wide) |
+| Rename, delete, try a line | the owner; Admins for household voices; anyone else gets a 404 |
+| Household <-> personal | Admins only |
+| Default voice, narrator voice | household voices, set by an Admin |
+| Download the recordings | the owner; Admins for household voices |
+| Speak as a bot's voice | household voices for any bot; a personal clone only for a personal bot owned by the same profile |
+| Profile deleted, or User -> Basic | its clones are deleted; **Reset to default keeps them** |
+
+A bot copied into another profile keeps the source's voice only if the new owner may use it. The details and the
+host hooks (`ctx.caller`, `ctx.register_voice_access`, `ctx.register_profile_data`) are in
+[extensions.md](extensions.md#voice) and the add-on's own documentation.
 
 ## Touch points for CPU voice
 
@@ -111,7 +135,7 @@ timed, and the full 1.4 GB download was not run.
    `js/voice-absent.js`).
 5. **Two status hints still name the terminal** (`dispatch-voice fetch-models` in the
    add-on's `missing` list). They are hints beside a working button, not steps.
-6. **The first-run owner account** is DisPatch's own step, not voice's.
+6. **The first-run Admin account** is DisPatch's own step, not voice's.
 
 ## Related
 

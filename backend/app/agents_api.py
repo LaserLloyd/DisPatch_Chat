@@ -15,7 +15,7 @@ before a handler runs (the ``Depends`` below say the same sentence again at the 
                             on a held handoff (``/api/tasks/{id}/release``)
 
 Who sees which task is one rule (``agents_ws.may_see_task``): a profile sees its OWN tasks -
-the Owner and Admins included since 4.0 (they keep the aggregate spend, ``/api/agents/usage``).
+Admins included since 4.0 (they keep the aggregate spend, ``/api/agents/usage``).
 A task you may not see answers 404, exactly like one that does not exist. An agent you may not
 use answers 404 too.
 
@@ -179,11 +179,11 @@ def _is_local_url(url: str | None) -> bool:
 
 
 def owner_only_features(spec: AgentSpec) -> set[str]:
-    """Powers that are host-level in effect: only the Owner (``admin_system``) may grant them.
+    """Powers that are host-level in effect: only the protected Admin (``admin_system``) may grant them.
 
     Each entry names the power AND what it is granted over (the stdio command line, the remote
     address a secret goes to, the tool run unattended), so that an edit is compared grant by
-    grant. Comparing bare names let an Admin keep an Owner-approved ``stdio_mcp`` entry and
+    grant. Comparing bare names let an Admin keep an approved ``stdio_mcp`` entry and
     rewrite its command - arbitrary code on the host - or move an approved remote server, with
     its stored secrets, to an address of their choosing."""
     import json as _json
@@ -201,7 +201,7 @@ def owner_only_features(spec: AgentSpec) -> set[str]:
             out.add("privileged_mcp:" + _fp(name, srv.transport, srv.url, srv.command, list(srv.args)))
         if srv.header_secrets and not _is_local_url(srv.url):
             # A stored secret is sent to this address: only to a server on this machine unless the
-            # Owner says otherwise, or an Admin could point a stored key at a host of their choosing.
+            # protected Admin says otherwise, or an Admin could point a stored key at a host of their choosing.
             out.add("secret_to_remote_server:" + _fp(name, srv.url, dict(srv.header_secrets)))
     for tool in spec.approval_policy.unattended_allow:
         out.add("unattended_allow:" + tool)
@@ -624,7 +624,7 @@ async def list_tasks(request: Request, state: str | None = None, agent_id: str |
                 date.fromisoformat(v[:10])
             except ValueError:
                 return _problem(422, "validation_error", f"{label}: use YYYY-MM-DD")
-    # 4.0: everyone is pinned to their own tasks, the Owner and Admins included (``profile`` is
+    # 4.0: everyone is pinned to their own tasks, Admins included (``profile`` is
     # accepted for old clients and ignored). An open install (no accounts) sees all.
     owner: str | None
     if pr.kind == "open":

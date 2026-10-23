@@ -314,8 +314,8 @@ batching writer, mirrors the task state, cost and session id into `tasks`, and c
 `restore_task` for tasks a restart interrupted (they come back `cancelled` with reason
 `restart`, resumable when the backend kept a session). A per-day spend ledger (`agent_spend`)
 feeds `Budget.max_usd_per_day`: before every run the effective budget is recomputed from the
-ledger and the profile's limits (`BaseBackend.update_budget`), and every `cost_update` is
-re-checked against the shared per-day caps, hard-stopping the task through
+ledger and the agent's own limits (`BaseBackend.update_budget`; 4.0 has no per-profile limits), and every `cost_update` is
+re-checked against the agent's per-day cap, hard-stopping the task through
 `BaseBackend.stop_for_budget`. `BaseBackend.patch_spec`, `any_active`, `has_task`, `is_active`,
 `forget_task` and the `tokens_so_far` / `turns_so_far` arguments of
 `restore_task` were added for it. Routes, frames and the UI are described in

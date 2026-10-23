@@ -229,5 +229,5 @@ LF endings so a Windows checkout does not break the source-scan tests.
 to `backend/app/route_policy.py` — `tests/test_route_table.py` fails the build otherwise —
 and any new `HTTPException` message to `backend/app/contracts/error_catalog.json`
 (`tests/test_error_catalog.py`). `tests/test_g5_access.py` calls every protected route with no
-session and with a Restricted session and expects a refusal. Use the `world` fixture
-(`tests/conftest.py`) for tests that need an owner, profiles and clients with chosen peers.
+session and with a Basic session and expects a refusal. Use the `world` fixture
+(`tests/conftest.py`) for tests that need a first Admin, profiles and clients with chosen peers.

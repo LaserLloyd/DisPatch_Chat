@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 540" role="img"
-     aria-label="The two access tiers. Every request from either tier hits the same server-side gate. Safe Mode, with no PIN, gets read and send to safe characters only, media stripped server-side, a one-way file drop and daily per-device budgets; every mutating endpoint answers 403. Unlocked, with the PIN, gets full agents, files, settings, deletion, the host dashboard, the tools and the coding pane. The gate is enforced on the server, so a hand-crafted request from a locked device gets the same 403 as a button press.">
+     aria-label="Three roles, one gate. A shared tablet that nobody signed in on lands on the shared DisPatch profile, a User with no PIN. An Admin signs in on a phone. Every request from either hits the same server-side gate, so a hand-crafted request gets the same 403 as a button press. The shared profile can chat, use voice, lookups, its own bots and pictures, but never agents, voice cloning or management routes. The Admin can do everything except open other profiles' chats.">
   <defs>
     <pattern id="g2" width="46" height="46" patternUnits="userSpaceOnUse">
       <path d="M 46 0 H 0 V 46" fill="none" stroke="#18202a" stroke-width="1"/>
@@ -14,20 +14,20 @@
   <rect width="1200" height="540" fill="url(#gl2)"/>
 
   <text x="64" y="56" font-family="ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace"
-        font-size="17" letter-spacing="5" fill="#5f7386">TWO TIERS &#183; ONE GATE</text>
+        font-size="17" letter-spacing="5" fill="#5f7386">THREE ROLES &#183; ONE GATE</text>
   <line x1="64" y1="76" x2="1136" y2="76" stroke="#26313e" stroke-width="2" stroke-dasharray="12 9"/>
   <circle cx="64" cy="76" r="6" fill="#2ea8ff"/>
 
   <!-- devices -->
   <g>
     <rect x="64" y="112" width="300" height="72" rx="14" fill="#10151b" stroke="#5f7386" stroke-width="3"/>
-    <text x="214" y="148" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="21" font-weight="700" fill="#eaf1f8" text-anchor="middle" textLength="148.2" lengthAdjust="spacingAndGlyphs">Kitchen tablet</text>
-    <text x="214" y="171" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="14" letter-spacing="2" fill="#9aabbc" text-anchor="middle" textLength="62.4" lengthAdjust="spacingAndGlyphs">NO PIN</text>
+    <text x="214" y="148" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="21" font-weight="700" fill="#eaf1f8" text-anchor="middle">Shared tablet</text>
+    <text x="214" y="171" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="14" letter-spacing="2" fill="#9aabbc" text-anchor="middle">NOT SIGNED IN</text>
   </g>
   <g>
     <rect x="836" y="112" width="300" height="72" rx="14" fill="#10151b" stroke="#2ea8ff" stroke-width="3"/>
-    <text x="986" y="148" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="21" font-weight="700" fill="#eaf1f8" text-anchor="middle" textLength="119.9" lengthAdjust="spacingAndGlyphs">Your phone</text>
-    <text x="986" y="171" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="14" letter-spacing="2" fill="#2ea8ff" text-anchor="middle" textLength="114.3" lengthAdjust="spacingAndGlyphs">PIN ENTERED</text>
+    <text x="986" y="148" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="21" font-weight="700" fill="#eaf1f8" text-anchor="middle">Your phone</text>
+    <text x="986" y="171" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="14" letter-spacing="2" fill="#2ea8ff" text-anchor="middle">ADMIN SIGNED IN</text>
   </g>
 
   <!-- funnel into the gate -->
@@ -37,9 +37,9 @@
 
   <!-- the gate -->
   <rect x="360" y="252" width="480" height="106" rx="16" fill="#10151b" stroke="#ffb64a" stroke-width="4"/>
-  <text x="600" y="288" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="23" font-weight="700" fill="#ffb64a" text-anchor="middle" textLength="395" lengthAdjust="spacingAndGlyphs">The gate — enforced on the server</text>
-  <text x="600" y="316" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#9aabbc" text-anchor="middle" textLength="179.7" lengthAdjust="spacingAndGlyphs">not in the interface</text>
-  <text x="600" y="338" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#9aabbc" text-anchor="middle" textLength="359.3" lengthAdjust="spacingAndGlyphs">a hand-crafted request gets the same 403</text>
+  <text x="600" y="288" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="23" font-weight="700" fill="#ffb64a" text-anchor="middle">The gate — enforced on the server</text>
+  <text x="600" y="316" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#9aabbc" text-anchor="middle">not in the interface</text>
+  <text x="600" y="338" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#9aabbc" text-anchor="middle">a hand-crafted request gets the same 403</text>
   <path d="M 600 236 V 252" fill="none" stroke="#ffb64a" stroke-width="3"/>
 
   <!-- outcomes -->
@@ -48,16 +48,16 @@
 
   <g>
     <rect x="64" y="386" width="500" height="122" rx="14" fill="#10151b" stroke="#5f7386" stroke-width="3"/>
-    <text x="88" y="418" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="20" font-weight="700" fill="#eaf1f8" textLength="103.7" lengthAdjust="spacingAndGlyphs">Safe Mode</text>
-    <text x="88" y="446" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc" textLength="406.1" lengthAdjust="spacingAndGlyphs">Read and send &#8212; safe characters only. Media stripped</text>
-    <text x="88" y="470" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc" textLength="421.9" lengthAdjust="spacingAndGlyphs">server-side. One-way file drop. Daily per-device budgets.</text>
-    <text x="88" y="496" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#ff6b6b" textLength="260.5" lengthAdjust="spacingAndGlyphs">every mutating endpoint &#8594; 403</text>
+    <text x="88" y="418" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="20" font-weight="700" fill="#eaf1f8">DisPatch profile (a User)</text>
+    <text x="88" y="446" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc">Chat, voice, lookups, its own bots, pictures.</text>
+    <text x="88" y="470" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc">Shared on purpose. No agents, no voice cloning.</text>
+    <text x="88" y="496" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#ff6b6b">every management route &#8594; 403</text>
   </g>
   <g>
     <rect x="636" y="386" width="500" height="122" rx="14" fill="#10151b" stroke="#2ea8ff" stroke-width="3"/>
-    <text x="660" y="418" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="20" font-weight="700" fill="#eaf1f8" textLength="93.8" lengthAdjust="spacingAndGlyphs">Unlocked</text>
-    <text x="660" y="446" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc" textLength="381.1" lengthAdjust="spacingAndGlyphs">Full-power agents, files, settings, deletion, the host</text>
-    <text x="660" y="470" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc" textLength="409.8" lengthAdjust="spacingAndGlyphs">dashboard, and the tools and coding pane if enabled.</text>
-    <text x="660" y="496" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#4ade80" textLength="89.8" lengthAdjust="spacingAndGlyphs">everything</text>
+    <text x="660" y="418" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="20" font-weight="700" fill="#eaf1f8">Admin</text>
+    <text x="660" y="446" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc">Agents, files, settings, backups, the host</text>
+    <text x="660" y="470" font-family="system-ui, 'Segoe UI', Roboto, Arial, sans-serif" font-size="16" fill="#9aabbc">dashboard, tools and the coding pane.</text>
+    <text x="660" y="496" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="15" fill="#4ade80">everything except other profiles' chats</text>
   </g>
 </svg>

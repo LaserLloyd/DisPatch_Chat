@@ -77,10 +77,13 @@ Voice chat lets you talk to a thread hands-free: DisPatch listens, works out
 when you have finished, sends what you said like a typed message and speaks
 the bot's reply back sentence by sentence. Everything runs on the server's
 CPU; nothing you say leaves the machine. It understands and speaks English
-only for now. Since 2.3.4 it works on a locked (Safe Mode) device too, on the
-bots that device can chat with (the `safe` ones), and every turn it sends runs
-with the same locked rules as a typed Safe-Mode message. Voice settings stay
-unlocked-only.
+only for now. Every profile with `use_voice` (all roles by default) can call the
+bots it can chat with, including the shared DisPatch profile that an unsigned
+device lands on; every turn it sends runs under the rules of a typed message.
+Voice settings and cloned voices follow the permission table: setup is
+`manage_plugins` (Admin), cloning is `voice_lab` and, with an add-on that declares
+per-profile clones (DisPatch Voice 1.6 or later), a clone belongs to the profile
+that made it ([voice.md](voice.md)).
 
 **Settings → Voice** tells you which state you are in. Without the add-on it
 explains what voice chat is and shows the install command below, ready to copy,
@@ -329,22 +332,22 @@ and `state_dir` = `<data>/ext/<id>/`, owner-only — never the data directory it
 `bot_backend(bot_id)`, `socket_count(name)`, `touch_session(token)`,
 `counters` (host-side counters such as `speculation_stale`).
 
-> **`db()` writes need an owner (ownership groundwork, Unreleased).** The
+> **`db()` writes need an owner (4.0).** The
 > database `db()` returns now takes a required keyword-only owner on the calls
 > that create a record: `create_thread(..., owner_profile_id=)`,
 > `add_file(..., owner_profile_id=)`, `adopt_file(..., owner_profile_id=)` and
 > `find_or_create_daily_thread(..., owner=)`. Omitting it is a `TypeError`.
 > Pass the profile the record belongs to; for a machine-made record (an
-> extension's own drop, a daily thread) pass the Owner's id
-> (`app.ownership.owner_id()`), or `None` on an install without an Owner yet.
+> extension's own drop, a daily thread) pass the protected Admin's id
+> (`app.ownership.owner_id()`), or `None` on an install without an Admin yet.
 > `EXT_API` stays 1: the voice add-on never calls these, and nothing else in
 > the extension API changed shape.
 
 **Turns** — `submit_turn` runs under the same rules as a typed message. It
 raises `PermissionError` (no row is stored, no turn runs) when the thread's
-socket belongs to a caller who may not start this turn: a Restricted caller
-on a character it cannot see or out of budget, or a profile without
-`dispatch_agents` on a character whose turns run an agent on the host. The
+socket belongs to a caller who may not start this turn: a profile that may no
+longer use the character, or a profile without `dispatch_agents` on a character
+whose turns run an agent on the host. The
 thread socket itself refuses that last caller after accept with 1008 and a
 reason, so a client stops instead of retrying.
 
@@ -353,25 +356,27 @@ reason, so a client stops instead of retrying.
 (`extensions.require_extension_route`): the requirement the route table declares
 for that path (`route_policy.extension_requirement`, listed in
 `docs/contracts/routes.json` under `extension_routes`) — `manage_plugins` by
-default, `use_voice` (Member, Admin, Owner; never a Restricted caller) for the
-reads a voice user needs: `GET /api/voice/status`, `GET /api/voice/preview` and
-`GET /api/voice/profiles` (2026-10-19, "Members should have voice"). Never the
-machine-inbound tier. The prefix joins the Safe-Mode block list and is kept
+default, `use_voice` (every role by default) for the reads a voice user needs:
+`GET /api/voice/status`, `GET /api/voice/preview` and `GET /api/voice/profiles`.
+When the add-on declares per-profile clones (`ctx.register_voice_access`), the clone
+routes (create, analyse, patch, delete, say) are gated on `voice_lab` instead of
+`manage_plugins`; an add-on that does not declare it keeps every clone route
+Admin-only. Never the machine-inbound tier. The prefix is kept
 off the machine-inbound surface, and `body_limits` (exact path → bytes) are
 enforced from `Content-Length` before the body is read. A request that can
 change something (anything but GET, HEAD and OPTIONS) must also come from
 DisPatch's own page: a present `Origin` must equal the `Host` and
 `Sec-Fetch-Site` must not be `cross-site` or `same-site` — else 403 "cross-origin
 request refused". A raw-body or multipart POST is a CORS "simple" request a page
-on another port of the same host name could otherwise send with the unlocked
+on another port of the same host name could otherwise send with the session
 cookie. A router carrying any
 websocket route, `Mount` or plain Starlette `Route` is refused (`ValueError` →
 `failed`): those take no dependencies, so the operator check could not run on
 them. Static files go through `serve_static`.
 
 **Static files** — `serve_static(directory, entry, css, locales)` serves
-`/ext/<id>/<path>`: GET/HEAD for an unlocked session and, since 2.3.4, a
-locked device (it mounts the frontend too); never a machine caller; only `js mjs css json map wasm onnx wav mp3 ogg png
+`/ext/<id>/<path>`: GET/HEAD for any profile, including the lock-target default
+profile an unsigned device lands on (it mounts the frontend too); never a machine caller; only `js mjs css json map wasm onnx wav mp3 ogg png
 jpg webp woff2` (anything else — HTML, SVG and XML documents in particular —
 is a 404: an extension renders into the shell's DOM and never ships a page),
 `X-Content-Type-Options: nosniff`, a deny-all CSP, a strong ETag, `no-cache`
@@ -384,12 +389,14 @@ with it). DisPatch runs the gate, then calls `handler(ws, sock)` with the
 socket **not yet accepted**:
 
 1. a present `Origin` must equal `Host` — else **1008** before accept;
-2. the tier, decided like the main `/ws`: with a PIN, a live unlocked
-   `lc_session`, else a **locked** device;
-3. the thread exists and, for a locked device, its bot is `safe` **and
-   listed** (`visible` — the threads a locked device's chat list shows, the
-   same rule as a Safe-Mode send on the main `/ws`) — else **1008** before
-   accept;
+2. the caller, decided like the main `/ws`: a live session is that profile; with
+   none, the lock-target default profile (the shared "DisPatch" profile); with
+   none of those, nobody — **1008**. The profile must hold `use_voice`;
+3. the thread exists, the caller **owns** it (a voice call hears every reply in
+   the thread) and may use its bot — else **1008** before accept, the same
+   answer as a thread that does not exist. A bot whose turns run an agent on the
+   host also needs `dispatch_agents`: that refusal is accept-then-1008 with a
+   reason, so a client stops instead of retrying;
 4. at most `max_total` open sockets under the name — beyond it
    accept-then-**1013** "Voice is busy on this server (3 chats open)" (a
    session that already holds one is never "busy": its oldest is replaced;
@@ -402,21 +409,12 @@ socket **not yet accepted**:
    close frame does not hold up its own reconnect.
 
 `sock` is a `ThreadSocket {thread, bot (a BotView), token, session_live(),
-touch(), close_unavailable(reason), on_replaced(fn), locked}`. `locked` (2.3.4)
-says the socket came from a locked device (`token` is None): every turn the
-host takes for that thread — `submit_turn` while the socket is open and for
-two minutes after it closed — runs with `TurnOptions(locked=True)` exactly
-like a typed Safe-Mode send, and `speculate_turn` answers None there (a
-speculation is built unlocked). Such a turn is also a Safe-Mode send for the
-daily budget: while a locked socket is open on the thread, `submit_turn` is
-charged to that device's `DECOY_TURN_QUOTA` (the same "turn" budget as the
-main `/ws`) and, once it is spent — or the bot has stopped being safe or
-listed meanwhile — it raises `PermissionError` before anything is persisted
-(the voice add-on tells the listener it could not send). The extension never
-has to pass `locked`; it reads it only to show less. `session_live()` turns
-false when the session lapses, a PIN appears on a PIN-less install, the
-thread is deleted, the bot is removed, or (for a locked socket) the bot stops
-being `safe` or listed —
+touch(), close_unavailable(reason), on_replaced(fn), profile_id}`. `profile_id`
+(4.0) is the profile behind the socket, which is the thread's owner by
+construction (None on an open install); the voice add-on resolves a personal
+bot's voice with it. `session_live()` turns false when the session lapses, the
+profile is signed out or disabled, the thread is deleted, the bot is removed, or
+the profile may no longer use the bot —
 re-check it (≤ 1/s) and close 1008 when it does. `close_unavailable(reason)`
 is accept-then-1013 with your reason (≤ 120 characters). A handler that returns
 without accepting is answered accept-then-1013 "extension did not accept" (and
@@ -461,7 +459,7 @@ logged), never a bare 1006. A websocket to a name
   bounded queue the host owns (256; overflow drops the oldest) — never inside
   the broadcast. A reply still streaming when you subscribe arrives first as
   `stream_start` + `stream_chunk {replace: true}` with everything so far. The
-  Safe-Mode redaction applies the instant `token`'s session lapses.
+  per-profile frame scoping applies the instant `token`'s session lapses.
 
 | Frame | Fields you may rely on |
 |---|---|
@@ -490,11 +488,8 @@ may only keep the stored value or clear it.
 `thread=True` runs it on a daemon thread, never awaited), `on_shutdown(fn)`.
 A raising hook is logged, never fatal.
 
-**Locked status** (2.3.4) — `locked_status(fn)`: what a locked device may
-read about you, e.g. `{"enabled": True, "ready": True}` for voice. Called per
-`GET /api/extensions` from a locked device and served in your row as
-`locked_status`, cut to at most 16 flat scalars (bool, number, None, a string
-≤ 80 characters); a raising `fn` is `None`. Never put a secret in it.
+**Locked status** (2.3.4, removed in 4.0) — `locked_status(fn)` and the `locked_status` field of an
+`/api/extensions` row are gone: there is no limited tier to report to. Every profile reads the same rows.
 
 > **The trailer is in-band.** A gateway agent reads the voice note as part of
 > the user's message — there is no separate system slot on that path — so an
@@ -589,10 +584,8 @@ no `module:attr` target is shown. Both need `manage_plugins`
 itself (see "Live tools" in [advisor.md](advisor.md)) without touching
 DisPatch. They join the eight built-in lookups in one registry: a bot with
 `advisor.tools: true` is offered the built-ins **and** every extension tool, and a
-`tools:` list may name them. A **locked (Safe-Mode) turn** gets only the eight
-built-ins by default: an extension tool reaches a family device only when the
-owner names it in that bot's `tools_locked` (opt-in, like everything else Safe
-Mode can touch).
+`tools:` list may name them. The lookups are open to every profile
+(`use_lookups`); an extension tool is offered to a bot's model like the built-ins.
 
 A complete minimal extension (a `dice` roller):
 
@@ -652,11 +645,10 @@ tools as `live_tools`.
 Rules for a tool:
 
 - **Read-only intent.** A tool is called by a model that read text from the
-  open web or from a chat, and once the owner names it in a bot's
-  `tools_locked` it is callable from a Safe-Mode (family) device. Look things
+  open web or from a chat, and it is callable by every profile that can use the
+  bot, including the shared DisPatch profile. Look things
   up; do not send, write, delete, spend or run anything. If a tool must act,
-  the bot's lists are the control: name it in `tools` and leave it out of
-  `tools_locked` so it is never offered on a locked turn.
+  the bot's `tools` list is the control: name only the tools that bot should offer.
 - **Never raise, and keep arguments honest.** The model's arguments are
   untrusted; validate them and return a short message the model can act on.
   DisPatch still catches anything you raise: the model then sees only
@@ -668,8 +660,7 @@ Rules for a tool:
 - **Be quick.** The turn waits for the tool; time-box network calls yourself.
 - **Per bot.** `tools: true` offers everything; `tools: [roll_dice, weather]`
   offers just those (unknown names are logged and dropped, so a bot's list
-  survives the extension being uninstalled). `tools_locked: [weather]` narrows
-  what a Safe-Mode turn may call.
+  survives the extension being uninstalled). The 3.x `tools_locked` list is gone.
 
 The install-wide switch lives in `<data>/tools.yaml`:
 
@@ -687,9 +678,8 @@ prompt stops mentioning them, and it takes effect on the next turn.
 ## Writing an extension: the frontend
 
 When a session starts (and `features.extensions > 0`) the shell reads
-`/api/extensions` and, for each `ok` extension — on a locked device too since
-2.3.4, which then gets `mount(shell, {assetsVersion, locked: true})` and
-whose Settings, Bots-tab and tools slots are no-ops; crossing the lock
+`/api/extensions` and, for each `ok` extension, calls `mount(shell, {assetsVersion, locked})`
+(`locked` is a 3.x argument the shell still passes; treat it as informational). Crossing the lock
 boundary unmounts and mounts again:
 
 1. merges its locale bundle (`/ext/<id>/locales/<lang>.json` and `en.json`)
@@ -717,15 +707,15 @@ export async function mount(shell, { assetsVersion }) {
 `i18n {t, tHtml, has, applyDom, list, n, lang}`, `onLocale(fn)`,
 `onLocked(fn)`, `onThread(fn)` (the open chat changed or closed; also
 spelled `onThreadChange`), `api(path, {method, body, query,
-signal})` (same-origin JSON; `DecoyError` on a Safe-Mode 403),
+signal})` (same-origin JSON; `DecoyError`, the 3.x name kept, on a 403),
 `activeThread()`, `bots()`, `botById(id)`, `allBots()`, `isLocked()`,
 `language()`, `features()`, `can(permission)` (2026-10-19: does this session hold
-`manage_plugins`, `use_voice`, …? — a Member uses voice but does not administer it;
+`manage_plugins`, `use_voice`, …? — a User uses voice but does not administer it;
 the server decides either way), `threadFace(thread, bot)` (honours No-Image Mode),
 `toast`, `confirm`, `prompt`, `navigate`, `activity()` (2.2.0: the person is
 using the app — re-arms the idle auto-lock the way a touch does; call it while
 your feature is in use without touches, e.g. a voice chat; it never unlocks
-anything and does nothing on a locked or remembered device), and the slots:
+anything and does nothing on a remembered device), and the slots:
 
 | Slot | What it does |
 |---|---|
@@ -763,13 +753,13 @@ const dispose = shell.settings.pane('stats', {
   titleKey: 'stats.tab',        // a key in your locale bundle (merged into the shell's strings)
   // title: 'Stats',            // …or plain text
   glyph: '📊',                  // optional, a short emoji; default is a puzzle piece
-  // public: true,              // visible in Safe Mode too (default: admin-only)
+  // public: true,              // visible to every profile (default: admin-only)
   render(root) { /* build into root with the shell's classes */ },
   onShow() {}, onHide() {},
 });
 ```
 
-A tab is **admin-only** by default: hidden for a Safe-Mode session exactly like
+A tab is **admin-only** by default: hidden from every other role exactly like
 Reactions or Health. `public: true` shows it to everyone, so a public pane must
 never render anything an admin pane would. A malformed or built-in id, a missing
 `render`, or an id another extension already holds throws. The tab strip scrolls
@@ -794,20 +784,16 @@ to `settings.pane`. The service worker never caches `/ext/`.
 
 Every gate stays in DisPatch; an extension only ever receives what passed it.
 
-- Locked devices (2.3.4): Safe Mode reads `/api/extensions` (the mount rows
-  and each one's `locked_status`, nothing else) and `/ext/*` (GET/HEAD), gets
-  `features.extensions` only, and mounts the frontend told it is locked.
-  Every extension ROUTE refuses it (403), the voice user's reads included. Its
-  websockets are open to it on a `safe` bot's thread only, and every turn from
-  there runs locked. A locked socket is resolved like the HTTP gate: a device
-  bound to a Restricted profile is that profile (its quiet hours and minutes end
-  the call through `session_live`, its turns spend its own daily budget); only a
-  device nobody bound is an anonymous guest on the per-address defaults.
-- Websockets: Origin==Host, the tier and an existing thread (a `safe` bot's
-  for a locked device) are checked inline before `accept` (HTTP middleware
-  never sees a websocket).
-- HTTP: the declared requirement on every route (`manage_plugins`, or `use_voice`
-  for the voice user's reads), the Safe-Mode block list, never
+- No locked tier (4.0): an unsigned device is the lock-target default profile (or
+  nobody, with `lock_target: profile_list`), resolved by the same gate as a
+  signed-in one. `/api/extensions` and `/ext/*` are open to any profile; every
+  extension ROUTE declares its requirement (below); websockets need `use_voice`,
+  the thread's owner and a bot that profile may use. Agents and voice cloning are
+  never effective on the default profile.
+- Websockets: Origin==Host, the caller, the thread's owner and the bot are checked
+  inline before `accept` (HTTP middleware never sees a websocket).
+- HTTP: the declared requirement on every route (`manage_plugins`, `use_voice`
+  for the voice user's reads, `voice_lab` for per-profile clones), never
   the machine-inbound surface, body ceilings before the body is read.
 - Static: an asset-type allowlist, no documents, `nosniff`, a deny-all CSP.
 - Data: the context exposes `BotView`s and named paths — never provider blocks,
@@ -815,7 +801,7 @@ Every gate stays in DisPatch; an extension only ever receives what passed it.
 - HTTP writes: an extension route that can change something refuses a
   cross-origin browser request (Origin ≠ Host, or `Sec-Fetch-Site` cross-site /
   same-site), so another service on the same host name cannot drive it with the
-  unlocked cookie.
+  session cookie.
 - Boot: a failing extension is a state with its routes rolled back; a `setup`
   that hangs is abandoned after 60 s; the shell never fails to start because of
   one. A start-up that never settles (a native crash or a hang killed by the

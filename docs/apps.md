@@ -60,7 +60,8 @@ Apps are loaded once at startup; changing a backend means restarting
 id: jobboard                    # [a-z0-9-]{1,40}; must equal the directory name
 title: Job Board                # rail label (default: the id)
 icon: clipboard                 # a shell line-icon name, or an emoji (≤16 chars)
-safe: false                     # default false → operator only (Safe Mode never sees it)
+permission: use_tools           # the permission a profile needs (default use_tools = Admin only)
+safe: false                     # legacy 3.x key: accepted, never read
 order: 50                       # rail order among apps (default 100)
 api:
   legacy_prefix: /api/jobs      # OPTIONAL: mount the router here TOO, unchanged
@@ -127,9 +128,9 @@ Everything an app gets from the shell, and all of it:
 | `data_dir` | `<DATA_DIR>/apps-data/<id>/`, created `0700` on first use — the app's own files |
 | `db` | the shared `Database` (the shell's SQLite handle) |
 | `config` | the shell's `config` module (`config.get_bot(...)`, `config.DATA_DIR`, …) |
-| `require_operator` | dependency/callable: a real operator session (or a no-PIN install); **never** the machine tier. Put it on operator-only routes. |
-| `require_access` | dependency/callable: the operator **or** an authenticated on-box machine (loopback, or a remote caller with the `api_token`). What agents and crons use. |
-| `broadcast(frame)` | `async`: WebSocket broadcast to operator clients. `frame["type"]` **must** start with `app:<id>:` (anything else raises `ValueError`); Safe-Mode sockets never receive it. |
+| `require_operator` | dependency/callable: a person holding the app's `permission` (or a no-PIN install); **never** the machine tier. Put it on person-only routes. |
+| `require_access` | dependency/callable: a person holding the app's `permission` **or** an authenticated on-box machine (loopback, or a remote caller with the `api_token`). What agents and crons use. |
+| `broadcast(frame)` | `async`: WebSocket broadcast to operator clients. `frame["type"]` **must** start with `app:<id>:` (anything else raises `ValueError`); the frame is delivered only to sockets of profiles that may see it. |
 | `bot_id` | the manifest's `bot.id`, or `None` |
 | `env` | `{name: value}` for the manifest's `env` names that are set |
 | `log` | a `logging.Logger` named `local-chat.app.<id>` |
@@ -139,8 +140,7 @@ Everything an app gets from the shell, and all of it:
 `broadcast_message` and `dispatch_turn` were added for the Job Board: posting
 into a thread and starting a bot's turn are shell behaviours an app must not
 reimplement. `require_operator` / `require_access` refuse with the same
-`403 {"detail": "Unlock for full access", "decoy": true}` the rest of DisPatch
-sends a locked caller.
+`403 permission_denied` body the rest of DisPatch sends a profile that lacks the permission.
 
 An app should import nothing else from the shell. (The Job Board also imports
 `app.database` for the monthly-thread title helpers, because its tables and the
@@ -148,24 +148,23 @@ storage methods that build those titles live in the shell's `database.py`.)
 
 ## Gating
 
-Three layers, each sufficient on its own to keep Safe Mode out:
+Three layers, each sufficient on its own to keep out a profile that lacks the app's permission:
 
 1. **The auth gate.** Every mounted app's API (both prefixes) is on the
    machine-inbound surface: an on-box agent reaches it without a session from
-   loopback, a remote caller needs the `api_token` (401 without), and a
-   browser never takes that branch. Every app path — `/api/apps/*`, `/apps/*`,
-   each legacy prefix — is in `_decoy_blocked` unless the app is `safe: true`
-   and the method only reads, so a locked browser gets the uniform
-   `403 {"decoy": true}` before any app code runs. An app path naming no app
-   is blocked outright.
-2. **The router gate** the loader adds to every route: the decoy 403 for a
-   Safe-Mode caller of a non-safe app, then **404 when the app is switched
-   off** in `tools.yaml` (for everyone, machines included — the switch turns
-   the feature off).
+   loopback while `machine_loopback_trust` is on, a remote caller needs the
+   `api_token` (401 without), and a browser never takes that branch. A browser
+   caller is checked against the permission the manifest names (`permission`,
+   default `use_tools`, which only an Admin holds), before any app code runs.
+2. **The router gate** the loader adds to every route: the same uniform
+   `403 permission_denied` whether or not the app exists, then **404 when the app
+   is switched off** in `tools.yaml` (for everyone, machines included — the
+   switch turns the feature off).
 3. **Per route**, the app's own `ctx.require_access` / `ctx.require_operator`.
 
-`safe: true` lets Safe Mode `GET`/`HEAD` the app's page, assets and read
-routes (and lists the app in the Safe-Mode rail); mutations stay refused.
+Image Studio, for example, names `use_images`, so every profile holding it can open the
+app; the Job Board names `manage_agents` and is Admin-only. The 3.x `safe: true` key is
+legacy data and is never read.
 
 ## Static serving
 
@@ -245,8 +244,8 @@ what the file holds. App rows are never removed through the API.
 An app page imports **only** `/static/js/app-sdk.js` from the shell:
 
 - `api(path, {method, body, query})` → JSON. Same-origin `fetch` with
-  `credentials: 'same-origin'`. A `403 {decoy: true}` throws `DecoyError` (show
-  "Unlock for full access"); other 4xx/5xx throw with the server's `detail`.
+  `credentials: 'same-origin'`. A `403` throws `DecoyError` (the 3.x
+  name kept; show "You do not have permission"); other 4xx/5xx throw with the server's `detail`.
   Call your own API as `/api/apps/<id>/…`.
 - `t(key, vars)` / `ready()` / `has(key)`: loads
   `/apps/<id>/locales/<lang>.json` for the shell's current language (the same

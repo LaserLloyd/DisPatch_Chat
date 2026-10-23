@@ -15,24 +15,27 @@ nothing below is switched on.
 
 | Concept | What it is |
 |---|---|
-| **Agent** | a configured worker: a *backend*, a model, instructions, a tool allow-list, MCP servers, a workspace policy, an approval policy and a budget. An Owner or Admin defines it (Settings → AI & Connections → Agents) and *publishes* it to the profiles that may use it. |
+| **Agent** | a configured worker: a *backend*, a model, instructions, a tool allow-list, MCP servers, a workspace policy, an approval policy and a budget. An Admin defines it (Settings → AI & Connections → Agents) and *publishes* it to the profiles that may use it. |
 | **Task** | one dispatched job: a live timeline (what the agent said and did, subagents nested), approvals, artifacts, an **estimated** cost, and one state — `queued`, `running`, `awaiting_approval`, `succeeded`, `failed`, `cancelled`. |
 | **Backend** | what actually runs it. Two ship: **OpenClaw** (the gateway or CLI on this machine) and **Claude Agent** (the Anthropic agent SDK, one supervised process per task). Both speak one interface (`AgentBackend`, [agents/backends.md](agents/backends.md)). |
 | **Approval** | the agent stops and asks before a tool that changes things. You allow it once, allow it for the rest of the task (never for a destructive tool), or deny it. |
 
 The three permissions (see [security.md](security.md)):
 
-| Permission | Lets you | Owner | Admin | Member | Restricted |
-|---|---|---|---|---|---|
-| `manage_agents` | define agents, store the Claude key, set budgets and retention | yes | yes | no | **never** |
-| `dispatch_agents` | assign tasks to the agents published to you, watch, steer, stop | yes | yes | only if granted | **never** |
-| `approve_agent_actions` | answer approval cards; Send a held hand-off | yes | yes | only if granted | **never** |
+| Permission | Lets you | Admin | User | Basic |
+|---|---|---|---|---|
+| `manage_agents` | define agents, store the Claude key, set per-agent budgets and retention | yes | **never** | **never** |
+| `dispatch_agents` | assign tasks to the agents published to you, watch, steer, stop | yes | off, an Admin may switch it on | off, an Admin may switch it on |
+| `approve_agent_actions` | answer approval cards; Send a held hand-off | yes | off, an Admin may switch it on | off, an Admin may switch it on |
 
-A **Restricted** profile can never see, start or receive output from an agent or a task: every
-route answers 403 (listing included), the WebSocket frames are never sent to it, and a grant
-cannot give it the permission. A **Member** can use only agents an admin has published to
-them; an agent that was not published answers "not found", exactly like one that does not
-exist. An Owner or Admin sees every task; everyone else sees their own.
+**Agent bots can run commands on this computer, including reading anyone's chats**, so these two
+permissions are off for Users and Basic profiles until an Admin switches them on (the screen says
+so plainly), and they are never effective on the profile an unsigned device lands on (the
+shared DisPatch profile). Without `dispatch_agents` every route answers 403 (listing included)
+and the WebSocket frames are never sent. A profile that has it can use only agents an Admin has
+published to it; an agent that was not published answers "not found", exactly like one that does
+not exist. **A task is its dispatcher's own: everyone, Admins included, sees only their own tasks**
+(an Admin keeps the aggregate spend and the audit log).
 
 ## Using it
 
@@ -41,20 +44,20 @@ exist. An Owner or Admin sees every task; everyone else sees their own.
   dialog, filled in; **nothing runs until you press Assign**. The dialog says where the prompt
   goes (a Claude Agent task sends what it reads and writes to Anthropic's API; an OpenClaw task
   stays on this machine) and that it will ask before changing anything.
-- A task starts only from a chat with a character that Members and above alone can see: the
-  prompt, approval requests and the result are written into that chat, so a chat a Restricted
-  profile can read is refused (`task_thread_not_allowed`). From the Tasks page there is no chat.
+- A task starts from one of your own chats: the prompt, approval requests and the result are
+  written into that chat, so you can only start one from a chat you own and a character you may use
+  (anything else is a 404). From the Tasks page there is no chat.
 - The task's **card** appears in the chat and on the **Tasks** page (the 📋 button in the left
   rail, with a dot while an approval waits for you). It shows the timeline, tool calls that fold
   open, approval cards inline, artifacts, the cost labelled *estimate*, and the controls:
   **Stop** (resumable), **Resume**, a **steer** box while it works and a **follow-up** box when
   it is idle, and **End task** (for good).
-- The Tasks page filters by state, agent, person (Owner/Admin) and date.
+- The Tasks page filters by state, agent and date.
 - You are told when a task needs approval, finishes or fails: a Web Push ping with no content
   (see [privacy.md](privacy.md)), a collapsed notice line in the originating chat, and a
   badge on the rail.
 
-## Setting it up (Owner / Admin)
+## Setting it up (Admin)
 
 **Settings → AI & Connections → Agents.**
 
@@ -69,20 +72,20 @@ exist. An Owner or Admin sees every task; everyone else sees their own.
    line; a shell, file writes and anything that sends, posts, deletes or creates always asks),
    MCP servers, working folder, approval mode, limits, and who it is published to. *Add
    StudioForge (read-only key)* adds the StudioForge MCP server with the read-only key's secret
-   name; an admin-scope key needs the Owner.
-3. **Limits and history.** Per-person daily dollars, turns, minutes and tokens; how long
+   name; an admin-scope key needs `admin_system` (an Admin).
+3. **Limits and history.** Each agent's own dollars, turns, minutes and tokens; how long
    transcripts are kept (default **30 days**); how many tasks run at once; the
    `agents.unified_dispatch` switch (below).
 4. **Secrets.** The names MCP servers need (`MCP_…`, `STUDIOFORGE_…`) and whether each is set.
 
-What only the **Owner** may grant an agent, because each is code execution on this machine in
+What only an **Admin** (`admin_system`) may grant an agent, because each is code execution on this machine in
 effect or hands out a stored secret: trusting a repository's own settings (its hooks will run),
 a local-program MCP server, a server marked admin-scope, a stored secret sent to an address that
 is not on this machine, and pre-approved tools for an agent that never asks.
 
 An agent is read afresh at every run: editing its tools, limits or approval policy applies to the
 next follow-up or resume of tasks it already has, and unpublishing, switching off or deleting it
-stops a Member from continuing them (they can still read the history; Stop always works).
+stops a profile from continuing them (they can still read the history; Stop always works).
 
 ### Safety rules that are enforced, not advised
 
@@ -96,7 +99,7 @@ stops a Member from continuing them (they can still read the history; Stop alway
 - **Quarantine.** An agent that reads untrusted content (web pages, email, uploads — a web tool
   counts) cannot also hold a shell or write tools; split it into a reader and an actor.
 - **Budgets** are a hard stop plus a notification: per task (dollars, turns, minutes, tokens)
-  and per agent and per person per day. Costs are client-side estimates and are labelled so;
+  and per agent per day (there are no per-person limits). Costs are client-side estimates and are labelled so;
   never bill from them.
 - **Audit.** Every finished task records who, which agent, approvals allowed and denied, the
   estimated cost, the duration and the outcome (Settings → People & Access → Activity & audit); every approval and
@@ -154,7 +157,7 @@ overrides the setting either way):
 - an OpenClaw character's chat turn runs as a hidden *chat task* whose id is the thread id (so
   the OpenClaw session key is the same one the old path used) — same lock, typing indicator,
   delivery funnel and error frames, with limits, a record and the protocol probe;
-- a `[[handoff:<agent>|brief]]` card also becomes a task in `queued`, held until the owner
+- a `[[handoff:<agent>|brief]]` card also becomes a task in `queued`, held until the chat's owner
   presses Send (the card's button, or Send on the Tasks page — same UX, same
   `approve_agent_actions` permission); Send runs the advisor's own pipeline (the brief,
   the saved note, the report) as a visible task, and Dismiss cancels it.
@@ -185,7 +188,7 @@ All routes are declared in `backend/app/route_policy.py` and listed in
 
 WebSocket frames (server to client only): `task.event` (one normalized event with a task
 summary), `task.approval` (pending / allow / deny / expired) and `task.update`. They go only to
-sockets whose profile may see the task, never to a Restricted socket; a client that sees a gap in
+sockets whose profile may see the task (its dispatcher's); a client that sees a gap in
 `event.seq` refetches `…/events?after_seq=`.
 
 For the support bundle, `agents_store.redacted_summary()` returns counts and configuration shape
@@ -204,12 +207,11 @@ bots:
     emoji: "✨"
     avatar: assistant.png  # under frontend/static/avatars/
     order: 0
-    visible: true
-    audience: members      # all | members | restricted
 ```
 
-`audience` is enforced on the server: a character a Restricted profile may not see is invisible
-*and* unreachable to it, not merely hidden. An **advisor** character answers from a model API
+Who may use a character is decided on the server (household list, personal ownership and, for an
+agent-backed one, `dispatch_agents`; see [characters.md](characters.md)): a character a profile may
+not use is invisible *and* unreachable to it, not merely hidden. An **advisor** character answers from a model API
 and can hand work to agents through `[[research:…]]` and `[[handoff:…]]` markers, with a
 Send/Dismiss card for anything that does work — see [advisor.md](advisor.md).
 
@@ -237,10 +239,9 @@ needs no credential; from anywhere else it requires an API key. See
 Three things worth knowing before you write a script against this, because each
 one is a place where a naive caller silently does the wrong thing:
 
-- **`GET /api/bots` gives an on-box caller the real roster.** A browser tab with
-  no unlocked session still gets the Safe-Mode subset — that is the two-tier
-  gate, not a bug — but a script on the host sees every visible bot, so it is a
-  fine way to discover ids.
+- **`GET /api/bots` gives a machine caller the household roster** (plus the first Admin's
+  personal bots). A browser session gets only the bots its profile may use, so a script on the
+  host is the way to discover ids.
 - **Ids are matched case-insensitively**, both `bot_id` and `thread_id`, on
   every route: post, read back, rename, mark read, delete. The response carries
   the canonical id; store that one. This matters when the id reaches you
@@ -363,10 +364,11 @@ Rules worth knowing:
 - **Three requests per bot per minute.** A render occupies a GPU for tens of
   seconds; a refusal is a `429` and is final, not queued.
 - Same access rules as the rest of the machine surface: the API key (loopback
-  without one only while `machine_loopback_trust` is on), and a locked browser
-  tab gets a `403`.
+  without one only while `machine_loopback_trust` is on). The prompt passes the
+  image hard-line guard (adult-only depictions; no sexual imagery of real,
+  identifiable people).
 - The finished picture is an ordinary chat image. It opens in the lightbox,
-  it is hidden by Safe Mode, and No-Image Mode omits the row entirely — the
+  and No-Image Mode omits the row entirely — the
   job pipeline adds no exceptions to any of that.
 
 Host configuration for this is `DISPATCH_CLAWFORGE_URL` (the image server's
@@ -395,8 +397,8 @@ loopback, with or without a PIN — and nothing about their requests or the
 responses changed. New callers may use either prefix.
 
 Every route is **machine-callable** (no PIN-derived session needed from
-loopback, or remotely with the `api_token`). Safe-Mode browsers are blocked
-at both prefixes in `_decoy_blocked`, so a locked device never sees a row.
+loopback, or remotely with the `api_token`). A browser session needs the app's
+permission (`manage_agents`, so an Admin).
 
 The full lifecycle from one call:
 
@@ -485,9 +487,9 @@ or company (90-day window) returns `{duplicate: false, repost_of:
   route, reads and writes (`POST /api/jobs`, `score`, `find`, and the manage
   verbs `vote / applied / feedback / tags / archive / recompute`). The app's
   write routes all use `ctx.require_access` = operator OR machine.
-- **Unlocked browser session**: every route.
-- **Locked browser** (Safe Mode): 403 `{"decoy": true}` on every route and on
-  the `/apps/jobboard/` page, so a locked device never sees a row.
+- **Admin browser session**: every route.
+- **Any other profile**: 403 `permission_denied` on every route and on
+  the `/apps/jobboard/` page.
 - **Remote caller without the token**: 401.
 - **No-PIN install**: everything is open, as for the rest of DisPatch.
 - **Switched off** (`{id: jobboard, kind: app, enabled: false}` in
@@ -495,8 +497,8 @@ or company (90-day window) returns `{duplicate: false, repost_of:
 
 **WebSocket frames.** A new or changed job is broadcast as
 `app:jobboard:job_created` / `app:jobboard:job_updated` (they were
-`job_created` / `job_updated` before the move). Safe-Mode sockets never
-receive them.
+`job_created` / `job_updated` before the move). Only sockets of profiles
+that may see the app receive them.
 
 ## Pointing at a file on the host
 
@@ -518,8 +520,8 @@ The file is never copied. That has two consequences worth stating: the link
 breaks if you delete the file, and **only paths under the folders the operator
 configured for the local viewer open at all** — everything else answers "Not
 served by the local viewer", as do secrets, dotfiles and system paths whatever
-the configuration says. It is also an unlocked-tier affordance: a Safe-Mode
-device sees the path as plain text and nothing happens when it is tapped. See
+the configuration says. It is also an Admin affordance: any other profile
+sees the path as plain text and nothing happens when it is tapped. See
 [configuration.md](configuration.md) and [security.md](security.md).
 
 The four markers an agent can write in a message:
@@ -565,8 +567,7 @@ Rules:
 - The body is a standard markdown table — the same one that already renders
   elsewhere. The leading checkbox column is added automatically; do **not** add
   one yourself.
-- Checking requires an unlocked (full) session. Safe Mode shows the checkboxes
-  read-only.
+- Ticking a box edits the chat, so only the profile that owns the chat can do it.
 
 ## Writing your own adapter
 

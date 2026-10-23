@@ -925,8 +925,8 @@ def _session(request: Request):
 
 
 def _is_operator(request: Request) -> bool:
-    """May this caller CONFIGURE tools and plugins (``manage_plugins``)? Owner and
-    Admin sessions, or an open install. A machine is never the operator: tools are
+    """May this caller CONFIGURE tools and plugins (``manage_plugins``)? Admin
+    sessions, or an open install. A machine is never the operator: tools are
     a browser feature. The decision is ``policy``'s - this is only its old name."""
     return policy.of(request).can(Permission.MANAGE_PLUGINS)
 
@@ -1028,8 +1028,8 @@ def list_out(operator: bool, member: bool = False, can_app=None) -> list[dict]:
     holder of the blanket ``use_tools`` (every enabled page or URL tool, no host paths; the
     apps whose manifest permission they hold) and everyone else (only the apps whose
     manifest permission they hold - Image Studio for ``use_images``; no tools: a tool panel
-    is never in a User's or Basic profile's column). A tool's ``safe`` flag is a 3.x
-    Safe-Mode input: kept in tools.yaml, never read."""
+    is never in a User's or Basic profile's column). A tool's ``safe`` flag is legacy 3.x
+    data: kept in tools.yaml, never read."""
     manifest = load_tools()
     apps = _mounted_apps()
     if not operator:

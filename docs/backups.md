@@ -1,7 +1,7 @@
 # Backups, restore, the support bundle, and your data
 
 Three kinds of backup sit side by side in `<data>/backups/` and are listed together in **Settings -> System ->
-Backups** (and `GET /api/backups`). All of it is host control (`admin_system`): the **Owner's and the Admins'**.
+Backups** (and `GET /api/backups`). All of it is host control (`admin_system`): the **Admins'**.
 
 | Kind | What | Made by |
 |---|---|---|
@@ -68,11 +68,12 @@ your data best.
 
 `GET /api/users/{profile_id}/export` returns everything DisPatch holds about one profile as JSON: the profile
 (never a PIN or password hash), its devices and sessions, daily usage, its activity rows and the admin actions taken
-on it, and the characters limited to it. `DELETE /api/users/{profile_id}` erases the profile and what is attached to
-it (its activity, usage, sessions, device bindings and its place in character visibility lists); the Owner cannot be
-erased, an Admin cannot touch another Admin, and nobody erases the profile they are using.
+on it, and the household characters it may use. `DELETE /api/users/{profile_id}` erases the profile's activity, usage,
+sessions and devices (it does not delete the profile's bots or chats: the People screen's delete does that, after
+naming the counts); the first Admin cannot be erased, an Admin cannot touch another Admin, and nobody erases the
+profile they are using.
 
-**Conversations are shared by the household in this version and are not attributed to one profile**, so they are not
-part of a per-profile export; use the History export (`GET /api/export`) for the conversations.
+A profile's own chats and bot setup are exported by that profile (Settings → You → Account → Download my chats,
+`GET /api/me/export`); an Admin cannot read them. The History export (`GET /api/export`) is host control.
 
 Everything that changes data here writes an audit row (who, what, which profile - never the data).

@@ -22,87 +22,186 @@ backends. Transport is protected by TLS. Storage is protected by your
 filesystem. Anyone marketing an app like this one as "E2E encrypted" is
 misleading you about one of those three.
 
-**Multi-user is isolation, not adversarial separation.** Conversations belong to
-a *character*, not to a person: everyone who can use a character opens the same
-chats with it. That includes other Restricted profiles and Members, and, while
-`anonymous_access` is `restricted` (the default), any device nobody has signed in
-on, for every character whose audience is "Everyone" or "Restricted only" and
-that has no `profiles` list. The Owner and Admins can use every character, so
-they can read every chat, a Restricted profile's included. To keep one person's chats away from
-the others, give them a character limited to their profile (the character's
-`profiles` list); a profile left off that list must not be able to read those
-chats, and if they can, it is a bug and we want the report. DisPatch is built for
-a household or small team, and it is not designed to resist a determined insider
-who also controls the host. The app says this in Settings -> Account ("Stored on
-the host computer": files and pictures, then chats), and once per device in a
-short card on its first normal page load.
+**Multi-user is isolation, not adversarial separation.** Since 4.0 a conversation
+belongs to the *profile* it was had in. Nobody else lists, opens, searches,
+exports or receives live updates of it in the app, **Admins included**, and a
+Basic profile's chats are as private as a User's. A bot a User or Admin made is
+private to that profile too. Two exceptions are on purpose: the shared
+**DisPatch** profile (everyone who uses it shares its bots and chats), and the
+household bots, which an Admin manages but whose chats stay with whoever had
+them. That is a statement about the app, not about the host: an Admin has host
+access and can download backups, and an agent bot can read anything on the
+machine (see below). DisPatch is built for a household or small team, and it
+is not designed to resist a determined insider who also controls the host. The
+app says this in Settings → Account ("Stored on the host computer"), and once
+per sign-in in a short card.
 
 **Agent backends run as your user.** A bot is a local process with your
 permissions. Who you let talk to a bot is a real privilege decision, not a
 cosmetic one.
 
+## What the defaults expose
+
+The honest list of what a default 4.0 install lets through. None of it is a bug; each is a trade for a chat app a
+household can walk up to.
+
+- **The default profile is open to anything that can reach the port.** With `lock_target: default_profile` (the
+  fresh-install default), a device nobody signed in on is the shared DisPatch profile: it can chat with that profile's
+  bots and see that profile's chats, over plain http on a LAN as readily as over a tailnet. It cannot run agents or
+  clone voices. Set `lock_target: profile_list` if that is too open for the network, and keep the app off the
+  internet unless it is behind TLS and your own authentication.
+- **There are no budgets.** Anyone who can use a bot can spend the connection behind it, and the GPU rig behind an
+  image or voice add-on. Point shared bots at flat-rate or capped accounts, and give a profile a metered connection
+  only on purpose.
+- **Chat pictures are protected by an unguessable address, not by a per-owner check.** `/media/<uuid>` names are
+  random, but any profile (or the shared one) that has an address can fetch it, and a deleted picture stays fetchable
+  by anyone who kept the address until the last message that uses it is gone.
+- **An agent bot's own records outlive a Reset.** An agent runtime (OpenClaw, for example) keeps its own session
+  transcripts, which DisPatch does not manage.
+- **Agent bots can read any chat on the machine**, and an Admin has host access and can download backups. A voice
+  recording is protected by the ownership rules but lives in a plain file in `<data>/voices/`.
+- **The shared profile can be reset by anyone who reaches it**, by design.
+
 ## People, roles and permissions
 
-Since 3.0 DisPatch has real accounts. Everything below is enforced on the server,
-on every HTTP route and every WebSocket action; the browser never decides
-what it may do.
+Everything below is enforced on the server, on every HTTP route and every
+WebSocket action; the browser never decides what it may do. PINs and passwords
+are optional on every profile except that an Admin signs in with a password.
 
-| Role | Who it is for | What it can do |
+| Role | Who it is for | What it is |
 |---|---|---|
-| **Owner** | You. Exactly one. | Everything, including host control (the coding harness, wiping files, full export, logs, Health, backups) and the machine API key. |
-| **Admin** | A trusted adult. | Everything the Owner can do: host control, the machine API key, every setting, characters, connections, plugins, agents (shell approvals included), backups, Health, and every profile, other Admins included. The one exception is THE Owner profile: an Admin cannot delete, disable, demote, sign out or change the credentials of it (nor change the install PIN, which is the Owner's), so nobody can lock the owner out. Needs a password. |
-| **Member** | An adult or teen household member. | Chat, voice (the call screen, Settings → Voice, the voice list and samples; not voice administration such as cloning, the GPU rig or the server switch), images, the tools you enabled, notifications, rename/delete their conversations. **Not** agents (see below) and not configuration. Needs a PIN. |
-| **Restricted** | A child or a guest. | Chat and voice with the characters whose *audience* is "Restricted only" or "Everyone". No tools (unless you flag one `safe`), no agents, no settings, no file access, no history management. Daily budgets and time limits apply. |
+| **Admin** | Whoever runs the install. | Every permission, including host control (the coding harness, wiping files, full export, logs, Health, backups) and the machine API key. Its own chats and bots are private to it. |
+| **User** | A person. The default **DisPatch** profile is a User. | Its own bots (create, edit, delete, AI build), copies of household bots, and the household bots an Admin enables (default: all). Bots and chats are private: Admins cannot see them. |
+| **Basic** | A simple managed profile. | Only the household bots an Admin adds. Chats are private: Admins cannot read them. No bots of its own. |
+
+The **first Admin is protected**: it cannot be demoted, disabled or deleted (and
+no other Admin can change its credentials, sign it out or reset it), so the
+install can never lock itself out. Every other profile can be removed. A Basic
+profile can be made a User and keeps its chats; a User made Basic keeps its
+name and PIN but **every private bot and every chat is deleted**, and the
+confirmation names the counts first. Removing a profile deletes what it owns
+(chats, its bots, pictures, files, cloned voices) after the same kind of
+confirmation.
+
+### What each role may do
+
+This is the permission table, maximum delegated down. An Admin can switch off
+any item for one profile, and can switch on the ones marked "switchable".
+
+| | Admin | User | Basic |
+|---|---|---|---|
+| Chat, voice chat, built-in voices | yes | yes | yes |
+| Attach files or photos in a chat | yes | yes | yes |
+| Live lookups (web, news, fetch, weather, Wikipedia, rates, time, calculator) | yes | yes | yes |
+| Quick actions, reactions, personalities | yes | yes | yes |
+| Rename, pin, delete or export own chats; Reset to default | yes | yes | yes |
+| Own appearance, theme, language, PIN | yes | yes | yes |
+| File Server | yes | upload, plus list and download own files | upload only |
+| Image generation (Image Studio, pictures in chat) | yes | yes | off (switchable) |
+| Voice cloning / Voice Lab | yes | yes | off (switchable) |
+| Own bots, AI build, copy household bots | yes | yes | no |
+| Choose a bot's backend | yes | from household connections the Admin allows | no |
+| OpenClaw agent bots / Tasks | yes | off, switchable (see warning) | off, switchable (see warning) |
+| Benchmark Board, StudioForge panel | yes | no | no |
+| Mail, Clients, Job Board (personal data) | yes | never | never |
+| Coding terminal, Local Viewer (host) | yes | never | never |
+| Profiles and permissions, household bots, connections and keys, plugins, voice setup, backups, security, audit log | yes | never | never |
+
+**Agent bots can run commands on this machine, including reading anyone's
+chats.** When an Admin switches them on for a profile, the screen says so
+plainly. A gateway (agent) bot runs with its own OpenClaw configuration, tools
+included, whoever talks to it; give it only to people you would hand a shell
+to. An advisor's research and hand-off markers need the same permission;
+without it the advisor answers with them switched off.
 
 A **permission** is a named capability (`use_chat`, `use_voice`, `use_images`,
-`use_tools`, `dispatch_agents`, `approve_agent_actions`, `manage_agents`,
-`manage_connections`, `manage_characters`, `manage_plugins`, `manage_users`,
-`manage_settings`, `view_activity`, `admin_system`, and a few more). The
-role-to-permission matrix is in [contracts/permissions.json](contracts/permissions.json); the
-permission each route and WebSocket action requires is in
+`attach_files`, `use_lookups`, `files_upload`, `files_read`, `voice_lab`,
+`create_characters`, `choose_backend`, `dispatch_agents`,
+`approve_agent_actions`, `use_tools`, `manage_*`, `view_activity`,
+`admin_system`, and a few more). The role-to-permission matrix, with its three
+columns (on, switchable, never), is in
+[contracts/permissions.json](contracts/permissions.json); the permission each
+route and WebSocket action requires is in
 [contracts/routes.json](contracts/routes.json). Both are generated from the code.
+A grant outside a role's "switchable" column is refused with 422.
 
-- **Per-profile grants and denies.** The Owner can give one Member
-  `dispatch_agents`, or take `use_voice` away from one profile. A Restricted
-  profile can never be granted a management permission, and `admin_system`
-  (host control) belongs to the Owner and Admins: it cannot be granted to a Member,
-  whatever anyone types.
-- **Dispatching an agent is its own permission.** A character backed by an agent
-  on the host (OpenClaw) runs with your user's rights. A Member cannot talk to
-  one until you grant `dispatch_agents`. A Restricted profile is not refused, but
-  "locked" does **not** tame an agent: a gateway character runs with its own
-  OpenClaw configuration, tools included, whoever talks to it. The only protection
-  is which characters you give a Restricted audience: mark an agent character
-  `restricted`/`all` (or `safe`) only if its agent is one you would hand to a child.
-  An advisor's research and hand-off markers need `dispatch_agents` too; without
-  it the advisor answers with them switched off.
-- **Shared devices.** In **Settings → People & Access → This device** you can
-  bind a browser to a Member or Restricted profile: the kitchen tablet then opens
-  as "Mia" with nobody signing in. Admins and the Owner cannot be a device
-  default — stepping up always needs their credential.
-- **Quick switch.** The lock screen lists the profiles; tap yours and enter your
-  PIN (Member), your password (Admin) or your password/PIN (Owner). A Restricted
-  profile without a PIN is just a tap.
-- **Session timeouts** are per role (`session_timeout_member`,
-  `session_timeout_restricted` in `security.yaml`; Owner and Admin follow
+- **API keys are household connections.** A provider key lives in the secret
+  store behind a [connection](connections.md) that every profile's bots may
+  use (one account serves everyone); nobody but an Admin sees a key, and no
+  route returns one. A User picks a backend only among the connections an
+  Admin allows for that profile.
+- **No daily limits.** There are no per-profile budgets, quiet hours or minute
+  caps. The one limit left is plumbing: a machine caller (an agent handing a
+  document back with `POST /api/upload`) shares a 200 MB-a-day byte guard
+  (`DISPATCH_MACHINE_UPLOAD_QUOTA`), so a looping agent cannot fill the disk.
+- **Reset to default** (Settings → You → Account) deletes every custom bot and
+  every chat in the profile, then gives an Admin or User a fresh Atlas and a
+  Basic profile its assigned household bots again. The confirmation names the
+  counts. Cloned voices are kept. By default any profile can reset itself,
+  **including anyone using the shared DisPatch profile**; an Admin can also
+  reset a profile from People without seeing what is in it.
+- **Copying a bot** copies its setup only (name, picture, personality, voice,
+  backend), never its chats. A User copies a household bot into their own
+  profile; an Admin can copy one into a profile. Agent bots cannot be copied.
+- **Every profile gets its own Atlas.** An Admin or User created later gets a
+  personal copy of the shipped direct-API bot. The first Admin of a fresh
+  install uses the household Atlas, and a Basic profile uses the household
+  bots it was given.
+- **Per-profile voice clones.** With a voice add-on that declares it, cloned
+  voices belong to the profile that made them (gated by `voice_lab`, not by
+  plugin administration); see [voice.md](voice.md). Voice cloning is never on
+  for the shared default profile.
+- **Session timeouts** are per role (`session_timeout_user`,
+  `session_timeout_basic` in `security.yaml`; Admin sessions follow
   `lock_timeout_seconds`) and can be overridden per profile.
-- **Every admin action is audited** (who, what, to whom) in
-  **People & Profiles → Activity → Audit**.
+- **Every admin action is audited** (who, what, to whom; rows carry ids and
+  counts, never names or content) in **People & Profiles → Activity → Audit**.
+
+### Sign-in, lock and the DisPatch profile
+
+**DisPatch** is the default profile: a User with no PIN and its own Atlas, a
+playground for new people, **shared on purpose**. Everyone who taps into it
+shares its bots and chats, and the app says so in its sign-in popup. An Admin
+can downgrade it to Basic or point the lock somewhere else.
+
+- **Lock and unsigned devices** land on the profile named by `lock_target` in
+  `security.yaml`: `default_profile` (the DisPatch profile, the fresh-install
+  default) or `profile_list` (the sign-in screen with the profile tiles). An
+  Admin picks it in People ("When locked, show"). An Admin profile cannot be
+  the default profile. If the default profile is deleted, the lock falls back
+  to the profile list.
+- **The fence.** On whichever profile is the lock target, `dispatch_agents`,
+  `approve_agent_actions` and `voice_lab` are never effective and cannot be
+  granted (422), whatever its role says. A device that can reach the port
+  without signing in is using that profile, so it can never reach an agent.
+- **A profile button** switches to your own profile, or anyone else's, with
+  their PIN if they have one.
+- **The sign-in popup** (privacy card) shows once per sign-in and closes with a
+  click anywhere, the close button or Esc. It says where chats are stored,
+  that they are private to the profile, that the DisPatch profile is the
+  exception, and, when an Admin reset the profile's PIN, who did it and when.
+- **Device binding is gone.** There is no "this device opens as that profile"
+  setting: a lock always goes to the lock target.
 
 ### Old names, new names
 
-| Before 3.0 (code / docs / API) | Now |
+| Before 4.0 (code / docs / API) | Now |
 |---|---|
-| decoy, Safe Mode, locked device, "limited tier", `request.state.decoy` | **Restricted** (role); `"decoy": true` stays in 403 bodies for old clients |
-| Unlocked, operator, full session | **Owner** (or **Admin**) |
-| the one PIN | the **Owner's PIN**; Members have their own, Admins a password |
-| `safe` / `hide_unlocked` on a character | **`audience`**: `all`, `members`, `restricted` (the old flags are still read and written for one release) |
-| `DISPATCH_DECOY_*_QUOTA` | still honoured; budgets are now per profile (below) |
-| per-IP counters in memory | per-profile daily budgets in `chats.db` |
+| Owner | the **protected Admin** (the first Admin; stored internally as the word `owner`) |
+| Member | **User** |
+| Restricted, decoy, Safe Mode, locked device, "limited tier" | there is no such tier. A Basic profile is an ordinary managed profile, and a locked or unsigned device is the lock-target profile |
+| `audience`, `safe`, `hide_unlocked` on a character | inert legacy data. Who may use a bot is its scope (household or personal), each profile's `household_bots` list and the permission table; `hidden` keeps a bot off the rail |
+| per-profile daily budgets, minutes per day, quiet hours, `DISPATCH_DECOY_*` | removed. No limits (the 200 MB machine upload guard stays) |
+| `anonymous_access` in `security.yaml` | replaced by `lock_target`; read once by the 4.0 migration |
+| supervision, Restricted guardrails and output filter | removed |
+
+The role words `owner`, `member` and `restricted` are still accepted wherever
+a role is typed (the command line, old API callers) and mean Admin, User and
+Basic.
 
 ### First run, and the setup token
 
-A fresh install has no owner. The first account is created in the browser **on
+A fresh install has no Admin yet. The first account (the protected Admin) is created in the browser **on
 the machine DisPatch runs on**, or from any other device with the one-time
 **setup token** the server prints in its log at startup:
 
@@ -113,10 +212,10 @@ DisPatch has no owner account yet.
        SETUP TOKEN: ...
 ```
 
-Until the owner exists, the network sees only the app shell and the sign-in
+Until that first Admin exists, the network sees only the app shell and the sign-in
 state — never data. (Docker: `docker compose logs app | grep "SETUP TOKEN"`.)
 Wrong-token guesses are throttled. The token lives in memory, changes every
-start and is spent when the owner is created (after `owner reset` it is also kept in
+start and is spent when the first Admin is created (after `owner reset` it is also kept in
 `SETUP-TOKEN.txt`, owner-only, and deleted with it). This replaces 2.x, where the first
 network client to set a PIN became the owner.
 
@@ -127,56 +226,17 @@ the log says so loudly.
 ### Lost your sign-in
 
 Anyone with the machine can get back in; nobody without it can. `python -m app users passwd <name>` sets a new password or
-PIN, `users add` / `users delete` manage profiles, `owner reset` clears the owner's password and PIN and opens setup again
+PIN, `users add` / `users delete` manage profiles, `owner reset` clears the first Admin's password and PIN and opens setup again
 with a new setup token, and a `RESET_LOGIN` file in the data directory (or `DISPATCH_RESET_OWNER` in the environment) does
 the same at the next start, deleting itself first. None of it is reachable over the network, and none of it touches chats
 or other profiles. A running server follows within a second. Commands for every install, and what is kept:
 [accounts.md](accounts.md).
 
-### Restricted profiles
-
-- **Characters.** A Restricted caller sees and reaches only characters whose
-  audience is `restricted` or `all`; frames, avatars, reactions, threads and voice
-  sockets about any other character are refused or never sent.
-- **Budgets per profile** (People & Profiles → edit): messages, new
-  conversations, ratings and upload megabytes per day, **minutes per day** of
-  active time and **quiet hours** (for example 20:30–07:00). They are stored in
-  `chats.db`, survive a restart, and follow the *person*, not the network
-  address — two children behind one router each get their own.
-- **Locking is not a way out.** Nobody signed in is the same as a locked
-  session: a guest is a Restricted caller (Restricted characters only, no
-  mutations) and there is no state less restricted than a Restricted profile.
-  The first time a Restricted profile signs in on a device nobody bound, the
-  device is bound to it (People & Profiles → This device shows it; an Owner or
-  Admin can unbind or re-bind it), so when the child locks the screen, the
-  session times out or the session cookie is dropped, the device opens as that
-  profile again — under its quiet hours, minutes per day and daily budgets, over
-  HTTP, the chat socket and the voice socket alike, counted across lock and
-  unlock. A device already bound to someone else is left alone. Only a device
-  nobody bound (or one whose site data was wiped) is an anonymous guest, on the
-  default Restricted budgets (`DISPATCH_DECOY_*`) charged per address; set
-  `anonymous_access: none` to show such a device nothing but the sign-in page.
-- **Guardrails.** Restricted turns run locked: on a direct or advisor character
-  that means no tools, no lookups beyond the character's allow-list, no agent
-  hand-offs, and the guardrail system prompt and the output filter hook stay in
-  place. A gateway (agent) character ignores the lock and runs its agent as
-  configured, so keep agent characters out of the Restricted audience unless the
-  agent itself is safe for a child.
-- **Activity summary.** The Owner (and Admins with `view_activity`) can see counts
-  per day — logins, messages, new conversations, uploads, limits hit — never the
-  content. The summary is not the only view, though: the chats themselves belong
-  to the characters, so anyone who can use the same character can open them: the
-  Owner, Admins, Members, other Restricted profiles and, with `anonymous_access:
-  restricted`, a device nobody signed in on. Limit a character to one profile
-  (its `profiles` list) to keep a child's chats with it to that child (and the
-  Owner and Admins). The Restricted UI shows a banner saying both, and a
-  "my activity" panel with the same numbers.
-
 ### Sign-in protection
 
-- Passwords and PINs for Members/Admins are **argon2id** (19 MiB, 2 passes — the
-  OWASP minimum). The Owner's PIN stays in `security.yaml` as PBKDF2-HMAC-SHA256
-  so the file-edit recovery and `RECOVERY-CODE.txt` keep working; the Owner's
+- Passwords and PINs are **argon2id** (19 MiB, 2 passes — the
+  OWASP minimum). The protected Admin's PIN stays in `security.yaml` as PBKDF2-HMAC-SHA256
+  so the file-edit recovery and `RECOVERY-CODE.txt` keep working; that Admin's
   *password* (recommended) is argon2id.
 - **Throttle.** Five failures lock that *device and profile* for 5 s, doubling to
   about five minutes; fifteen from one address lock the address; a global ceiling
@@ -199,17 +259,17 @@ or other profiles. A running server follows within a second. Commands for every 
 ### What the sign-in page reveals
 
 `GET /api/auth/status` is public (the lock screen needs it). On a claimed install it lists
-each profile's **display name, role, avatar and which credential it takes** so a household
-member can pick their tile - never a hash, a PIN length or a session. If you do not want
-names visible to your network, set `anonymous_access: none` and put the app behind your
-reverse proxy's own authentication, or keep it off the network.
+each profile's **display name, role, avatar and which credential it takes** so a person
+can pick their tile - never a hash, a PIN length or a session. With `lock_target: default_profile`
+it also names the default profile. If you do not want names visible to your network, put
+the app behind your reverse proxy's own authentication, or keep it off the network.
 
 ### Machine access (agents, crons, the image server)
 
 A machine is not a person and holds no role. It is a **principal with named
 scopes** (`machine:inject`, `machine:threads`, `machine:image_jobs`, …; the list
 is in `contracts/permissions.json`). It proves who it is with the install's API
-key (`X-API-Key` or `Authorization: Bearer`), which the Owner generates in
+key (`X-API-Key` or `Authorization: Bearer`), which an Admin generates in
 **People & Profiles → Machine access** (shown once) and can narrow to a subset of
 scopes (`machine_scopes` in `security.yaml`).
 
@@ -223,9 +283,9 @@ else from an owner-only file, `~/.config/local-chat/machine.env` (one line,
 `DISPATCH_API_KEY=<key>`; `$DISPATCH_KEY_FILE` moves it), and pass it to `curl`
 as a config file on a pipe so it never appears in a process list. Give your own
 crons the same file. An agent hands a document back with `POST /api/upload`,
-which needs `machine:upload` and shares the daily byte budget of a signed-out
-device (`DECOY_UPLOAD_QUOTA`, 200 MB a day), so a looping agent cannot fill the disk.
-A keyless upload is never a machine's: it is judged as a signed-out device's. The API key itself is stored in `security.yaml` (mode 0600, written atomically) in
+which needs `machine:upload` and shares one daily byte guard (`DISPATCH_MACHINE_UPLOAD_QUOTA`,
+200 MB a day), so a looping agent cannot fill the disk. A keyless upload is never a
+machine's: it is judged as the unsigned device it is (the lock-target profile, or refused). The API key itself is stored in `security.yaml` (mode 0600, written atomically) in
 plain text, as before; it is shown once when generated and never returned by the API again. Anything that passed through a reverse proxy (`X-Forwarded-*`,
 `Tailscale-*` headers) is never treated as on-box. The image server's completion
 callback is the one other machine route; it carries its own per-job token.
@@ -246,7 +306,7 @@ lines stays unrestricted.
 
 ## Connections, keys and backups (3.0)
 
-- **Provider keys** live in the secret store (the OS keyring, else a `0600` file) behind a [connection](connections.md);
+- **Provider keys** (household connections, shared by every profile's bots; only an Admin sees or changes one) live in the secret store (the OS keyring, else a `0600` file) behind a [connection](connections.md);
   no route returns one and `config.yaml` no longer holds them after the upgrade migrates them.
 - **Connection addresses** are validated and re-checked on every use: link-local and cloud-metadata addresses are refused
   (`connections.allow_private_targets` is the admin's explicit opt-out), so a model-server address cannot be used to
@@ -254,16 +314,16 @@ lines stays unrestricted.
 - **Backups** are encrypted (AES-256-GCM, scrypt) and restore refuses anything outside DisPatch's own files; the
   **support bundle** removes keys, tokens, PINs and passwords and leaves out character prompts unless asked
   ([backups.md](backups.md)). These, and per-profile export / erase, are host control (`admin_system`): the
-  Owner's and the Admins'. Nobody but the Owner may export or erase the Owner's own profile.
+  Admins'. Nobody but the protected Admin may export or erase that profile.
 - **Plugins** declare what they ask for and a new one must be approved before the Plugins switch turns it on
   ([extensions.md](extensions.md#manifests-permissions-and-approval-30)).
 
 ## Checklist
 
-**Create the owner account immediately.** With no owner, the app answers only
+**Create the first Admin account immediately.** With no Admin, the app answers only
 the machine it runs on. The first-run page asks for a name, a password and,
 optionally, a PIN for quick unlock. The log says so loudly if you bind to
-anything other than `127.0.0.1` with no owner.
+anything other than `127.0.0.1` with no Admin.
 
 **Do not expose port 8765 to the internet directly.** Port-forward 443 to a
 reverse proxy that terminates TLS, never 8765 to the app. On a LAN it is
@@ -272,28 +332,30 @@ set up — but the moment it is reachable from outside your network it belongs
 behind TLS. See [remote-access.md](remote-access.md).
 
 **Keep the recovery code.** It is written to `RECOVERY-CODE.txt` in the data
-directory when the Owner's PIN is set. Losing both it and the PIN means editing
+directory when the protected Admin's PIN is set. Losing both it and the PIN means editing
 `security.yaml` on the host to clear the PIN — which is the right proof of
-ownership for self-hosted software, but it means you need shell access. An owner
+ownership for self-hosted software, but it means you need shell access. An Admin
 with a password can always sign in with it.
 
 Using the code on the lock screen removes the PIN on a one-person install. Once
 other people have profiles it **replaces** the PIN instead: type the code and a
 new PIN together (`POST /api/auth/recover` with `new_pin`). Removing the only
-Owner credential there would leave the household with no owner, so a request
+protected-Admin credential there would leave the install with no way in, so a request
 without a new PIN is refused with `recovery_needs_new_pin` and nothing changes.
 
-**Decide who is Restricted.** Anyone who reaches the port without signing in is
-Restricted — useful for a tablet on the kitchen counter, and the reason the
-audience of each character is a decision, not a default. Give children their own
-profiles (budgets follow the profile), bind their tablets to them, and turn the
-anonymous Restricted view off entirely if the app is reachable from the internet
-by putting it behind your reverse proxy's own authentication.
+**Decide who can reach the port.** Anyone who reaches the port without signing
+in lands on the lock-target profile (the shared DisPatch profile by default),
+so treat its bots and chats as public to your network and keep it a plain
+User: it can never run agents or clone voices. If the app is reachable from
+the internet, set `lock_target: profile_list` (the sign-in screen only) or put
+it behind your reverse proxy's own authentication. Give each person their own
+profile; their chats are private to it.
 
-**Watch the budgets.** The message budget matters most: every message to a bot
-spawns an agent turn, which may cost real money. Defaults are in
-[configuration.md](configuration.md) (`DISPATCH_DECOY_*`); per-profile values
-override them.
+**Watch what a connection can spend.** There are no per-profile budgets, so
+anyone who can use a bot can spend the connection behind it. Put a metered
+provider key only behind a connection an Admin allows for the profiles that
+should use it, and prefer a flat-rate account for the shared one. A looping
+agent cannot fill the disk: machine uploads share one 200 MB-a-day guard.
 
 **Run one process.** Sessions, connections and rate limits are in-process state.
 The app takes an exclusive lock on its data directory and refuses to start
@@ -312,7 +374,7 @@ file blobs — copy the whole data directory.
 The local viewer hands a browser bytes from the host's filesystem, which makes
 it the widest read surface in the app. Its threat model, in full:
 
-- **Owner and Admins only (`admin_system`).** A Restricted profile never sees the affordance, *and* the
+- **Admins only (`admin_system`).** A User or Basic profile never sees the affordance, *and* the
   server refuses every viewer route for any role below Admin. Both halves are
   required; neither is sufficient. It is also deliberately absent from the
   machine-inbound surface, so the inbound API token — which belongs to on-box
@@ -385,15 +447,15 @@ probe. Contract: [design/2026-09-25-tools-plugins.md](design/2026-09-25-tools-pl
   surfaces cannot drift apart.
 - **The app's own data directory is never a root.** A `root` that is, or is
   under, the data directory is refused when the manifest is saved *and* when a
-  hand-edited `tools.yaml` is read — otherwise a `safe: true` tool rooted there
-  would hand `files/`, `media/` and `tools.yaml` itself to a Restricted device.
+  hand-edited `tools.yaml` is read — otherwise a tool rooted there
+  would hand `files/`, `media/` and `tools.yaml` itself to whoever may open it.
   The resolver refuses it again at serve time.
-- **Uniform refusals.** For an Admin or the Owner, anything not served — unknown tool,
+- **Uniform refusals.** For an Admin, anything not served — unknown tool,
   disabled tool, traversal, symlink escape, denied name, missing file —
-  answers the same `404 Not found`. A Restricted caller sees only tools marked
-  `safe: true` (a Member sees every enabled page, without host paths); every other
-  tool id, existing or not, answers the same `403`, so a Restricted device cannot
-  enumerate the manifest.
+  answers the same `404 Not found`. Tool panels are Admin-only (`use_tools` is
+  never in a User's or Basic profile's column); for any other caller every tool
+  id, existing or not, answers the same `403`, so a profile cannot enumerate the
+  manifest. A tool's old `safe` flag is legacy data and is never read.
 - **Framing is sandboxed with an opaque origin.** HTML is served with
   `Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups;
   frame-ancestors 'self'` — never `allow-same-origin` — and the client frames it
@@ -415,8 +477,8 @@ probe. Contract: [design/2026-09-25-tools-plugins.md](design/2026-09-25-tools-pl
 - **Refresh runs a fixed argv, operator-only.** A `refresh` block is a list of
   arguments, never a shell string, and can only come from editing
   `tools.yaml` by hand — the Settings API refuses to introduce or change one.
-  Only an Admin or the Owner (`manage_plugins`) can trigger it, or anyone on an
-  install with no owner yet (set one). Never a Restricted profile, never
+  Only an Admin (`manage_plugins`) can trigger it, or anyone on an
+  install with no Admin yet (set one). Never a User or Basic profile, never
   the machine-inbound API token. It runs as the service
   user with `shell=False`, stdin closed, its own process group (killed whole on
   timeout), and an environment scrubbed of credential-shaped names
@@ -461,18 +523,28 @@ review.
 
 Run it for your household. Don't run it for a newsroom's source communications.
 
-## Upgrading to 3.0
+## Upgrading to 4.0
 
-The exact steps, the backup location and the rollback are in the
-[3.0.0 changelog entry](../CHANGELOG.md#300--2026-10-18). In short:
+The server runs the migrations itself when it starts, after taking a backup
+(`<data>/backups/<version>-<stamp>/`). To see first, with the server stopped:
 
 ```
 uv run python -m app.migrate --dry-run --data-dir <your data dir>   # what would change; writes nothing
 uv run python -m app.migrate --data-dir <your data dir>             # or just start the server
-uv run python -m app.migrate --restore <data dir>/backups/3.0.0-<stamp>   # undo (server stopped)
+uv run python -m app.migrate --restore <data dir>/backups/<version>-<stamp>   # put the backup back (server stopped)
 ```
 
-An existing PIN becomes the Owner's PIN and keeps working; set the Owner's password the
-first time the app asks. Characters gain an `audience` computed from their old flags.
-An install that never had a PIN stays unclaimed until you create the owner account, and
-until then only the machine it runs on can use it.
+Roles map as Owner → the protected Admin, Admin → Admin, Member → User, Restricted
+→ Basic. Everyone keeps their PIN and password. Every conversation keeps the owner
+migration 009 gave it. If exactly one Restricted profile had no PIN and
+`anonymous_access` was `restricted`, it becomes the shared **DisPatch** default
+profile (as a User) and the lock lands on it; otherwise `lock_target` is
+`profile_list`. `--default-profile <id|name>` picks it explicitly. Characters
+become household bots, and a 3.x `hide_unlocked` bot becomes `hidden`. A Restricted
+profile's character list becomes its `household_bots`. Existing bots are not
+copied for anyone; a profile gets its own Atlas when it is created or on its first
+Reset. The changelog entry has the full list:
+[4.0.0](../CHANGELOG.md#400--2026-10-23).
+
+Earlier upgrades: the exact steps for 3.0 are in the
+[3.0.0 changelog entry](../CHANGELOG.md#300--2026-10-18).

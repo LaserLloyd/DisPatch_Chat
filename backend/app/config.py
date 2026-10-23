@@ -42,7 +42,7 @@ FRONTEND_DIR = PROJECT_ROOT / "frontend" / "static"
 #
 # The URL does not change: /static/avatars/<file> is mounted from here
 # explicitly, ahead of the general /static mount. Nothing in the frontend, the
-# config schema or the Safe-Mode path checks had to move.
+# config schema or the path checks had to move.
 #
 # LEGACY: an install whose avatars are still in the old location keeps working.
 # Preferring the old path when it exists and the new one does not means an
@@ -535,26 +535,13 @@ class Bot:
     emoji: str = ""             # Fallback glyph if avatar missing
     model_hint: str = ""        # Human label for the model badge (runtime wins)
     order: int = 0
-    # Visibility is TWO independent flags (2.4.2), the Bots tab's "Show
-    # locked" and "Show unlocked" switches. Neither on = the bot shows nowhere
-    # but still exists (Bots tab, dimmed "Hidden"; its threads open by URL on
-    # an unlocked device). The old `visible` master switch is folded in: a
-    # config.yaml or client `visible: false` reads as "neither" (see
-    # fold_visible), and `visible` survives only as the derived property below.
-    #
-    # Show locked. Shown in Safe Mode (the no-PIN, image-free view).
-    # Server-enforced: bots without this flag are invisible AND unreachable to
-    # Safe-Mode sessions.
+    # LEGACY (3.x visibility flags `safe` and `hide_unlocked`, plus the derived
+    # `audience` and `visible` below). There is no Safe Mode or Restricted tier in 4.0, so
+    # nothing reads them to decide who may see or reach a bot: that is `scope`, the profile's
+    # `household_bots` and the permission table (characters.may_use). They stay on the record
+    # so an older config.yaml, an older client and the voice add-on round-trip unchanged.
+    # Migration 010 turns each `hide_unlocked` bot into `hidden`.
     safe: bool = False
-    # NOT Show unlocked (2.4.0): left OFF the rail on unlocked devices —
-    # the sidebar, the new-chat picker, Ctrl-K — while locked (Safe-Mode)
-    # devices still list it when it is `safe`. For bots that belong on the
-    # family tablet but not on the owner's own screen (the kids' science
-    # animals). A display preference, not a gate: the Bot Manager still lists
-    # it, its threads stay reachable by URL, the API still serves it, and a
-    # device may opt back in ("Show hidden bots on this device", Settings ->
-    # Device, localStorage). Security is untouched — who can reach what is
-    # still decided by `safe` and the session tier.
     hide_unlocked: bool = False
     # 4.0: the Admin's "keep it off the rail" switch (migration 010 writes it for every bot whose
     # hide_unlocked was on and keeps hide_unlocked beside it as an inert key). Display only: a
@@ -562,8 +549,8 @@ class Bot:
     # household list names it (characters.visible_to). Written to config.yaml only when true.
     hidden: bool = False
     # Quick actions ("Proof this", "Fact-check", ...): False takes the chips, the
-    # composer pill and the action itself away from this bot (the kids' science
-    # animals). The server also ignores an `action` sent to it.
+    # composer pill and the action itself away from this bot. The server also
+    # ignores an `action` sent to it.
     quick_actions: bool = True
     # Optional explicit avatar colour (any CSS colour, e.g. "#a01818"). Drives the
     # letter-block avatar gradient instead of the id-derived hue, so a character
@@ -572,7 +559,7 @@ class Bot:
     # May this bot fire reaction images? OFF for every shipped bot by design —
     # a reaction interrupts every screen in the house, so it is an opt-in
     # per-character trait, not an ambient capability. Toggled in the Bot
-    # Manager (unlocked) and in the Companions panel for safe bots. Each bot
+    # Manager (Settings -> Characters). Each bot
     # switched on here gets its OWN image pool (see reactions.py).
     reactions: bool = False
     # Server-side reaction AUTOPILOT: when this bot's reply carries no
@@ -658,16 +645,15 @@ class Bot:
     # not. Empty = the add-on's default.
     voice: str = ""
     voice_rp: str = ""
-    # 3.0 (characters): profile ids allowed to see this character IN ADDITION to
-    # `audience`. Empty (the default) = everyone the audience allows. The Owner and
-    # Admins always see every character. See app/characters.py.
+    # LEGACY 3.0 per-character profile list: inert in 4.0 (migration 010 folds it into each
+    # profile's `household_bots`). Still round-tripped through config.yaml. See app/characters.py.
     profiles: list = field(default_factory=list)
     # The starter pack this character was installed from ("" = made by hand).
     pack: str = ""
     # One line for the character picker.
     description: str = ""
-    # 4.0 ownership (data model only - nothing reads these yet): ``household`` (the
-    # default: managed by the Owner/Admins, everyone has their own chats with it) or
+    # 4.0 ownership: ``household`` (the
+    # default: managed by the Admins, everyone has their own chats with it) or
     # ``personal`` (belongs to the one profile ``owner_profile``); ``cloned_from`` is the
     # character id a copy was made from. Written to config.yaml only when not default,
     # so an existing roster keeps the file it has always had.
@@ -677,13 +663,10 @@ class Bot:
 
     @property
     def audience(self) -> str:
-        """Who this character is FOR (3.0): ``all`` (everyone), ``members``
-        (signed-in Members, Admins, Owner; never a Restricted profile) or
-        ``restricted`` (made for Restricted profiles; hidden from the Owner's own
-        rail by default). Derived from the two legacy flags - ``safe`` = reachable by
-        Restricted, ``hide_unlocked`` = kept off the signed-in rail - which stay
-        readable and writable for one release. The server gate is
-        ``audience in (all, restricted)`` for a Restricted caller, i.e. ``safe``."""
+        """LEGACY (3.x): ``all`` / ``members`` / ``restricted``, derived from the two legacy
+        flags ``safe`` and ``hide_unlocked``. 4.0 has no Restricted tier, so this is kept only
+        as round-trip data on the wire and in config.yaml; no access decision reads it
+        (characters.may_use does that)."""
         if self.safe and self.hide_unlocked:
             return "restricted"
         if self.safe:
@@ -692,9 +675,8 @@ class Bot:
 
     @property
     def visible(self) -> bool:
-        """Listed on SOME device: shown locked, or shown unlocked. Derived and
-        read-only (2.4.2) -- kept on the wire for older clients and the voice
-        add-on. Never a gate: Safe Mode is `safe` alone."""
+        """Derived and read-only (2.4.2) from the legacy flags -- kept on the wire for older
+        clients and the voice add-on. Never a gate."""
         return bool(self.safe or not self.hide_unlocked)
 
     # Whether an advisor turn may start agent work is decided per TURN, not per
@@ -735,7 +717,7 @@ class Bot:
         return f"/static/avatars/{self.avatar}?v={v}"
 
     def to_dict(self) -> dict:
-        """The public bot record. Reachable by a Safe-Mode session, so it
+        """The public bot record. Reachable by every signed-in profile, so it
         carries NO API credentials and no provider base URL — only the fact
         that a direct provider is configured, which is what the UI needs to
         stop offering the first-run "Connect an AI" card."""
@@ -800,7 +782,7 @@ class Bot:
     def to_admin_dict(self) -> dict:
         """to_dict() plus the redacted API block (full-session routes only)."""
         # `voice` (which recorded person a bot speaks as) is admin-only: the
-        # plain dict reaches locked Safe-Mode devices for safe bots.
+        # plain dict reaches every profile.
         return {**self.to_dict(), "api": self.api_public(),
                 "advisor": self.advisor_public(), "voice": self.voice,
                 "voice_rp": self.voice_rp}
@@ -893,8 +875,7 @@ def _bot_entry(b: Bot) -> dict:
         "safe": b.safe,
         "hide_unlocked": b.hide_unlocked,
         # Written beside the legacy flags (3.0). Derived, so it can never disagree
-        # with them when this process writes; on read, `audience` wins over a
-        # hand-edited flag (see audience_flags).
+        # with them when this process writes. Inert in 4.0 (see Bot.audience).
         "audience": b.audience,
         "quick_actions": b.quick_actions,
         "color": b.color,
@@ -933,7 +914,7 @@ def _bot_entry(b: Bot) -> dict:
 
 
 def _write_bots(entries: list[dict]) -> None:
-    """Persist the roster, then lock the file down to owner-only.
+    """Persist the roster, then lock the file down to the file's owner only (0600).
 
     config.yaml can now hold provider API keys, so it is treated as a secret
     even when it does not happen to contain one today — a chmod that only
@@ -993,7 +974,7 @@ def load_bots() -> list[Bot]:
     into every load — any DEFAULT_BOTS id absent from config.yaml was appended
     back — which meant an existing install grew phantom bots on upgrade: entries
     that map to no agent, that the operator never chose, and (if a shipped
-    default is flagged safe) that show up on locked family devices. Removing a
+    default exists) that nobody asked for. Removing a
     bot from config.yaml is a decision; this function must respect it.
     """
     global _bots_cache
@@ -1101,13 +1082,12 @@ def load_bots() -> list[Bot]:
 
 
 def fold_visible(visible, safe: bool, hide_unlocked: bool) -> dict:
-    """Fold the pre-2.4.2 `visible` master switch into the two flags.
+    """Fold the pre-2.4.2 `visible` master switch into the two legacy flags (3.x data;
+    nothing in 4.0 reads the result to gate access).
 
-    `visible: false` meant "shown nowhere", which is now "neither": Show
-    locked off AND Show unlocked off. It wins over a `safe: true` beside it,
-    because such a bot was not on any locked device before and must not start
-    being on one. `visible: true` (or absent) changes nothing -- older clients
-    sent it for every bot they held, and it must never un-hide one.
+    `visible: false` meant "shown nowhere": both flags read as off/hidden. `visible: true`
+    (or absent) changes nothing -- older clients sent it for every bot they held, and it
+    must never un-hide one.
     """
     if visible is not None and not bool(visible):
         return {"safe": False, "hide_unlocked": True}
@@ -1118,8 +1098,8 @@ AUDIENCES = ("all", "members", "restricted")
 
 
 def audience_flags(audience, flags: dict) -> dict:
-    """Resolve an explicit ``audience`` over the legacy ``safe``/``hide_unlocked``
-    pair. ``audience`` wins when it is a known value; anything else (absent, None,
+    """LEGACY (3.x): resolve an explicit ``audience`` over the ``safe``/``hide_unlocked``
+    pair; inert in 4.0 (round-trip data only). ``audience`` wins when it is a known value; anything else (absent, None,
     a typo) leaves the flags exactly as the file said - the migration is a no-op
     for a config.yaml that predates 3.0."""
     a = str(audience or "").strip().lower()
@@ -1128,20 +1108,18 @@ def audience_flags(audience, flags: dict) -> dict:
     if a == "restricted":
         return {"safe": True, "hide_unlocked": True}
     if a == "members":
-        # "Members" is not reachable by Restricted; whether it sits on the rail
-        # (hide_unlocked) is the separate display preference.
+        # "members": whether it sits on the rail (hide_unlocked) is the separate
+        # display preference.
         return {"safe": False, "hide_unlocked": bool(flags.get("hide_unlocked"))}
     return flags
 
 
 def reconcile_flags(audience, flags: dict) -> dict:
-    """Read side: combine the ``audience`` on disk with the two legacy flags.
+    """LEGACY (3.x) read side: combine the ``audience`` on disk with the two legacy flags.
 
-    Both are written together by every code path, so they normally agree. When they do
+    Both were written together by every code path, so they normally agree. When they do
     not - a hand edit, an old tool that only knows ``safe``/``visible`` - the result is
-    the one that grants LESS: a character is reachable by a Restricted profile only if
-    its flag AND its audience allow it. Widening needs an explicit write through the
-    API (``audience_flags``), which sets both."""
+    the narrower one. Inert in 4.0: it only keeps the round-tripped data stable."""
     a = str(audience or "").strip().lower()
     if a not in AUDIENCES:
         return flags

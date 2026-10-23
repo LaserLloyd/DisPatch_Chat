@@ -12,7 +12,7 @@ file is called from one place only (`backend/app/main.py`, `_lifespan_startup`; 
 
 ```text
 python -m app [--data-dir DIR] users list [--json]
-python -m app [--data-dir DIR] users add <name> [--profile restricted|member|admin|owner] [--password-stdin | --password-env VAR]
+python -m app [--data-dir DIR] users add <name> [--profile basic|user|admin|owner] [--password-stdin | --password-env VAR]
 python -m app [--data-dir DIR] users passwd <name> [--kind pin|password] [--password-stdin | --password-env VAR]
 python -m app [--data-dir DIR] users delete <name> [--yes]
 python -m app [--data-dir DIR] owner reset [--yes]
@@ -47,49 +47,50 @@ standard input) or from `--password-env VAR`. `--password foo` is a usage error.
 
 | Role | Signs in with | `users add` needs | `users passwd` sets |
 | --- | --- | --- | --- |
-| Owner | password, and/or the install PIN (`security.yaml`) | a password (only when there is no owner yet) | the password; `--kind pin` the PIN |
-| Admin | password | a password; the owner must have a password first | the password |
-| Member | PIN | a PIN | the PIN |
-| Restricted | PIN, or nothing (pick the tile) | nothing (the default); a PIN if you pass one | the PIN |
+| First Admin (`owner` on the command line; protected) | password, and/or the install PIN (`security.yaml`) | a password (only when there is no Admin yet) | the password; `--kind pin` the PIN |
+| Admin | password | a password; the first Admin must have a password first | the password |
+| User | PIN, or nothing (the shared DisPatch profile has none) | a PIN, or nothing | the PIN |
+| Basic | PIN, or nothing (pick the tile) | nothing (the default); a PIN if you pass one | the PIN |
 
-PINs are at least 4 characters and passwords at least 8 (the same rules as the Settings screens).
+PINs are at least 4 characters and passwords at least 8 (the same rules as the Settings screens). The 3.x role words
+`member` and `restricted` are still accepted and mean `user` and `basic`.
 
 **Who may do this.** Whoever can run the command or write the data folder: it is host access, not a role. An Admin signed in to
-the app holds every permission the Owner has except the structural one, changing the Owner's profile or credentials; this command
-line (or the recovery file) is how the Owner's own sign-in gets reset. `users add --profile` defaults to the lowest role
-(Restricted), so a new sign-in gets nothing it was not asked for.
+the app can do everything the first Admin can except the structural exception, changing that profile's role or credentials; this
+command line (or the recovery file) is how the first Admin's own sign-in gets reset. `users add --profile` defaults to the lowest
+role (Basic), so a new sign-in gets nothing it was not asked for.
 
 ### users
 
 - `users list` prints name, role, what each profile signs in with, and whether it is disabled. `--json` prints the
   profile records the People screen gets. A password or PIN hash never appears.
-- `users add <name>` creates a profile. **Without `--profile` it is Restricted**, the lowest role. `--profile owner` works
-  only on an install with no owner (there is exactly one Owner; the command tells you to use `users passwd` or `owner reset`
-  otherwise). Names are 1 to 40 characters and unique ignoring case.
+- `users add <name>` creates a profile. **Without `--profile` it is Basic**, the lowest role. A new Admin or User gets its own
+  Atlas, like a profile made in the app. `--profile owner` works only on an install with no first Admin (there is exactly one;
+  the command tells you to use `users passwd` or `owner reset` otherwise). Names are 1 to 40 characters and unique ignoring case.
 - `users passwd <name>` sets a new credential and **signs the profile out everywhere** (its sessions and remembered
-  devices). Admins have no PIN and Members/Restricted profiles have no password; asking for the wrong one is refused.
-- `users delete <name>` removes a profile and its sessions; chats are kept. It asks first on a terminal and needs `--yes` in
-  a script. **The owner cannot be deleted**: every install keeps exactly one. To lock an owner out and start the owner's
-  sign-in again use `owner reset`.
+  devices). Admins have no PIN and Users/Basic profiles have no password; asking for the wrong one is refused.
+- `users delete <name>` removes a profile **and everything it owns**: its chats, its own bots, pictures, files and cloned voices.
+  The command names the counts and asks first on a terminal (it needs `--yes` in a script). **The first Admin cannot be
+  deleted**: every install keeps exactly one. To lock that Admin out and start its sign-in again use `owner reset`.
 
 ### owner reset
 
-For when the owner's password **and** PIN are both lost. It:
+For when the first Admin's password **and** PIN are both lost. It:
 
-1. clears the owner's password, the install PIN (`security.yaml`) and the recovery code (`RECOVERY-CODE.txt`);
-2. ends the owner's sessions and remembered devices;
+1. clears that Admin's password, the install PIN (`security.yaml`) and the recovery code (`RECOVERY-CODE.txt`);
+2. ends that Admin's sessions and remembered devices;
 3. makes a new one-time **setup token** and prints it (`SETUP TOKEN: ...`), also keeping it in
    `<data>/SETUP-TOKEN.txt` (owner-only) so the running server accepts it and the next start prints the same one;
 4. writes an `owner_reset` row to the audit log.
 
 The install is then unclaimed again, exactly like a first run: closed to the network, open to the browser on the machine
-itself, and the wizard's **Your account** step gives the *existing* owner row (its id, name, picture and history) a new
+itself, and the wizard's **Your account** step gives the *existing* first-Admin row (its id, name, picture and history) a new
 password. From another device, or from a browser talking to a container's published port, the wizard asks for the token.
-The token file is deleted as soon as the owner exists. Other profiles keep their PINs and passwords, but they cannot sign in
-until the owner is set again (an unclaimed install has no sign-in).
+The token file is deleted as soon as the first Admin exists. Other profiles keep their PINs and passwords, but they cannot sign in
+until it is set again (an unclaimed install has no sign-in).
 
 If you only forgot the password and still know the PIN, or the reverse, you do not need this: `users passwd <owner>` sets a
-new password for the owner without touching anything else.
+new password for that Admin without touching anything else.
 
 ### token
 
@@ -114,8 +115,8 @@ DisPatch. While it starts, the server reads the file, **deletes it first**, and 
 | First line | Effect |
 | --- | --- |
 | *(empty file)* | the same as `owner reset`: owner credentials cleared, new setup token logged and written to `SETUP-TOKEN.txt` |
-| `Olive` | the same, but only if `Olive` is the owner's name (any case); otherwise nothing is reset |
-| `Olive:new-password` | `Olive`'s password is set to everything after the first colon (so it may contain colons and spaces; trailing whitespace from an editor is dropped). Creates the owner when there is none. The owner's sessions end. |
+| `Olive` | the same, but only if `Olive` is the first Admin's name (any case); otherwise nothing is reset |
+| `Olive:new-password` | `Olive`'s password is set to everything after the first colon (so it may contain colons and spaces; trailing whitespace from an editor is dropped). Creates the first Admin when there is none. Its sessions end. |
 
 The server logs exactly one line, `login recovery: RESET_LOGIN consumed; ...`, and never the password.
 
@@ -182,13 +183,13 @@ for the next start. If both `RESET_LOGIN` and `RESET_LOGIN.txt` exist, the first
 
 | | `users passwd` | `users delete` | `owner reset`, empty file, variable | `Olive:pw` file |
 | --- | --- | --- | --- | --- |
-| That profile's credential | replaced | profile removed | owner's password, PIN, recovery code cleared | owner's password replaced |
-| That profile's sessions, remembered devices | ended | ended | the owner's ended | the owner's ended |
-| Other profiles and their PINs | kept | kept | kept (cannot sign in until the owner is back) | kept |
-| Chats, roster, settings, connections, backups | kept | kept | kept | kept |
-| The owner's profile row (id, name, history) | kept | n/a | kept | kept |
+| That profile's credential | replaced | profile removed | first Admin's password, PIN, recovery code cleared | first Admin's password replaced |
+| That profile's sessions, remembered devices | ended | ended | the first Admin's ended | the first Admin's ended |
+| Other profiles and their PINs | kept | kept | kept (cannot sign in until the first Admin is back) | kept |
+| Chats, roster, settings, connections, backups | kept | **the profile's own chats, bots and files go** | kept | kept |
+| The first Admin's profile row (id, name, history) | kept | n/a | kept | kept |
 
-Chats are not tied to a profile, so deleting a profile deletes no conversation.
+Since 4.0 a conversation belongs to one profile, so deleting a profile deletes its conversations. Nobody else's are touched.
 
 ## Troubleshooting
 
@@ -198,7 +199,7 @@ Chats are not tied to a profile, so deleting a profile deletes no conversation.
   (`login recovery: cannot delete RESET_LOGIN ... NOT acting on it`). Check `docker compose logs app`.
 - **`owned by another user; deleted without being used`**: the file was created by a different non-root user. Create it as root or as
   the user DisPatch runs as.
-- **`names 'X' but this install's owner is 'Y'`**: use the owner's name (`users list` shows it).
+- **`names 'X' but this install's owner is 'Y'`**: use the first Admin's name (`users list` shows it).
 - **Everyone is locked out after a reset**: that is the point of an unclaimed install; finish the setup wizard with the token and
   the other profiles can sign in again.
 - **Still have the PIN-only recovery path**: the `pin:` directive and `RECOVERY-CODE.txt` described in

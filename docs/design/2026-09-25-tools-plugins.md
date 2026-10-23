@@ -1,5 +1,9 @@
 # DisPatch Tools — modular, out-of-repo tool panels
 
+> **Historical design note (3.x).** It uses the 3.x access words Safe Mode, locked device, Restricted
+> and Owner. 4.0 replaced them with Admin, User and Basic profiles and private chats; see
+> [../security.md](../security.md) for how access works now. Everything else here is kept as written.
+
 Date: 2026-09-25. Status: contract for implementation (backend + frontend built in
 parallel against this document).
 

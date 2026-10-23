@@ -64,7 +64,7 @@ class ToolPluginManifest(_Manifest):
     description: str = Field(default="", max_length=400)
     entry: str | None = None
     permission: str = "use_tools"
-    restricted_ok: bool = False                  # `safe: true` - Restricted profiles may use it
+    restricted_ok: bool = False                  # LEGACY 3.x `safe: true` flag; inert in 4.0 (no Restricted tier)
     api_version: int = Field(default=1, ge=1)    # DisPatch extension API it targets
     network: list[str] = Field(default_factory=list)   # hosts it may call, declared up front
     license: str = Field(default="MIT", max_length=40)

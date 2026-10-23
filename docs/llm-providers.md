@@ -108,8 +108,6 @@ example below shows a legacy `api` block:
   emoji: 🟢
   model_hint: gpt-4o-mini
   order: 2
-  visible: true
-  safe: false
   api:
     provider: openai
     base_url: https://api.openai.com/v1
@@ -128,7 +126,7 @@ can hold credentials. Be aware of what that does and does not buy you:
   with it.
 
 The key is never returned by any endpoint. The API reports `has_key: true` and
-nothing else, and `/api/bots` — which a Safe-Mode device can read — carries only
+nothing else, and `/api/bots` — which every signed-in profile can read — carries only
 the provider *id*, not the URL and not the credential.
 
 ### Keeping the key out of the file: `api_key_env`
@@ -154,15 +152,16 @@ both has said which one they trust, and it is not the one on disk.
 ## Access control
 
 The setup panel and all three routes behind it (`/api/llm/providers`,
-`/api/llm/test`, `/api/llm/connect`) are **full-session only** — a PIN-locked
-device never sees the 🔌 AI models tab and gets a 403 if it constructs the request by
-hand. Setting up a provider spends money and writes a credential; it belongs on
-the same side of the door as the dashboard and the harness pane.
+`/api/llm/test`, `/api/llm/connect`) are **Admin-only** (`manage_connections`) — another role never sees the
+🔌 AI models tab and gets a 403 if it constructs the request by hand. Setting up a
+provider spends money and writes a credential; it belongs on the same side of the door
+as the dashboard and the harness pane. The key is a household connection: every
+profile's bots may use it (an Admin can narrow which connections a profile's own bots
+may pick), and nobody but an Admin sees it.
 
-A newly connected bot is created with `safe: false`, so it does **not** appear
-on Safe-Mode devices until you flip that yourself in **Settings → Characters**.
-Decide deliberately: a safe bot is reachable by anyone holding a family tablet,
-and every message it sends costs you tokens.
+A newly connected household bot is available to Users by default and to a Basic profile
+only once an Admin adds it to that profile's household list (Settings → People).
+Decide deliberately: anyone who can use the bot spends your tokens.
 
 ## Configuration reference
 
@@ -204,7 +203,7 @@ creating a second one — leaving the key field blank keeps the stored key.
   server, an Anthropic refusal — each produces an error in the thread naming the
   cause. Nothing fails silently, and the thread never stays stuck "thinking".
 - **Cost is yours.** DisPatch does not meter, cap, or display spend. A cloud
-  provider connected to a bot that Safe-Mode devices can reach is a bill with no
+  provider connected to a bot that every profile can reach is a bill with no
   ceiling; the provider's own dashboard is where you set limits.
 
 ## Need streaming, fallbacks or a knowledge base?

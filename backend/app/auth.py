@@ -1,14 +1,14 @@
 """Credentials, sessions and the brute-force throttle.
 
-3.0 replaced the single shared PIN with *profiles* (``app/accounts.py``): an Owner,
-Admins, Members and Restricted profiles, each with its own credential. What used to
-be "Safe Mode" is now the **Restricted** role (nobody signed in on a claimed
-install is Restricted). The install's PIN in ``security.yaml`` is the Owner's PIN:
-entering it (``POST /api/auth/unlock``) signs the Owner in, exactly as before.
+3.0 replaced the single shared PIN with *profiles* (``app/accounts.py``); 4.0 has three
+roles, Admin, User and Basic, each profile with its own optional credential. The install's
+PIN in ``security.yaml`` is the protected first Admin's PIN (stored role word ``owner``):
+entering it (``POST /api/auth/unlock``) signs that Admin in, exactly as before.
 
-A session belongs to a profile. A request that holds a valid session is that
-profile; any other request (no/expired session) is Restricted, unless the device is
-bound to a default profile. Authorisation itself lives in ``app/policy.py``.
+A session belongs to a profile. A request that holds a valid session is that profile; any
+other request (no or expired session) is an unsigned device, which lands on the lock-target
+profile (the shared no-PIN default, "DisPatch") or on the profile list, depending on the
+``lock_target`` setting. Authorisation itself lives in ``app/policy.py``.
 
 Optionally ("remember_device_days" > 0 in security.yaml), the unlock screen
 offers to REMEMBER the device: the session then survives restarts and never
@@ -210,7 +210,7 @@ class SecurityConfig:
     recovery_salt: str | None = None
     remember_days: int = 0
     machine_loopback_trust: bool = True
-    anonymous_access: str = "restricted"          # restricted | none (3.x; read by migration 010 only once WP-CORE lands)
+    anonymous_access: str = "restricted"          # LEGACY 3.x key (restricted | none), kept only so migration 010 can read it
     machine_scopes: list[str] | None = None
     session_timeouts: dict = field(default_factory=lambda: {
         "user": DEFAULT_SESSION_TIMEOUTS["user"],
@@ -229,8 +229,8 @@ class SecurityConfig:
 
 @dataclass
 class _Session:
-    """A full-access session. Its mere existence (and not being expired) is what
-    grants full access; Safe Mode is simply the absence of one.
+    """A signed-in session. Its mere existence (and not being expired) is what makes a
+    request that profile; an unsigned device has none and lands on the lock target.
 
     ``persistent`` sessions belong to a remembered device: they are exempt from
     the idle timeout and are validated against the trusted-device store (which
@@ -408,7 +408,7 @@ def _drop_recovery(cfg: SecurityConfig) -> None:
 
 # Sentinel used when security.yaml EXISTS but cannot be read/parsed. It never
 # equals a hex PBKDF2 digest, so pin_set is True but no PIN (and no recovery
-# code) can ever verify — the app stays in Safe Mode until the file is fixed.
+# code) can ever verify — the app stays locked until the file is fixed.
 _LOCKDOWN_HASH = "!unreadable-security-yaml!"
 
 

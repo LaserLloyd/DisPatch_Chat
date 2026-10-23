@@ -7,6 +7,117 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.0.0] — 2026-10-23
+
+Chat-first profiles. The 3.x ladder (Owner, Admin, Member, Restricted, plus Safe Mode and a decoy view for
+anyone not signed in) is replaced by three roles, private chats and a shared default profile. Read the
+[upgrade notes](#400-upgrade-notes) before you update a live install. The entries under "Earlier work in this
+release" further down are the changes made since 3.1.0; some of them describe the 3.x model that 4.0 then replaced.
+
+### Profiles and privacy
+
+- **Three roles: Admin, User, Basic.** Owner becomes the **protected first Admin** (it cannot be demoted, disabled or
+  deleted, and no other Admin can change its credentials), Admin stays Admin, Member becomes User, Restricted becomes
+  Basic. PINs and passwords are optional on every profile (an Admin signs in with a password). The permission table
+  is one table with three columns per role (on, switchable by an Admin, never): [docs/security.md](docs/security.md#what-each-role-may-do),
+  `docs/contracts/permissions.json`.
+- **Chats are private to the profile they were had in.** Other profiles, Admins included, cannot list, open, search,
+  export or receive live frames of them, and the same goes for a profile's own bots and its File Server files and
+  Image Studio history. A thread or file you may not read answers 404. The sign-in popup says "Admins can't open your
+  chats in the app". Machines (the API key) write into any existing thread and read only the first Admin's.
+- **DisPatch, the shared default profile.** A User with no PIN that locked and unsigned devices land on (the
+  `lock_target: default_profile` setting; or `profile_list` to show the sign-in screen). Everyone who uses it shares its
+  bots and chats, on purpose. Agent bots, approving agent actions and voice cloning are never effective on it and cannot
+  be granted (422). A profile button switches to your own profile.
+- **Sign-in popup.** A short card shown once per sign-in (closes on a click anywhere, the close button or Esc) replaces
+  the permanent Restricted strip. It says where chats are stored, that they are private, that the DisPatch profile is
+  shared, and who reset your PIN, if an Admin did.
+- **Every new Admin or User gets its own Atlas**, and **Reset to default** (Settings → You → Account, or an Admin from
+  People without seeing the contents) deletes a profile's bots and chats and gives it a fresh Atlas (a Basic profile
+  goes back to its assigned household bots). The dialog names the counts. Anyone using the DisPatch profile can reset it.
+- **Own bots.** A User or Admin makes bots of their own (by hand, or by describing one to an AI that drafts it), and
+  copies household bots: setup only (name, picture, personality, voice, backend), never chats; agent bots cannot be
+  copied. An Admin can copy a bot into a profile. A User picks a backend only among the household connections an Admin
+  allows for that profile; **API keys are household connections** that every profile's bots use, and only an Admin sees them.
+- **Role changes and removal name what they delete.** Basic to User keeps everything; User to Basic keeps the name and PIN
+  and deletes every private bot and chat; removing a profile deletes its chats, bots, pictures, files and cloned voices.
+  Each shows the counts first and takes a one-time confirmation token.
+- **Per-profile voice clones** with DisPatch Voice 1.6.0 or later (`ctx.register_voice_access`, `ctx.register_profile_data`;
+  `EXT_API` stays 1): a clone belongs to the profile that made it, gated by the new `voice_lab` permission; Reset keeps
+  clones, deleting a profile or User to Basic removes them. An older add-on keeps every clone route Admin-only. See
+  [docs/voice.md](docs/voice.md).
+- **One Atlas corpus per person.** An advisor's notes, `_profile.md` and home location belong to one profile
+  (`advisor.corpus_profile`, default the first Admin); chats owned by anyone else get no corpus.
+
+### Removed
+
+- **No Restricted tier, no Safe Mode, no decoy view, no supervision.** Gone: the turn-time safety layer and output filter,
+  `tools_locked`, the locked voice socket, quiet hours, minutes per day, and **all per-profile daily budgets and
+  limits** (messages, conversations, ratings, uploads, agent dollars). Bots answer unrestricted for whoever may use them.
+  `DISPATCH_DECOY_*` is ignored. The one byte guard left is plumbing: machine uploads share 200 MB a day
+  (`DISPATCH_MACHINE_UPLOAD_QUOTA`).
+- **Device binding** ("this device opens as that profile") and `PUT /api/people/devices/this`; the `anonymous_access`
+  setting (replaced by `lock_target`); `/api/agents/profile-budgets`; the `budgets` field of a profile (the People API
+  answers 422); `locked_status` for add-ons; the `audience`, `safe`, `hide_unlocked`, `visible` and `profiles` inputs of the
+  bot and character APIs (422; old values in `config.yaml` are inert data).
+- **The kids' starter pack** (Animal Friends) is no longer shipped; the Assistants pack remains.
+
+### Kept on purpose
+
+- **Image generation hard lines**, now enforced on the server for every image prompt (`app/image_guard.py`; `[[pic:]]`
+  markers, image jobs, Image Studio): nothing sexual involving a person under 18 (depictions are adult-only), and no
+  sexual imagery of real, identifiable people. Everything else stays unrestricted.
+- The machine API key and its scopes, the CSRF and Origin checks, the one-way File Server for Basic profiles (upload
+  only), and the Local Viewer, coding terminal and Mail/Clients/Job Board (Admin only).
+
+### Scale and retention
+
+Designed for 20 profiles over three years (about 1-2 million messages) with no slowdown.
+
+- **Indexes for every owner-scoped hot query** (migration 011) with query-plan tests, paginated thread lists and
+  history, and an opt-in synthetic-load benchmark (`pytest -m scale`).
+- **A daily maintenance task** (04:30 local by default, skipped while the maintenance marker exists or a backup runs)
+  prunes old activity, task and job events, sessions and finished image jobs, sweeps orphaned files, optimizes the
+  full-text index and the database and keeps the backup folder small. Nothing in the defaults deletes a chat. A profile
+  can opt in to archiving chats older than N months (reversible; never deletes). An Admin card in Settings → Health shows
+  storage and the last run. See [docs/maintenance.md](docs/maintenance.md).
+- **Generated images: keep forever (the default) or N months**, an Admin setting that covers every generated image
+  (reaction pool, Image Studio, `[[pic:]]` pictures, avatar-pool snapshots). Images still in use are never removed; an
+  aged-out picture shows an "image expired" placeholder; a dry-run count appears before you save.
+
+### Interface
+
+- ThemeForge 2.0.1 is vendored: the app's icons come from its shared icon set (`ui-theme/icons.svg`).
+- Settings is grouped You / Household, and People, Reset to default, My bots, the profile switch and the sign-in popup
+  are new screens.
+
+<a id="400-upgrade-notes"></a>
+### Upgrade notes
+
+- The server migrates on start after taking a backup (`<data>/backups/<version>-<stamp>/`); to look first, run
+  `python -m app.migrate --dry-run` with the server stopped. Migration 010 maps roles (Owner to the protected Admin,
+  Admin to Admin, Member to User, Restricted to Basic) and keeps every chat with the owner migration 009 gave it. If
+  exactly one Restricted profile had no PIN and `anonymous_access` was `restricted`, it becomes the shared default
+  profile (as a User) and the lock lands on it (`--default-profile <id|name>` picks it explicitly); otherwise the lock
+  shows the profile list. `hide_unlocked` becomes `hidden`, and a character's `profiles` list folds into each profile's
+  `household_bots`. Existing bots stay household bots; a profile's own Atlas appears when it is created or on its first Reset.
+- **Rollback is a restore, nothing more:** stop the server, restore the pre-upgrade copy of the data directory (or
+  `python -m app.migrate --restore <backup dir>`), and redeploy the previous release. There is no downgrade of a migrated
+  database in place.
+- Stored role words are still `owner`, `admin`, `member` and `restricted` in `chats.db`; only `app/accounts.py` maps them,
+  and old role words are still accepted wherever a role is typed. A later migration renames them.
+- On-box callers must send the API key if you set `machine_loopback_trust: false`; see the 3.x notes below.
+- An old voice add-on (1.5.x) keeps working; clone routes stay Admin-only until you update it to 1.6.0 or later.
+
+### Later
+
+- **Migration 012:** rename the stored role words (`owner/member/restricted` to `admin/user/basic`) with a 12-step table
+  rebuild on a dedicated connection, once 4.0 has been live a while. Not part of 4.0.
+- Retire the 3.x client keys that are inert data today (`decoy` in `/api/auth/status`, the reaction and pool `safe` flag).
+
+### Earlier work in this release (since 3.1.0)
+
+
 ### Security
 
 - **Machines can upload again, and the host scripts carry the API key.** `POST /api/upload` has a machine

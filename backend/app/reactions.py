@@ -44,7 +44,7 @@ files sit in a mood's folder are that reaction's stock, so there is no manifest
 to drift out of sync with the disk.
 
 Every signed-in profile sees the whole pack (4.0: reactions are for every role). A
-reaction's and a pool's ``safe`` flag are 3.x Safe-Mode inputs: still read and written so
+reaction's and a pool's ``safe`` flag are legacy 3.x data: still read and written so
 an older registry round-trips, never used to decide who sees what.
 """
 
@@ -355,7 +355,7 @@ class Reaction:
     file: str                                    # "<root>/<filename>"
     aliases: list[str] = field(default_factory=list)
     category: str = "general"
-    safe: bool = False                           # 3.x Safe-Mode flag: kept, inert
+    safe: bool = False                           # legacy 3.x flag: kept, inert
     duration_ms: int | None = None               # None = pack default
     source: str = "upload"                       # builtin | upload | generated
     prompt: str = ""                             # set for generated images
@@ -1664,7 +1664,7 @@ class PoolConfig:
     min_per_mood: int = 5            # a mood dipping below this refills right away
     refresh_hour: int = 4            # local hour of the nightly top-up
     max_per_cycle: int = 6           # generation is slow — cap one refill run
-    safe: bool = False               # 3.x Safe-Mode flag: kept, inert
+    safe: bool = False               # legacy 3.x flag: kept, inert
     style: str = ""                  # image CLI style preset
     workflow: str = ""               # image CLI workflow override
     per_mood_overrides: dict = field(default_factory=dict)

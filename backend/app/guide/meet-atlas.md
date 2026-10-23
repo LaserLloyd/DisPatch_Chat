@@ -4,7 +4,7 @@ To get me working, open **Settings → AI & Connections**: the quickest way is *
 
 With any OpenAI-compatible provider I come with lookups: web and news search, a page fetch, weather, Wikipedia, exchange rates, the time and a calculator. When one of them runs, you will see a small notice before my answer, so you always know where a fact came from.
 
-You stay in charge of me. Lookups can be switched off per bot, and on a Safe Mode device I only get the subset you allow. If you would rather not have me at all, remove me in **Settings → Characters** (⋯ → Remove). Nothing else depends on me.
+You stay in charge of me. Lookups can be switched off per bot. If you would rather not have me at all, remove me in **Settings → Characters** (⋯ → Remove). Nothing else depends on me.
 
 When you want more (pictures, local models, agents, voice, offline Wikipedia, email), the **Set up add-ons** chat walks through each one.
 

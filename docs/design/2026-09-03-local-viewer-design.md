@@ -1,5 +1,9 @@
 # Local Viewer — open local files, folders and sites inside DisPatch
 
+> **Historical design note (3.x).** It uses the 3.x access words Safe Mode, locked device, Restricted
+> and Owner. 4.0 replaced them with Admin, User and Basic profiles and private chats; see
+> [../security.md](../security.md) for how access works now. Everything else here is kept as written.
+
 Status: design contract for the 2026-09-03 implementation round. Every implementer
 works from this file; the file:line anchors refer to the tree at commit `510be1a`.
 
