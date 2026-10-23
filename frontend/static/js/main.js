@@ -2687,7 +2687,9 @@ function isNearBottom(px = 140) {
 }
 function scrollToBottom(instant = false) {
   const b = dom['messages'];
-  messageWindow().ensureTail();     // a long thread read far back: paint the newest rows first
+  // A long thread read far back: paint the newest rows first, and jump (a smooth scroll over that
+  // distance would run through the spacer while the window moves under it).
+  if (messageWindow().ensureTail()) instant = true;
   if (instant) {
     // Temporarily override CSS scroll-behavior: smooth for an immediate jump.
     b.style.scrollBehavior = 'auto';

@@ -2046,7 +2046,10 @@
     "export": "[de] Export",
     "erase": "[de] Erase",
     "erase_confirm": "[de] Erase {name} and everything attached to the profile? This cannot be undone.",
-    "erased": "[de] Profile erased."
+    "erased": "[de] Profile erased.",
+    "tier_recent": "Recent",
+    "tier_daily": "Daily",
+    "tier_weekly": "Weekly"
   },
   "host_notice": {
     "title": "Auf dem Host-Computer gespeichert",

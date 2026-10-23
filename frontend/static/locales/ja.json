@@ -2018,7 +2018,10 @@
     "export": "[ja] Export",
     "erase": "[ja] Erase",
     "erase_confirm": "[ja] Erase {name} and everything attached to the profile? This cannot be undone.",
-    "erased": "[ja] Profile erased."
+    "erased": "[ja] Profile erased.",
+    "tier_recent": "Recent",
+    "tier_daily": "Daily",
+    "tier_weekly": "Weekly"
   },
   "host_notice": {
     "title": "ホストコンピューターに保存されます",

@@ -199,7 +199,10 @@
 /* A long thread: the top-of-list "Load earlier" row, and the spacers that stand in for rows that are not painted. */
 .load-earlier { display: flex; justify-content: center; padding: 4px 0 12px; }
 .win-gap { display: block; flex: none; pointer-events: none; }
-.messages { overflow-anchor: auto; }
+/* Rows are laid out for real: with content-visibility:auto an unseen row is an 80px guess until it scrolls
+ * into view, and the list jumps by the difference. The window above keeps the row count near 300, so the
+ * saving it was after is already made. */
+.messages > .msg { content-visibility: visible; }
 
 /* An image the retention setting removed. */
 .media-expired {
@@ -214,7 +217,7 @@
 .sys-cleanup { display: contents; }
 .storage-card, .retention-card, .archive-after { max-width: 640px; }
 .storage-areas { list-style: none; margin: 8px 0 6px; padding: 0; display: grid; gap: 6px; }
-.storage-area { display: grid; grid-template-columns: minmax(96px, 36%) 1fr auto; gap: 10px; align-items: center; font-size: 13px; }
+.storage-area { display: grid; grid-template-columns: minmax(96px, 36%) 1fr 4.5em; gap: 10px; align-items: center; font-size: 13px; }
 .storage-area-name { color: var(--text-primary); overflow-wrap: anywhere; }
 .storage-area-bar { height: 8px; border-radius: 4px; background: var(--bg-tertiary); overflow: hidden; }
 .storage-area-fill { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
@@ -232,7 +235,8 @@
 .storage-stray-list { margin: 4px 0 0; padding-inline-start: 18px; font-size: 12px; overflow-wrap: anywhere; }
 .retention-row, .archive-after-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
 .retention-months-wrap { display: inline-flex; align-items: center; gap: 6px; }
-.retention-months { width: 5.5em; }
+.retention-months { width: 6em; }
+.retention-months-unit { font-size: 14px; color: var(--text-secondary); }
 .retention-months[aria-invalid="true"] { border-color: var(--error); }
 .retention-result { min-height: 1.4em; margin: 6px 0; font-size: 13px; }
 .retention-result p { margin: 2px 0; }

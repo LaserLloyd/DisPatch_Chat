@@ -1605,3 +1605,5 @@ New in 4.0 wave 3b, English copies in the other seven locales (WP-LOC translates
 The Foundation keys `storage.*`, `retention.*`, `archive.*` and `media.expired` are used as created.
 
 `storage.other` was renamed `storage.rest` (same text, all eight locales): a group that has a key called `other` is read as a plural object, which hid the whole `storage.*` group from the key-parity test and from `t()`.
+
+`bkp.tier_recent`, `bkp.tier_daily`, `bkp.tier_weekly` (new, English copies in all locales): the badge on a rotating snapshot in Settings -> System -> Backups.

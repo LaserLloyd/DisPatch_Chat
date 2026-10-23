@@ -2018,7 +2018,10 @@
     "export": "[zh] Export",
     "erase": "[zh] Erase",
     "erase_confirm": "[zh] Erase {name} and everything attached to the profile? This cannot be undone.",
-    "erased": "[zh] Profile erased."
+    "erased": "[zh] Profile erased.",
+    "tier_recent": "Recent",
+    "tier_daily": "Daily",
+    "tier_weekly": "Weekly"
   },
   "host_notice": {
     "title": "保存在主机电脑上",

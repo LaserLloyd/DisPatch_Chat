@@ -2071,7 +2071,10 @@
     "export": "[fr] Export",
     "erase": "[fr] Erase",
     "erase_confirm": "[fr] Erase {name} and everything attached to the profile? This cannot be undone.",
-    "erased": "[fr] Profile erased."
+    "erased": "[fr] Profile erased.",
+    "tier_recent": "Recent",
+    "tier_daily": "Daily",
+    "tier_weekly": "Weekly"
   },
   "host_notice": {
     "title": "Enregistré sur l’ordinateur hôte",

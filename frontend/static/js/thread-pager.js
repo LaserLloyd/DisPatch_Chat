@@ -1,5 +1,4 @@
 // Paging for long lists, 4.0 scale round (design target: 20 profiles x 3 years, 1-2 million messages, no slowdowns).
-// slowdowns"; design target 20 profiles x 3 years, 1-2 million messages).
 //
 //   * ThreadPager      the rail: one page of threads at a time by `next_cursor`
 //                      (GET /api/threads?bot_id=&limit=&cursor=&archived=), page one has
@@ -137,7 +136,7 @@ const idOf = (n) => (n && n.dataset && n.dataset.id) || '';
  *    build(from, to)        the DOM nodes (date separators included) for messages[from, to)
  *    getMore()              {has: bool, loading: bool, onClick: fn} for the "Load earlier" row, or null
  *    t, el                  translator and element factory (only for the Load earlier row)
- *    measure(node)          optional; height of a node (tests; default getBoundingClientRect)
+ *    measure(node)          optional; height of a node (tests; default the node's rendered height)
  *
  *  The box holds, in order: [Load earlier] [top spacer] message rows ... [bottom spacer]
  *  followed by whatever main.js appends (the typing bubble, a streaming bubble). Which messages
@@ -256,7 +255,7 @@ export class MessageWindow {
     if (this.measure) {
       span = rows.reduce((s, n) => s + this.measure(n), 0);
     } else {
-      span = last.getBoundingClientRect().bottom - first.getBoundingClientRect().top;
+      span = last.offsetTop + last.offsetHeight - first.offsetTop;
     }
     const per = span / rows.length;
     if (Number.isFinite(per) && per >= 24 && per <= 800) this.avg = this.avg * 0.5 + per * 0.5;
@@ -273,15 +272,19 @@ export class MessageWindow {
     }
   }
 
+  /** Where a node sits in the scrolled box, from its layout position. (Not getBoundingClientRect: a row
+   *  that is mid-way through its entrance animation reports the animated position, and the anchor would
+   *  settle somewhere else when the animation ends.) */
+  _pos(node) { return node.offsetTop - this.box.scrollTop; }
+
   _anchorNode() {
     const rows = this.rows();
     if (!rows.length) return null;
-    const top = this.box.getBoundingClientRect().top;
     // binary search for the first row that ends below the box's top edge
     let lo = 0; let hi = rows.length - 1;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
-      if (rows[mid].getBoundingClientRect().bottom > top) hi = mid; else lo = mid + 1;
+      if (this._pos(rows[mid]) + rows[mid].offsetHeight > 0) hi = mid; else lo = mid + 1;
     }
     return rows[lo];
   }
@@ -290,10 +293,10 @@ export class MessageWindow {
   _keepAnchor(fn) {
     const anchor = this._anchorNode();
     if (!anchor) { fn(); return; }
-    const before = anchor.getBoundingClientRect().top;
+    const before = this._pos(anchor);
     fn();
     if (!anchor.isConnected) return;
-    const delta = anchor.getBoundingClientRect().top - before;
+    const delta = this._pos(anchor) - before;
     if (delta) this._scrollBy(delta);
   }
 
@@ -348,7 +351,7 @@ export class MessageWindow {
     const n = this.getMessages().length;
     const anchor = anchorId ? this.rows().find((r) => idOf(r) === anchorId) : this._anchorNode();
     const id = anchor ? idOf(anchor) : '';
-    const top = anchor ? anchor.getBoundingClientRect().top : 0;
+    const top = anchor ? this._pos(anchor) : 0;
     const idx = id ? (this.indexMap().get(id) ?? n - 1) : n - 1;
     if (n <= this.max) this.paint(0, n);
     else {
@@ -357,7 +360,7 @@ export class MessageWindow {
     }
     if (!id) return;
     const again = this.rows().find((r) => idOf(r) === id);
-    if (again) this._scrollBy(again.getBoundingClientRect().top - top);
+    if (again) this._scrollBy(this._pos(again) - top);
   }
 
   // ---- scrolling
@@ -575,7 +578,7 @@ export function renderArchiveControl(host, deps) {
   for (const old of host.querySelectorAll('[data-anchor="archive-after"]')) old.remove();
   if (deps.can && !deps.can()) return null;
   const status = el('p', { class: 'dev-group-hint archive-would', 'aria-live': 'polite' });
-  const select = el('select', { id: 'archive-after-months', class: 'settings-select archive-after-select', disabled: 'disabled' });
+  const select = el('select', { id: 'archive-after-months', class: 'ui-select archive-after-select', disabled: 'disabled' });
   const label = el('label', { class: 'archive-after-label', for: 'archive-after-months', text: t('archive.older_than') });
   let current = null;
   const paint = (months) => {

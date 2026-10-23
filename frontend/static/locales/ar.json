@@ -2158,7 +2158,10 @@
     "export": "[ar] Export",
     "erase": "[ar] Erase",
     "erase_confirm": "[ar] Erase {name} and everything attached to the profile? This cannot be undone.",
-    "erased": "[ar] Profile erased."
+    "erased": "[ar] Profile erased.",
+    "tier_recent": "Recent",
+    "tier_daily": "Daily",
+    "tier_weekly": "Weekly"
   },
   "host_notice": {
     "title": "محفوظ على الكمبيوتر المضيف",

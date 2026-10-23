@@ -97,6 +97,7 @@ export function renderStorageCard(host, deps) {
 
   let timer = 0;
   let stopped = false;
+  let asked = false;          // the first-time folder walk was requested
   const stop = () => { stopped = true; if (timer) { clearTimeout(timer); timer = 0; } };
   card._stop = stop;
 
@@ -167,6 +168,11 @@ export function renderStorageCard(host, deps) {
       return;
     }
     if (stopped) return;
+    // Nothing measured yet (a fresh install, or the nightly run has not happened): walk the folder once.
+    if (report && !report.measured_at && !report.scanning && !asked) {
+      asked = true;
+      try { await api.maintenanceStorageRefresh(); report = { ...report, scanning: true }; } catch { /* the button is still there */ }
+    }
     const busy = paint(status, report);
     if (busy) timer = setTimeout(load, 3000);
   };
@@ -226,12 +232,12 @@ export function renderRetentionCard(host, deps) {
   const { api, t, el, toast } = deps;
   for (const old of host.querySelectorAll('[data-anchor="retention"]')) old.remove();
 
-  const mode = el('select', { id: 'retention-images-mode', class: 'settings-select retention-mode', disabled: 'disabled', 'aria-label': t('retention.images_title') }, [
+  const mode = el('select', { id: 'retention-images-mode', class: 'ui-select retention-mode', disabled: 'disabled', 'aria-label': t('retention.images_title') }, [
     el('option', { value: 'forever', text: t('retention.forever') }),
     el('option', { value: 'months', text: t('retention.months') }),
   ]);
   const months = el('input', {
-    id: 'retention-images-months', class: 'retention-months', type: 'number', inputmode: 'numeric',
+    id: 'retention-images-months', class: 'ui-input retention-months', type: 'number', inputmode: 'numeric',
     min: String(MONTHS_MIN), max: String(MONTHS_MAX), step: '1', value: String(MONTHS_DEFAULT),
     'aria-label': t('retention.months_label'),
   });
