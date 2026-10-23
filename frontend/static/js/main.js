@@ -9440,6 +9440,8 @@ function renderSecurityStrings() {
     else if (a.claimed && a.needsPassword) key = 'acct.status_pin_only';
     else key = a.claimed ? 'acct.status_pin_password' : 'security.status_set';
   } else if (state.role === 'admin') key = a.needsPassword ? 'acct.status_admin_nopw' : 'acct.status_admin';
+  // The shared default profile cannot give itself a PIN (only an Admin can, in People & Access).
+  else if (a.profile && a.profile.shared) key = 'acct.status_shared';
   else key = selfCredential() === 'none' ? 'acct.status_no_pin' : 'acct.status_member';
   setI18nText(dom['sec-status-line'], key);
   if (a.remembered) dom['sec-status-line'].append(' ', t('acct.status_remembered'));

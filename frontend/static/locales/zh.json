@@ -2087,6 +2087,7 @@
     "status_admin_nopw": "你还没有密码。",
     "status_member": "你使用 PIN 登录。",
     "status_no_pin": "你没有设置 PIN：使用这台设备的任何人都能打开此个人资料。如有需要，请在下方设置。",
+    "status_shared": "这是所有人进入的共享个人资料。只有管理员可以为它设置 PIN（设置 → 人员与访问）。",
     "status_remembered": "此设备保持登录。",
     "my_pin_saved": "你的 PIN 已更改。",
     "device_title": "此设备"

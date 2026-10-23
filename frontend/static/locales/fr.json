@@ -2140,6 +2140,7 @@
     "status_admin_nopw": "Tu n’as pas encore de mot de passe.",
     "status_member": "Tu te connectes avec ton PIN.",
     "status_no_pin": "Tu n’as pas de PIN : toute personne qui utilise cet appareil peut ouvrir ce profil. Définis-en un ci-dessous si tu veux.",
+    "status_shared": "C'est le profil partagé sur lequel tout le monde arrive. Seul un Admin peut lui donner un code PIN (Réglages → Personnes et accès).",
     "status_remembered": "Cet appareil reste connecté.",
     "my_pin_saved": "Ton PIN a été changé.",
     "device_title": "Cet appareil"

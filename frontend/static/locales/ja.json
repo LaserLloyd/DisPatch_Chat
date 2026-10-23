@@ -2087,6 +2087,7 @@
     "status_admin_nopw": "パスワードはまだ設定されていません。",
     "status_member": "PIN でサインインします。",
     "status_no_pin": "PIN が設定されていません。このデバイスを使う人なら誰でもこのプロフィールを開けます。必要なら下で設定してください。",
+    "status_shared": "これは全員が最初に入る共有プロフィールです。PINを設定できるのはAdminだけです（設定 → ユーザーとアクセス）。",
     "status_remembered": "この端末はサインインしたままになります。",
     "my_pin_saved": "PIN を変更しました。",
     "device_title": "この端末"

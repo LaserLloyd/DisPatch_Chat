@@ -264,3 +264,13 @@ test('every audit kind the People routes write has words in the audit log, the p
     for (const k of kinds) assert.equal(typeof L.people[`audit_${k.replace(/\./g, '_')}`], 'string', `${loc} ${k}`);
   }
 });
+
+test('Account on the shared default profile says only an Admin can give it a PIN (not "set one below")', () => {
+  const main = readFileSync(join(STATIC, 'js', 'main.js'), 'utf8');
+  assert.match(main, /else if \(a\.profile && a\.profile\.shared\) key = 'acct\.status_shared';\s*else key = selfCredential\(\) === 'none' \? 'acct\.status_no_pin'/);
+  for (const loc of ['ar', 'de', 'en', 'es', 'fr', 'ja', 'pt', 'zh']) {
+    const L = JSON.parse(readFileSync(join(STATIC, 'locales', `${loc}.json`), 'utf8'));
+    assert.equal(typeof L.acct.status_shared, 'string', loc);
+    assert.match(L.acct.status_shared, new RegExp(L.settings.sec_people.replace(/[&]/g, '\\$&')), loc);
+  }
+});

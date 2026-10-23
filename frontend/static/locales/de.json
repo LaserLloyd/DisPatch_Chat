@@ -2115,6 +2115,7 @@
     "status_admin_nopw": "Du hast noch kein Passwort.",
     "status_member": "Du meldest dich mit deiner PIN an.",
     "status_no_pin": "Du hast keine PIN: Jeder an diesem Gerät kann dieses Profil öffnen. Lege unten eine fest, wenn du willst.",
+    "status_shared": "Das ist das gemeinsame Profil, auf dem alle landen. Nur ein Admin kann ihm eine PIN geben (Einstellungen → Personen & Zugriff).",
     "status_remembered": "Dieses Gerät bleibt angemeldet.",
     "my_pin_saved": "Deine PIN wurde geändert.",
     "device_title": "Dieses Gerät"
