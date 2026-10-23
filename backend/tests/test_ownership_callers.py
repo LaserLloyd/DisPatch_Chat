@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-READERS = re.compile(r"\.(all_threads|list_threads|load_bots)\(")
+READERS = re.compile(r"\.(all_threads|list_threads_page|list_threads|load_bots)\(")
 
 _HOUSE = "household housekeeping: no person sees the result"
 _ADMIN_CFG = "Admin-only configuration route (household characters / connections)"
@@ -72,7 +72,6 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("backend/app/main.py", "_broadcast_roster", "load_bots"): _SCOPER,
     ("backend/app/main.py", "_complete_bot_order", "load_bots"): "order rows; the route 404s a foreign personal id and filters its reply",
     ("backend/app/main.py", "upload_bot_avatar", "load_bots"): _SCOPER,
-    ("backend/app/main.py", "list_threads", "list_threads"): _OWNED,
     ("backend/app/main.py", "bot_avatar_history", "all_threads"): _OWNED,
     ("backend/app/main.py", "bot_avatar_history_image", "all_threads"): _OWNED,
     ("backend/app/main.py", "restore_bot_avatar", "load_bots"): _SCOPER,
@@ -85,7 +84,9 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("backend/app/main.py", "export_all", "all_threads"): _OWNED,
     ("backend/app/main.py", "recover_transcript", "all_threads"): _OWNED,
     ("backend/app/main.py", "_mirror_cycle", "load_bots"): _HOUSE,
-    ("backend/app/main.py", "_handle_get_threads", "list_threads"): _OWNED,
+    # 4.0 scale: GET /api/threads, the WS get_threads frame and the hello first page page
+    # through here, always with the caller's principal.
+    ("backend/app/main.py", "_thread_page", "list_threads_page"): _OWNED,
     ("backend/app/main.py", "websocket_endpoint", "load_bots"): "hello roster: filtered through visible_to",
     ("backend/app/main.py", "_probe_chat", "load_bots"): "plugin catalog probe (manage_plugins): household bots only, personal ones filtered out",
     ("backend/app/main.py", "_probe_infoforge", "load_bots"): "plugin catalog probe (manage_plugins): household bots only, personal ones filtered out",

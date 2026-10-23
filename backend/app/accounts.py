@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -76,7 +77,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     disabled       INTEGER NOT NULL DEFAULT 0,
     epoch          INTEGER NOT NULL DEFAULT 0, -- bumped to invalidate every session of the profile
     backends       TEXT NOT NULL DEFAULT '{}', -- 4.0: JSON {allowed}; {} = every household connection
-    household_bots TEXT DEFAULT '"all"'        -- 4.0: JSON "all" or a list of household bot ids
+    household_bots TEXT DEFAULT '"all"',       -- 4.0: JSON "all" or a list of household bot ids
+    archive_after_months INTEGER               -- 4.0 (011_scale): archive own chats older than N months; NULL = off
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_profiles_name ON profiles(lower(name));
 CREATE UNIQUE INDEX IF NOT EXISTS ux_profiles_one_owner ON profiles(role) WHERE role = 'owner';
@@ -144,6 +146,8 @@ _ADDED_COLUMNS = (
     # 4.0 (migration 010_profiles reports it; added here too so no reader ever meets a
     # profiles table without it, exactly like ``backends``).
     "ALTER TABLE profiles ADD COLUMN household_bots TEXT DEFAULT '\"all\"'",
+    # 4.0 (migration 011_scale): the profile's own "archive chats older than N months"; NULL = off.
+    "ALTER TABLE profiles ADD COLUMN archive_after_months INTEGER",
 )
 
 #: Tables this module owns, in drop-safe (children first) order.
@@ -179,6 +183,46 @@ def new_id() -> str:
 # --------------------------------------------------------------------------- #
 
 
+#: The real install's data directory, and the chats.db the data directory resolved to when
+#: this module was imported (before any test moved it). Under pytest nothing may open either:
+#: see :func:`refuse_live_db_under_pytest`.
+LIVE_DATA_DIR = Path.home() / ".local" / "share" / "local-chat"
+IMPORT_DB_PATH = Path(config.DATA_DIR) / "chats.db"
+#: The import-time path was chosen explicitly (``DISPATCH_DATA_DIR`` / ``LOCAL_CHAT_DATA_DIR``
+#: exported, e.g. a scratch directory as a backstop): then it is not the install's default and
+#: is allowed - only the real data directory stays refused.
+IMPORT_DB_EXPLICIT = bool(os.environ.get("DISPATCH_DATA_DIR") or os.environ.get("LOCAL_CHAT_DATA_DIR"))
+
+
+def _resolved(p: Path | str) -> Path:
+    try:
+        return Path(p).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return Path(p).expanduser().absolute()
+
+
+def is_live_db_path(path: Path | str) -> bool:
+    """Is ``path`` inside the real install's data directory, or the import-time chats.db?"""
+    p = _resolved(path)
+    for root in (LIVE_DATA_DIR,):
+        r = _resolved(root)
+        if p == r or r in p.parents:
+            return True
+    return not IMPORT_DB_EXPLICIT and p == _resolved(IMPORT_DB_PATH)
+
+
+def refuse_live_db_under_pytest(path: Path | str) -> None:
+    """Fail closed: a test run never opens the real install's database. (2026-10-23 a test that
+    entered the app's lifespan without its own Database ran schema statements on the live
+    chats.db.) Outside pytest this does nothing."""
+    import sys
+    if "pytest" not in sys.modules or os.environ.get("DISPATCH_ALLOW_LIVE_DB_IN_TESTS") == "1":
+        return
+    if is_live_db_path(path):
+        raise RuntimeError(f"refusing to open {path} under pytest: that is the real install's "
+                           "data. Point config.DATA_DIR (and the Database) at a scratch directory.")
+
+
 def db_path() -> Path:
     return Path(config.DATA_DIR) / "chats.db"
 
@@ -186,6 +230,7 @@ def db_path() -> Path:
 @contextlib.contextmanager
 def connect(path: Path | None = None) -> Iterator[sqlite3.Connection]:
     path = path or db_path()
+    refuse_live_db_under_pytest(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
     con.row_factory = sqlite3.Row
@@ -234,6 +279,9 @@ class Profile:
     #: 4.0: the household bots this profile may use - ``"all"`` or a list of bot ids
     #: (``characters.may_use``). A Basic profile's list is what an Admin picked for it.
     household_bots: str | list[str] = "all"
+    #: 4.0 (011_scale): the profile's own "archive chats older than N months" (1..120); None =
+    #: off. Set by the profile itself (maintenance_api); the maintenance task reads it.
+    archive_after_months: int | None = None
     #: 4.0: the protected first Admin (stored role ``owner``): cannot be demoted, disabled or
     #: deleted; only it changes its own credentials.
     protected: bool = False
@@ -290,7 +338,22 @@ def _row_profile(r: sqlite3.Row) -> Profile:
         session_timeout=r["session_timeout"], created=r["created"],
         disabled=bool(r["disabled"]), epoch=int(r["epoch"] or 0),
         backends=_j(r["backends"], {}) if "backends" in keys else {},
-        household_bots=_household_bots(hb))
+        household_bots=_household_bots(hb),
+        archive_after_months=_archive_months(r["archive_after_months"])
+        if "archive_after_months" in keys else None)
+
+
+#: Bounds of ``archive_after_months`` (the same as the image-retention ``months``).
+ARCHIVE_MONTHS_MIN, ARCHIVE_MONTHS_MAX = 1, 120
+
+
+def _archive_months(value) -> int | None:
+    """The stored ``archive_after_months`` as the model reads it: an int in range, else None."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if ARCHIVE_MONTHS_MIN <= n <= ARCHIVE_MONTHS_MAX else None
 
 
 def _household_bots(value) -> str | list[str]:
@@ -474,7 +537,8 @@ def _adopt_unowned(con: sqlite3.Connection, owner_id: str) -> None:
 
 
 _UPDATABLE = {"name", "role", "pin_hash", "password_hash", "avatar", "grants",
-              "denies", "session_timeout", "disabled", "backends", "household_bots"}
+              "denies", "session_timeout", "disabled", "backends", "household_bots",
+              "archive_after_months"}
 
 
 def _household_value(value) -> str | list[str]:
@@ -513,6 +577,12 @@ def update_profile(profile_id: str, **fields) -> Profile:
             v = stored_role(r, protected=cur.protected)
         if k == "household_bots":
             v = json.dumps(_household_value(v))
+        elif k == "archive_after_months":
+            if v is not None and (isinstance(v, bool) or not isinstance(v, int)
+                                  or not ARCHIVE_MONTHS_MIN <= v <= ARCHIVE_MONTHS_MAX):
+                raise AccountError("profile_field_invalid",
+                                   f"archive_after_months must be null or "
+                                   f"{ARCHIVE_MONTHS_MIN}..{ARCHIVE_MONTHS_MAX}.")
         elif k == "backends":
             if not isinstance(v or {}, dict):
                 raise AccountError("profile_field_invalid", "backends must be an object.")
@@ -689,11 +759,13 @@ def usage_add(subject: str, kind: str, amount: int) -> int:
 
 
 def prune(keep_days: int = 35) -> None:
-    cutoff = (datetime.now() - timedelta(days=keep_days)).strftime("%Y-%m-%d")
-    cutoff_ts = (datetime.now(UTC) - timedelta(days=90)).isoformat(timespec="seconds")
-    with _lock, connect() as con:
-        con.execute("DELETE FROM usage_daily WHERE day < ?", (cutoff,))
-        con.execute("DELETE FROM activity WHERE ts < ?", (cutoff_ts,))
+    """Kept for its caller (``auth.purge_expired``); deletes nothing any more.
+
+    It used to delete ``usage_daily`` older than 35 days and EVERY ``activity`` row older than
+    90 days - audit rows included, against the 400-day audit rule. Since 4.0 the daily
+    maintenance task owns those deletes (``maintenance.py``: activity 90 days, audit 400,
+    usage_daily 45, each an Admin setting), so two writers can no longer disagree."""
+    del keep_days
 
 
 # --------------------------------------------------------------------------- #
