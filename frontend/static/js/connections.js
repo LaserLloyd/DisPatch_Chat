@@ -39,8 +39,11 @@ export function describeTest(r) {
   }
 }
 
-/** The stored last_test of a connection, in the same shape. */
-export const describeStored = (c) => describeTest(c.last_test && Object.keys(c.last_test).length ? c.last_test : null);
+/** The stored last_test of a connection, in the same shape. The stored test keeps no model
+ *  list (the connection carries it), so the connection's own list is used. */
+export const describeStored = (c) => describeTest(c.last_test && Object.keys(c.last_test).length
+  ? { ...c.last_test, models: Array.isArray(c.last_test.models) ? c.last_test.models : (c.models || []) }
+  : null);
 
 /** "Used by" as names, at most `max`, then "+N more". `nameOf(id)` maps a character id
  *  (household characters); `personal` is how many personal bots of other profiles use it

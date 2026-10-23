@@ -8802,7 +8802,8 @@ function applyAuthStatus(s, { keepFeatures = false } = {}) {
       ? { disclosure_code: s.disclosure_code || null, disclosure: s.disclosure || null } : null,
   };
   state.role = state.auth.role;
-  paintDisclosure(document.getElementById('host-notice-disclosure'), state.auth.disclosure);
+  paintDisclosure(document.getElementById('host-notice-disclosure'),
+    state.auth.profile && state.auth.profile.shared ? null : state.auth.disclosure);
   setMenuScope(state.auth.profile ? state.auth.profile.id : '');
 }
 
@@ -10152,9 +10153,7 @@ const RAIL_LABELS = {
   'fs-chip': 'nav.label_files',
   // The popup rows (js/railmenu.js) print data-label, so Tasks needs one too.
   'tasks-btn': 'tasks.nav_title',
-  // nav.label_reactions / label_dashboard / label_connect are no longer
-  // referenced — ⚡ 🩺 🔌 left the rail for Settings tabs. The KEYS stay in all
-  // eight locale files: deleting them churns every translation for nothing.
+  // (⚡ 🩺 🔌 left the rail for Settings sections; their old label keys are gone.)
 };
 function applyRailLabels() {
   // No dictionary at all (both fetches failed) => leave the buttons as their

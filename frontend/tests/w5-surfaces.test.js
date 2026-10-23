@@ -228,6 +228,10 @@ test('connections list: reachable with no models is a warning, Used by shows nam
   assert.equal(C.usedByText(['a', 'b'], (id) => names[id]), 'Used by Ann, Bob');
   assert.equal(C.usedByText(['a', 'b', 'c', 'd', 'e', 'f', 'g'], (id) => names[id], 5), 'Used by Ann, Bob, c, d, e and 2 more');
   assert.equal(C.usedByText([], (id) => id), EN.cxn.unused);
+  // A stored test keeps no model list: the connection's own list counts (not a false "0 models").
+  const stored = C.describeStored({ models: ['m1'], last_test: { ok: true, latency_ms: 4 } });
+  assert.equal(stored[0], 'ok');
+  assert.equal(C.describeStored({ models: [], last_test: { ok: true } })[0], 'warn');
   // Other profiles' personal bots are a count, never names or ids.
   assert.equal(C.usedByText(['a'], (id) => names[id], 5, 3), 'Used by Ann, personal bots: 3');
   assert.equal(C.usedByText([], (id) => id, 5, 2), 'Used by personal bots: 2');

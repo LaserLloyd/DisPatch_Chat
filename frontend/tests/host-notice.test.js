@@ -148,6 +148,10 @@ test('a non-Admin is told what an Admin can see: in the popup (by code, translat
   const unknown = mod.maybeShowSignInNotice({ who: 'user:p2', disclosure: { disclosure_code: 'newer_code', disclosure: 'server text' } });
   assert.equal(unknown.querySelector('.privacy-card-disclosure').textContent, 'server text', 'an unknown code falls back');
   mod._resetForTest();
+  const sharedOne = mod.maybeShowSignInNotice({ who: 'user:dp', shared: true, disclosure: { disclosure_code: 'activity_summary' } });
+  assert.equal(sharedOne.querySelector('.privacy-card-disclosure'), null, 'the shared profile: only the shared line');
+  assert.ok(sharedOne.querySelector('.privacy-card-shared'));
+  mod._resetForTest();
   const admin = mod.maybeShowSignInNotice({ who: 'admin:p3', disclosure: null });
   assert.equal(admin.querySelector('.privacy-card-disclosure'), null, 'an Admin is told nothing');
   const p = win.document.createElement('p');
@@ -166,7 +170,7 @@ test('Settings -> Account has the disclosure line, hidden until the auth state f
   const i = HTML.indexOf('id="sec-host-notice"');
   const aside = HTML.slice(i, HTML.indexOf('</aside>', i));
   assert.match(aside, /<p class="host-notice-body host-notice-disclosure" id="host-notice-disclosure" hidden><\/p>/);
-  assert.match(MAIN, /paintDisclosure\(document\.getElementById\('host-notice-disclosure'\), state\.auth\.disclosure\);/);
+  assert.match(MAIN, /paintDisclosure\(document\.getElementById\('host-notice-disclosure'\),\n\s+state\.auth\.profile && state\.auth\.profile\.shared \? null : state\.auth\.disclosure\);/);
   assert.match(MAIN, /disclosure: \(s\.disclosure_code \|\| s\.disclosure\)/);
 });
 

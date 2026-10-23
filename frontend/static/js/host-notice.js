@@ -100,7 +100,9 @@ export function maybeShowSignInNotice({
       el('li', { text: t('host_notice.card_chats') }),
     ]),
   ];
-  const told = disclosureText(disclosure);
+  // On the shared profile the disclosure ("chats are private to this profile") is not true:
+  // the shared line below says what is.
+  const told = shared ? '' : disclosureText(disclosure);
   if (told) parts[2].append(el('li', { class: 'privacy-card-disclosure', text: told }));
   if (shared) parts.push(el('p', { class: 'privacy-card-shared', text: t('host_notice.shared') }));
   for (const n of Array.isArray(notices) ? notices : []) {
