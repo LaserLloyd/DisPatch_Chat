@@ -1834,7 +1834,7 @@
     "unused": "Noch nicht genutzt",
     "not_tested": "Noch nicht getestet",
     "latency": "{ms} ms",
-    "ok_models": "{count} Modelle verfügbar",
+    "ok_models": "Verfügbare Modelle: {count}",
     "ok_no_models": "Verbunden (Modellliste nicht verfügbar)",
     "bad_auth": "Der Schlüssel wurde nicht akzeptiert",
     "bad_unreachable": "Server nicht erreichbar",

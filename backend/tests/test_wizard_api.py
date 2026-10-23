@@ -54,7 +54,9 @@ def test_the_whole_wizard_by_api(world, monkeypatch):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["test"]["ok"] is True and body["connection"]["models"] == ["qwen2.5-7b"]
-    assert body["assigned"] == {"character": "helper", "model": "qwen2.5-7b"}
+    assigned = body["assigned"]
+    assert {k: assigned[k] for k in ("character", "model")} == {"character": "helper", "model": "qwen2.5-7b"}
+    assert assigned["name"] == config.get_bot("helper").name         # the wizard shows the name, not the id
     assert settings_store.get("connections.default") == body["connection"]["id"]
     bot = config.get_bot(body["assigned"]["character"])
     assert bot.advisor["providers"][0]["connection"] == body["connection"]["id"]

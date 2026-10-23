@@ -475,7 +475,7 @@ test('Connections: cards, Test result, add form with a Test before Save', { skip
   assert.match(card.textContent, /Default/);
   [...card.querySelectorAll('button')].find((b) => b.textContent === 'Test').click();
   await tick(); await tick();
-  assert.match(card.querySelector('.cxn-result').textContent, /1 models available|12 ms/);
+  assert.match(card.querySelector('.cxn-result').textContent, /Models available: 1|12 ms/);
   // add form
   [...pane.querySelectorAll('.cxn-bar button')].find((b) => b.textContent === EN.cxn.add).click();
   const form = pane.querySelector('.cxn-form');
@@ -489,7 +489,7 @@ test('Connections: cards, Test result, add form with a Test before Save', { skip
   key.value = 'sk-test';
   [...form.querySelectorAll('button')].find((b) => b.textContent === 'Test').click();
   await tick(); await tick();
-  assert.match(form.querySelector('.cxn-result').textContent, /models available/);
+  assert.match(form.querySelector('.cxn-result').textContent, /Models available/);
   [...form.querySelectorAll('button')].find((b) => b.textContent === EN.cxn.add_save).click();
   await tick(); await tick();
   assert.equal(created.length, 1);

@@ -202,7 +202,7 @@ export function openWizard(initial, ctx = {}) {
         const [kind, head, detail] = describeTest(r.test);
         result.className = `cxn-result cxn-${kind}`; result.textContent = detail ? `${head} · ${detail}` : head;
         if (r.test.ok) {
-          if (r.assigned) result.append(' ', t('wiz.conn_assigned', { name: r.assigned.character }));
+          if (r.assigned) result.append(' ', t('wiz.conn_assigned', { name: r.assigned.name || r.assigned.character }));
           list.textContent = '';
           content.append(actions(btn(t('wiz.next'), 'btn-primary', () => next())));
         }

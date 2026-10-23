@@ -221,7 +221,7 @@ async def wizard_connection(request: Request, payload: WizardConnectionIn):
                 if bot is not None and bot.scope == "household":     # a personal bot is its owner's to set up
                     await asyncio.to_thread(config.update_bot, target,
                                             lambda b: characters.with_connection(b, c.id, model))
-                    out["assigned"] = {"character": target, "model": model}
+                    out["assigned"] = {"character": target, "name": bot.name or target, "model": model}
             except characters.CharacterError as e:
                 out["assigned_error"] = str(e)
         # Every profile's own Atlas made before there was a connection answers through this one now.

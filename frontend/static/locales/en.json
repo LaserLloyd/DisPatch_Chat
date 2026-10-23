@@ -1834,7 +1834,7 @@
     "unused": "Not used yet",
     "not_tested": "Not tested yet",
     "latency": "{ms} ms",
-    "ok_models": "{count} models available",
+    "ok_models": "Models available: {count}",
     "ok_no_models": "Connected (model list not available)",
     "bad_auth": "The key was not accepted",
     "bad_unreachable": "Could not reach the server",

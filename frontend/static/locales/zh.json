@@ -1807,7 +1807,7 @@
     "unused": "尚未使用",
     "not_tested": "尚未测试",
     "latency": "{ms} 毫秒",
-    "ok_models": "{count} 个模型可用",
+    "ok_models": "可用模型：{count}",
     "ok_no_models": "已连接（无法获取模型列表）",
     "bad_auth": "密钥未被接受",
     "bad_unreachable": "无法连接到服务器",
