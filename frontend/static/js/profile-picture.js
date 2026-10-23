@@ -44,10 +44,13 @@ export function pictureError(e) {
   return t('picture.err_generic', { error: msg });
 }
 
-export async function uploadPicture(base, file) {
+/** `square`: the face square from the face picker ({x, y, size}, fractions); none = centred. */
+export async function uploadPicture(base, file, square = null) {
   const fd = new FormData();
   fd.append('file', file, file.name || 'picture');
-  return profileReq('POST', base, { form: fd });
+  const q = square
+    ? `?${new URLSearchParams({ crop_x: square.x, crop_y: square.y, crop_size: square.size })}` : '';
+  return profileReq('POST', `${base}${q}`, { form: fd });
 }
 
 export const removePicture = (base) => profileReq('DELETE', base);
@@ -65,8 +68,10 @@ export function previewNode(profile, cls = 'pp-preview') {
  * The picture row. `profile` is {id, name, avatar}; `base` the avatar route; `onChanged(profile)`
  * runs after a successful upload or removal with the server's profile. `locked` (the shared
  * default profile, seen by a non-Admin) shows the preview and the reason, no buttons.
+ * `chooseFace(file, name, {hint})` (main.js, the face picker the bot pictures use) lets the
+ * person place the square before anything is uploaded; closing it uploads nothing.
  */
-export function pictureRow({ profile, base, onChanged, toast, locked = false }) {
+export function pictureRow({ profile, base, onChanged, toast, locked = false, chooseFace = null }) {
   let current = profile || {};
   const holder = el('span', { class: 'pp-preview-wrap' });
   const status = el('div', { class: 'pp-status muted', role: 'status', 'aria-live': 'polite' });
@@ -98,10 +103,15 @@ export function pictureRow({ profile, base, onChanged, toast, locked = false }) 
     if (!file) return;
     const bad = pictureProblem(file);
     if (bad) { say(t(bad), true); return; }
+    let square = null;
+    if (typeof chooseFace === 'function') {
+      square = await chooseFace(file, current.name || '', { hint: t('picture.crop_hint') });
+      if (!square) return;                   // closed without saving: nothing is uploaded
+    }
     busy(true);
     say(t('picture.uploading'));
     try {
-      await done(await uploadPicture(base, file), t('picture.saved'));
+      await done(await uploadPicture(base, file, square), t('picture.saved'));
     } catch (e) {
       say(pictureError(e), true);
     } finally {
@@ -153,7 +163,7 @@ export function renderProfilePicture(host, deps = {}) {
   const group = el('section', { class: 'dev-group', 'data-anchor': 'picture', 'aria-labelledby': 'pp-h' }, [
     el('h3', { class: 'dev-group-title', id: 'pp-h', text: t('picture.title') }),
     pictureRow({
-      profile: prof, base: '/api/me/avatar', locked, toast: d.toast,
+      profile: prof, base: '/api/me/avatar', locked, toast: d.toast, chooseFace: d.chooseFace,
       onChanged: async () => { if (d.onProfileChanged) await d.onProfileChanged(); },
     }),
   ]);

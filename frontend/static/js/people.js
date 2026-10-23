@@ -482,6 +482,7 @@ function editorPanel(ctx, person) {
           el('span', { class: 'people-field-label', text: t('picture.title') }),
           pictureRow({
             profile: person, base: `/api/people/${encodeURIComponent(person.id)}/avatar`, toast: ctx.toast,
+            chooseFace: ctx.chooseFace,
             onChanged: async (p) => { person.avatar = p.avatar; await ctx.refreshRows(); },
           }),
         ]),
@@ -745,7 +746,7 @@ export async function mountPeopleSettings(pane, deps) {
   });
   const ctx = {
     api: a, w5, role, calls: profileCalls, data: read(data), tables: permTables(data),
-    devices, toast: deps.toast, confirm: deps.confirm,
+    devices, toast: deps.toast, confirm: deps.confirm, chooseFace: deps.chooseFace,
     openEditor: () => {}, closeEditor: () => {}, reload: () => {}, reloadDevices: () => {}, refreshRows: () => {},
   };
 

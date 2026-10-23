@@ -223,3 +223,44 @@ def test_the_picture_folder_is_in_backups_and_not_an_orphan_sweep_target():
     assert "profile-avatars" in backups.DATA_DIRS and "profile-avatars" in backups.ALLOWED_TOP
     from app import media_inventory
     assert any("profile-avatars" in w["writes"] for w in media_inventory.WRITERS)
+
+
+def _two_halves(size=(400, 200)):
+    """Left half red, right half blue: which half the square came from shows in its colour."""
+    from PIL import Image
+    im = Image.new("RGB", size, (220, 20, 20))
+    im.paste((20, 20, 220), (size[0] // 2, 0, size[0], size[1]))
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _centre_colour(pid):
+    from PIL import Image
+    with Image.open(profile_avatars.folder() / _stored(pid)[0]) as im:
+        return im.convert("RGB").getpixel((128, 128))
+
+
+def test_the_face_square_from_the_face_picker_is_the_picture(world, owner):
+    p, c = _user(world, owner)
+    # The right-hand square of a 400x200 picture: x = 0.5, a side of the full height.
+    r = c.post("/api/me/avatar?crop_x=0.5&crop_y=0&crop_size=1",
+               files={"file": ("me.png", _two_halves(), "image/png")})
+    assert r.status_code == 200, r.text
+    red, _g, blue = _centre_colour(p["id"])
+    assert blue > 150 and red < 80
+    # The left-hand square, by an Admin from People.
+    r = owner.post(f"/api/people/{p['id']}/avatar?crop_x=0&crop_y=0&crop_size=1",
+               files={"file": ("me.png", _two_halves(), "image/png")})
+    assert r.status_code == 200, r.text
+    red, _g, blue = _centre_colour(p["id"])
+    assert red > 150 and blue < 80
+
+
+@pytest.mark.parametrize("q", ["crop_x=0.5", "crop_x=0&crop_y=0&crop_size=0", "crop_x=2&crop_y=0&crop_size=1",
+                               "crop_x=0&crop_y=-1&crop_size=1"])
+def test_a_broken_face_square_is_refused_and_nothing_is_stored(world, owner, q):
+    p, c = _user(world, owner)
+    r = c.post(f"/api/me/avatar?{q}", files={"file": ("me.png", _png(), "image/png")})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "avatar_crop_invalid", r.text
+    assert _stored(p["id"]) == [] and not accounts.get_profile(p["id"]).avatar

@@ -1001,8 +1001,6 @@ async def people_audit(request: Request):
 # sign-in screen included, by design (Settings says so at upload time).
 # --------------------------------------------------------------------------- #
 
-_AVATAR_PROBLEMS = {"avatar_invalid": 422, "avatar_too_large": 413, "profile_not_found": 404}
-
 
 def _avatar_fence(request: Request, prof: accounts.Profile) -> JSONResponse | None:
     """The shared default profile's picture is changed by an Admin only (as its name)."""
@@ -1012,13 +1010,18 @@ def _avatar_fence(request: Request, prof: accounts.Profile) -> JSONResponse | No
     return None
 
 
-async def _avatar_upload(request: Request, prof: accounts.Profile, file: UploadFile, kind: str) -> JSONResponse:
+async def _avatar_upload(request: Request, prof: accounts.Profile, file: UploadFile, kind: str,
+                         crop: tuple[float | None, float | None, float | None]) -> JSONResponse:
     fence = _avatar_fence(request, prof)
     if fence is not None:
         return fence
+    try:
+        square = profile_avatars.parse_crop(*crop)
+    except profile_avatars.AvatarError as e:
+        return _problem(e.status, e.code, str(e))
     raw = await file.read(profile_avatars.MAX_BYTES + 1)
     try:
-        updated = await asyncio.to_thread(profile_avatars.set_avatar, prof.id, raw)
+        updated = await asyncio.to_thread(profile_avatars.set_avatar, prof.id, raw, square)
     except profile_avatars.AvatarError as e:
         return _problem(e.status, e.code, str(e))
     except accounts.AccountError as e:
@@ -1047,13 +1050,16 @@ def _me(request: Request) -> tuple[accounts.Profile | None, JSONResponse | None]
 
 
 @router.post("/api/me/avatar")
-async def me_avatar_set(request: Request, file: UploadFile = File(...)):
-    """Your own profile picture (PNG, JPEG, WebP or GIF, 5 MB at most; stored as a 256 px WebP)."""
+async def me_avatar_set(request: Request, file: UploadFile = File(...), crop_x: float | None = None,
+                        crop_y: float | None = None, crop_size: float | None = None):
+    """Your own profile picture (PNG, JPEG, WebP or GIF, 5 MB at most; stored as a 256 px WebP).
+    ``crop_x``/``crop_y``/``crop_size``: the face square placed in the face picker, as fractions
+    (top-left corner; side of the shorter edge); a centred square without them."""
     prof, err = _me(request)
     if err is not None:
         return err
     assert prof is not None
-    return await _avatar_upload(request, prof, file, "profile_avatar_set")
+    return await _avatar_upload(request, prof, file, "profile_avatar_set", (crop_x, crop_y, crop_size))
 
 
 @router.delete("/api/me/avatar")
@@ -1066,12 +1072,14 @@ async def me_avatar_clear(request: Request):
 
 
 @router.post("/api/people/{profile_id}/avatar", dependencies=[_MANAGE])
-async def people_avatar_set(request: Request, profile_id: str, file: UploadFile = File(...)):
+async def people_avatar_set(request: Request, profile_id: str, file: UploadFile = File(...),
+                            crop_x: float | None = None, crop_y: float | None = None,
+                            crop_size: float | None = None):
     prof, err = _target(request, profile_id)
     if err is not None:
         return err
     assert prof is not None
-    return await _avatar_upload(request, prof, file, "profile_avatar_set")
+    return await _avatar_upload(request, prof, file, "profile_avatar_set", (crop_x, crop_y, crop_size))
 
 
 @router.delete("/api/people/{profile_id}/avatar", dependencies=[_MANAGE])

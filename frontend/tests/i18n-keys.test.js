@@ -126,7 +126,7 @@ const DYNAMIC = [
   // label: upgraded installs still have 3.x rows of that kind in their activity table.
   { re: new RegExp('^people\\.audit_(' + [
     'login_failed', 'owner_created', 'owner_reset', 'owner_password_reset',
-    'profile_created', 'profile_updated', 'profile_deleted',
+    'profile_created', 'profile_updated', 'profile_deleted', 'profile_avatar_set', 'profile_avatar_removed',
     'pin_set', 'pin_cleared', 'pin_changed', 'password_set', 'password_changed',
     'signed_out', 'device_removed', 'device_bound', 'recovered', 'recovery_failed',
     'api_token_changed', 'support_bundle', 'plugin_approve',

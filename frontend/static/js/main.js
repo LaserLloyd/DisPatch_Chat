@@ -863,10 +863,11 @@ function railGroupLabel(group) {
     text: t(group === 'mine' ? 'profiles.rail_mine' : 'profiles.rail_household'),
   });
 }
-function railMakeBotButton() {
+function railMakeBotButton(hasMine = false) {
   const b = el('button', {
     type: 'button', class: 'bot-make-btn', title: t('profiles.rail_make_bot'),
-    'aria-label': `${t('profiles.rail_mine_empty')} ${t('profiles.rail_make_bot')}`,
+    // "You haven't made any bots yet" only while that is true.
+    'aria-label': hasMine ? t('profiles.rail_make_bot') : `${t('profiles.rail_mine_empty')} ${t('profiles.rail_make_bot')}`,
   }, [railIcon(RAIL_ICONS.plus)]);
   b.addEventListener('click', () => openSettingsTab(MY_BOTS_SECTION));
   return b;
@@ -899,8 +900,8 @@ function renderSidebarInner() {
   if (showGroups) bots = [...bots.filter(isMineBot), ...bots.filter((b) => !isMineBot(b))];
   let lastGroup = null;
   if (offerMake) {
-    if (showGroups) { list.append(railGroupLabel('mine'), railMakeBotButton()); lastGroup = 'mine'; }
-    else list.append(railMakeBotButton());
+    if (showGroups) { list.append(railGroupLabel('mine'), railMakeBotButton(hasMine)); lastGroup = 'mine'; }
+    else list.append(railMakeBotButton(hasMine));
   }
   bots.forEach((bot, idx) => {
     if (showGroups) {
@@ -4376,6 +4377,7 @@ async function openModelPicker() {
   const th = state.activeThread;
   const bot = th && (botById(th.bot_id) || botById(state.selectedBotId));
   if (!th || !bot) return;
+  if (!sessionCan('manage_characters')) { toggleThreadMenu(false); return; }   // an Admin's setting
   toggleThreadMenu(false);
   toggleModelPicker(true);
 
@@ -5023,7 +5025,7 @@ async function setSettingsTab(target, { focusTab = false } = {}) {
       break;
     case 'people':
       await mountPeopleSettings(pane, {
-        toast, confirm: (msg, o) => uiConfirm(msg, o), role: state.role,
+        toast, confirm: (msg, o) => uiConfirm(msg, o), role: state.role, chooseFace,
         extraGroups: () => peopleRuleGroups(),
         collapseActivity: true,
       });
@@ -5943,14 +5945,19 @@ function setThreadListCollapsed(collapsed) {
 // source image are sent to the server, which crops from the full-res original.
 // `resolve` set = chooseFace() mode: Save hands back the fractions instead of uploading (the
 // personal-bot editor uploads them with the bot).
-const crop = { botId: null, file: null, boxX: 0, boxY: 0, boxSize: 0, resolve: null };
+const crop = { botId: null, file: null, boxX: 0, boxY: 0, boxSize: 0, resolve: null, returnFocus: null };
 
-function openCropModal(botId, file, name) {
+function openCropModal(botId, file, name, hint) {
+  // A household upload never answers a face picker some closed editor is still waiting on.
+  if (botId && crop.resolve) { const r = crop.resolve; crop.resolve = null; r(null); }
   const bot = botId ? (botById(botId) || (bmBots.find((b) => b.id === botId))) : null;
   crop.botId = botId;
   crop.file = file;
   const who = name || (bot ? bot.name : botId) || '';
   dom['crop-title'].textContent = who ? t('crop.title_for', { name: who }) : t('crop.title');
+  // A profile picture keeps only the square, so it says so instead of "the original is saved too".
+  const hintEl = dom['crop-backdrop'].querySelector('.modal-hint');
+  if (hintEl) hintEl.textContent = hint || t('crop.hint');
   const url = URL.createObjectURL(file);
   dom['crop-img'].onload = () => {
     URL.revokeObjectURL(url);
@@ -5958,6 +5965,10 @@ function openCropModal(botId, file, name) {
   };
   dom['crop-img'].src = url;
   dom['crop-backdrop'].classList.remove('hidden');
+  // Focus moves into the dialog (it is modal): Esc then reaches the picker, not the editor
+  // under it (the own-bot editor and Settings both close on an Esc that reaches them).
+  crop.returnFocus = document.activeElement;
+  try { dom['crop-save'].focus({ preventScroll: true }); } catch { /* ignore */ }
 }
 
 function imgRect() {
@@ -6014,13 +6025,16 @@ function wireCropModal() {
     clampCropBox(); applyCropBox();
   });
 
-  const closeCrop = () => {
-    dom['crop-backdrop'].classList.add('hidden'); crop.file = null;
-    const r = crop.resolve; crop.resolve = null;
-    if (r) r(null);                          // closed without saving
-  };
+  const closeCrop = closeCropModal;
   dom['crop-close'].addEventListener('click', closeCrop);
-  dom['crop-backdrop'].addEventListener('click', (e) => { if (e.target === dom['crop-backdrop']) closeCrop(); });
+  // Only a click that STARTED on the backdrop closes it: dragging the square and letting go
+  // outside the card fires a click on the backdrop too, and must not throw the picture away.
+  let cropDownOnBackdrop = false;
+  dom['crop-backdrop'].addEventListener('pointerdown', (e) => { cropDownOnBackdrop = e.target === dom['crop-backdrop']; });
+  dom['crop-backdrop'].addEventListener('click', (e) => {
+    const start = cropDownOnBackdrop; cropDownOnBackdrop = false;
+    if (e.target === dom['crop-backdrop'] && start) closeCrop();
+  });
 
   dom['crop-save'].addEventListener('click', async () => {
     if (!crop.file) return;
@@ -6050,13 +6064,34 @@ function wireCropModal() {
   });
 }
 
+/** Close the face picker. Every way out (✕, a click outside, Esc, a lock) comes here, so a
+ *  waiting chooseFace() always settles: null = closed without saving. */
+function isCropOpen() { return !!dom['crop-backdrop'] && !dom['crop-backdrop'].classList.contains('hidden'); }
+function closeCropModal() {
+  const wasOpen = isCropOpen();
+  if (dom['crop-backdrop']) dom['crop-backdrop'].classList.add('hidden');
+  crop.file = null;
+  const back = crop.returnFocus; crop.returnFocus = null;
+  if (wasOpen && back && back.isConnected && typeof back.focus === 'function') {
+    try { back.focus({ preventScroll: true }); } catch { /* ignore */ }
+  }
+  const r = crop.resolve; crop.resolve = null;
+  if (r) r(null);
+}
+
 /** Let the user place the face square on `file` (a Blob) and resolve to the crop fractions
- *  `{x, y, size}`, or null when they close the dialog. Nothing is uploaded. */
-function chooseFace(file, name) {
+ *  `{x, y, size}`, or null when they close the dialog. Nothing is uploaded. `hint` replaces the
+ *  dialog's line under the title. */
+function chooseFace(file, name, { hint = '' } = {}) {
   if (crop.resolve) { const r = crop.resolve; crop.resolve = null; r(null); }
+  // Every caller lives in Settings: once it has closed (Esc, a lock, a profile switch) a late
+  // answer - a generated picture arriving afterwards - opens nothing, on nobody's screen.
+  if (!dom['botmanager-backdrop'] || dom['botmanager-backdrop'].classList.contains('hidden')) {
+    return Promise.resolve(null);
+  }
   return new Promise((resolve) => {
     crop.resolve = resolve;
-    openCropModal(null, file, name);
+    openCropModal(null, file, name, hint);
   });
 }
 
@@ -6085,6 +6120,14 @@ async function renderFileServer() {
   const list = dom['fs-list'];
   list.innerHTML = '';
   let files = [];
+  // Upload only (a Basic profile): there is no list to read, so none is asked for.
+  if (!sessionCan('files_read')) {
+    list.append(el('div', { class: 'empty-list' }, [
+      el('div', { class: 'empty-emoji' }, [railIcon(RAIL_ICONS.folder)]),
+      el('p', { text: t('files.upload_only') }),
+    ]));
+    return;
+  }
   try { files = (await api.files()).files || []; }
   catch (e) { toast(e.message, true); return; }
 
@@ -8392,14 +8435,19 @@ function wireEvents() {
   window.addEventListener('keydown', (e) => {
     // The sign-in overlay owns the keyboard while it's open (handled elsewhere).
     if (!dom['lock-screen'].classList.contains('hidden')) return;
+    // One Esc closes one layer: a native dialog on top (a confirm, the Ctrl+K palette) takes
+    // this Esc itself, and a layer that already handled it says so with preventDefault.
+    if (e.key === 'Escape' && (e.defaultPrevented || document.querySelector('dialog[open]'))) return;
     if (e.key === 'Escape') {
       const lb = [...document.querySelectorAll('.lightbox')].at(-1);
       // Route through the ✕ button so the lightbox's own close() runs
       // (pauses video, detaches its window pan listeners).
       if (lb) { const x = lb.querySelector('.lightbox-close'); if (x) x.click(); else lb.remove(); return; }
-      closeBotManager();   // confirms first if there are unsaved edits
+      // The face picker opens over Settings (Characters, My bots, Account, People): Esc closes
+      // the picker alone, never the Settings under it, and settles a waiting chooseFace().
+      if (isCropOpen()) { closeCropModal(); return; }
+      closeBotManager();   // closes Settings (an open own-bot editor's unsaved edits go with it)
       dom['fileserver-backdrop'].classList.add('hidden');
-      dom['crop-backdrop'].classList.add('hidden');
       dom['search-backdrop'].classList.add('hidden');
       dom['recover-backdrop'].classList.add('hidden');
       dom['tx-backdrop'].classList.add('hidden');
@@ -8504,6 +8552,9 @@ function applyAuthChrome() {
   // Host maintenance in a chat's menu (re-pull a transcript from the agent runtime) is an Admin surface.
   document.querySelectorAll('#thread-menu [data-act="sync"], #thread-menu [data-act="transcript"]')
     .forEach((b) => { b.hidden = !canAdmin(); });
+  // "Model & thinking" reads the bot's model list, which only a character manager may.
+  const modelItem = document.getElementById('thread-menu-model');
+  if (modelItem) modelItem.hidden = !sessionCan('manage_characters');
   // 🎨 is a pin like any other, just one that ships pinned and keeps its own
   // markup (pins.js `kind: 'rail'`). Unpinning it in Settings → Device hides
   // the button; the Theme tab itself is untouched, so nothing becomes
@@ -9376,9 +9427,10 @@ function closeAllOverlays() {
   // Settings carries Security, Reactions, Health and AI models as tabs now, so
   // hiding its one backdrop closes all five — the tab observer stops whatever
   // the active pane had running.
-  ['botmanager-backdrop', 'fileserver-backdrop', 'crop-backdrop',
+  ['botmanager-backdrop', 'fileserver-backdrop',
    'search-backdrop', 'recover-backdrop', 'tx-backdrop']
     .forEach((k) => dom[k] && dom[k].classList.add('hidden'));
+  closeCropModal();          // settles a waiting face picker too
   // The tool panes are Admin-only — never leave a view alive across a lock or
   // a profile switch.
   //
@@ -9657,6 +9709,8 @@ function renderSecurityStrings() {
     else if (a.claimed && a.needsPassword) key = 'acct.status_pin_only';
     else key = a.claimed ? 'acct.status_pin_password' : 'security.status_set';
   } else if (state.role === 'admin') key = a.needsPassword ? 'acct.status_admin_nopw' : 'acct.status_admin';
+  // The shared default profile cannot give itself a PIN (only an Admin can, in People & Access).
+  else if (a.profile && a.profile.shared) key = 'acct.status_shared';
   else key = selfCredential() === 'none' ? 'acct.status_no_pin' : 'acct.status_member';
   setI18nText(dom['sec-status-line'], key);
   if (a.remembered) dom['sec-status-line'].append(' ', t('acct.status_remembered'));
@@ -10231,6 +10285,10 @@ async function openSearchHit(h) {
 function openRecovery() {
   dom['botmanager-backdrop'].classList.add('hidden');
   dom['recover-result'].textContent = '';
+  // Restoring from the agent runtime's transcripts is host maintenance: an Admin's (the routes
+  // refuse anyone else). Everyone exports their own chats.
+  const adminPart = document.getElementById('recover-admin');
+  if (adminPart) adminPart.hidden = !canAdmin();
   dom['recover-backdrop'].classList.remove('hidden');
 }
 function closeRecovery() { dom['recover-backdrop'].classList.add('hidden'); }
@@ -10590,7 +10648,12 @@ function closePalette() { const dlg = $('cmdk'); if (dlg && dlg.open) dlg.close(
 function wireCmdk() {
   const dlg = $('cmdk'); const inp = $('cmdk-input');
   window.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); openPalette(); }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      // Never over the sign-in overlay: its actions would act on the profile behind it.
+      if (dom['lock-screen'] && !dom['lock-screen'].classList.contains('hidden')) return;
+      openPalette();
+    }
   });
   if (!dlg || !inp) return;
   inp.addEventListener('input', () => { cmdkItems = cmdkBuild(inp.value); cmdkSel = 0; cmdkRender(); });

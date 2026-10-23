@@ -334,3 +334,28 @@ def test_the_seed_prompts_start_the_history_and_then_become_ordinary_history(env
     _gen(c, prompt="mine")
     assert c.get(BASE + "/state").json()["prompts"] == ["mine", "seeded one", "seeded two"], \
         "the seeds become ordinary history, newest prompt first"
+
+
+def test_a_user_is_offered_only_their_own_bots_for_an_avatar_and_no_send(env, provider):
+    """4.0: a User may make pictures and has bots of its own, but changes no household
+    character's picture and may not inject: the studio offers only what will work."""
+    owner = _unlocked(env)
+    r = owner.post("/api/people", json={"name": "Uma", "role": "user", "pin": "1111"})
+    assert r.status_code == 201, r.text
+    u = env()
+    assert u.post("/api/auth/login", json={"profile_id": r.json()["id"], "pin": "1111"}).status_code == 200
+    mine = u.post("/api/me/characters", json={"name": "Mine"})
+    assert mine.status_code in (200, 201), mine.text
+    mine_id = (mine.json().get("bot") or mine.json())["id"]
+    bots = u.get(BASE + "/targets").json()["bots"]
+    assert {b["id"] for b in bots} <= {b["id"] for b in bots if b["personal"]}
+    assert mine_id in {b["id"] for b in bots} and "main" not in {b["id"] for b in bots}
+    assert u.get(BASE + "/state").json()["can_send"] is False
+    st = owner.get(BASE + "/state").json()
+    assert st["can_send"] is True
+    assert any(b["id"] == "main" and not b["personal"] for b in owner.get(BASE + "/targets").json()["bots"])
+    # The route the studio uses for an own bot takes the studio's square as fractions.
+    from tests.test_image_jobs import _png as png
+    up = u.post(f"/api/me/characters/{mine_id}/avatar?crop_x=0&crop_y=0&crop_size=1",
+                files={"file": ("s.png", png(), "image/png")})
+    assert up.status_code == 200, up.text

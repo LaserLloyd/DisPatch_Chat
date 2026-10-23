@@ -84,8 +84,20 @@ def file_for_name(name: str) -> Path | None:
     return p
 
 
-def process(raw: bytes) -> bytes:
-    """Upload bytes -> a 256 px square WebP with no metadata. Raises :class:`AvatarError`."""
+def parse_crop(x: float | None, y: float | None, size: float | None) -> tuple[float, float, float] | None:
+    """The face square from the face picker (``crop_x``/``crop_y`` = its top-left corner as
+    fractions of the width/height, ``crop_size`` = its side as a fraction of the shorter edge),
+    or None for a centred square. All three or none; raises :class:`AvatarError`."""
+    if x is None and y is None and size is None:
+        return None
+    if x is None or y is None or size is None or not (0 <= x <= 1 and 0 <= y <= 1 and 0 < size <= 1):
+        raise AvatarError("avatar_crop_invalid", "The face square must be given as fractions from 0 to 1.")
+    return (float(x), float(y), float(size))
+
+
+def process(raw: bytes, crop: tuple[float, float, float] | None = None) -> bytes:
+    """Upload bytes -> a 256 px square WebP with no metadata (``crop``: the face square, see
+    :func:`parse_crop`; None = centred). Raises :class:`AvatarError`."""
     if not raw:
         raise AvatarError("avatar_invalid", "No picture was sent.")
     if len(raw) > MAX_BYTES:
@@ -102,7 +114,13 @@ def process(raw: bytes) -> bytes:
             has_alpha = "A" in im.getbands() or "transparency" in im.info
             im = im.convert("RGBA" if has_alpha else "RGB")
             side = min(im.size)
-            left, top = (im.width - side) // 2, (im.height - side) // 2
+            if crop is None:
+                left, top = (im.width - side) // 2, (im.height - side) // 2
+            else:
+                cx, cy, cs = crop
+                side = max(8, min(side, int(cs * side)))
+                left = max(0, min(int(cx * im.width), im.width - side))
+                top = max(0, min(int(cy * im.height), im.height - side))
             square = im.crop((left, top, left + side, top + side)).resize((SIZE, SIZE), Image.LANCZOS)
             out = io.BytesIO()
             square.save(out, "WEBP", quality=88, method=4)      # no exif=/icc_profile=: metadata dropped
@@ -140,10 +158,12 @@ def remove_files(profile_id: str) -> int:
     return n
 
 
-def set_avatar(profile_id: str, raw: bytes) -> accounts.Profile:
-    """Process ``raw`` and make it the profile's picture; the old file goes away."""
+def set_avatar(profile_id: str, raw: bytes,
+               crop: tuple[float, float, float] | None = None) -> accounts.Profile:
+    """Process ``raw`` (cropped to ``crop``, else centred) and make it the profile's picture;
+    the old file goes away."""
     _safe_pid(profile_id)
-    data = process(raw)
+    data = process(raw, crop)
     digest = hashlib.sha256(data).hexdigest()[:16]
     name = f"{profile_id}-{digest}.webp"
     with _LOCK:

@@ -4,6 +4,6 @@ I answer through the household's AI connection, which an Admin sets up once for 
 
 I can look things up while I answer: web and news search, a page fetch, weather, Wikipedia, exchange rates, the time and a calculator. When a lookup runs you see a small 🔧 notice before my answer, so you always know where a fact came from.
 
-You can change me: rename me, give me a new picture or personality, or remove me, under **Settings → Characters**. If you ever want to start over, **Settings → Account → Reset to default** deletes this profile's own bots and chats and gives you a fresh Atlas.
+You can change me: rename me, give me a new picture or personality, or delete me, under **Settings → My bots** (**Edit**, **Delete**). If you ever want to start over, **Settings → Account → Reset to default** deletes this profile's own bots and chats and gives you a fresh Atlas.
 
 The **Using DisPatch** chat next to this one is a short tour of everything else. Or just ask me: *What can I do in DisPatch?*

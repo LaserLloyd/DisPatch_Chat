@@ -164,7 +164,7 @@ def test_a_fresh_install_seeds_the_guide_threads_once(env):
     c = env(real_defaults=True)
     ts = _threads(c)
     assert sorted(t["title"] for t in ts) == ["How DisPatch works", "Meet Atlas",
-                                              "Set up add-ons"]
+                                              "Set up add-ons", "Using DisPatch"]
     assert ts[0]["title"] == "Meet Atlas"            # newest = top of the list
     for t in ts:
         msgs = c.get(f"/api/threads/{t['id']}/messages").json()
@@ -182,10 +182,10 @@ def test_a_fresh_install_seeds_the_guide_threads_once(env):
 
 def test_a_second_boot_seeds_nothing(env):
     c = env(real_defaults=True)
-    assert len(_threads(c)) == 3
+    assert len(_threads(c)) == 4
     c.__exit__(None, None, None)
     c2 = env(real_defaults=True, fresh_db=False)
-    assert len(_threads(c2)) == 3
+    assert len(_threads(c2)) == 4
 
 
 def test_deleting_every_thread_does_not_bring_the_tour_back(env):

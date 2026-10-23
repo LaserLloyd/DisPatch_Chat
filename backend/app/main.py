@@ -546,15 +546,18 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # First run only: the two explainer threads on the default bot (never on
     # an install that already has threads; see app/firstrun.py). Non-fatal.
     await asyncio.to_thread(firstrun.install_default_avatars)
-    # After an update: a "What's new" chat on every Admin's and User's Atlas (before the
-    # first-run seed, so a fresh install reads as one and gets none).
-    await firstrun.post_release_notes(db, _deliver_assistant_text)
+    # Counted before anything is posted: a fresh install reads as one and gets no "What's new".
+    fresh_install = await firstrun.count_threads(db) == 0
     await firstrun.seed_if_first_run(db, _deliver_assistant_text)
     # Every Atlas copy opens with the guide chats: post the queue (copies made by the CLI or
     # while the server was down) and from now on post each new one at once.
     firstrun.bind_server(asyncio.get_running_loop(), db, _deliver_assistant_text)
     await asyncio.to_thread(firstrun.backfill_guides_once)
     await firstrun.drain_guides(db, _deliver_assistant_text)
+    await firstrun.backfill_house_guides(db, _deliver_assistant_text)
+    # After an update: a "What's new" chat on every Admin's and User's Atlas, posted last so
+    # it sits on top of the guides an upgrade backfills.
+    await firstrun.post_release_notes(db, _deliver_assistant_text, fresh=fresh_install)
     # Extensions (app/extensions.py): each one's on_startup hooks — the voice
     # add-on warms its speech models here, on a daemon thread, so the first
     # voice chat after a restart neither waits to accept nor pays the model
@@ -14453,7 +14456,9 @@ async def guide_seed(request: Request, name: str, force: bool = False):
     if name not in firstrun.GUIDES:
         raise HTTPException(404, "Unknown guide")
     try:
-        tid = await firstrun.seed_one(db, _deliver_assistant_text, name, force=force)
+        # In the caller's own chats, on the Atlas that talks to them (a machine: the main Admin).
+        tid = await firstrun.seed_one(db, _deliver_assistant_text, name, force=force,
+                                      profile_id=None if machine else policy.of(request).principal.profile_id)
     except firstrun.GuideExists:
         raise HTTPException(409, "That guide is already in your chats") from None
     except KeyError:

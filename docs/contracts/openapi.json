@@ -11879,8 +11879,58 @@
         "summary": "Me Avatar Clear"
       },
       "post": {
-        "description": "Your own profile picture (PNG, JPEG, WebP or GIF, 5 MB at most; stored as a 256 px WebP).",
+        "description": "Your own profile picture (PNG, JPEG, WebP or GIF, 5 MB at most; stored as a 256 px WebP).\n``crop_x``/``crop_y``/``crop_size``: the face square placed in the face picker, as fractions\n(top-left corner; side of the shorter edge); a centred square without them.",
         "operationId": "me_avatar_set_api_me_avatar_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "crop_x",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop X"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_y",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop Y"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_size",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop Size"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "multipart/form-data": {
@@ -13720,6 +13770,54 @@
             "schema": {
               "title": "Profile Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_x",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop X"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_y",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop Y"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_size",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop Size"
             }
           }
         ],
