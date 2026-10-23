@@ -438,6 +438,10 @@ def set_many(changes: dict[str, Any], *, actor: str = "", reset: list[str] | Non
         pid = str(_want("people.default_profile", cfg.default_profile or "") or "") or None
         try:
             auth.check_lock_target(target, pid)
+            if "people.default_profile" in coerced and pid and target != "default_profile":
+                # A default profile named now is checked now, not only when the landing is
+                # switched to it later (which would then refuse a choice made long before).
+                auth.check_lock_target("default_profile", pid)
             lock_pair = (target, pid)
         except accounts.AccountError as e:
             for k in lock_keys:

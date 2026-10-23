@@ -50,9 +50,9 @@ export const describeStored = (c) => describeTest(c.last_test && Object.keys(c.l
  *  (a count: their names are not the Admin's to read). */
 export function usedByText(ids, nameOf = (id) => id, max = 5, personal = 0) {
   const list = (ids || []).map((id) => nameOf(id) || id);
-  if (personal > 0) list.push(t('cxn.personal_bots', { count: personal }));
-  if (!list.length) return t('cxn.unused');
-  const shown = list.slice(0, max).join(', ');
+  if (!list.length && !(personal > 0)) return t('cxn.unused');
+  // The personal-bot count is always said, after the names and outside the "+N more" cut.
+  const shown = [...list.slice(0, max), ...(personal > 0 ? [t('cxn.personal_bots', { count: personal })] : [])].join(', ');
   return list.length > max
     ? t('cxn.used_by_more', { names: shown, count: list.length - max })
     : t('cxn.used_by', { names: shown });

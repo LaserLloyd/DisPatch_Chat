@@ -129,3 +129,12 @@ def test_a_profile_with_a_pin_is_never_opened_by_the_lock_target(world):
     assert policy.unsigned() is not None
     assert owner.post(f"/api/people/{lobby['id']}/pin", json={"pin": "2580"}).status_code == 200
     assert policy.unsigned() is None
+
+
+def test_a_default_profile_named_while_the_landing_is_the_profile_list_is_checked_then(world):
+    owner = world.create_owner(world.client())
+    pinned = world.person(owner, "Kit", "basic", pin="1357")
+    auth.set_lock_target("profile_list", None)
+    r = owner.patch("/api/settings", json={"set": {"people.default_profile": pinned["id"]}})
+    assert r.status_code == 422, r.text
+    assert not auth.load().default_profile
