@@ -163,9 +163,13 @@ export function buildSearchIndex({ t = (k) => k, allowed = () => true, schema = 
     out.push({ section: r.section, anchor: r.anchor, label, where: sectionLabel(r.section),
       hay: fold(`${label} ${r.terms || ''} ${sectionLabel(r.section)}`) });
   }
+  // A schema setting a section draws with its own control under the same name (the "When
+  // locked, show" picker is a static row AND people.lock_target) is listed once.
+  const seen = new Set(out.map((e) => `${e.section}|${fold(e.label)}`));
   for (const def of (schema && schema.settings) || []) {
     const { id, anchor } = schemaTarget(def);
     if (!allowed(id, 'admin')) continue;
+    if (seen.has(`${id}|${fold(def.label)}`)) continue;
     out.push({ section: id, anchor: `key:${def.key}`, label: def.label, where: sectionLabel(id),
       hay: fold(`${def.label} ${def.description || ''} ${def.key} ${def.section || ''} ${anchor}`) });
   }

@@ -415,3 +415,16 @@ test('createRevealer: the later deep link wins in either order, and closing mid-
   r.end();
   assert.equal(r.reveal(ticket, {}, 'viewer', 'system'), true);
 });
+
+test('search lists a setting once when a section draws it with its own control under the same name', async () => {
+  const N = await import('../static/js/settings-nav.js');
+  const schema = { settings: [
+    { key: 'people.lock_target', label: 'When locked, show', ui_section: 'people#lock-target', group: 'people' },
+    { key: 'people.default_profile', label: 'Default profile', ui_section: 'people#lock-target', group: 'people' },
+  ] };
+  const t = (k) => (k === 'lock.target_title' ? 'When locked, show' : k);
+  const index = N.buildSearchIndex({ t, schema });
+  const hits = N.searchSettings(index, 'when locked');
+  assert.equal(hits.filter((h) => h.label === 'When locked, show').length, 1);
+  assert.ok(N.searchSettings(index, 'default profile').some((h) => h.anchor === 'key:people.default_profile'));
+});
