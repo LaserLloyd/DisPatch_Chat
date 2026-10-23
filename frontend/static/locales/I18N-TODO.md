@@ -14,5 +14,10 @@ App packages (`apps/jobboard`, `apps/imagestudio`): `locked` and `detail.locked`
 
 Deleted: `settings.change_photo` (unused; `change_photo_short` stays), `dash.locked`.
 
-Not WP-LOC's: a few English strings still say "Owner" (e.g. `security.owner_only`, `agents.approval_hint`,
-`mcp_stdio`, `audit_owner_created`, `machine_intro`); their translations follow the English.
+Deleted after the 4.0 stale review (unused, and `i18n-keys.test.js` now ignores comments and substrings, so it
+catches these): the `voices.*` namespace, `retention.title|months_value|preview_first`, `archive.archived`,
+`nav.label_reactions`, `settings.hint`, `security.note`, `links.url`, `tools.save`, `schema.save|saved`.
+
+Added in all eight locales: `people.audit_*` labels for every audit kind the server writes (agents, API key,
+support bundle, add-on approval, main Admin reset); `people.audit_device_bound` stays as a label for 3.x history
+rows. `push.needs_remember` names the "Keep this device signed in" checkbox.

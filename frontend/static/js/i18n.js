@@ -480,10 +480,10 @@ function escapeForHtml(v) {
 // ---------------------------------------------------------------------------
 //
 //   <h2 data-i18n="settings.title">Settings</h2>
-//   <button data-i18n-attr="title=nav.lock;aria-label=nav.lock">🔒</button>
+//   <button data-i18n-attr="title=nav.lock_now;aria-label=nav.lock_now">🔒</button>
 //   <input data-i18n-attr="placeholder=search.placeholder" />
-//   <p data-i18n-html="settings.hint">…markup we control…</p>
-//   <span data-i18n="files.count" data-i18n-vars='{"count":3}'></span>
+//   <p data-i18n-html="security.recovery_note">…markup we control…</p>
+//   <span data-i18n="archive.months" data-i18n-vars='{"count":3}'></span>
 //
 // `data-i18n` writes textContent, so put it on a LEAF element. When a string
 // carries inline markup (<strong>, <code>, <br>), use `data-i18n-html` — those
