@@ -753,6 +753,9 @@ ORPHAN_MAX_FRACTION = 0.2
 ORPHAN_MIN_RECORDS = 200
 
 
+_DATED_AVATAR = re.compile(r"\A(.+)-\d{4}-\d{2}-\d{2}(?:-.*)?\Z")
+
+
 def _avatar_roots(names) -> set[str]:
     return {_snapshot_stem(n) for n in names if n}
 
@@ -837,8 +840,10 @@ def find_orphans(con: sqlite3.Connection, data_dir: Path | str | None, *, grace_
     try:
         from . import accounts, config
         used = set()
+        bot_ids = set()
         for b in config.load_bots():
             used.add(getattr(b, "avatar", "") or "")
+            bot_ids.add(b.id)
         for p in accounts.list_profiles():
             used.add(getattr(p, "avatar", "") or "")
         roots = _avatar_roots(Path(u).name for u in used)
@@ -846,7 +851,16 @@ def find_orphans(con: sqlite3.Connection, data_dir: Path | str | None, *, grace_
         out["refused"]["avatars"] = "the roster could not be read"
         roots = None
     if roots is not None:
-        consider("avatars", data / "avatars", lambda n: _snapshot_stem(n) in roots, images_only=True)
+        def avatar_in_use(n: str) -> bool:
+            stem = _snapshot_stem(n)
+            if stem in roots:
+                return True
+            # The avatar rotator's dated bank (<bot id>-YYYY-MM-DD-face/full.png) belongs to a
+            # character that still exists: kept (whether old pairs are worth keeping is a choice
+            # for the person, not for a sweep).
+            m = _DATED_AVATAR.match(stem)
+            return bool(m and m.group(1) in bot_ids)
+        consider("avatars", data / "avatars", avatar_in_use, images_only=True)
     return out
 
 

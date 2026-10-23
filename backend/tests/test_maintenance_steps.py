@@ -364,6 +364,22 @@ def test_orphan_sweep_keeps_a_nested_media_file_a_message_shows(scratch):
     assert out["orphan_sweep"]["rows"] == 1 and not (root / "media" / "feed" / "lost.png").exists()
 
 
+def test_orphan_sweep_keeps_the_dated_avatar_bank_of_a_character_that_exists(scratch):
+    """The avatar rotator keeps <bot id>-YYYY-MM-DD-{face,full}.png pairs: in use while the
+    character exists; a gone character's pair is an orphan like any other."""
+    from app import config
+    scratch.admin()
+    root = scratch.root
+    assert config.get_bot("pack_otter") is not None
+    kept = [put(root / "avatars" / f"pack_otter-2026-08-0{d}-{k}.png") for d in (1, 2) for k in ("face", "full")]
+    gone = put(root / "avatars" / "retired_bot-2026-08-01-face.png")
+    for f in (*kept, gone):
+        os_age(f, 60)
+    out = run(["orphan_sweep"])
+    assert all(f.exists() for f in kept)
+    assert not gone.exists() and out["orphan_sweep"]["rows"] == 1
+
+
 def test_orphan_sweep_reports_files_rows_without_a_blob(scratch):
     _orphan_world(scratch)
     res = maintenance.run_nightly(now=NOW, steps=["orphan_sweep"], dry_run=True, sleep=0)
