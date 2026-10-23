@@ -180,3 +180,70 @@
 .tools-arrange { padding-inline-start: 46px; }
 
 /* ===== WP-SCALE-FE: thread pager, Archived view, load earlier, Storage and image cards ===== */
+
+/* The rail's "Show more" row and the Archived view. */
+.thread-more { display: flex; justify-content: center; padding: 10px 6px 14px; }
+.thread-more-btn, .load-earlier-btn { min-height: 36px; }
+.archived-head { display: flex; align-items: center; gap: 10px; padding: 4px 4px 10px; flex-wrap: wrap; }
+.archived-back { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; }
+.archived-back > svg.rail-icon { width: 16px; height: 16px; }
+.archived-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.thread-unarchive {
+  align-self: flex-start; margin-top: 6px; padding: 4px 10px; min-height: 30px; cursor: pointer;
+  font: inherit; font-size: 12px; color: var(--text-secondary);
+  background: none; border: 1px solid var(--border-strong); border-radius: var(--radius-sm, 8px);
+}
+.thread-unarchive:hover, .thread-unarchive:focus-visible { color: var(--text-primary); border-color: var(--accent); }
+#archived-btn.active { color: var(--accent-text, var(--accent)); background: var(--bg-tertiary); }
+
+/* A long thread: the top-of-list "Load earlier" row, and the spacers that stand in for rows that are not painted. */
+.load-earlier { display: flex; justify-content: center; padding: 4px 0 12px; }
+.win-gap { display: block; flex: none; pointer-events: none; }
+/* Rows are laid out for real: with content-visibility:auto an unseen row is an 80px guess until it scrolls
+ * into view, and the list jumps by the difference. The window above keeps the row count near 300, so the
+ * saving it was after is already made. */
+.messages > .msg { content-visibility: visible; }
+
+/* An image the retention setting removed. */
+.media-expired {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  padding: 10px 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius-md);
+  color: var(--text-muted, var(--text-secondary)); font-size: 13px; background: var(--bg-secondary, transparent);
+}
+.media-expired > svg.rail-icon { flex: none; }
+.media-expired-text { overflow-wrap: anywhere; }
+
+/* Settings -> System: Storage and Generated images. */
+.sys-cleanup { display: contents; }
+.storage-card, .retention-card, .archive-after { max-width: 640px; }
+.storage-areas { list-style: none; margin: 8px 0 6px; padding: 0; display: grid; gap: 6px; }
+.storage-area { display: grid; grid-template-columns: minmax(96px, 36%) 1fr 4.5em; gap: 10px; align-items: center; font-size: 13px; }
+.storage-area-name { color: var(--text-primary); overflow-wrap: anywhere; }
+.storage-area-bar { height: 8px; border-radius: 4px; background: var(--bg-tertiary); overflow: hidden; }
+.storage-area-fill { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.storage-area-size { color: var(--text-secondary); font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
+.storage-free { margin: 4px 0 10px; font-size: 13px; color: var(--text-secondary); }
+.storage-run p { margin: 4px 0; font-size: 13px; }
+.storage-lastrun.failed { color: var(--error-text); }
+.storage-steps { list-style: none; margin: 6px 0 8px; padding: 0; display: grid; gap: 2px; font-size: 12px; }
+.storage-step { display: flex; gap: 10px; justify-content: space-between; padding: 3px 0; border-top: 1px solid var(--border-subtle, var(--border-strong)); }
+.storage-step-name { color: var(--text-secondary); text-transform: capitalize; flex: none; }
+.storage-step-note { color: var(--text-muted, var(--text-secondary)); text-align: end; overflow-wrap: anywhere; }
+.storage-step.failed .storage-step-name, .storage-step.failed .storage-step-note { color: var(--error-text); font-weight: 600; }
+.storage-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.storage-stray-h { margin: 14px 0 2px; font-size: 13px; }
+.storage-stray-list { margin: 4px 0 0; padding-inline-start: 18px; font-size: 12px; overflow-wrap: anywhere; }
+.retention-row, .archive-after-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
+.retention-months-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.retention-row .ui-select, .archive-after-row .ui-select { width: auto; min-width: 9em; max-width: 100%; }
+.retention-row .ui-input.retention-months { width: 6em; }
+.retention-months-unit { font-size: 14px; color: var(--text-secondary); }
+.retention-months[aria-invalid="true"] { border-color: var(--error); }
+.retention-result { min-height: 1.4em; margin: 6px 0; font-size: 13px; }
+.retention-result p { margin: 2px 0; }
+.retention-error { color: var(--error-text); }
+.archive-after-label { color: var(--text-primary); font-size: 14px; }
+@media (max-width: 480px) {
+  .storage-area { grid-template-columns: 1fr auto; }
+  .storage-area-bar { grid-column: 1 / -1; grid-row: 2; }
+}

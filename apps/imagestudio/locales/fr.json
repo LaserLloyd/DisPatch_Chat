@@ -11,7 +11,7 @@
     ]
   },
   "title": "Studio d'images",
-  "locked": "Déverrouillez pour un accès complet",
+  "locked": "Ce profil ne peut pas utiliser Image Studio. Demande à un admin.",
   "loading": "Chargement…",
   "nim.hidden": "Les images sont masquées en mode sans image.",
   "prompt.label": "Prompt",

@@ -9,7 +9,7 @@
     ]
   },
   "title": "图像工作室",
-  "locked": "解锁以获得完整访问权限",
+  "locked": "此个人资料无法使用 Image Studio。请联系管理员。",
   "loading": "加载中…",
   "nim.hidden": "无图模式下不显示图片。",
   "prompt.label": "提示词",

@@ -67,7 +67,7 @@
   "detail.first_seen": "First seen",
   "detail.source": "Source",
   "detail.offline": "تعذّر الوصول إلى DisPatch — تحقّق من الاتصال.",
-  "detail.locked": "ألغِ القفل لعرض هذه الوظيفة.",
+  "detail.locked": "سجّل الدخول بملف شخصي يستطيع رؤية هذه الوظيفة.",
   "seniority.junior": "Junior",
   "seniority.senior": "Senior",
   "seniority.staff": "Staff",
@@ -114,5 +114,5 @@
   "tags.remove": "إزالة الوسم {tag}",
   "archive.button": "أرشفة",
   "archive.done": "تمت الأرشفة",
-  "locked": "افتح قفل DisPatch لعرض لوحة الوظائف."
+  "locked": "لا يستطيع هذا الملف الشخصي فتح Job Board. اطلب من مشرف."
 }

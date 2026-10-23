@@ -62,7 +62,7 @@
   "detail.first_seen": "初出",
   "detail.source": "情報源",
   "detail.offline": "DisPatch に接続できません。接続を確認してください。",
-  "detail.locked": "この求人を見るにはロックを解除してください。",
+  "detail.locked": "この求人を見られるプロファイルでサインインしてください。",
   "seniority.junior": "ジュニア",
   "seniority.senior": "シニア",
   "seniority.staff": "スタッフ",
@@ -109,5 +109,5 @@
   "tags.remove": "タグ {tag} を削除",
   "archive.button": "アーカイブ",
   "archive.done": "アーカイブしました",
-  "locked": "求人ボードを見るには DisPatch のロックを解除してください。"
+  "locked": "このプロファイルではジョブボードを開けません。管理者に相談してください。"
 }

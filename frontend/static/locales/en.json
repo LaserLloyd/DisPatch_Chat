@@ -253,7 +253,6 @@
     "hint": "Tap a picture to change it. Reorder with ▲/▼ (or drag).",
     "language": "Language",
     "minimal_avatars": "Minimal avatars",
-    "change_photo": "Change photo",
     "change_photo_short": "Change photo",
     "react_title": "Let this bot fire reaction images",
     "pool_title": "Give this bot an avatar pool — each new chat draws its own one-shot face",
@@ -2046,7 +2045,10 @@
     "export": "Export",
     "erase": "Erase",
     "erase_confirm": "Erase {name} and everything attached to the profile? This cannot be undone.",
-    "erased": "Profile erased."
+    "erased": "Profile erased.",
+    "tier_recent": "Recent",
+    "tier_daily": "Daily",
+    "tier_weekly": "Weekly"
   },
   "host_notice": {
     "title": "Stored on the host computer",
@@ -2258,7 +2260,7 @@
     "trash": "Trash",
     "stray": "Old .bak files",
     "stray_hint": "Listed only. Nothing here is deleted automatically.",
-    "other": "Other",
+    "rest": "Other",
     "free": "Free disk space",
     "last_run": "Last clean-up: {when} ({duration})",
     "next_run": "Next clean-up: {when}",
@@ -2267,7 +2269,13 @@
     "running": "Running…",
     "refresh": "Refresh",
     "step_failed": "{step} failed: {error}",
-    "step_rows": "{rows} rows"
+    "step_rows": "{rows} rows",
+    "total": "Total",
+    "measured": "Measured {when}",
+    "blocked": "Paused: a backup or maintenance window is active.",
+    "by_area": "Disk use by area",
+    "started": "Clean-up started.",
+    "scanning": "Measuring…"
   },
   "retention": {
     "title": "Clean-up",
@@ -2281,7 +2289,9 @@
     "preview_first": "Check first, then save.",
     "save": "Save",
     "saved": "Saved.",
-    "trash_note": "Expired images stay in the trash for 14 days before they are deleted."
+    "trash_note": "Expired images stay in the trash for 14 days before they are deleted.",
+    "months_label": "Months",
+    "hint": "Applies to every picture DisPatch generated: chat pictures, Image Studio, reactions and avatars. Pictures still in use are never removed."
   },
   "archive": {
     "older_than": "Archive chats older than",
@@ -2293,7 +2303,10 @@
     "empty": "No archived chats.",
     "unarchive": "Move back",
     "load_earlier": "Load earlier",
-    "show_more": "Show more"
+    "show_more": "Show more",
+    "back": "Back to chats",
+    "would": "{count} chats would be archived now.",
+    "moved_back": "Moved back to your chats."
   },
   "media": {
     "expired": "image expired"

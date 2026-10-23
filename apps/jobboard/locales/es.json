@@ -64,7 +64,7 @@
   "detail.first_seen": "First seen",
   "detail.source": "Source",
   "detail.offline": "No se pudo contactar con DisPatch — comprueba la conexión.",
-  "detail.locked": "Desbloquea para ver este empleo.",
+  "detail.locked": "Inicia sesión en un perfil que pueda ver este empleo.",
   "seniority.junior": "Junior",
   "seniority.senior": "Senior",
   "seniority.staff": "Staff",
@@ -111,5 +111,5 @@
   "tags.remove": "Quitar la etiqueta {tag}",
   "archive.button": "Archivar",
   "archive.done": "Archivado",
-  "locked": "Desbloquea DisPatch para ver el tablón de empleos."
+  "locked": "Este perfil no puede abrir el Job Board. Pídeselo a un administrador."
 }

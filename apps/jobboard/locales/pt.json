@@ -64,7 +64,7 @@
   "detail.first_seen": "First seen",
   "detail.source": "Source",
   "detail.offline": "Não foi possível contactar o DisPatch — verifique a ligação.",
-  "detail.locked": "Desbloqueie para ver esta vaga.",
+  "detail.locked": "Inicia sessão num perfil que possa ver esta vaga.",
   "seniority.junior": "Junior",
   "seniority.senior": "Senior",
   "seniority.staff": "Staff",
@@ -111,5 +111,5 @@
   "tags.remove": "Remover a etiqueta {tag}",
   "archive.button": "Arquivar",
   "archive.done": "Arquivada",
-  "locked": "Desbloqueie o DisPatch para ver o quadro de vagas."
+  "locked": "Este perfil não pode abrir o Quadro de vagas. Pede a um administrador."
 }

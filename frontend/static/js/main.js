@@ -48,6 +48,12 @@ import {
 import { renderVoiceHeard } from './voice-heard.js?v=1';
 import { maybeShowSignInNotice, armSignInNotice } from './host-notice.js?v=1';
 import { createChatDrop } from './chatdrop.js?v=1';
+// 4.0 scale round: the rail pages by cursor, a long thread is windowed, and the clean-up cards.
+import {
+  ThreadPager, showMoreRow, MessageWindow, renderArchiveControl, WINDOW_MAX, MESSAGE_PAGE,
+} from './thread-pager.js?v=1';
+import { renderStorageCard, renderRetentionCard } from './storage-card.js?v=1';
+import { installExpiredImages } from './media-expired.js?v=1';
 import { activeLayout, applyLayout, moveItem, saveLayout, wireRailDrag, openArrangeDialog } from './railmenu.js?v=1';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=16';
 import { mountPluginsSettings } from './plugins.js?v=17';
@@ -88,7 +94,7 @@ import { renderLinkRail, linksSection } from './links.js?v=7';
 import { createGallery, createChrome, keyDirection, inBottomZone, swipeDirection, normalizeGalleryRequest } from './lightbox-nav.js?v=1';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
 // same closeAllOverlays route). main.js only decides WHEN it may open: host paths
-// are an Admin surface, so isDecoy is a live callback ("not an Admin") rather than a boolean.
+// are an Admin surface, so refuse() is a live callback ("not an Admin") rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=7';
 import { aboutRow } from './about.js?v=22';
 // Profiles (Admin / User / Basic): pure decisions (profiles.js), the sign-in /
@@ -141,6 +147,8 @@ const state = {
   connected: false,
   attachments: [],     // [{url, name}]
   hasMoreOlder: false, // active thread has older pages to scroll back into
+  loadingOlder: false, // a "Load earlier" request is in flight
+  threadsView: 'chats', // the rail shows 'chats' or the 'archived' view of the selected character
   streamingIds: new Set(), // message ids currently being streamed
   unread: {},          // thread_id -> ISO time of oldest unread bot message
   progress: {},        // thread_id -> live working items (thinking/tool calls)
@@ -874,21 +882,24 @@ function renderSidebarInner() {
   // Placement is per-device (see menubots.js): a bot parked in the Tools popup leaves the rail.
   pruneMenuBots(state.bots.map((b) => b.id));
   const menuIds = menuBotIds();
-  const bots = allVisible.filter((b) => !menuIds.has(b.id));
+  let bots = allVisible.filter((b) => !menuIds.has(b.id));
   const menuBots = allVisible.filter((b) => menuIds.has(b.id));
   // Mine / Household: two labelled groups when both exist, or when the profile has none of
   // its own yet but may make some. A profile with only one kind sees a plain rail.
   const hasMine = bots.some(isMineBot);
   const hasHousehold = bots.some((b) => !isMineBot(b));
-  const grouped = hasMine && hasHousehold;
-  const offerMake = !hasMine && hasHousehold && canMakeBots();
+  // A profile that may make bots always gets the "+" tile, however many it has already.
+  const offerMake = canMakeBots();
+  const showGroups = hasHousehold && (hasMine || offerMake);
+  // Mine first, so each label appears once.
+  if (showGroups) bots = [...bots.filter(isMineBot), ...bots.filter((b) => !isMineBot(b))];
   let lastGroup = null;
   if (offerMake) {
-    list.append(railGroupLabel('mine'), railMakeBotButton());
-    lastGroup = 'mine';
+    if (showGroups) { list.append(railGroupLabel('mine'), railMakeBotButton()); lastGroup = 'mine'; }
+    else list.append(railMakeBotButton());
   }
   bots.forEach((bot, idx) => {
-    if (grouped || offerMake) {
+    if (showGroups) {
       const g = isMineBot(bot) ? 'mine' : 'household';
       if (g !== lastGroup) { list.append(railGroupLabel(g)); lastGroup = g; }
     }
@@ -1078,6 +1089,15 @@ function renderThreadsInner() {
     ]));
     return;
   }
+  const archivedView = state.threadsView === 'archived';
+  if (archivedView) wrap.append(archivedHeadEl());
+  if (!state.threads.length && archivedView) {
+    wrap.append(el('div', { class: 'empty-list' }, [
+      el('div', { class: 'empty-emoji' }, [railIcon(RAIL_ICONS.archive)]),
+      el('p', { text: t('archive.empty') }),
+    ]));
+    return;
+  }
   if (!state.threads.length) {
     wrap.append(el('div', { class: 'empty-list' }, [
       el('div', { class: 'empty-emoji' }, [railIcon(RAIL_ICONS.messages)]),
@@ -1101,6 +1121,7 @@ function renderThreadsInner() {
     // `th`, not `t`: the translator is imported under that name and a thread
     // variable called `t` would shadow it for the whole loop body.
     for (const th of state.threads) wrap.append(threadRowEl(th, bot));
+    appendThreadsMore(wrap);
     return;
   }
   const now = Date.now();
@@ -1124,6 +1145,104 @@ function renderThreadsInner() {
     wrap.append(threadSectionHeadEl(section.name, t));
     for (const th of section.items) wrap.append(threadRowEl(th, bot));
   }
+  appendThreadsMore(wrap);
+}
+
+// ---- Paging the rail (js/thread-pager.js): page one is 50 threads plus the pinned ones,
+// "Show more" (or scrolling to it) fetches the next page by cursor.
+const threadPager = new ThreadPager(() => Promise.resolve({ threads: [], next_cursor: null }));
+
+/** Point the pager at the selected character's chats or archived chats and forget its cursor. */
+function aimThreadPager(botId, view) {
+  threadPager.reset();
+  threadPager.fetchPage = (cursor) => api.threads(botId, { cursor, archived: view === 'archived' });
+}
+
+/** Everything a freshly listed thread row has to register (unread dot, thinking flag, bot map). */
+function absorbThreadRows(rows) {
+  rows.forEach((th) => {
+    state.threadBot[th.id] = th.bot_id;
+    syncUnreadFromThread(th);
+    // Reconcile authoritative "thinking" state from the server thread status (so a stuck
+    // optimistic flag clears, e.g. after a WS reconnect).
+    if (th.status === 'thinking') state.thinking[th.id] = true;
+    else delete state.thinking[th.id];
+  });
+}
+
+function appendThreadsMore(wrap) {
+  if (!threadPager.hasMore && !threadPager.loading) return;
+  wrap.append(showMoreRow({ t, el, loading: threadPager.loading, onMore: loadMoreThreads }));
+}
+
+async function loadMoreThreads() {
+  const botId = state.selectedBotId;
+  if (!botId || !threadPager.hasMore || threadPager.loading) return;
+  const pending = threadPager.loadMore(state.threads);
+  renderThreads();                       // the row turns into "Loading…"
+  let rows = null;
+  try { rows = await pending; } catch (e) { toast(cleanErr(e), true); }
+  if (state.selectedBotId !== botId) return;
+  if (rows) { absorbThreadRows(rows); state.threads = rows; }
+  renderThreads();
+}
+
+function archivedHeadEl() {
+  return el('div', { class: 'archived-head' }, [
+    el('button', { type: 'button', class: 'ui-btn archived-back', onclick: () => showThreadsView('chats') }, [
+      railIcon(RAIL_ICONS.back), document.createTextNode(` ${t('archive.back')}`),
+    ]),
+    el('h3', { class: 'archived-title', text: t('archive.view') }),
+  ]);
+}
+
+/** Switch the rail between the selected character's chats and its Archived view. */
+async function showThreadsView(view) {
+  const botId = state.selectedBotId;
+  if (!botId || isToolId(botId) || state.threadsView === view && view === 'chats') return;
+  state.threadsView = view;
+  aimThreadPager(botId, view);
+  paintArchivedButton();
+  state.threads = [];
+  renderThreads();
+  try {
+    const rows = await threadPager.loadFirst([]);
+    if (state.selectedBotId !== botId || state.threadsView !== view) return;
+    if (rows) { absorbThreadRows(rows); state.threads = rows; }
+  } catch (e) { toast(cleanErr(e), true); }
+  if (state.selectedBotId !== botId || state.threadsView !== view) return;
+  renderThreads();
+  if (isMobile()) navigate('threads');
+}
+
+async function unarchiveThread(id) {
+  try {
+    await api.unarchive(id);
+    state.threads = state.threads.filter((x) => x.id !== id);
+    toast(t('archive.moved_back'));
+    renderThreads();
+  } catch (e) { toast(cleanErr(e), true); }
+}
+
+function paintArchivedButton() {
+  const b = document.getElementById('archived-btn');
+  if (!b) return;
+  const on = state.threadsView === 'archived';
+  b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  b.classList.toggle('active', on);
+}
+
+/** The Archived button in the thread list's header (next to search and New chat). */
+function wireArchivedButton() {
+  if (document.getElementById('archived-btn')) return;
+  const newBtn = dom['new-chat'];
+  if (!newBtn || !newBtn.parentNode) return;
+  const b = el('button', {
+    type: 'button', class: 'icon-btn ghost', id: 'archived-btn',
+    title: t('archive.view'), 'aria-label': t('archive.view'), 'aria-pressed': 'false',
+  }, [spriteIcon('archive', 18)]);
+  b.addEventListener('click', () => showThreadsView(state.threadsView === 'archived' ? 'chats' : 'archived'));
+  newBtn.parentNode.insertBefore(b, newBtn);
 }
 
 /** Build ONE thread row.
@@ -1180,7 +1299,10 @@ function threadRowEl(th, bot) {
       dataset: { id: th.id },    // lets repaintPreserving restore keyboard focus
       tabindex: '0', role: 'button', 'aria-label': threadTitle(th),
       onclick: () => openThread(th.id),
-      onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openThread(th.id); } },
+      onkeydown: (e) => {
+        if (e.target !== row) return;     // the Move back button handles its own keys
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openThread(th.id); }
+      },
     }, [
       threadAvatarNode(th, bot),
       el('div', { class: 'thread-main' }, [
@@ -1189,7 +1311,11 @@ function threadRowEl(th, bot) {
           el('div', { class: 'thread-time', text: relTime(th.updated_at) }),
         ]),
         previewEl,
-      ]),
+        state.threadsView === 'archived'
+          ? el('button', { type: 'button', class: 'thread-unarchive', text: t('archive.unarchive'),
+            onclick: (e) => { e.stopPropagation(); unarchiveThread(th.id); } })
+          : null,
+      ].filter(Boolean)),
     ]);
     return row;
   }
@@ -1258,6 +1384,14 @@ function upsertThread(t) {
   syncUnreadFromThread(t);
   if (t.bot_id !== state.selectedBotId) return;
   const idx = state.threads.findIndex((x) => x.id === t.id);
+  // The Archived view lists archived chats only: a live update neither adds a row to it nor
+  // keeps one that is no longer archived.
+  if (state.threadsView === 'archived') {
+    if (idx >= 0 && t.is_archived === false) state.threads.splice(idx, 1);
+    else if (idx >= 0) state.threads[idx] = { ...state.threads[idx], ...t };
+    return;
+  }
+  if (t.is_archived) { if (idx >= 0) state.threads.splice(idx, 1); return; }
   if (idx >= 0) state.threads[idx] = { ...state.threads[idx], ...t };
   else state.threads.unshift(t);
   sortThreads();
@@ -1646,8 +1780,15 @@ function clearReplyTarget() {
 // same tolerance the rest of this feature gives a quote that no longer
 // resolves to anything.
 function jumpToMessage(id) {
-  const target = dom['messages'].querySelector(`[data-id="${CSS.escape(id)}"]`);
-  if (!target) return;
+  let target = dom['messages'].querySelector(`[data-id="${CSS.escape(id)}"]`);
+  if (!target) {
+    // In a long thread the quoted row may be loaded but not painted: paint a window around it.
+    const idx = state.messages.findIndex((m) => m.id === id);
+    if (idx < 0) return;
+    messageWindow().showIndex(idx);
+    target = dom['messages'].querySelector(`[data-id="${CSS.escape(id)}"]`);
+    if (!target) return;
+  }
   target.scrollIntoView({ block: 'center', behavior: 'smooth' });
   target.classList.add('flash');
   setTimeout(() => target.classList.remove('flash'), 1000);
@@ -1868,7 +2009,7 @@ function messageEl(msg) {
   // moment it gets a src. Building it first and then returning the trace row
   // threw the node away but not the fetch — every reaction trace in a thread
   // pulled the bot's avatar for a row that never showed one.
-  const trace = reactionMessageEl(msg, { decoy: nimEnabled() });
+  const trace = reactionMessageEl(msg, { noImage: nimEnabled() });
   if (trace) return trace;
 
   // Machine-posted alerts (failed runs, watchdogs, missed pictures) collapse
@@ -2199,12 +2340,66 @@ function renderSkeleton() {
   box.append(wrap);
 }
 
-// A bot with `quick_actions: false` (the kids' animals) gets no chips, pill or composer
-// button, and none of the generic suggestion chips either.
+// A bot with `quick_actions: false` gets no chips, pill or composer button, and none of the
+// generic suggestion chips either.
 function syncQuickAllowed() {
   const b = botById(state.activeThread?.bot_id) || botById(state.selectedBotId);
   setQuickAllowed(!(b && b.quick_actions === false));
   return !(b && b.quick_actions === false);
+}
+
+/** The DOM nodes for state.messages[from, to): date separators and message rows.
+ *  `lead`: the first row gets its date separator (a whole list, or a window's first row);
+ *  without it the run continues the previous message's day and grouping (rows added at the end). */
+function buildMessageNodes(from, to, { lead = true } = {}) {
+  const out = [];
+  let lastDay = '';
+  let prev = null;
+  if (!lead && from > 0) {
+    prev = state.messages[from - 1];
+    lastDay = dayKey(prev.created_at) || '';
+  }
+  for (let i = from; i < to; i += 1) {
+    const msg = state.messages[i];
+    // Build the row BEFORE the date separator. In NIM a picture-only message
+    // renders as null, and a day whose every message was a picture must not
+    // leave a dangling "Tuesday" heading with nothing under it — so the
+    // separator is only emitted once we know something will follow it.
+    const node = messageEl(msg);
+    // null = NIM dropped a picture-only row. Skip it WITHOUT touching `prev`,
+    // so the dropped message can't break the grouping run either side of it —
+    // two texts from the same sender with an image between them should still
+    // read as one grouped run once the image is gone.
+    if (!node) continue;
+    const dk = dayKey(msg.created_at);
+    if (dk && dk !== lastDay) {
+      const sep = el('div', { class: 'date-sep', text: dayLabel(msg.created_at) });
+      sep.dataset.day = dk;
+      out.push(sep);
+      lastDay = dk;
+      prev = null;   // a date break ends a run, so the next row shows identity
+    }
+    if (isGrouped(prev, msg)) node.classList.add('grouped');
+    out.push(node);
+    prev = msg;
+  }
+  return out;
+}
+
+// The windowed message list (js/thread-pager.js MessageWindow): created once, reads the live
+// state.messages and the live #messages box.
+let msgWindow = null;
+function messageWindow() {
+  if (!msgWindow || msgWindow.box !== dom['messages']) {
+    msgWindow = new MessageWindow({
+      box: dom['messages'],
+      getMessages: () => state.messages,
+      build: buildMessageNodes,
+      getMore: () => ({ has: state.hasMoreOlder, loading: state.loadingOlder, onClick: loadOlderMessages }),
+      t, el,
+    });
+  }
+  return msgWindow;
 }
 
 function renderMessages(stick = true) {
@@ -2240,29 +2435,9 @@ function renderMessages(stick = true) {
     }
     box.append(welcome);
   } else {
-    let lastDay = '';
-    let prev = null;
-    for (const msg of state.messages) {
-      // Build the row BEFORE the date separator. In NIM a picture-only message
-      // renders as null, and a day whose every message was a picture must not
-      // leave a dangling "Tuesday" heading with nothing under it — so the
-      // separator is only emitted once we know something will follow it.
-      const node = messageEl(msg);
-      // null = NIM dropped a picture-only row. Skip it WITHOUT touching `prev`,
-      // so the dropped message can't break the grouping run either side of it —
-      // two texts from the same sender with an image between them should still
-      // read as one grouped run once the image is gone.
-      if (!node) continue;
-      const dk = dayKey(msg.created_at);
-      if (dk && dk !== lastDay) {
-        box.append(el('div', { class: 'date-sep', text: dayLabel(msg.created_at) }));
-        lastDay = dk;
-        prev = null;   // a date break ends a run, so the next row shows identity
-      }
-      if (isGrouped(prev, msg)) node.classList.add('grouped');
-      box.append(node);
-      prev = msg;
-    }
+    // At most about WINDOW_MAX rows are painted (js/thread-pager.js): the newest window of a
+    // long thread, with a spacer standing in for the rest.
+    messageWindow().render();
   }
   if (state.thinking[state.activeThreadId]) box.append(typingEl());
 
@@ -2287,6 +2462,17 @@ function appendMessageToView(msg) {
   if (state.messages.some((m) => m.id === msg.id)) return;
   state.messages.push(msg);
   const box = dom['messages'];
+  const win = messageWindow();
+  if (!win.atTail()) {
+    // Reading far back in a long thread: the newest rows are not painted. Your own message
+    // takes you to the end; someone else's only counts toward the jump-to-new badge.
+    if (msg.role === 'user') { win.ensureTail(); scrollToBottom(true); return; }
+    win.noteLiveAppend();
+    showScrollButton(true);
+    bumpUnseen();
+    announceMessage(msg);
+    return;
+  }
   const emptyState = box.querySelector('.empty-state');
   if (emptyState) emptyState.remove();
   // Build the row first: in NIM a picture-only message renders as null, and
@@ -2305,6 +2491,7 @@ function appendMessageToView(msg) {
   if (sameDay && isGrouped(last, msg)) node.classList.add('grouped');
   const typing = box.querySelector('.typing');
   if (typing) box.insertBefore(node, typing); else box.append(node);
+  win.afterLiveAppend();             // over the cap at the end of the list: drop rows from the top
   if (isNearBottom()) scrollToBottom();
   else { showScrollButton(true); if (msg.role !== 'user') bumpUnseen(); }
   if (msg.role !== 'user') announceMessage(msg);
@@ -2500,6 +2687,9 @@ function isNearBottom(px = 140) {
 }
 function scrollToBottom(instant = false) {
   const b = dom['messages'];
+  // A long thread read far back: paint the newest rows first, and jump (a smooth scroll over that
+  // distance would run through the spacer while the window moves under it).
+  if (messageWindow().ensureTail()) instant = true;
   if (instant) {
     // Temporarily override CSS scroll-behavior: smooth for an immediate jump.
     b.style.scrollBehavior = 'auto';
@@ -3539,20 +3729,16 @@ async function selectBot(id) {
   // Leaving a tool pane for a real bot tears the view down cleanly.
   closeToolPanes();
   state.selectedBotId = id;
+  state.threadsView = 'chats';
+  paintArchivedButton();
   renderSidebar();
   updateThreadListHeader();
+  aimThreadPager(id, 'chats');
   try {
-    const r = await api.threads(id);
-    if (state.selectedBotId !== id) return;   // user switched while loading
-    state.threads = r.threads || [];
-    state.threads.forEach((t) => {
-      state.threadBot[t.id] = t.bot_id;
-      syncUnreadFromThread(t);
-      // Reconcile authoritative "thinking" state from the server thread status
-      // (so a stuck optimistic flag clears, e.g. after a WS reconnect).
-      if (t.status === 'thinking') state.thinking[t.id] = true;
-      else delete state.thinking[t.id];
-    });
+    const rows = await threadPager.loadFirst([]);
+    if (state.selectedBotId !== id || rows === null) return;   // user switched while loading
+    state.threads = rows;
+    absorbThreadRows(rows);
   } catch (e) {
     if (state.selectedBotId !== id) return;   // stale failure — don't clobber
     state.threads = []; toast(e.message, true);
@@ -3689,7 +3875,12 @@ async function openThread(id, { background = false, botId = null } = {}) {
   // Bug 1: Don't scroll to bottom if we have a saved position for the target
   // thread — restore that instead.
   const hasSavedPos = state.scrollPositions[id] !== undefined;
-  if (!keptCachedView) renderMessages((!background || wasNearBottom) && !hasSavedPos);
+  if (!keptCachedView) {
+    // A refresh under someone reading far back in a long thread keeps their place instead of
+    // repainting the newest window.
+    if (background && !wasNearBottom && messageWindow().isWindowed()) messageWindow().repaintKeeping();
+    else renderMessages((!background || wasNearBottom) && !hasSavedPos);
+  }
   if (background && !wasNearBottom) box.scrollTop = savedTop;
   // Let the swap-induced scroll events (clamp + restore/stick) flush before
   // re-enabling position saving.
@@ -3703,36 +3894,36 @@ async function openThread(id, { background = false, botId = null } = {}) {
   }
 }
 
-// Scroll-back pagination: load the previous page when the user nears the top.
-let loadingOlder = false;
+// "Load earlier": the previous page of the open thread (keyset on the oldest message we hold),
+// from the button at the top of the list or when the reader scrolls up to it. The row the reader
+// was looking at stays where it was.
 async function loadOlderMessages() {
   const id = state.activeThreadId;
-  if (!id || loadingOlder || !state.hasMoreOlder || !state.messages.length) return;
-  loadingOlder = true;
-  const box = dom['messages'];
-  const prevHeight = box.scrollHeight;
-  const prevTop = box.scrollTop;
+  if (!id || state.loadingOlder || !state.hasMoreOlder || !state.messages.length) return;
+  const win = messageWindow();
+  if (win.gap('top')) return;          // older rows are already loaded, just not painted: scrolling brings them
+  state.loadingOlder = true;
+  win._syncLoadEarlier();              // the button reads "Loading…"
+  const anchor = win._anchorNode();
+  const anchorId = anchor ? anchor.dataset.id : null;
   try {
-    const r = await api.messages(id, state.messages[0].id);
+    const r = await api.messages(id, state.messages[0].id, MESSAGE_PAGE);
     if (state.activeThreadId !== id) return;
     const older = r.messages || [];
     state.hasMoreOlder = !!r.has_more;
     if (older.length) {
       const ids = new Set(state.messages.map((m) => m.id));
       state.messages = older.filter((m) => !ids.has(m.id)).concat(state.messages);
-      // Drop any saved scroll offset first: with it set, renderMessages(false)
-      // would launch settleScroll(() => savedPos) and re-pin the viewport near
-      // the top every frame — overriding the manual anchor below and, because
-      // that keeps scrollTop < 80, re-triggering loadOlderMessages in a runaway
-      // cascade that burst-loads the whole history. Cleared → renderMessages
-      // runs neither scroll branch and the anchor is authoritative.
+      // Drop any saved scroll offset first: with it set, renderMessages(false) would re-pin the
+      // viewport near the top every frame and re-trigger this in a runaway cascade.
       delete state.scrollPositions[id];
-      renderMessages(false);
-      // Keep the viewport anchored on what the user was reading.
-      box.scrollTop = box.scrollHeight - prevHeight + prevTop;
+      win.repaintKeeping(anchorId);
     }
   } catch (e) { toast(e.message, true); }
-  finally { loadingOlder = false; }
+  finally {
+    state.loadingOlder = false;
+    if (state.activeThreadId === id) win._syncLoadEarlier();
+  }
 }
 
 // Re-sync everything after a dropped+restored WebSocket connection.
@@ -3740,15 +3931,12 @@ async function resync() {
   const botId = state.selectedBotId;
   if (!botId) return;
   try {
-    const r = await api.threads(botId);
-    if (state.selectedBotId !== botId) return;   // selection changed mid-resync
-    state.threads = r.threads || [];
-    state.threads.forEach((t) => {
-      state.threadBot[t.id] = t.bot_id;
-      syncUnreadFromThread(t);
-      if (t.status === 'thinking') state.thinking[t.id] = true;
-      else delete state.thinking[t.id];
-    });
+    // Page one again; pages already scrolled in are kept where older (no duplicate rows).
+    threadPager.fetchPage = (cursor) => api.threads(botId, { cursor, archived: state.threadsView === 'archived' });
+    const rows = await threadPager.loadFirst(state.threads);
+    if (state.selectedBotId !== botId || rows === null) return;   // selection changed mid-resync
+    state.threads = rows;
+    absorbThreadRows(rows);
   } catch { return; /* will retry on next reconnect */ }
   if (state.selectedBotId !== botId) return;
   renderThreads();
@@ -4576,6 +4764,8 @@ async function setSettingsTab(target, { focusTab = false } = {}) {
       mountLanguagePicker('account');
       activateSecurityPane({ focusField: false });
       paintAccountWho();
+      // "Archive my chats older than N months": the caller's own setting.
+      renderArchiveControl(pane, { api, t, el, toast, can: () => sessionCan('manage_history') });
       break;
     case 'voice':
       // The add-on's own pane when it is mounted; otherwise how to add it.
@@ -5479,6 +5669,19 @@ async function mountSystemSection(pane) {
   if (box) box.classList.toggle('open', open);
   if (toggle) { toggle.setAttribute('aria-expanded', String(open)); setI18nText(toggle, open ? 'settings.health_close' : 'settings.health_open'); }
   if (host) await mountDashboard(host, dom['sfoot-health'], dashCtx());
+  // Admin only: disk use, the nightly clean-up and the Generated images retention setting.
+  if (canAdmin()) {
+    const backups = document.getElementById('sys-backups');
+    let cleanup = document.getElementById('sys-cleanup');
+    if (!cleanup && backups && backups.parentNode) {
+      cleanup = el('div', { id: 'sys-cleanup', class: 'sys-cleanup' });
+      backups.parentNode.insertBefore(cleanup, backups);
+    }
+    if (cleanup) {
+      renderStorageCard(cleanup, { api, t, el, toast });
+      renderRetentionCard(cleanup, { api, t, el, toast });
+    }
+  }
   const bk = document.getElementById('sys-backups-host');
   if (bk) mountBackups(bk, { toast, confirm: (msg, o) => uiConfirm(msg, o), role: state.role });
   mountSchemaHosts(pane);
@@ -7506,6 +7709,7 @@ function handleWs(data) {
       state.messages = state.messages.filter((m) => m.id !== mid);
       if (data.thread_id === state.activeThreadId) {
         const msgEl = dom['messages'].querySelector(`[data-id="${CSS.escape(mid)}"]`);
+        queueMicrotask(() => messageWindow().resync());
         if (msgEl) {
           // Remove an orphaned date separator that immediately preceded this message.
           const prev = msgEl.previousElementSibling;
@@ -7736,6 +7940,7 @@ function wireEvents() {
   });
 
   dom['new-chat'].addEventListener('click', newChat);
+  wireArchivedButton();
   // Settings.
   dom['manage-bots'].addEventListener('click', () => { openBotManager(); });
   // The rail's theme button is a shortcut straight to Settings → Theme, the
@@ -7841,6 +8046,7 @@ function wireEvents() {
   dom['messages'].addEventListener('scroll', () => {
     showScrollButton(!isNearBottom());
     if (dom['messages'].scrollTop < 80) loadOlderMessages();
+    messageWindow().onScroll();       // a long thread: bring rows in ahead of the reader, drop the far ones
     // Bug 1: Save scroll position on user scroll so it's restored on return.
     // Suppressed while openThread() swaps content (the innerHTML wipe clamps
     // scrollTop to 0 and would record a bogus position for the NEW thread).
@@ -7988,7 +8194,7 @@ async function afterProviderConnected(bot) {
   try { dom['input'].focus(); } catch { /* focus is best-effort */ }
 }
 
-// ===================== Lock / PIN / safe-view =====================
+// ===================== Lock / PIN / sign-in socket =====================
 let socket = null;
 
 function getSocket() {
@@ -8480,7 +8686,7 @@ function renderPins() {
 // ---- The bar vs "Tools & more" (js/railmenu.js) ----
 // Which static rail buttons sit on the bar and which in the Tools popup, per device.
 function applyRailLayout() {
-  applyLayout(activeLayout(false), {
+  applyLayout(activeLayout(), {
     rail: document.getElementById('gear-row'),
     menu: document.getElementById('tools-more'),
   });
@@ -8488,7 +8694,7 @@ function applyRailLayout() {
 }
 
 function moveRailButton(id, zone, beforeId) {
-  saveLayout(moveItem(activeLayout(false), id, zone, beforeId));
+  saveLayout(moveItem(activeLayout(), id, zone, beforeId));
   applyRailLayout();
   if (zone === 'menu' && !toolsMenuOpen()) openToolsMenu('tools');
 }
@@ -8511,7 +8717,6 @@ function wireRailLayout() {
     rail: document.getElementById('gear-row'),
     menu: document.getElementById('tools-more'),
     toolList: document.getElementById('tool-list'),
-    isDecoy: () => false,
     openMenu: () => { if (!toolsMenuOpen()) openToolsMenu('tools'); },
     onMove: moveRailButton,
   });
@@ -9421,95 +9626,23 @@ function wireAuthEvents() {
 
 // ===================== Boot =====================
 
-// The rail's static buttons ship emoji/text glyphs in the markup (a readable
-// no-JS fallback); swap them for the shared line-icon set so the whole rail —
-// built-ins, pins and links alike — speaks one visual language. The theme
-// button is theme.js's (it sets the swatch icon once at boot; it no longer
-// repaints, because there is no per-theme state left to draw), and the buttons
-// carry only data-i18n-attr, so no translation pass ever writes text over the
-// SVG.
-function iconifyRail() {
-  for (const [id, icon] of [
-    ['lock-now', RAIL_ICONS.lock],
-    ['fs-chip', RAIL_ICONS.folder],
-    ['manage-bots', RAIL_ICONS.gear],
-    // 3.2: Tasks was the one colour emoji (📋) left among the line icons.
-    ['tasks-btn', RAIL_ICONS.jobs],
-  ]) {
-    const b = document.getElementById(id);
-    if (b) b.replaceChildren(railIcon(icon));
-  }
-}
-
-// The same swap, for the chrome outside the rail (2026-09). The tab bar, the
-// settings tab strip, the chat header and the composer shipped colour emoji,
-// which the platform draws in its own palette: they cannot theme, and beside
-// the rail's line art they read as another app's furniture. Everything here
-// keeps its emoji in the markup as the no-JS fallback, exactly like the rail.
-//
-// Two rules this function must not break:
-//  1. NEVER replace the whole button when it also holds a text label. The
-//     tabs and the settings tabs carry a translated <span> that i18n rewrites
-//     on every language change; only the GLYPH span is swapped, or the label
-//     disappears the first time someone switches language.
-//  2. Only touch a glyph that is still the shipped emoji. Re-running this (a
-//     re-render, a tier change) must be a no-op rather than nesting an <svg>
-//     inside the last one.
+// The rail, tab bar, chat header and composer ship their line icons in index.html. Two
+// controls still ship a text arrow in the markup (the thread list's collapse and expand
+// handles); they get the shared line icon here. Re-running this is a no-op.
 function iconifyChrome() {
-  // [element, icon, glyphSelector] — glyphSelector picks the span to replace
-  // when the control is more than its glyph; null means the whole element is
-  // the glyph.
-  const swaps = [
-    // Mobile tabs: the glyph is the first <span>, the label is the second.
-    ['.mobile-tabs .tab[data-view="bots"]', RAIL_ICONS.bots, 'span:not(.tab-label)'],
-    ['.mobile-tabs .tab[data-view="threads"]', RAIL_ICONS.chats, 'span:not(.tab-label)'],
-    ['.mobile-tabs .tab[data-action="new-chat"]', RAIL_ICONS.plus, 'span:not(.tab-label)'],
-    // (The Settings nav's line icons are data-icon spans, iconifyDataIcons; Voice's
-    // mic glyph is filled in wireSettingsTabs.)
-    // Chat header + thread list.
-    ['#back-btn', RAIL_ICONS.back, null],
-    ['#expand-threads', RAIL_ICONS.forward, null],
-    ['#collapse-threads', RAIL_ICONS.back, null],
-    ['#popout-btn', RAIL_ICONS.popout, null],
-    ['#thread-menu-btn', RAIL_ICONS.menu, null],
-    ['#search-btn', RAIL_ICONS.search, null],
-    ['#new-chat', RAIL_ICONS.plus, null],
-    ['#scroll-bottom', RAIL_ICONS['chevron-down'], null],
-    // Composer.
-    ['#attach-btn', RAIL_ICONS.attach, null],
-    ['#send', RAIL_ICONS.send, null],
-    ['#stop', RAIL_ICONS.stop, null],
-    // The two big decorative glyphs: the empty chat and the lock face. Scoped
-    // to #chat-empty on purpose — the harness and StudioForge panes reuse
-    // .empty-emoji for their "dsh" and "SF" wordmarks, which are text, not
-    // emoji, and must stay as they are.
-    ['#chat-empty .empty-emoji', RAIL_ICONS.messages, null],
-    ['.lock-emoji', RAIL_ICONS.lock, null],
-  ];
-  for (const [sel, icon, glyphSel] of swaps) {
+  for (const [sel, icon] of [
+    ['#expand-threads', RAIL_ICONS.forward],
+    ['#collapse-threads', RAIL_ICONS.back],
+  ]) {
     const host = document.querySelector(sel);
-    if (!host || !icon) continue;
-    const target = glyphSel ? host.querySelector(glyphSel) : host;
-    if (!target || target.querySelector('svg')) continue;   // already iconified
-    target.replaceChildren(railIcon(icon));
-  }
-  // Every modal in the app closes with the same ✕, on eight different ids.
-  // Matching the GLYPH rather than listing the ids is both shorter and harder
-  // to forget to extend: a ninth modal gets the icon for free. textContent is
-  // compared trimmed and exactly, so a button that merely contains a ✕ inside
-  // a longer label is left alone.
-  for (const b of document.querySelectorAll('.icon-btn')) {
-    if (b.textContent.trim() === '✕') b.replaceChildren(railIcon(RAIL_ICONS.close));  // forgeui: allow-icons
+    if (!host || !icon || host.querySelector('svg')) continue;
+    host.replaceChildren(railIcon(icon));
   }
 }
 
-// The generic form of the two swaps above, for markup written AFTER them
-// (2026-09-18 sweep: the thread menu, the recovery/File-Server/search panel
-// titles, the settings recovery+lock rows). A `<span data-icon="pin">`
-// anywhere in `root` gets that RAIL_ICONS entry — no id list to keep in sync,
-// so a new menu item just needs the attribute. Safe to call again on freshly
-// inserted DOM (a modal's contents, say): already-filled spans are skipped
-// the same way iconifyChrome skips an already-swapped glyph.
+// A `<span data-icon="pin">` anywhere in `root` gets that RAIL_ICONS entry: no id list to
+// keep in sync, so a new menu item just needs the attribute. Safe to call again on freshly
+// inserted DOM (a modal's contents, say): already-filled spans are skipped.
 function iconifyDataIcons(root = document) {
   for (const host of root.querySelectorAll('[data-icon]')) {
     const icon = RAIL_ICONS[host.dataset.icon];
@@ -9521,9 +9654,10 @@ function iconifyDataIcons(root = document) {
 async function startApp() {
   if (state.started) return;
   state.started = true;
-  iconifyRail();
   iconifyChrome();
   iconifyDataIcons();
+  // A picture the retention setting removed answers 410: show "image expired", not a broken image.
+  installExpiredImages({ t, el, icon: spriteIcon });
   // Delegated code-block / file-path copy handlers (idempotent, survives
   // re-render + streaming since it binds on document, not per message).
   // A plain click on a file path opens it in the local viewer; Shift/Alt-click
@@ -10094,6 +10228,7 @@ function cmdkActions() {
   if (canAdmin()) a.push({ icon: RAIL_ICONS.lifering, label: t('cmdk.action_recovery'), run: () => openRecovery() });
   a.push({ icon: RAIL_ICONS.gear, label: t('cmdk.action_settings'), run: () => openSettingsTab(null) });
   if (canAdmin()) a.push({ icon: RAIL_ICONS.pulse, label: t('cmdk.action_health'), run: () => openSettingsTab('system#health') });
+  if (state.selectedBotId && !isToolId(state.selectedBotId)) a.push({ icon: RAIL_ICONS.archive, label: t('archive.view'), run: () => showThreadsView('archived') });
   if (sessionCan('files_upload')) a.push({ icon: RAIL_ICONS.folder, label: t('cmdk.action_files'), run: () => openFileServer() });
   // Open a path on the DisPatch host in the viewer: Admins only.
   if (canAdmin()) a.push({ icon: RAIL_ICONS.eye, label: t('cmdk.open_local'), run: () => openLocalPath() });
@@ -10269,7 +10404,7 @@ async function init() {
   // The local viewer, same shape: it holds no app state, it just needs the
   // app's toast and a live read of the tier. The default fetch-based api is
   // fine — /api/local/{stat,ls} are plain GETs with no client-side state.
-  installViewerHandlers({ onToast: toast, isDecoy: () => !canAdmin() });
+  installViewerHandlers({ onToast: toast, refuse: () => !canAdmin() });
   // The viewer's feature-off pane offers a way to Settings rather than telling
   // the operator to go find it. It cannot import openSettingsTab (that would be
   // a cycle back into main.js), so it asks by event and this is the answer.
