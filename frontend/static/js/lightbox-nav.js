@@ -137,8 +137,126 @@ export function normalizeGalleryRequest(msg) {
       downloadUrl: safeGalleryUrl(it.downloadUrl) ? it.downloadUrl : src,
       downloadName: typeof it.name === 'string' ? it.name.slice(0, 120) : '',
       caption: typeof it.caption === 'string' ? it.caption.slice(0, 1500) : '',
+      info: cleanInfo(it.info),
     });
   });
   if (!items.length) return null;
   return { items, index: clampIndex(index, items.length) };
+}
+
+// ---- zoom (4.0) -------------------------------------------------------------
+//
+// The picture is drawn with `translate(tx, ty) scale(s)` around its own centre. These keep the
+// arithmetic out of the DOM code: zooming about a point (the cursor, a double-click, the middle
+// of a pinch) and clamping the pan so a zoomed picture can never be dragged off the screen.
+
+export const ZOOM_MIN = 1;
+export const ZOOM_MAX = 8;
+/** One press of + / - (or a wheel notch is a fraction of it). */
+export const ZOOM_STEP = 1.25;
+
+export function clampZoom(s) {
+  const n = Number(s);
+  if (!Number.isFinite(n)) return ZOOM_MIN;
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, n));
+}
+
+/**
+ * Zoom `view` ({s, tx, ty}) to scale `next`, keeping the screen point (px, py) where it is.
+ * `rect` is the media element's CURRENT bounding rect (it already includes the transform).
+ */
+export function zoomAt(view, next, px, py, rect) {
+  const s1 = clampZoom(next);
+  if (s1 === ZOOM_MIN) return { s: ZOOM_MIN, tx: 0, ty: 0 };
+  const s0 = view.s || 1;
+  if (!rect || !(rect.width > 0)) return { s: s1, tx: view.tx, ty: view.ty };
+  // The untransformed centre: the rect's centre minus the current translation.
+  const c0x = rect.left + rect.width / 2 - view.tx;
+  const c0y = rect.top + rect.height / 2 - view.ty;
+  const ux = (px - c0x - view.tx) / s0;
+  const uy = (py - c0y - view.ty) / s0;
+  return { s: s1, tx: px - c0x - ux * s1, ty: py - c0y - uy * s1 };
+}
+
+/**
+ * Keep a zoomed picture on screen: `base` is its untransformed size {w, h}, `vp` the viewport
+ * {w, h}. The pan is limited to the part that sticks out; a picture that fits is centred.
+ */
+export function clampPan(view, base, vp) {
+  if (!base || !vp) return view;
+  const lim = (len, room) => Math.max(0, (len * view.s - room) / 2);
+  const lx = lim(base.w, vp.w), ly = lim(base.h, vp.h);
+  const clamp = (v, l) => Math.max(-l, Math.min(l, v)) || 0;     // || 0: never a -0
+  return { s: view.s, tx: clamp(view.tx, lx), ty: clamp(view.ty, ly) };
+}
+
+/** "250%". */
+export function zoomLabel(s) { return `${Math.round(clampZoom(s) * 100)}%`; }
+
+// ---- details (4.0) ----------------------------------------------------------
+
+/** 1536 -> "1.5 KB"; null for an unknown size. */
+export function formatBytes(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v < 0) return null;
+  if (v < 1024) return `${v} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let x = v / 1024, i = 0;
+  while (x >= 1024 && i < units.length - 1) { x /= 1024; i += 1; }
+  return `${x >= 10 ? Math.round(x) : x.toFixed(1)} ${units[i]}`;
+}
+
+/** The file name a URL ends in ("/media/ab12.png?x=1" -> "ab12.png"); "" when there is none. */
+export function fileNameFromUrl(url) {
+  if (typeof url !== 'string') return '';
+  const path = url.split(/[?#]/)[0];
+  const last = path.slice(path.lastIndexOf('/') + 1);
+  try { return decodeURIComponent(last); } catch { return last; }
+}
+
+/** "image/png" -> "PNG". */
+export function typeLabel(mime) {
+  const m = /^image\/([a-z0-9.+-]+)/i.exec(String(mime || ''));
+  if (!m) return '';
+  const sub = m[1].toLowerCase().replace('svg+xml', 'svg');
+  return sub === 'jpeg' ? 'JPEG' : sub.toUpperCase();
+}
+
+/**
+ * The rows of the details panel for one item, in display order, empty ones dropped.
+ * `info` is what the opener knew (prompt, model, workflow, seed, created, source, bot);
+ * `probe` what the viewer measured (width, height, bytes, mime). Labels are i18n keys.
+ */
+export function detailRows(item, probe = {}) {
+  const info = (item && item.info) || {};
+  const rows = [];
+  const add = (key, value) => { if (value != null && String(value).trim() !== '') rows.push({ key, value: String(value) }); };
+  add('lightbox.d_file', (item && item.downloadName) || fileNameFromUrl(item && item.src));
+  const dims = probe.width && probe.height ? `${probe.width} × ${probe.height}` : '';
+  add('lightbox.d_size', [dims, formatBytes(probe.bytes), typeLabel(probe.mime)].filter(Boolean).join(' · '));
+  add('lightbox.d_created', info.created);
+  add('lightbox.d_source', info.source);
+  add('lightbox.d_bot', info.bot);
+  add('lightbox.d_model', info.model);
+  add('lightbox.d_workflow', info.workflow);
+  add('lightbox.d_seed', info.seed);
+  return rows;
+}
+
+/** The prompt to show and copy: the generation prompt, else the caption. */
+export function itemPrompt(item) {
+  const info = (item && item.info) || {};
+  return String(info.prompt || (item && item.caption) || '').trim();
+}
+
+/** A gallery item's `info` from an app page (Image Studio), strings only and capped. */
+export function cleanInfo(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const out = {};
+  for (const [k, cap] of [['prompt', 4000], ['model', 120], ['workflow', 120], ['seed', 40],
+    ['created', 40], ['source', 60], ['bot', 60]]) {
+    const v = raw[k];
+    if (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))) out[k] = String(v).slice(0, cap);
+  }
+  return out;
 }

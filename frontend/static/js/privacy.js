@@ -62,6 +62,7 @@ export const APP_KEYS = [
   'dispatch-settings-last',   // main.js (the Settings section this device opened last)
   'dispatch-settings-adv',    // main.js (which Settings "Advanced" disclosures were left open)
   'dispatch-viewer-recent',   // main.js (recent local-viewer paths in the palette)
+  'dispatch-lightbox-details', // main.js (the picture viewer's Details panel was left open)
   'tl-collapsed',             // main.js (thread list collapsed, desktop)
   'lc-remember',              // main.js (sign-in keypad "keep this device signed in")
   'dp-firstrun-dismissed',    // main.js (the "create the first Admin account" card was put away here)

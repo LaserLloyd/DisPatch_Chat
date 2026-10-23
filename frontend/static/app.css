@@ -1010,20 +1010,77 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .lightbox-next { right: 14px; }
 .lightbox-next .rail-icon { transform: scaleX(-1); }
 .lightbox-counter {
-  position: absolute; bottom: 30px; inset-inline-start: 18px; z-index: 5;
+  position: absolute; top: calc(18px + env(safe-area-inset-top)); inset-inline-start: 18px; z-index: 5;
   padding: 4px 10px; border-radius: 999px; background: rgba(20,20,40,.8); color: #fff;
   font-size: 13px; font-variant-numeric: tabular-nums;
 }
 .lightbox-counter:empty { display: none; }
-.lightbox-caption {
-  position: absolute; bottom: 74px; left: 50%; transform: translateX(-50%); z-index: 5;
-  width: min(720px, calc(100vw - 32px)); padding: 8px 12px; border-radius: 10px;
-  background: rgba(20,20,40,.82); color: #fff; font-size: 13px; line-height: 1.4;
-  text-align: center; cursor: pointer; overflow: hidden;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+.copy-buffer { position: fixed; top: 0; left: 0; opacity: 0; pointer-events: none; }
+.lightbox-download[hidden], .lb-download[hidden], .lb-zoom[hidden] { display: none; }
+/* The toolbar (4.0): zoom out · 100% · zoom in | Details | Download, bottom centre, chrome. */
+.lightbox-bar {
+  position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 6;
+  display: flex; align-items: center; gap: 6px; padding: 5px; border-radius: 999px;
+  background: rgba(20,20,40,.86); color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.45);
+  max-width: calc(100vw - 24px);
 }
-.lightbox-caption.open { display: block; max-height: 40vh; overflow: auto; text-align: start; }
-.lightbox-caption[hidden], .lightbox-download[hidden] { display: none; }
+.lb-group { display: flex; align-items: center; gap: 2px; }
+.lb-zoom { padding-inline-end: 6px; border-inline-end: 1px solid rgba(255,255,255,.18); }
+.lb-tool {
+  min-width: 40px; height: 40px; padding: 0 10px; border: 0; border-radius: 999px;
+  background: transparent; color: inherit; font: inherit; font-size: 14px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  cursor: pointer; text-decoration: none; white-space: nowrap;
+}
+.lb-tool .rail-icon { width: 18px; height: 18px; flex: none; }
+.lb-tool:hover:not(:disabled), .lb-tool[aria-expanded="true"] { background: var(--accent); color: var(--on-accent); }
+.lb-tool:disabled { opacity: .4; cursor: default; }
+.lb-tool:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.lb-zoom-label { min-width: 58px; font-variant-numeric: tabular-nums; }
+/* The details panel: a drawer on the right, a sheet at the bottom on a phone. Not chrome. */
+.lightbox-details {
+  position: absolute; top: 0; inset-inline-end: 0; bottom: 0; width: 340px; z-index: 7;
+  background: var(--surface-1, var(--bg-secondary)); color: var(--text-primary);
+  border-inline-start: 1px solid var(--border-light); box-shadow: -8px 0 30px rgba(0,0,0,.35);
+  overflow-y: auto; padding: 16px 18px 24px; cursor: default; text-align: start;
+  touch-action: pan-y;
+}
+.lightbox-details[hidden] { display: none; }
+.lb-details-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.lb-details-title { font-size: 16px; margin: 0; }
+.lb-details-close { color: var(--text-primary); }
+.lb-rows { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0 0 14px; font-size: 13px; }
+.lb-rows dt { color: var(--text-secondary); }
+.lb-rows dd { margin: 0; overflow-wrap: anywhere; }
+.lb-prompt-title { font-size: 13px; color: var(--text-secondary); margin: 4px 0 6px; font-weight: 600; }
+.lb-prompt {
+  margin: 0 0 14px; padding: 10px 12px; border-radius: 10px; background: var(--bg-hover, rgba(127,127,127,.12));
+  font-size: 13px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow-y: auto;
+  user-select: text;
+}
+.lb-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.lb-act { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; text-decoration: none; }
+.lb-act .rail-icon { width: 16px; height: 16px; flex: none; }
+/* With the panel open the picture shares the screen with it. */
+.lightbox.details-open img, .lightbox.details-open video { max-width: calc(94vw - 360px); }
+.lightbox.details-open { padding-inline-end: 340px; }
+.lightbox.details-open .lightbox-bar { left: calc((100vw - 340px) / 2); }
+.lightbox.details-open .lightbox-next { right: 354px; }
+:root[dir="rtl"] .lightbox.details-open .lightbox-bar { left: calc(340px + (100vw - 340px) / 2); }
+@media (max-width: 720px) {
+  .lightbox-details {
+    top: auto; inset-inline-start: 0; width: auto; max-height: 55vh;
+    border-inline-start: 0; border-top: 1px solid var(--border-light); border-radius: 16px 16px 0 0;
+    box-shadow: 0 -8px 30px rgba(0,0,0,.35); padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+  .lightbox.details-open { padding-inline-end: 0; padding-bottom: 55vh; }
+  .lightbox.details-open img, .lightbox.details-open video { max-width: 94vw; max-height: calc(45vh - 80px); }
+  .lightbox.details-open .lightbox-bar, :root[dir="rtl"] .lightbox.details-open .lightbox-bar { left: 50%; bottom: calc(55vh + 10px); }
+  .lightbox.details-open .lightbox-next { right: 6px; }
+  .lb-tool-text { display: none; }
+  .lightbox-bar { bottom: calc(14px + env(safe-area-inset-bottom)); }
+  .lb-tool { min-width: 44px; height: 44px; }
+}
 @media (hover: none) {
   .lightbox-prev { left: 6px; }
   .lightbox-next { right: 6px; }
@@ -1097,16 +1154,6 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 }
 .fs-act-btn .rail-icon { width: 16px; height: 16px; }
 .fs-act-btn:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-.lightbox-download {
-  position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%);
-  background: var(--accent); color: var(--on-accent); text-decoration: none; font-weight: 600;
-  padding: 10px 22px; border-radius: 999px; font-size: 14px; z-index: 5;
-  box-shadow: 0 6px 20px rgba(0,0,0,.5);
-  display: inline-flex; align-items: center; gap: 6px;
-}
-.lightbox-download .rail-icon { width: 15px; height: 15px; flex: none; }
-.lightbox-download:hover { background: var(--accent-hover); }
-
 /* ===================== Avatar crop modal ===================== */
 .crop-modal { width: min(560px, 94vw); }
 .crop-stage {

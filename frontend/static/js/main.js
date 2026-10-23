@@ -28,7 +28,7 @@ import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=14';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=15';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=16';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
@@ -91,7 +91,10 @@ import {
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp, api as appApi } from './app-sdk.js?v=4';
 import { renderLinkRail, linksSection } from './links.js?v=8';
-import { createGallery, createChrome, keyDirection, overMedia, swipeDirection, normalizeGalleryRequest } from './lightbox-nav.js?v=2';
+import {
+  createGallery, createChrome, keyDirection, overMedia, swipeDirection, normalizeGalleryRequest,
+  ZOOM_MIN, ZOOM_MAX, ZOOM_STEP, zoomAt, clampPan, zoomLabel, detailRows, itemPrompt,
+} from './lightbox-nav.js?v=3';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
 // same closeAllOverlays route). main.js only decides WHEN it may open: host paths
 // are an Admin surface, so refuse() is a live callback ("not an Admin") rather than a boolean.
@@ -3432,9 +3435,12 @@ async function handleFiles(files) {
 }
 
 // ===================== Lightbox =====================
-// Click outside (backdrop) or ✕ closes. Double-click/double-tap an image
-// zooms in at that point; drag to pan while zoomed; double-click again to
-// reset. Videos get native controls + sound.
+// Click outside (backdrop) or ✕ closes. Videos get native controls + sound.
+//
+// ZOOM (pictures). The wheel, a double-click/double-tap and a two-finger pinch zoom about the
+// point under them; + / - / the percentage (back to fit) on the toolbar and the keys + - 0 do the
+// same about the centre. Drag pans while zoomed, never further than the picture sticks out.
+// The arithmetic is lightbox-nav.js's (zoomAt, clampPan).
 //
 // GALLERY. Given `gallery` (items oldest -> newest) and `index`, ← / → keys,
 // the side arrows and a swipe step through them: forward is NEWER, both stop at
@@ -3443,14 +3449,64 @@ async function handleFiles(files) {
 // results through the `dispatch:lightbox` message. No-Image Mode never gets a
 // gallery at all, so nothing is fetched for a neighbour.
 //
-// CHROME (✕, Download, caption, counter, arrows) is hidden until the pointer is
-// near the bottom of the picture or on a control, fades 1.5 s after it leaves,
-// toggles on a touch tap, shows on keyboard focus, and never blocks Esc.
-// The logic lives in lightbox-nav.js; this is the DOM around it.
+// CHROME (✕, the arrows, the counter and the bottom toolbar) shows only while
+// the pointer is over the picture or on a control, hides a moment after it
+// leaves, toggles on a touch tap and shows on keyboard focus (never on a click).
+//
+// DETAILS. "Details" (the toolbar, or the i key) opens a panel beside the picture (below it on
+// a phone) that stays until it is closed: file name, pixel size, file size and type, when, where
+// from, the model/workflow/seed of a generated picture and its full prompt, with Copy prompt,
+// Copy image, Download and Open original. The device remembers whether it was open. Each
+// item's `info` ({prompt, model, workflow, seed, created, source, bot}) is what the opener knew.
+const LB_DETAILS_KEY = 'dispatch-lightbox-details';
+
+function lbDetailsWanted() {
+  try { return localStorage.getItem(LB_DETAILS_KEY) === '1'; } catch { return false; }
+}
+function lbRememberDetails(on) {
+  try { localStorage.setItem(LB_DETAILS_KEY, on ? '1' : '0'); } catch { /* per-device nicety */ }
+}
+
+async function copyTextToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through to the old way */ }
+  const ta = el('textarea', { readonly: '', class: 'copy-buffer', 'aria-hidden': 'true' });
+  ta.value = text;
+  document.body.append(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
+
+/** Copying a picture needs the async clipboard (https or localhost) and ClipboardItem. */
+function canCopyImage() {
+  return !!(window.isSecureContext && navigator.clipboard && navigator.clipboard.write
+    && typeof window.ClipboardItem === 'function');
+}
+
+async function copyImageToClipboard(url) {
+  const res = await fetch(url, { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  let blob = await res.blob();
+  if (blob.type !== 'image/png') {
+    // Browsers only take PNG on the clipboard: redraw anything else.
+    const bmp = await globalThis.createImageBitmap(blob);
+    const c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    c.getContext('2d').drawImage(bmp, 0, 0);
+    if (bmp.close) bmp.close();
+    blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+  }
+  await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': blob })]);
+}
+
 function openLightbox(src, { video = false, downloadUrl = null, downloadName = null,
-                             gallery = null, index = 0 } = {}) {
+                             gallery = null, index = 0, info = null } = {}) {
   const useGallery = Array.isArray(gallery) && gallery.length > 0 && !nimEnabled();
-  const items = useGallery ? gallery : [{ src, video, downloadUrl, downloadName }];
+  const items = useGallery ? gallery : [{ src, video, downloadUrl, downloadName, info: info || {} }];
   const nav = createGallery(items, useGallery ? index : 0);
   const itemVideo = (it) => !!(it.video != null ? it.video : isVideoUrl(it.src));
 
@@ -3458,17 +3514,38 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
     const { src, downloadName } = it;
     return itemVideo(it)
       ? el('video', { src, controls: '', autoplay: '', loop: '', playsinline: '' })
-      : el('img', { src, draggable: 'false', alt: downloadName || t('msg.fullsize_alt') });
+      : el('img', { src, draggable: 'false', alt: downloadName || itemPrompt(it).slice(0, 120) || t('msg.fullsize_alt') });
   };
   let media = makeMedia(nav.current());
   const chromeCls = 'lightbox-chrome';
-  const closeBtn = el('button', { class: `lightbox-close ${chromeCls}`, 'aria-label': t('common.close') }, [railIcon(RAIL_ICONS.close)]);
-  const prevBtn = el('button', { class: `lightbox-nav lightbox-prev ${chromeCls}`, type: 'button', 'aria-label': t('lightbox.previous') }, [railIcon(RAIL_ICONS.back)]);
-  const nextBtn = el('button', { class: `lightbox-nav lightbox-next ${chromeCls}`, type: 'button', 'aria-label': t('lightbox.next') }, [railIcon(RAIL_ICONS.back)]);
+  const btn = (cls, label, icon, extra = {}) => el('button', {
+    class: `${cls} ${chromeCls}`, type: 'button', 'aria-label': label, title: label, ...extra }, [icon]);
+  const closeBtn = el('button', { class: `lightbox-close ${chromeCls}`, type: 'button', 'aria-label': t('common.close'), title: t('common.close') }, [railIcon(RAIL_ICONS.close)]);
+  const prevBtn = btn('lightbox-nav lightbox-prev', t('lightbox.previous'), railIcon(RAIL_ICONS.back));
+  const nextBtn = btn('lightbox-nav lightbox-next', t('lightbox.next'), railIcon(RAIL_ICONS.back));
   const counter = el('div', { class: `lightbox-counter ${chromeCls}`, 'aria-live': 'polite', dir: 'ltr' });
-  const caption = el('div', { class: `lightbox-caption ${chromeCls}`, tabindex: '0' });
-  const dl = el('a', { class: `lightbox-download ${chromeCls}` }, iconLabel(RAIL_ICONS['viewer-download'], t('common.download')));
-  dl.addEventListener('click', (e) => e.stopPropagation());
+
+  // The toolbar: zoom out · 100% (fit) · zoom in | Details | Download.
+  const zoomOut = el('button', { class: 'lb-tool', type: 'button', 'aria-label': t('lightbox.zoom_out'), title: t('lightbox.zoom_out') }, [railIcon(['M5 12h14'])]);
+  const zoomFit = el('button', { class: 'lb-tool lb-zoom-label', type: 'button', 'aria-label': t('lightbox.zoom_fit'), title: t('lightbox.zoom_fit'), dir: 'ltr' });
+  const zoomIn = el('button', { class: 'lb-tool', type: 'button', 'aria-label': t('lightbox.zoom_in'), title: t('lightbox.zoom_in') }, [spriteIcon('plus', 18)]);
+  const zoomGroup = el('div', { class: 'lb-group lb-zoom' }, [zoomOut, zoomFit, zoomIn]);
+  let detailsChev = spriteIcon('chevron-up', 16);
+  const detailsBtn = el('button', { class: 'lb-tool lb-details-toggle', type: 'button', 'aria-expanded': 'false' },
+    [spriteIcon('info', 18), el('span', { class: 'lb-tool-text', text: t('lightbox.details') }), detailsChev]);
+  const dl = el('a', { class: 'lb-tool lb-download', 'aria-label': t('common.download'), title: t('common.download') },
+    [spriteIcon('download', 18), el('span', { class: 'lb-tool-text', text: t('common.download') })]);
+  const bar = el('div', { class: `lightbox-bar ${chromeCls}`, role: 'toolbar', 'aria-label': t('lightbox.toolbar') },
+    [zoomGroup, detailsBtn, dl]);
+  for (const n of [bar, closeBtn, prevBtn, nextBtn, counter]) n.addEventListener('click', (e) => e.stopPropagation());
+
+  // The details panel (not chrome: it stays until closed).
+  const panelId = `lb-details-${Math.random().toString(36).slice(2, 8)}`;
+  const panel = el('aside', { class: 'lightbox-details', id: panelId, 'aria-label': t('lightbox.details'), hidden: 'hidden' });
+  detailsBtn.setAttribute('aria-controls', panelId);
+  panel.addEventListener('click', (e) => e.stopPropagation());
+  panel.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+
   // A modal dialog, declared as one: without role/aria-modal a screen reader
   // keeps reading the chat behind it, and without `inert` on #app a Tab walks
   // straight out of the picture into the composer underneath.
@@ -3481,16 +3558,13 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
   }, [media, closeBtn]);
   const multi = nav.size > 1;
   if (multi) lb.append(prevBtn, nextBtn, counter);
-  lb.append(caption, dl);
+  lb.append(bar, panel);
 
   const cleanups = [];
   // Whoever was focused when the picture opened gets focus back when it closes
   // — a keyboard user who opened a thumbnail lands back on that thumbnail, not
   // at the top of the document.
   const returnFocus = document.activeElement;
-  // The controls and caption follow the mouse: up while it is over the picture or a control,
-  // gone a moment after it leaves. Only keyboard focus pins them (a click focuses too, and
-  // used to leave the caption stuck over the picture).
   const chrome = createChrome({ delay: 350, onChange: (on) => lb.classList.toggle('chrome-on', on) });
   const close = () => {
     try { if (itemVideo(nav.current())) media.pause(); } catch {}
@@ -3507,59 +3581,163 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
   closeBtn.addEventListener('click', close);
   lb.addEventListener('click', (e) => { if (e.target === lb) close(); });
 
-  // ---- zoom / pan, re-armed for each picture ----------------------------
-  let scale = 1, tx = 0, ty = 0;
-  const apply = () => {
-    media.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
-    media.classList.toggle('zoomed', scale > 1);
+  // ---- zoom / pan ----------------------------------------------------------
+  let view = { s: 1, tx: 0, ty: 0 };
+  const isPic = () => !itemVideo(nav.current());
+  const setView = (next) => {
+    view = clampPan(next, { w: media.offsetWidth, h: media.offsetHeight },
+      { w: window.innerWidth, h: window.innerHeight });
+    media.style.transform = view.s === 1 && !view.tx && !view.ty ? '' : `translate(${view.tx}px, ${view.ty}px) scale(${view.s})`;
+    media.classList.toggle('zoomed', view.s > 1);
+    zoomFit.textContent = zoomLabel(view.s);
+    zoomOut.disabled = view.s <= ZOOM_MIN;
+    zoomIn.disabled = view.s >= ZOOM_MAX;
   };
+  const zoomTo = (s, px, py) => {
+    if (!isPic()) return;
+    const r = media.getBoundingClientRect();
+    const x = px == null ? r.left + r.width / 2 : px;
+    const y = py == null ? r.top + r.height / 2 : py;
+    setView(zoomAt(view, s, x, y, r));
+  };
+  zoomIn.addEventListener('click', () => zoomTo(view.s * ZOOM_STEP));
+  zoomOut.addEventListener('click', () => zoomTo(view.s / ZOOM_STEP));
+  zoomFit.addEventListener('click', () => setView({ s: 1, tx: 0, ty: 0 }));
+
   let dragging = false, lx = 0, ly = 0;
-  const down = (x, y) => { if (scale > 1) { dragging = true; lx = x; ly = y; } };
+  let pinch = null;      // {d, s} while two fingers are down
+  let pinched = false;   // a pinch just happened: the lifting finger is not a tap or a swipe
+  const down = (x, y) => { if (view.s > 1) { dragging = true; lx = x; ly = y; } };
   const move = (x, y) => {
     if (!dragging) return;
-    tx += x - lx; ty += y - ly; lx = x; ly = y; apply();
+    setView({ s: view.s, tx: view.tx + x - lx, ty: view.ty + y - ly });
+    lx = x; ly = y;
   };
+  const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
   let tapStart = null;   // a touch that may turn out to be a tap or a swipe
   const armMedia = () => {
     if (itemVideo(nav.current())) return;
     media.addEventListener('dblclick', (e) => {
       e.preventDefault();
-      if (scale > 1) { scale = 1; tx = ty = 0; }
-      else {
-        scale = 2.5;
-        // Zoom centered on the click point: shift so that point stays put.
-        const r = media.getBoundingClientRect();
-        tx = (r.left + r.width / 2 - e.clientX) * (scale - 1);
-        ty = (r.top + r.height / 2 - e.clientY) * (scale - 1);
-      }
-      apply();
+      if (view.s > 1) setView({ s: 1, tx: 0, ty: 0 });
+      else zoomTo(2.5, e.clientX, e.clientY);
     });
-    // Drag (mouse or touch) to pan while zoomed.
+    // Drag (mouse or touch) to pan while zoomed; two fingers pinch.
     media.addEventListener('mousedown', (e) => { e.preventDefault(); down(e.clientX, e.clientY); });
-    media.addEventListener('touchstart', (e) => { if (e.touches.length === 1) down(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
-    media.addEventListener('touchmove', (e) => { if (e.touches.length === 1) move(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
-    media.addEventListener('touchend', () => { dragging = false; });
+    media.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        dragging = false; pinched = true;
+        pinch = { d: dist(e.touches[0], e.touches[1]) || 1, s: view.s };
+      } else if (e.touches.length === 1) down(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: true });
+    media.addEventListener('touchmove', (e) => {
+      if (pinch && e.touches.length === 2) {
+        const [a, b] = e.touches;
+        zoomTo(pinch.s * (dist(a, b) / pinch.d), (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+      } else if (e.touches.length === 1) move(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: true });
+    media.addEventListener('touchend', (e) => {
+      if (e.touches.length < 2) pinch = null;
+      if (!e.touches.length) dragging = false;
+    });
+    media.addEventListener('load', () => { renderDetails(); setView(view); });
   };
   // Pan tracks on window (so drags survive leaving the image), but the
   // handlers must die with the lightbox or every open leaks two listeners.
   const onMove = (e) => move(e.clientX, e.clientY);
   const onUp = () => { dragging = false; };
+  const onResize = () => setView(view);
   window.addEventListener('mousemove', onMove);
   window.addEventListener('mouseup', onUp);
+  window.addEventListener('resize', onResize);
   cleanups.push(() => {
     window.removeEventListener('mousemove', onMove);
     window.removeEventListener('mouseup', onUp);
+    window.removeEventListener('resize', onResize);
   });
-  // Mouse wheel zoom (pictures only).
+  // Mouse wheel zoom about the cursor (pictures only).
   lb.addEventListener('wheel', (e) => {
-    if (itemVideo(nav.current())) return;
+    if (!isPic()) return;
     e.preventDefault();
-    const prev = scale;
-    scale = Math.min(6, Math.max(1, scale * (e.deltaY < 0 ? 1.18 : 0.85)));
-    if (scale === 1) { tx = ty = 0; }
-    else { const f = scale / prev; tx *= f; ty *= f; }
-    apply();
+    zoomTo(view.s * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY);
   }, { passive: false });
+
+  // ---- details ---------------------------------------------------------------
+  const probes = new Map();      // src -> {bytes, mime} from one HEAD request
+  let detailsOpen = false;
+  const probeFor = (it) => {
+    const p = { ...(probes.get(it.src) || {}) };
+    if (media.tagName === 'IMG' && media.naturalWidth) { p.width = media.naturalWidth; p.height = media.naturalHeight; }
+    return p;
+  };
+  const fetchProbe = (it) => {
+    if (probes.has(it.src)) return;
+    probes.set(it.src, {});
+    fetch(it.src, { method: 'HEAD', credentials: 'same-origin' }).then((r) => {
+      if (!r.ok) return;
+      const n = Number(r.headers.get('content-length'));
+      probes.set(it.src, { bytes: Number.isFinite(n) && n > 0 ? n : null, mime: r.headers.get('content-type') || '' });
+      if (nav.current() === it) renderDetails();
+    }).catch(() => {});
+  };
+  const actBtn = (label, icon, onclick) => {
+    const b = el('button', { class: 'ui-btn lb-act', type: 'button' }, [icon, el('span', { text: label })]);
+    b.addEventListener('click', onclick);
+    return b;
+  };
+  function renderDetails() {
+    if (!detailsOpen) return;
+    const it = nav.current();
+    fetchProbe(it);
+    const rows = detailRows(it, probeFor(it));
+    const dlEl = el('dl', { class: 'lb-rows' });
+    for (const r of rows) dlEl.append(el('dt', { text: t(r.key) }), el('dd', { text: r.value, dir: 'auto' }));
+    const prompt = itemPrompt(it);
+    const href = it.downloadUrl || it.src;
+    const acts = el('div', { class: 'lb-acts' });
+    if (prompt) {
+      acts.append(actBtn(t('lightbox.copy_prompt'), spriteIcon('copy', 16), async () => {
+        toast(t(await copyTextToClipboard(prompt) ? 'lightbox.prompt_copied' : 'lightbox.copy_failed'), false);
+      }));
+    }
+    if (isPic() && canCopyImage()) {
+      acts.append(actBtn(t('lightbox.copy_image'), spriteIcon('image', 16), async () => {
+        try { await copyImageToClipboard(href); toast(t('lightbox.image_copied')); }
+        catch { toast(t('lightbox.copy_failed'), true); }
+      }));
+    }
+    const dlA = el('a', { class: 'ui-btn lb-act', href, download: it.downloadName || '' },
+      [spriteIcon('download', 16), el('span', { text: t('common.download') })]);
+    const openA = el('a', { class: 'ui-btn lb-act', href, target: '_blank', rel: 'noopener noreferrer' },
+      [spriteIcon('external-link', 16), el('span', { text: t('lightbox.open_original') })]);
+    acts.append(dlA, openA);
+    const head = el('div', { class: 'lb-details-head' }, [
+      el('h2', { class: 'lb-details-title', text: t('lightbox.details') }),
+      el('button', { class: 'lb-tool lb-details-close', type: 'button', 'aria-label': t('lightbox.hide_details'),
+        title: t('lightbox.hide_details'), onclick: () => setDetails(false) }, [railIcon(RAIL_ICONS.close)]),
+    ]);
+    const kids = [head, dlEl];
+    if (prompt) {
+      kids.push(el('h3', { class: 'lb-prompt-title', text: t(it.info && it.info.prompt ? 'lightbox.d_prompt' : 'lightbox.d_caption') }),
+        el('p', { class: 'lb-prompt', text: prompt, dir: 'auto' }));
+    }
+    kids.push(acts);
+    panel.replaceChildren(...kids);
+  }
+  const setDetails = (on, { remember = true } = {}) => {
+    detailsOpen = !!on;
+    panel.hidden = !detailsOpen;
+    lb.classList.toggle('details-open', detailsOpen);
+    detailsBtn.setAttribute('aria-expanded', String(detailsOpen));
+    const chev = spriteIcon(detailsOpen ? 'chevron-down' : 'chevron-up', 16);
+    detailsChev.replaceWith(chev);
+    detailsChev = chev;
+    if (remember) lbRememberDetails(detailsOpen);
+    renderDetails();
+    // The picture area changed size: keep the zoom inside it.
+    requestAnimationFrame(() => setView(view));
+  };
+  detailsBtn.addEventListener('click', () => setDetails(!detailsOpen));
 
   // ---- showing one item ---------------------------------------------------
   const show = () => {
@@ -3568,42 +3746,60 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
     try { if (itemVideo(it) !== (media.tagName === 'VIDEO')) media.pause?.(); } catch {}
     lb.replaceChild(fresh, media);
     media = fresh;
-    scale = 1; tx = ty = 0; dragging = false;
+    dragging = false; pinch = null;
     armMedia();
-    lb.setAttribute('aria-label', it.downloadName || it.caption || t('msg.fullsize_alt'));
-    const href = it.downloadUrl || (useGallery && !itemVideo(it) ? it.src : '');
+    view = { s: 1, tx: 0, ty: 0 };
+    setView(view);
+    zoomGroup.hidden = !isPic();
+    lb.setAttribute('aria-label', it.downloadName || itemPrompt(it).slice(0, 120) || t('msg.fullsize_alt'));
+    const href = it.downloadUrl || (!itemVideo(it) ? it.src : '');
     dl.hidden = !href;
     if (href) {
       dl.setAttribute('href', href);
-      if (it.downloadName) dl.setAttribute('download', it.downloadName);
-      else dl.setAttribute('download', '');
+      dl.setAttribute('download', it.downloadName || '');
     }
-    caption.textContent = it.caption || '';
-    caption.hidden = !it.caption;
-    caption.classList.remove('open');
     counter.textContent = nav.label();
     prevBtn.disabled = !nav.canStep(-1);
     nextBtn.disabled = !nav.canStep(1);
+    renderDetails();
   };
   const stepBy = (dir, { flash = false } = {}) => { if (nav.step(dir)) { show(); if (flash) chrome.flash(); } };
-  caption.addEventListener('click', (e) => { e.stopPropagation(); caption.classList.toggle('open'); });
-  prevBtn.addEventListener('click', (e) => { e.stopPropagation(); stepBy(-1); });
-  nextBtn.addEventListener('click', (e) => { e.stopPropagation(); stepBy(1); });
+  prevBtn.addEventListener('click', () => stepBy(-1));
+  nextBtn.addEventListener('click', () => stepBy(1));
   show();
+  if (lbDetailsWanted()) setDetails(true, { remember: false });
 
-  // ---- keyboard: ← older, → newer (Esc is the global handler's) ------------
+  // ---- keyboard: ← older, → newer, + - 0 zoom, i details (Esc: below) --------
   const onKey = (e) => {
     if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
     if ([...document.querySelectorAll('.lightbox')].at(-1) !== lb) return;
+    if (e.target && e.target.closest && e.target.closest('input, textarea, select')) return;
+    if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomTo(view.s * ZOOM_STEP); return; }
+    if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomTo(view.s / ZOOM_STEP); return; }
+    if (e.key === '0') { e.preventDefault(); setView({ s: 1, tx: 0, ty: 0 }); return; }
+    if (e.key === 'i' || e.key === 'I') { e.preventDefault(); setDetails(!detailsOpen); return; }
     const dir = keyDirection(e.key);
     if (!dir || !multi) return;
     e.preventDefault();
     stepBy(dir, { flash: true });
   };
+  // Esc closes the details panel first (capture: before the global handler that closes the
+  // whole viewer), then the viewer on the next press.
+  const onEsc = (e) => {
+    if (e.key !== 'Escape' || !detailsOpen) return;
+    if ([...document.querySelectorAll('.lightbox')].at(-1) !== lb) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    setDetails(false);
+    lb.focus();
+  };
   window.addEventListener('keydown', onKey);
-  cleanups.push(() => window.removeEventListener('keydown', onKey));
+  window.addEventListener('keydown', onEsc, true);
+  cleanups.push(() => {
+    window.removeEventListener('keydown', onKey);
+    window.removeEventListener('keydown', onEsc, true);
+  });
 
-  // ---- chrome: pointer zone, touch tap, swipe, focus ------------------------
+  // ---- chrome: over the picture, touch tap, swipe, focus --------------------
   const onPointerMove = (e) => {
     if (e.pointerType === 'touch') return;
     const onCtl = !!e.target.closest?.(`.${chromeCls}`);
@@ -3613,14 +3809,16 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
   lb.addEventListener('pointerleave', () => chrome.leave());
   lb.addEventListener('pointerdown', (e) => {
     if (e.pointerType !== 'touch') return;
-    tapStart = { x: e.clientX, y: e.clientY, t: Date.now(), onCtl: !!e.target.closest?.(`.${chromeCls}`) };
+    if (e.isPrimary) pinched = false;
+    tapStart = { x: e.clientX, y: e.clientY, t: Date.now(),
+      onCtl: !!e.target.closest?.(`.${chromeCls}, .lightbox-details`) };
   });
   lb.addEventListener('pointerup', (e) => {
     if (e.pointerType !== 'touch' || !tapStart) return;
     const s = tapStart; tapStart = null;
-    if (s.onCtl) return;
+    if (s.onCtl || pinched) return;
     const dx = e.clientX - s.x, dy = e.clientY - s.y;
-    const dir = multi ? swipeDirection(dx, dy, { zoomed: scale > 1 }) : 0;
+    const dir = multi ? swipeDirection(dx, dy, { zoomed: view.s > 1 }) : 0;
     if (dir) { stepBy(dir); return; }
     if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && e.target !== lb) chrome.tap();
   });
@@ -3702,9 +3900,33 @@ function chatGalleryFor(thumb) {
   const index = nodes.indexOf(thumb);
   if (index < 0) return null;
   return {
-    gallery: nodes.map((n) => ({ src: n.dataset.full, video: false, downloadUrl: n.dataset.full, downloadName: null, caption: '' })),
+    gallery: nodes.map((n) => ({ src: n.dataset.full, video: false, downloadUrl: n.dataset.full, downloadName: null,
+      caption: '', info: chatImageInfo(n) })),
     index,
   };
+}
+
+/** What the details panel can say about a chat picture: when, which bot, and for a generated
+ *  one its prompt, workflow and seed (the image-job metadata on the message). */
+function chatImageInfo(node) {
+  const id = node.closest('.msg')?.dataset.id;
+  const msg = id ? state.messages.find((m) => m.id === id) : null;
+  if (!msg) return {};
+  const meta = msg.metadata || {};
+  const bot = botById(state.threadBot[msg.thread_id]) || botById(state.activeThread?.bot_id);
+  const info = { source: t(msg.role === 'user' ? 'lightbox.src_you' : 'lightbox.src_chat') };
+  if (bot && msg.role !== 'user') info.bot = bot.name;
+  if (msg.created_at) {
+    const d = new Date(msg.created_at);
+    if (!Number.isNaN(d.getTime())) info.created = d.toLocaleString();
+  }
+  if (meta.kind === 'image_job') {
+    if (meta.prompt) info.prompt = String(meta.prompt);
+    if (meta.workflow) info.workflow = String(meta.workflow);
+    if (meta.seed != null) info.seed = String(meta.seed);
+    info.source = t('lightbox.src_generated');
+  }
+  return info;
 }
 
 /** An app page's picture set (Image Studio), already validated by
@@ -3722,7 +3944,9 @@ function openAppGallery(req) {
 
 function openAvatarLightbox(botId) {
   if (!botId) return;
-  openLightbox(`/api/bots/${encodeURIComponent(botId)}/avatar/full`);
+  const bot = botById(botId);
+  openLightbox(`/api/bots/${encodeURIComponent(botId)}/avatar/full`,
+    { info: { source: t('lightbox.src_avatar'), bot: bot ? bot.name : '' } });
 }
 
 // ===================== Actions =====================
@@ -5908,7 +6132,7 @@ async function renderFileServer() {
         thumb = el('div', { class: 'fs-thumb' },
                    [setFullRes(el('img', { src: rawUrl, alt: f.name, loading: 'lazy' }), rawUrl)]);
         thumb.style.cursor = 'zoom-in';
-        thumb.onclick = () => openLightbox(rawUrl, { downloadUrl: dlUrl, downloadName: f.name });
+        thumb.onclick = () => openLightbox(rawUrl, { downloadUrl: dlUrl, downloadName: f.name, info: { source: t('files.title') } });
       } else if (isVideo && !nimEnabled()) {
         thumb = el('div', { class: 'fs-thumb' }, [el('video', { src: rawUrl, muted: '', playsinline: '', preload: 'metadata' })]);
         thumb.style.cursor = 'zoom-in';

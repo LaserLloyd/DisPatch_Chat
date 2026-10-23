@@ -222,3 +222,52 @@ test('the CSS hides the chrome unless .chrome-on or focused, never fades under r
   assert.match(CSS, /\.lightbox \{ touch-action: none; \}/);
   assert.match(readFileSync(join(STATIC, 'sw.js'), 'utf8'), /'\/static\/js\/lightbox-nav\.js'/);
 });
+
+// ---- zoom and details (4.0) ------------------------------------------------
+
+import {
+  clampZoom, zoomAt, clampPan, zoomLabel, formatBytes, fileNameFromUrl, typeLabel,
+  detailRows, itemPrompt, cleanInfo, normalizeGalleryRequest as normGallery, ZOOM_MAX,
+} from '../static/js/lightbox-nav.js';
+
+test('zooming about a point keeps that point still', () => {
+  const rect = { left: 100, top: 100, width: 400, height: 300 };
+  const v = zoomAt({ s: 1, tx: 0, ty: 0 }, 2, 200, 150, rect);
+  // The point (200,150) is 100 px left / 100 px up of the centre (300,250): at 2x it must
+  // still be under the cursor, so the picture moves by the same offset.
+  assert.deepEqual(v, { s: 2, tx: 100, ty: 100 });
+  const zoomed = { left: 100 + 100 - 200, top: 100 + 100 - 150, width: 800, height: 600 };
+  const back = zoomAt(v, 1, 200, 150, zoomed);
+  assert.deepEqual(back, { s: 1, tx: 0, ty: 0 }, 'back to fit is centred');
+  assert.equal(clampZoom(99), ZOOM_MAX);
+  assert.equal(clampZoom(0.2), 1);
+  assert.equal(zoomLabel(2.5), '250%');
+});
+
+test('a zoomed picture can only be panned as far as it sticks out', () => {
+  const base = { w: 400, h: 300 }, vp = { w: 1000, h: 800 };
+  assert.deepEqual(clampPan({ s: 2, tx: 500, ty: -500 }, base, vp), { s: 2, tx: 0, ty: 0 }, 'still fits: centred');
+  assert.deepEqual(clampPan({ s: 4, tx: 9999, ty: -9999 }, base, vp), { s: 4, tx: 300, ty: -200 });
+});
+
+test('the details rows say what is known, in order, and drop the rest', () => {
+  const item = { src: '/media/ab%20c.png?x=1', info: { prompt: 'a red fox', model: 'img-1', seed: '42', source: 'Chat' } };
+  const rows = detailRows(item, { width: 1024, height: 768, bytes: 2048, mime: 'image/png' });
+  assert.deepEqual(rows.map((r) => r.key), ['lightbox.d_file', 'lightbox.d_size', 'lightbox.d_source', 'lightbox.d_model', 'lightbox.d_seed']);
+  assert.equal(rows[0].value, 'ab c.png');
+  assert.equal(rows[1].value, '1024 × 768 · 2.0 KB · PNG');
+  assert.equal(itemPrompt(item), 'a red fox');
+  assert.equal(itemPrompt({ caption: ' just a caption ' }), 'just a caption');
+  assert.equal(formatBytes(-1), null);
+  assert.equal(formatBytes(5 * 1024 * 1024), '5.0 MB');
+  assert.equal(typeLabel('image/jpeg'), 'JPEG');
+  assert.equal(fileNameFromUrl(42), '');
+});
+
+test('an app page can send details, strings only and capped', () => {
+  const g = normGallery({ items: [{ src: '/media/a.png', info: { prompt: 'x'.repeat(5000), seed: 7, evil: { a: 1 }, bot: ['no'] } }] });
+  assert.equal(g.items[0].info.prompt.length, 4000);
+  assert.equal(g.items[0].info.seed, '7');
+  assert.ok(!('evil' in g.items[0].info) && !('bot' in g.items[0].info));
+  assert.deepEqual(cleanInfo(null), {});
+});

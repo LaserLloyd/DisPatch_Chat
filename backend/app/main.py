@@ -3471,7 +3471,7 @@ def _image_job_meta(job_id: str, status: str, spec: image_jobs.ImageSpec,
                     *, error: str = "", progress: dict | None = None,
                     seed: int | None = None) -> dict:
     meta = {"kind": _IMAGE_JOB_KIND, "job_id": job_id, "status": status,
-            "prompt": spec.prompt[:200], "caption": spec.caption}
+            "prompt": spec.prompt[:2000], "caption": spec.caption}
     if spec.workflow:
         meta["workflow"] = spec.workflow
     if error:

@@ -256,7 +256,7 @@ function renderGrid() {
 
 function openFull(index) {
   if (S.nim) { setStatus(t('nim.hidden')); return; }
-  lightbox(galleryItems(shown()), index);
+  lightbox(galleryItems(shown(), { source: t('title') }), index);
 }
 
 async function copyPrompt(r) {

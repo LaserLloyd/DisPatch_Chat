@@ -362,13 +362,23 @@ export function openThread(threadId, hint) {
   return post('open-thread', msg);
 }
 /** Ask the shell to open its own lightbox (zoom, pan, swipe and arrow keys,
- *  download, Esc, No-Image Mode) on a picture set, oldest -> newest. Each item
- *  is {src, name?, caption?, downloadUrl?} with a same-origin path. */
+ *  download, details, Esc, No-Image Mode) on a picture set, oldest -> newest. Each item
+ *  is {src, name?, caption?, downloadUrl?, info?} with a same-origin path; `info` feeds the
+ *  details panel: {prompt, model, workflow, seed, created, source, bot}, strings. */
 export function lightbox(items, index = 0) {
-  const list = (Array.isArray(items) ? items : []).map((it) => ({
-    src: String(it && it.src || ''), name: String(it && it.name || ''),
-    caption: String(it && it.caption || ''), downloadUrl: String(it && it.downloadUrl || ''),
-  }));
+  const list = (Array.isArray(items) ? items : []).map((it) => {
+    const row = {
+      src: String(it && it.src || ''), name: String(it && it.name || ''),
+      caption: String(it && it.caption || ''), downloadUrl: String(it && it.downloadUrl || ''),
+    };
+    if (it && it.info && typeof it.info === 'object') {
+      row.info = {};
+      for (const [k, v] of Object.entries(it.info)) {
+        if (typeof v === 'string' || typeof v === 'number') row.info[k] = String(v);
+      }
+    }
+    return row;
+  });
   return list.length ? post('lightbox', { items: list, index: Number(index) || 0 }) : false;
 }
 /** Ask the shell to close this app's pane. */

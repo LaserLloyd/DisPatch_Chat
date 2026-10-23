@@ -80,11 +80,26 @@ export function defaultCropPos(w, h) {
 }
 
 /** Gallery items for the shell's lightbox, oldest -> newest, from result rows. */
-export function galleryItems(rows) {
+export function galleryItems(rows, { source = 'Image Studio' } = {}) {
   return rows.map((r) => ({
     src: r.url, downloadUrl: r.url, caption: r.prompt || '',
+    info: galleryInfo(r, source),
     name: `${(r.id || 'image').slice(0, 12)}${/\.[a-z0-9]{2,4}$/i.test(r.url) ? r.url.slice(r.url.lastIndexOf('.')) : '.png'}`,
   }));
+}
+
+/** The lightbox details for one result: prompt, model (provider · model), seed, when. */
+export function galleryInfo(r, source = 'Image Studio') {
+  const info = { source };
+  if (r.prompt) info.prompt = String(r.prompt);
+  const model = [r.provider, r.model].filter(Boolean).join(' · ');
+  if (model) info.model = model;
+  if (r.seed != null && r.seed !== '') info.seed = String(r.seed);
+  if (r.created_at) {
+    const d = new Date(r.created_at);
+    info.created = Number.isNaN(d.getTime()) ? String(r.created_at) : d.toLocaleString();
+  }
+  return info;
 }
 
 /** The note shown for a metered provider. */
