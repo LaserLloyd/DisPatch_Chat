@@ -191,6 +191,16 @@
       "status": 400
     },
     {
+      "code": "avatar_crop_invalid",
+      "docs": "avatar_crop_invalid",
+      "fix": "Send crop_x, crop_y and crop_size together, each a fraction of the picture (crop_size above 0), or none of them.",
+      "message": "The face square must be given as fractions from 0 to 1.",
+      "patterns": [
+        "The face square must be given as fractions from 0 to 1."
+      ],
+      "status": 422
+    },
+    {
       "code": "avatar_invalid",
       "docs": "avatar_invalid",
       "fix": "Send a PNG, JPEG or WebP picture.",
@@ -220,7 +230,8 @@
       "patterns": [
         "Avatar not found",
         "No such avatar snapshot",
-        "No avatar snapshot for this thread"
+        "No avatar snapshot for this thread",
+        "No such picture"
       ],
       "status": 404
     },
@@ -271,9 +282,20 @@
       "message": "The picture is too large (25 MB at most).",
       "patterns": [
         "The picture is too large (25 MB at most).",
-        "The picture has too many pixels."
+        "The picture has too many pixels.",
+        "The picture is too large (5 MB at most)."
       ],
       "status": 413
+    },
+    {
+      "code": "avatar_upload_only",
+      "docs": "avatar_upload_only",
+      "fix": "Upload the picture (Settings, Account) or send an emoji or a few letters.",
+      "message": "A picture is set by uploading it, not by naming a path.",
+      "patterns": [
+        "A picture is set by uploading it, not by naming a path."
+      ],
+      "status": 422
     },
     {
       "code": "avatar_write_failed",

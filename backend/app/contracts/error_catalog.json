@@ -948,7 +948,8 @@
    "patterns": [
     "Avatar not found",
     "No such avatar snapshot",
-    "No avatar snapshot for this thread"
+    "No avatar snapshot for this thread",
+    "No such picture"
    ],
    "seeded": false
   },
@@ -2591,7 +2592,28 @@
    "docs": "avatar_too_large",
    "patterns": [
     "The picture is too large (25 MB at most).",
-    "The picture has too many pixels."
+    "The picture has too many pixels.",
+    "The picture is too large (5 MB at most)."
+   ]
+  },
+  {
+   "code": "avatar_crop_invalid",
+   "status": 422,
+   "message": "The face square must be given as fractions from 0 to 1.",
+   "fix": "Send crop_x, crop_y and crop_size together, each a fraction of the picture (crop_size above 0), or none of them.",
+   "docs": "avatar_crop_invalid",
+   "patterns": [
+    "The face square must be given as fractions from 0 to 1."
+   ]
+  },
+  {
+   "code": "avatar_upload_only",
+   "status": 422,
+   "message": "A picture is set by uploading it, not by naming a path.",
+   "fix": "Upload the picture (Settings, Account) or send an emoji or a few letters.",
+   "docs": "avatar_upload_only",
+   "patterns": [
+    "A picture is set by uploading it, not by naming a path."
    ]
   },
   {

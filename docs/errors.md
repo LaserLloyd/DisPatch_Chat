@@ -35,6 +35,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`approval_scope_not_allowed`](#approval_scope_not_allowed) | 422 | That approval can only be given for this one call. |
 | [`archive_invalid`](#archive_invalid) | 422 | months must be a whole number from 1 to 120. |
 | [`archived_not_bool`](#archived_not_bool) | 400 | archived must be true or false |
+| [`avatar_crop_invalid`](#avatar_crop_invalid) | 422 | The face square must be given as fractions from 0 to 1. |
 | [`avatar_invalid`](#avatar_invalid) | 422 | That file is not a picture DisPatch can read. |
 | [`avatar_not_capturable`](#avatar_not_capturable) | 409 | The bot has no capturable avatar right now |
 | [`avatar_not_found`](#avatar_not_found) | 404 | Avatar not found |
@@ -43,6 +44,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`avatar_snapshot_failed`](#avatar_snapshot_failed) | 500 | Could not store the avatar snapshot |
 | [`avatar_source_required`](#avatar_source_required) | 400 | Send an image file, or pass source=current |
 | [`avatar_too_large`](#avatar_too_large) | 413 | The picture is too large (25 MB at most). |
+| [`avatar_upload_only`](#avatar_upload_only) | 422 | A picture is set by uploading it, not by naming a path. |
 | [`avatar_write_failed`](#avatar_write_failed) | 500 | Could not write the avatar |
 | [`backend_invalid`](#backend_invalid) | 422 | backend must be 'direct' or 'legacy-api' |
 | [`backend_not_allowed`](#backend_not_allowed) | 403 | Your profile may not choose a bot's backend. |
@@ -417,6 +419,14 @@ HTTP **400** - archived must be true or false
 
 **Fix:** Send archived as true (archive the chat) or false (move it back).
 
+## avatar_crop_invalid
+
+<a id="avatar_crop_invalid"></a>
+
+HTTP **422** - The face square must be given as fractions from 0 to 1.
+
+**Fix:** Send crop_x, crop_y and crop_size together, each a fraction of the picture (crop_size above 0), or none of them.
+
 ## avatar_invalid
 
 <a id="avatar_invalid"></a>
@@ -480,6 +490,14 @@ HTTP **400** - Send an image file, or pass source=current
 HTTP **413** - The picture is too large (25 MB at most).
 
 **Fix:** Send a smaller picture.
+
+## avatar_upload_only
+
+<a id="avatar_upload_only"></a>
+
+HTTP **422** - A picture is set by uploading it, not by naming a path.
+
+**Fix:** Upload the picture (Settings, Account) or send an emoji or a few letters.
 
 ## avatar_write_failed
 
