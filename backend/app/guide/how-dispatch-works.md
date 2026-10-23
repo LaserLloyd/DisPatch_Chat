@@ -1,10 +1,10 @@
 ## What DisPatch is
 
-DisPatch is a private chat app for your own AI. You run it on one machine, protect it with a PIN, and everyone you add opens it from their own phone, tablet or laptop with a profile of their own. The conversations live in one SQLite file on your server, and the AI behind each bot is whatever you choose to connect. Nothing here needs an account with us, and nothing is sent anywhere you did not point it.
+DisPatch is a private chat app for your own AI. You run it on one machine, protect it with a password, and everyone you add opens it from their own phone, tablet or laptop with a profile of their own. The conversations live in one SQLite file on your server, and the AI behind each bot is whatever you choose to connect. Nothing here needs an account with us, and nothing is sent anywhere you did not point it.
 
 ![Welcome screen](/static/guide/welcome.png)
 
-Turn it on: you already have. Set a PIN under Settings → Account if you have not yet.
+Turn it on: you already have. Add a PIN under Settings → Account if you want a quicker sign-in.
 
 ## Bots and backends
 
@@ -14,7 +14,7 @@ A **direct API** bot talks to a model API itself: any OpenAI-compatible service,
 
 ![Settings → Characters](/static/guide/bots-tab.png)
 
-Turn it on: Settings → Characters lists every bot. Add one, rename it, or remove it there (the ⋯ menu); removing a bot keeps its threads.
+Turn it on: Settings → Characters lists the household's bots. Add one, rename it, or remove it there (the **More** menu, ☰); removing a bot keeps its chats, but they can't be continued.
 
 ## Connect an AI
 
@@ -23,13 +23,13 @@ Atlas works the moment she has a model behind her.
 1. Open Settings → AI & Connections and press Add a connection.
 2. Choose a provider. For a local server, enter its address instead of a key.
 3. Paste the API key if the provider wants one, press Test, pick a model from the list that comes back and Save.
-4. In Settings → Characters, open Atlas's Details and choose that connection.
+4. Choose that connection for Atlas: the household Atlas in **Settings → Characters → Details**, your own Atlas in **Settings → My bots → Edit**.
 
 The key is kept in your computer's keyring when one is available, otherwise in a file only the DisPatch user can read (mode 0600). It is not encrypted, and it is never shown again or sent back to the browser. If you would rather keep it out of both, name an environment variable and DisPatch reads the key from there. A connection belongs to the whole household: every profile's bots can use it, and only an Admin ever sees it. Details per provider are in [llm-providers.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/llm-providers.md).
 
 ![Settings → AI & Connections](/static/guide/ai-models.png)
 
-Turn it on: Settings → AI & Connections, add a connection and Test it; then pick it in Atlas's Details (or another direct API bot's).
+Turn it on: Settings → AI & Connections, add a connection and Test it; then pick it in the Details of Atlas or another direct API bot (Settings → Characters), or under Settings → My bots for your own.
 
 Quickest of all: Settings → AI & Connections → **Set up everything with one provider**. Pick MiniMax, OpenAI or xAI, paste one key, and chat, pictures and (where the provider has it) knowledge search are set up and tested in one go.
 
@@ -43,7 +43,7 @@ Turn it on: Settings → Characters, open the bot's Details and switch Lookups o
 
 ## Quick actions
 
-On a desktop, an empty thread offers a row of ready-made prompts such as summarise, translate, fix grammar or explain. Pick one and a small pill appears in the composer; whatever you type next is sent through that action. The message you see in the thread is still just your own words. The same actions work with every kind of bot.
+On a desktop, an empty thread offers a row of ready-made prompts such as Summarize, Translate, Proof this or Explain this. Pick one and a small pill appears in the composer; whatever you type next is sent through that action. The message you see in the thread is still just your own words. The same actions work with every kind of bot.
 
 ![Quick actions](/static/guide/quick-actions.png)
 
@@ -57,9 +57,9 @@ DisPatch has three kinds of profile. An **Admin** runs the install: settings, co
 
 Chats are private. A chat belongs to the profile it was had in, and nobody else can open it in the app, Admins included. The exception is **DisPatch**, the shared profile with no PIN that a locked or signed-out device lands on (or the profile list, if you choose that under Settings → People & Access): everyone who uses it shares its bots and chats. It can never run agents or clone voices.
 
-Every new profile gets its own Atlas. **Reset to default** (Settings → Account) deletes a profile's own bots and chats and starts it over; copying a bot copies its setup, never its chats. There are no daily limits. Images stay unrestricted apart from two hard lines: adult-only depictions, and no sexual imagery of real, identifiable people.
+Every new Admin and User profile gets its own Atlas (a Basic profile uses the household bots an Admin picks for it). **Reset to default** (Settings → Account) deletes a profile's own bots and chats and starts it over; copying a bot copies its setup, never its chats. There are no daily limits. Images stay unrestricted apart from two hard lines: adult-only depictions, and no sexual imagery of real, identifiable people.
 
-You can mark a device as remembered so it stays signed in for a while. Forgetting it, or locking it, puts it back on the lock screen.
+You can mark a device as remembered so it stays signed in for a while. Forgetting it, or locking it, sends the device back to the shared DisPatch profile (or to the profile list, if you chose that).
 
 Turn it on: Settings → Account to set your PIN; Settings → People & Access to add profiles and choose what a locked device shows.
 
@@ -87,7 +87,7 @@ Turn it on: install the add-on, restart, then open Settings → Voice, switch it
 
 ## Apps and tools
 
-The Tools popup holds pages and small apps you add yourself: a static folder, a web address, or an app package with its own backend, page and bot. They are listed in `tools.yaml` and in the `apps/<id>/` folder of your install. Settings → Plugins & Apps shows all of it in one place: installed add-ons with an on/off switch, your apps and tools, and the built-in lookups. An add-on can also add a tab of its own to Settings.
+**Tools & more** holds pages and small apps you add yourself: a static folder, a web address, or an app package with its own backend, page and bot. They are listed in `tools.yaml` and in the `apps/<id>/` folder of your install. Settings → Plugins & Apps shows all of it in one place: installed add-ons with an on/off switch, your apps and tools, and the built-in lookups. An add-on can also add a tab of its own to Settings.
 
 ![Settings → Plugins & Apps](/static/guide/plugins-tab.png)
 
@@ -101,7 +101,7 @@ Turn it on: add an agent bot in Settings → Characters (Add → New character),
 
 ## Remote access
 
-Out of the box DisPatch is reachable on your home network. To use it away from home, put it behind Tailscale Serve, a reverse proxy with a real certificate, or a small VPS tunnel. Docker, a Raspberry Pi, Windows and bare Linux all have a guide. Notifications and installing on a phone's home screen need the https address.
+Out of the box DisPatch listens only on the computer it runs on (the Docker compose file opens it to your home network). To use it from other devices or away from home, put it behind Tailscale Serve, a reverse proxy with a real certificate, or a small VPS tunnel. Docker, a Raspberry Pi, Windows and bare Linux all have a guide. Notifications and installing on a phone's home screen need the https address.
 
 Turn it on: pick a route in [remote-access.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/remote-access.md), then follow the deploy guide for your platform.
 

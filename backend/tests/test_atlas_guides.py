@@ -244,3 +244,19 @@ def test_whats_new_is_posted_after_the_guides_so_it_sits_on_top():
     src = inspect.getsource(main._lifespan_startup)
     assert src.index("fresh_install = await firstrun.count_threads(db)") < src.index("seed_if_first_run")
     assert src.index("drain_guides") < src.index("post_release_notes(db, _deliver_assistant_text, fresh=fresh_install)")
+
+
+def test_the_guides_name_only_what_their_readers_have():
+    """Users and the shared profile read meet-your-atlas + using-dispatch: no Admin-only
+    section; and no 3.x names anywhere (lock screen, the Tools popup, ⋯ menus, fix grammar)."""
+    g = firstrun.GUIDE_DIR
+    for f in ("meet-your-atlas.md", "using-dispatch.md"):
+        text = (g / f).read_text(encoding="utf-8")
+        assert "Settings → Characters" not in text and "AI & Connections**" not in text.replace(
+            "ask an Admin to add one under **Settings → AI & Connections**", ""), f
+    for f in g.glob("*.md"):
+        text = f.read_text(encoding="utf-8")
+        for stale in ("fix grammar", "Tools popup", "lock screen", "(⋯", "on the bar", "summarise"):
+            assert stale not in text, (f.name, stale)
+    notes = firstrun.release_notes_file(__version__).read_text(encoding="utf-8")
+    assert not notes.lstrip().startswith("## What's new"), "the thread title already says it"
