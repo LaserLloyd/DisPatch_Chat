@@ -10,6 +10,12 @@ DisPatch is now a chat app first, with three kinds of profile and private chats.
 
 **Your own Atlas.** Every Admin and User profile now has its own Atlas, who opens with a short tour of DisPatch. **Make a bot** creates one of your own, by hand or by describing it to the AI; **Make my own copy** copies a household bot's setup, never its chats.
 
+**Profile pictures.** Settings → Account → Profile picture. Your picture is visible to everyone who uses this DisPatch, including on the sign-in screen.
+
+**Bot pictures.** A picture for your own bot (uploaded, picked or drawn by the AI) opens the face picker: drag the square over the face and that becomes the avatar.
+
+**Pictures, full size.** In the picture viewer, the caption and buttons now appear only while the mouse is over the picture.
+
 **Reset to default.** Settings → Account deletes a profile's own bots and chats and starts it over with a fresh Atlas. It always tells you exactly what will go first.
 
 **Sign-in card.** A short card now appears once when you sign in. It says where your chats are kept and who can see them. Click anywhere or press × to close it.

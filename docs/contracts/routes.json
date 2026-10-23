@@ -1726,6 +1726,22 @@
       }
     },
     {
+      "method": "DELETE",
+      "path": "/api/me/avatar",
+      "requirement": {
+        "note": "the caller's OWN profile picture; the shared default profile's is an Admin's (lock_target_fence)",
+        "permission": "use_chat"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/me/avatar",
+      "requirement": {
+        "note": "the caller's OWN profile picture; the shared default profile's is an Admin's (lock_target_fence)",
+        "permission": "use_chat"
+      }
+    },
+    {
       "method": "GET",
       "path": "/api/me/backends",
       "requirement": {
@@ -1972,6 +1988,24 @@
       }
     },
     {
+      "method": "DELETE",
+      "path": "/api/people/{profile_id}/avatar",
+      "requirement": {
+        "note": "an Admin sets or removes a profile's picture; same rank and lock-target rules as PATCH",
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
+        "permission": "manage_users"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/people/{profile_id}/avatar",
+      "requirement": {
+        "note": "an Admin sets or removes a profile's picture; same rank and lock-target rules as PATCH",
+        "owner_scoped": "none: profile administration (manage_users, people_api rank rules)",
+        "permission": "manage_users"
+      }
+    },
+    {
       "method": "PUT",
       "path": "/api/people/{profile_id}/backends",
       "requirement": {
@@ -2143,6 +2177,15 @@
         "note": "same-origin proxy onto the practice box",
         "owner_scoped": "none: host control (admin_system proxy)",
         "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/profile-avatars/{name}",
+      "requirement": {
+        "note": "profile pictures are visible to everyone who uses this DisPatch, the sign-in screen included, by design; the name is a strict pattern with the content hash",
+        "owner_scoped": "none: a public profile picture file (pictures are visible to all users by design)",
+        "public": true
       }
     },
     {

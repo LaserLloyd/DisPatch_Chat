@@ -424,6 +424,20 @@
         "title": "Body_file_upload_api_files_post",
         "type": "object"
       },
+      "Body_me_avatar_set_api_me_avatar_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_me_avatar_set_api_me_avatar_post",
+        "type": "object"
+      },
       "Body_my_character_avatar_api_me_characters__bot_id__avatar_post": {
         "properties": {
           "file": {
@@ -436,6 +450,20 @@
           "file"
         ],
         "title": "Body_my_character_avatar_api_me_characters__bot_id__avatar_post",
+        "type": "object"
+      },
+      "Body_people_avatar_set_api_people__profile_id__avatar_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_people_avatar_set_api_people__profile_id__avatar_post",
         "type": "object"
       },
       "Body_pin_thread_avatar_api_threads__thread_id__avatar_post": {
@@ -11835,6 +11863,57 @@
         "summary": "Put My Archive"
       }
     },
+    "/api/me/avatar": {
+      "delete": {
+        "operationId": "me_avatar_clear_api_me_avatar_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Me Avatar Clear"
+      },
+      "post": {
+        "description": "Your own profile picture (PNG, JPEG, WebP or GIF, 5 MB at most; stored as a 256 px WebP).",
+        "operationId": "me_avatar_set_api_me_avatar_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_me_avatar_set_api_me_avatar_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Me Avatar Set"
+      }
+    },
     "/api/me/backends": {
       "get": {
         "description": "The connections the caller's own bots may use: chat-capable household connections\nwithin the profile's ``backends.allowed``. No key, no base URL, no usage - those stay\nwith the Admin's Connections page. A profile without ``choose_backend`` gets an empty\nlist (its bots run on the household default).",
@@ -12057,6 +12136,7 @@
     },
     "/api/me/characters/{bot_id}/avatar": {
       "post": {
+        "description": "``crop_x``/``crop_y``/``crop_size``: the face square the user placed in the face picker,\nas fractions of the picture (top-left corner, side of the shorter edge); a centred square\nwithout them.",
         "operationId": "my_character_avatar_api_me_characters__bot_id__avatar_post",
         "parameters": [
           {
@@ -12066,6 +12146,54 @@
             "schema": {
               "title": "Bot Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_x",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop X"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_y",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop Y"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_size",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop Size"
             }
           }
         ],
@@ -13546,6 +13674,88 @@
         "summary": "People Patch"
       }
     },
+    "/api/people/{profile_id}/avatar": {
+      "delete": {
+        "operationId": "people_avatar_clear_api_people__profile_id__avatar_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Avatar Clear"
+      },
+      "post": {
+        "operationId": "people_avatar_set_api_people__profile_id__avatar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_people_avatar_set_api_people__profile_id__avatar_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Avatar Set"
+      }
+    },
     "/api/people/{profile_id}/backends": {
       "put": {
         "operationId": "people_backends_api_people__profile_id__backends_put",
@@ -14348,6 +14558,44 @@
           }
         },
         "summary": "Practice Proxy"
+      }
+    },
+    "/api/profile-avatars/{name}": {
+      "get": {
+        "description": "A profile picture, for anyone (the sign-in screen shows them). The name is\nunguessable-by-listing (it carries the content hash), content-addressed, so it is cached\nfor a year; a changed picture is a new name.",
+        "operationId": "profile_avatar_file_api_profile_avatars__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Profile Avatar File"
       }
     },
     "/api/push/subscribe": {

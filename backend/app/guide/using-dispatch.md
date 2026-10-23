@@ -8,7 +8,7 @@ A chat's menu (Thread actions) renames, pins or archives it. Archived chats are 
 
 The list on the left has two groups. **Mine** holds the bots that belong to you, starting with your own Atlas. **Household** holds the bots an Admin set up for everyone you are allowed to use.
 
-To make a bot of your own, press **Make a bot**: fill in a name, a picture and a personality by hand, or describe the bot you want and let the AI draft it. To start from a household bot, open it in **Settings → Characters** and choose **Make my own copy**: the copy takes its name, picture, personality and voice, never anyone's chats. A Basic profile uses the bots an Admin gives it and doesn't make its own.
+To make a bot of your own, press **Make a bot**: fill in a name, a picture and a personality by hand, or describe the bot you want and let the AI draft it. When you choose a picture, drag the square over the face: that square becomes the bot's avatar. To start from a household bot, open it in **Settings → Characters** and choose **Make my own copy**: the copy takes its name, picture, personality and voice, never anyone's chats. A Basic profile uses the bots an Admin gives it and doesn't make its own.
 
 ## Files and pictures
 
@@ -22,7 +22,7 @@ If voice chat is installed, the voice button in a chat lets you talk to the bot 
 
 ## Profiles, PINs and locking
 
-Each person has a profile. A PIN or password is optional; set one under **Settings → Account** if you want your chats kept behind it. **Lock** sends this device back to the shared **DisPatch** profile (or to the list of profiles, if an Admin chose that), and **Switch profile** on the bar moves to another one.
+Each person has a profile. A PIN or password is optional; set one under **Settings → Account** if you want your chats kept behind it. **Settings → Account → Profile picture** sets your picture: everyone who uses this DisPatch sees it, including on the sign-in screen. **Lock** sends this device back to the shared **DisPatch** profile (or to the list of profiles, if an Admin chose that), and **Switch profile** on the bar moves to another one.
 
 Everything you see in a profile, its chats, bots, pictures and files, belongs to that profile. **Reset to default** (Settings → Account) deletes them and starts the profile over with a fresh Atlas. Anyone using the shared DisPatch profile can reset it.
 
