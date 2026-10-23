@@ -1171,6 +1171,17 @@ def _truncate(text: str, n: int) -> str:
     return text if len(text) <= n else text[: n - 1].rstrip() + "…"
 
 
+_TITLE_NOISE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)|\[\[[^\]]*\]\]")
+
+
+def _title_from(text: str, n: int = 50) -> str:
+    """A chat title from the first message: pictures (``![name](/media/...)``) and inline
+    markers (``[[doc:...]]``, ``[[pic:...]]``) are not words, so they are left out; a message
+    that is nothing else falls back to the text as it was."""
+    words = " ".join(_TITLE_NOISE_RE.sub(" ", text or "").split())
+    return _truncate(words or text, n)
+
+
 _MEDIA_DIRECTIVE_RE = re.compile(r"\[\[media:([^\]|]+)(\|[^\]]*)?\]\]")
 _DOC_REF_RE = re.compile(r"\[\[doc:([^\]|]+)(?:\|([^\]]*))?\]\]")
 _INGEST_MAX = 500 * 1024 * 1024  # 500MB safety cap
@@ -13054,7 +13065,7 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     if cmid:
         _ack_mark(cmid, thread_id=thread_id, bot_id=thread.bot_id, text=text,
                   action=action_def.id if action_def else None)
-    await db.set_title_if_empty(thread_id, _truncate(text, 50))
+    await db.set_title_if_empty(thread_id, _title_from(text))
     msg_frame = {"type": "message", "thread_id": thread_id, "bot_id": thread.bot_id,
                  "message": user_msg.model_dump()}
     if cmid:
@@ -13923,7 +13934,7 @@ async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
         raise PermissionError(extensions.DISPATCH_REFUSED)
     meta = dict(metadata) if isinstance(metadata, dict) else {ext_id: True}
     user_msg = await db.add_message(thread_id, "user", text, metadata=meta or None)
-    await db.set_title_if_empty(thread_id, _truncate(text, 50))
+    await db.set_title_if_empty(thread_id, _title_from(text))
     frame = {"type": "message", "thread_id": thread_id, "bot_id": thread.bot_id,
              "message": user_msg.model_dump()}
     turn_opts = TurnOptions(user_msg_id=user_msg.id, voice=instructions,
