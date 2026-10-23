@@ -170,6 +170,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`jobboard_unknown_board_bot`](#jobboard_unknown_board_bot) | 404 | Unknown board bot |
 | [`json_invalid`](#json_invalid) | 400 | invalid JSON body |
 | [`list_index_invalid`](#list_index_invalid) | 400 | list must be a small non-negative integer |
+| [`lock_target_admin`](#lock_target_admin) | 422 | This is the shared default profile everyone lands on: it cannot be an Admin. |
 | [`lock_target_fence`](#lock_target_fence) | 422 | This is the shared default profile everyone lands on: agents and voice cloning cannot be switched on for it. |
 | [`lock_target_invalid`](#lock_target_invalid) | 422 | Pick an existing, enabled profile. |
 | [`machine_scope_denied`](#machine_scope_denied) | 403 | This API key is not allowed to call that endpoint. |
@@ -1496,6 +1497,14 @@ HTTP **400** - invalid JSON body
 HTTP **400** - list must be a small non-negative integer
 
 **Fix:** Check the request and resend it.
+
+## lock_target_admin
+
+<a id="lock_target_admin"></a>
+
+HTTP **422** - This is the shared default profile everyone lands on: it cannot be an Admin.
+
+**Fix:** Make another profile the default first (Settings → People & Access → When locked, show), or give the person a profile of their own.
 
 ## lock_target_fence
 

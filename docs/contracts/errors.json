@@ -1527,6 +1527,16 @@
       "status": 400
     },
     {
+      "code": "lock_target_admin",
+      "docs": "lock_target_admin",
+      "fix": "Make another profile the default first (Settings → People & Access → When locked, show), or give the person a profile of their own.",
+      "message": "This is the shared default profile everyone lands on: it cannot be an Admin.",
+      "patterns": [
+        "This is the shared default profile everyone lands on: it cannot be an Admin."
+      ],
+      "status": 422
+    },
+    {
       "code": "lock_target_fence",
       "docs": "lock_target_fence",
       "fix": "Grant it to a profile of its own, or make another profile the default first.",

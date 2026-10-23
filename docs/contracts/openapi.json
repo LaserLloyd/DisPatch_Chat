@@ -5718,7 +5718,7 @@
     },
     "/api/auth/password": {
       "post": {
-        "description": "Set or change YOUR password (Owner or Admin).\n\nThe first password of a PIN-only owner (the migration leaves it unset) is\nconfirmed with the install PIN; after that, with the current password.",
+        "description": "Set or change YOUR password (any Admin).\n\nThe first password is confirmed with the PIN the Admin signs in with: the install PIN for\nthe main Admin (a 3.x migration leaves a PIN-only one), the Admin's own PIN for any other\nAdmin (an Admin with no credential at all needs none); after that, with the current\npassword.",
         "operationId": "auth_password_api_auth_password_post",
         "requestBody": {
           "content": {

@@ -70,3 +70,17 @@ def test_the_settings_store_sets_the_lock_target_through_the_same_check(lobby):
         settings_store.set_many({"people.default_profile": a["id"]}, actor="t", owner=True)
     res = settings_store.set_many({"people.lock_target": "profile_list"}, actor="t", owner=True)
     assert auth.load().lock_target == "profile_list", res
+
+
+def test_the_shared_default_profile_can_never_be_made_an_admin(lobby):
+    """Every unsigned device lands on the default profile: an Admin there would be an Admin on
+    every device that reaches the port. Both the preview and the change refuse it."""
+    o, pid = lobby["owner"], lobby["id"]
+    r = o.get(f"/api/people/{pid}/role/preview", params={"role": "admin"})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "lock_target_admin", r.text
+    r = o.post(f"/api/people/{pid}/role", json={"role": "admin"})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "lock_target_admin", r.text
+    assert accounts.get_profile(pid).role.value == "user"
+    # Once another profile is the landing (or the profile list is), it may be promoted.
+    auth.set_lock_target("profile_list", None)
+    assert o.post(f"/api/people/{pid}/role", json={"role": "admin"}).status_code == 200

@@ -779,6 +779,17 @@ def _loses_private_content(old: Role, new: Role) -> bool:
     return new is Role.BASIC and old is not Role.BASIC
 
 
+def _refuse_admin_lock_target(prof: accounts.Profile, new: Role) -> None:
+    """The shared default profile every unsigned device and every lock lands on can never be
+    an Admin (it would make every device on the network an Admin): the same rule
+    ``auth.set_lock_target`` applies the other way round."""
+    from . import policy
+    if new is Role.ADMIN and policy.is_lock_target(prof):
+        raise ProfileServiceError(
+            "lock_target_admin",
+            "This is the shared default profile everyone lands on: it cannot be an Admin.", 422)
+
+
 def change_role_preview(profile_id: str, new_role: str) -> dict[str, Any]:
     """For User -> Basic: ``{"counts": {... incl. voices}, "token": str, "expires_in": ...}``;
     for any other change ``{"counts": {}, "token": "", ...}`` (nothing is deleted)."""
@@ -788,6 +799,7 @@ def change_role_preview(profile_id: str, new_role: str) -> dict[str, Any]:
         new = _normalise(new_role)
         if prof.protected and new is not Role.ADMIN:
             raise ProfileServiceError("owner_immutable", "The first Admin cannot be demoted.", 409)
+        _refuse_admin_lock_target(prof, new)
         if not _loses_private_content(prof.role, new):
             return {"counts": {}, "token": "", "expires_in": TOKEN_TTL_SECONDS, "deletes": False}
         counts = content_counts(profile_id)
@@ -857,6 +869,7 @@ def change_role(profile_id: str, new_role: str, *, confirm_token: str | None = N
             return prof
         if new is prof.role:
             return prof
+        _refuse_admin_lock_target(prof, new)
         if not _loses_private_content(prof.role, new):
             updated = accounts.update_profile(profile_id, role=new)
             _revoke(profile_id)
