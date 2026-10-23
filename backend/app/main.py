@@ -1961,15 +1961,8 @@ def _bearer(request: Request) -> str | None:
     return h[7:].strip() if h.lower().startswith("bearer ") else None
 
 
-# Path classification for the auth gate.
-# Past the gate, but NOT ungated: /api/health and /api/openapi.json both decide
-# for themselves what a given caller may see (liveness for anyone, detail for a
-# full session or an on-box machine). Listing them here only means the gate
-# does not answer on their behalf.
-_OPEN_EXACT = {"/", "/favicon.ico", "/favicon.svg", "/manifest.webmanifest",
-               "/api/health", "/api/openapi.json"}
-_OPEN_PREFIXES = ("/static/",)
-_AUTH_PREFIX = "/api/auth"
+# Which paths the auth gate lets through is declared per route in route_policy.py
+# (the gate reads that table; nothing here lists paths).
 
 
 def _gated_avatar_static(path: str) -> bool:
@@ -2974,7 +2967,7 @@ async def fire_reaction(
             tmsg = await _persist_and_broadcast_message(
                 thread_id, "system", f"⚡ {actor} reacted · {r.name}",
                 metadata={"kind": "reaction", "reaction_id": r.id,
-                          "reaction_name": r.name, "reaction_safe": r.safe,
+                          "reaction_name": r.name,
                           "actor": actor, "actor_kind": actor_kind,
                           # Fired pool images are kept in spent/ for good, so
                           # every trace can pop its picture back up on click.

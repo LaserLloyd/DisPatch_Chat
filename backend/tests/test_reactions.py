@@ -452,7 +452,7 @@ def test_fire_with_thread_persists_a_trace(rx_env):
     assert t["id"] == ev["trace_id"]
     assert t["role"] == "system"
     assert t["metadata"]["reaction_id"] == "nice"
-    assert t["metadata"]["reaction_safe"] is True
+    assert "reaction_safe" not in t["metadata"]          # the 3.x Safe-Mode flag is not written any more
     assert t["metadata"]["replayable"] is True
     assert "Nice" in t["content"]
 
