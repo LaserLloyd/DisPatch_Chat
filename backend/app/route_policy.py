@@ -339,6 +339,14 @@ _r("POST", "/api/me/characters/draft", _R(P.CREATE_CHARACTERS,
    note="AI build: a draft bot from a description; nothing is saved or logged"))
 
 # ---- WP-SCALE-OPS: maintenance, storage, retention (app/maintenance_api.py), all P.ADMIN_SYSTEM
+for _path, _m in (
+    ("/api/maintenance/status", "GET"), ("/api/maintenance/storage", "GET"),
+    ("/api/maintenance/storage/refresh", "POST"), ("/api/maintenance/run", "POST"),
+    ("/api/maintenance/images/preview", "GET"), ("/api/maintenance/retention", ("GET", "PUT")),
+    ("/api/maintenance/images/restore", "POST"),
+):
+    _r(_m, _path, _R(P.ADMIN_SYSTEM, note="host control: storage, retention and the daily maintenance task"))
+_r(("GET", "PUT"), "/api/me/archive", _R(P.MANAGE_HISTORY, note="the caller's OWN 'archive chats older than N months' value; nobody can set another profile's"))
 
 # --------------------------------------------------------------------------- #
 # Mounts (static trees) and dynamic prefixes

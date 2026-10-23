@@ -9,7 +9,8 @@
 * ``DELETE /api/backups/{id}``             delete an archive or snapshot       (admin_system)
 * ``POST   /api/support-bundle``           a redacted zip for a bug report     (admin_system)
 * ``GET    /api/users/{id}/export``        everything DisPatch holds about a profile (manage_users)
-* ``DELETE /api/users/{id}``               erase a profile and what is attached to it (manage_users)
+* ``DELETE /api/users/{id}``               erase a profile: the same removal as ``POST /api/people/{id}/delete``
+                                           (its bots, chats, files, pictures and voices go too) (manage_users)
 
 Ids look like ``archive:dispatch-20261018-120000.dpbk``, ``snapshot:chats-....db`` or
 ``premigration:3.0.0-....``. A passphrase typed here is never stored; the one in Settings is read
@@ -26,7 +27,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import accounts, auth, backups, config, policy, secret_store, settings_store
+from . import accounts, backups, config, policy, secret_store, settings_store
 from .api_common import audit, caller, fail
 from .contracts.permissions import Permission
 
@@ -236,37 +237,20 @@ async def export_user_route(request: Request, profile_id: str):
 
 @router.delete("/api/users/{profile_id}", dependencies=[_USERS])
 async def erase_user(request: Request, profile_id: str):
-    prof = _target(request, profile_id)
+    """Erase a profile. One removal path: this is ``POST /api/people/{id}/delete`` (the same
+    ``profiles_api.people_delete``, so the same rank rules, the same purge of the profile's bots,
+    chats, files, pictures, voices and push subscriptions, the same audit line) with the
+    confirmation token minted here, because this route is the older one-call form. The protected
+    Admin cannot be deleted and nobody deletes the profile they are using."""
+    from . import profiles_api, profiles_service
+    prof = profiles_api._target(request, profile_id, allow_self_protected=True)
     me = caller(request)
     if prof.id == me.profile_id:
         raise fail(409, "permission_denied", "You cannot delete the profile you are using.")
-    if prof.protected:
-        raise fail(409, "owner_immutable", "The owner cannot be deleted.")
-
-    def run() -> dict:
-        auth.revoke_profile(prof.id)
-        with accounts.connect() as con:
-            n_act = con.execute("DELETE FROM activity WHERE profile_id=? AND category='activity'", (prof.id,)).rowcount
-            n_use = con.execute("DELETE FROM usage_daily WHERE subject=?", (prof.id,)).rowcount
-        for b in config.load_bots():
-            if prof.id in b.profiles:
-                config.update_bot(b.id, lambda x: _without_profile(x, prof.id))
-        accounts.delete_profile(prof.id)
-        return {"activity_rows": n_act, "usage_rows": n_use}
-
-    out = await asyncio.to_thread(run)
-    audit(request, "user.erase", prof.id, f"{out['activity_rows']} activity, {out['usage_rows']} usage rows")
-    return {"erased": prof.id, **out}
-
-
-def _without_profile(b, profile_id: str):
-    """``b`` with ``profile_id`` taken off its profiles list. An EMPTY list means "everyone", so a
-    character that was made for this profile alone must not become visible to the whole household
-    (and its chats readable) because that profile was erased: it is left to the Owner instead."""
-    from dataclasses import replace
-    rest = [p for p in b.profiles if p != profile_id]
-    if not rest and b.profiles:
-        owner = accounts.get_owner()
-        rest = [owner.id] if owner is not None else [profile_id]
-    return replace(b, profiles=rest)
-
+    try:
+        preview = await asyncio.to_thread(profiles_service.delete_preview, profile_id)
+    except profiles_service.ProfileServiceError as e:
+        raise profiles_api._err(e) from e
+    out = await profiles_api.people_delete(request, profile_id,
+                                           profiles_api.DeleteIn(confirm_token=preview["token"]))
+    return {"erased": profile_id, "deleted": out["deleted"]}
