@@ -388,7 +388,7 @@ def test_owner_only_flags_cover_the_host_control_settings():
 def test_set_many_refuses_owner_only_keys_for_a_non_owner(tmp_path, monkeypatch):
     monkeypatch.setenv("DISPATCH_DATA_DIR", str(tmp_path))
     res = settings_store.set_many({"connections.image_cli": "/bin/evil", "characters.greeting": True}, owner=False)
-    assert "connections.image_cli" in res.errors and "Owner" in res.errors["connections.image_cli"]
+    assert "connections.image_cli" in res.errors and "only an Admin" in res.errors["connections.image_cli"]
     assert settings_store.resolve("connections.image_cli").source == "default"
     assert settings_store.resolve("characters.greeting").source == "default"      # all or nothing
     ok = settings_store.set_many({"connections.image_cli": "/bin/ok"})
