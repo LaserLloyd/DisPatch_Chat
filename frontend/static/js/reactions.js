@@ -742,7 +742,9 @@ async function withBusy(fn, errPrefix) {
 //     device chose to look — no broadcast, no timer pressure)
 //   * clicking the picture → collapses back to the chip
 // Returns null when the message isn't a reaction trace.
-export function reactionMessageEl(msg, { decoy = false } = {}) {
+export function reactionMessageEl(msg, { noImage, decoy = false } = {}) {
+  // `noImage` (No-Image Mode) is the 4.0 name; `decoy` is the old one main.js still passes.
+  const hideImage = noImage === undefined ? !!decoy : !!noImage;
   const meta = msg && msg.metadata;
   if (!meta || meta.kind !== 'reaction') return null;
   // In NIM the trace row goes too — chip, thumbnail and all. Half a reaction
@@ -759,7 +761,7 @@ export function reactionMessageEl(msg, { decoy = false } = {}) {
   // click. replayable:false only appears on legacy rows from before that
   // retention — those blobs are already purged, so they stay text-only.
   const rid = (meta.replayable === false) ? null : meta.reaction_id;
-  if (rid && !decoy) {
+  if (rid && !hideImage) {
     chip.append(el('img', {
       class: 'reaction-trace-thumb', src: api.reactionImageUrl(rid), alt: '', loading: 'lazy',
     }));
@@ -804,7 +806,7 @@ export function reactionMessageEl(msg, { decoy = false } = {}) {
   // below: an auto-expand used to `return row` early and skip this, so a row
   // that opened from a load-race had a dead chip after its 10s auto-collapse
   // and could not be re-opened until some later renderMessages rebuilt it.
-  if (rid && !decoy) {
+  if (rid && !hideImage) {
     chip.classList.add('clickable');
     chip.title = t('reactions.show');
     chip.addEventListener('click', () => {

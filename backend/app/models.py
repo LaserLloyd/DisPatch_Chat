@@ -17,7 +17,7 @@ class BotOut(BaseModel):
     model_hint: str = ""
     order: int = 0
     visible: bool = True
-    safe: bool = False
+    hidden: bool = False
     color: str = ""
     reactions: bool = False       # may this bot fire reaction images?
     image_jobs: bool = False      # may this bot request a generated picture?

@@ -363,6 +363,7 @@ class Reaction:
 
     def to_dict(self, *, settings: Settings | None = None) -> dict:
         d = asdict(self)
+        d.pop("safe", None)                      # legacy 3.x flag: stored, never sent
         d["image_url"] = image_url(self.id, self.file.rsplit("/", 1)[-1])
         if settings is not None:
             d["effective_duration_ms"] = settings.clamp_duration(self.duration_ms)
@@ -1687,6 +1688,12 @@ class PoolConfig:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    def public(self) -> dict:
+        """The pool settings as the API sends them (the legacy ``safe`` flag is stored only)."""
+        d = asdict(self)
+        d.pop("safe", None)
+        return d
+
 
 def per_mood_for(cfg: PoolConfig, mood: str) -> int:
     """Effective target stock for one mood: override wins, else global per_mood.
@@ -2567,7 +2574,7 @@ def pool_status(bot_id: str | None = None) -> dict:
     for mood in sorted(have):
         moods.setdefault(mood, have[mood])
     return {
-        **st.config.to_dict(),
+        **st.config.public(),
         # Daily freshness: fires counted toward the next daily run, and what
         # today's run (daily_date) still owes per mood.
         "fired_since_daily": dict(st.fired),

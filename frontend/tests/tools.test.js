@@ -62,7 +62,7 @@ async function freshTools() {
  *  desktop rail, ONE Tools button with a popup (the "desktop rail" cases). */
 function wire(mod, over = {}) {
   const rec = { opened: [], closedWith: [], restored: [], sidebar: 0, toasts: [], navigated: [], threads: [] };
-  const state = { decoy: false, selectedBotId: 'main', activeThreadId: 't-1', ...over.state };
+  const state = { selectedBotId: 'main', activeThreadId: 't-1', ...over.state };
   const flags = { harness: true, studioforge: true, mail: true, practice: false, ...over.flags };
   mod.wireTools({
     state,
@@ -74,7 +74,7 @@ function wire(mod, over = {}) {
     },
     openThread: (id, opts) => rec.threads.push([id, opts]),
     closeToolPanes: (except) => rec.closedWith.push(except),
-    builtinOn: (f) => !state.decoy && !!flags[f],
+    builtinOn: (f) => !!flags[f],
     builtinDot: (f) => (f === 'harness' ? 'harness-sidedot harness-running' : ''),
     restoreView: (p) => rec.restored.push(p),
     renderSidebar: () => { rec.sidebar += 1; mod.renderToolRail(); },
@@ -791,12 +791,11 @@ test('desktop rail: the dot is worst-of, and the button hides with nothing to sh
   await mod.loadTools();
   assert.ok(win.document.querySelector('#tools-menu-btn .bot-status-dot.tools-sidedot.error'));
 
-  // Safe Mode: parked bots are ignored and only safe tools count.
+  // Nothing to show (no tools, no parked bots): the button hides.
   win = setup();
   routes['GET /api/tools'] = () => [200, { tools: [] }];
   mod = await freshTools();
-  wire(mod, { mobile: false, state: { decoy: true, selectedBotId: null } });
-  mod.setParkedBots([{ id: 'parked-1', name: 'Parked Pal', dot: '', open: () => {} }]);
+  wire(mod, { mobile: false, state: { selectedBotId: null } });
   await mod.loadTools();
   assert.equal(win.document.getElementById('tool-list').hidden, true);
   assert.equal(win.document.getElementById('tools-menu-btn'), null);
@@ -862,7 +861,7 @@ test('crossing the breakpoint re-lays the one control out (rail button ⇄ phone
   let mobile = false;
   // Wired by hand: this case needs a viewport it can switch.
   const d = {
-    state: { decoy: false, selectedBotId: 'main', activeThreadId: 't-1' },
+    state: { selectedBotId: 'main', activeThreadId: 't-1' },
     openers: {}, closeToolPanes: () => {}, builtinOn: () => true, builtinDot: () => '',
     groupState: () => '', restoreView: () => {}, renderSidebar: () => mod.renderToolRail(),
     isMobile: () => mobile, navigate: () => {}, toast: () => {}, isBotId: () => false,
@@ -987,7 +986,7 @@ test('tool state: over 16 KB (or not JSON) is refused and the stored state kept'
   assert.ok(win.localStorage.getItem('dispatch-tool-state:benchmark'));
 });
 
-test('rail buttons moved into the popup: the button shows as "Tools & more" (even with no tools), rows are menu items, a click closes it, Restricted ignores them', { skip: dom.skip }, async () => {
+test('rail buttons moved into the popup: the button shows as "Tools & more" (even with no tools), rows are menu items, a click closes it', { skip: dom.skip }, async () => {
   let win = setup();
   routes['GET /api/tools'] = () => [200, { tools: [] }];
   let mod = await freshTools();
@@ -1013,16 +1012,6 @@ test('rail buttons moved into the popup: the button shows as "Tools & more" (eve
   fs.click();
   assert.equal(clicked, 1, 'it does what it does on the bar');
   assert.equal(doc.getElementById('tools-menu').hidden, true, 'and the popup closes');
-
-  win = setup();
-  routes['GET /api/tools'] = () => [200, { tools: [] }];
-  mod = await freshTools();
-  wire(mod, { mobile: false, state: { decoy: true, selectedBotId: null } });
-  const fs2 = win.document.getElementById('fs-chip');
-  fs2.classList.remove('hidden');
-  win.document.getElementById('tools-more').append(fs2);
-  await mod.loadTools();
-  assert.equal(win.document.getElementById('tools-menu-btn'), null, 'Restricted: no popup for rail buttons');
 });
 
 test('phone sheet: a tap in the profile chip\'s menu (opened from the sheet) reaches it, then the sheet closes', { skip: dom.skip }, async () => {

@@ -164,23 +164,16 @@ def _walk_files(root: Path) -> Iterator[os.DirEntry]:
 # Schema (idempotent; the same DDL migration 011 carries, plus the two helper tables)
 # --------------------------------------------------------------------------- #
 
-#: My own table (not in 011): which /media files DisPatch generated. image_jobs rows are pruned
-#: after 90 days; without this record the picture could no longer be told from an upload.
-GENERATED_DDL = """
-CREATE TABLE IF NOT EXISTS generated_media (
-    name TEXT PRIMARY KEY,
-    kind TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    owner TEXT
-);
-"""
+#: ``generated_media`` (which /media files DisPatch generated) is part of
+#: ``database.SCALE_SCHEMA`` since INT-3a, so migration 011 creates it and reconciles an early
+#: copy like the other 011 tables. Kept as a name for callers.
+GENERATED_DDL = ""
 
 
 def ensure_schema(con: sqlite3.Connection) -> None:
-    """The 011 tables (``database.SCALE_SCHEMA``, IF NOT EXISTS) plus ``generated_media``."""
+    """The 011 tables (``database.SCALE_SCHEMA``, IF NOT EXISTS; ``generated_media`` included)."""
     from . import database
     con.executescript(database.SCALE_SCHEMA)
-    con.executescript(GENERATED_DDL)
 
 
 def state_get(con: sqlite3.Connection, key: str, default: str | None = None) -> str | None:

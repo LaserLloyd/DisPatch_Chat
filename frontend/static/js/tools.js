@@ -345,16 +345,15 @@ function byAppOrder(a, b) {
 /** The tiles the rail should draw: builtins, then apps, then static/url. */
 export function railEntries() {
   if (!deps) return [];
-  const st = deps.state;
   const builtins = [];
   const apps = [];
   const others = [];
   for (const tool of allTools()) {
     if (tool.enabled === false) continue;
     if (tool.kind === 'builtin') {
-      // Never in Safe Mode, and only when the pane's own probe found it on.
+      // Only when the pane's own probe found it on.
       const b = builtinOf(tool);
-      if (st.decoy || !b || !deps.builtinOn(b.feature)) continue;
+      if (!b || !deps.builtinOn(b.feature)) continue;
       builtins.push(tool);
     } else if (isApp(tool)) {
       apps.push(tool);
@@ -434,7 +433,7 @@ export function setParkedBots(list) {
 function compactRail() { return !!deps && !deps.isMobile(); }
 
 function visibleParked() {
-  return deps && deps.state && deps.state.decoy ? [] : parked;
+  return parked;
 }
 
 // The static rail buttons the person moved into this popup (js/railmenu.js puts
@@ -442,7 +441,7 @@ function visibleParked() {
 // hidden for this profile stays hidden wherever it sits. Never in Restricted.
 function moreItems() {
   const host = $('tools-more');
-  if (!host || (deps && deps.state && deps.state.decoy)) return [];
+  if (!host) return [];
   return [...host.children].filter((b) => !b.classList.contains('hidden') && !b.hidden);
 }
 function moreCount() { return moreItems().length; }
@@ -629,7 +628,7 @@ function paintMenu() {
   if (moreSep) moreSep.hidden = !(extra && (toolsHost.childElementCount || botsHost.childElementCount));
   const arrange = $('tools-arrange');
   if (arrange) {
-    const can = !!(deps && typeof deps.arrangeRail === 'function' && !(deps.state && deps.state.decoy));
+    const can = !!(deps && typeof deps.arrangeRail === 'function');
     arrange.hidden = !can;
     // A menu item only while it is offered (a hidden row must not count as one).
     if (can) arrange.setAttribute('role', 'menuitem'); else arrange.removeAttribute('role');
@@ -952,7 +951,7 @@ function toIso(mtime) {
 function paintRefreshBtn(tool) {
   const btn = $('tool-refresh');
   if (!btn) return;
-  const show = !!(tool && tool.has_refresh) && !deps.state.decoy;
+  const show = !!(tool && tool.has_refresh);
   btn.classList.toggle('hidden', !show);
   btn.disabled = refreshing;
   const lbl = btn.querySelector('[data-i18n]');
@@ -1021,7 +1020,7 @@ async function refreshStatus(tool) {
 async function doRefresh() {
   const id = openId;
   const tool = id && findTool(id);
-  if (!tool || refreshing || deps.state.decoy) return;
+  if (!tool || refreshing) return;
   refreshing = true;
   hideError();
   paintRefreshBtn(tool);
@@ -1078,7 +1077,6 @@ export function openTool(id, { launch = true } = {}) {
   const tool = findTool(id);
   const b = BUILTIN_BY_ID.get(id) || (tool && tool.kind === 'builtin' ? builtinOf(tool) : null);
   if (b) {
-    if (st.decoy) return false;
     if (tool && tool.enabled === false) return false;
     const opener = b.open ? () => b.open(b.id) : (deps.openers && deps.openers[b.feature]);
     if (typeof opener !== 'function') return false;
@@ -1386,7 +1384,7 @@ export function hashToolId(hash = location.hash) {
 /** Open the tool named in the URL hash, if any. Unlocked only (see spec). */
 export function openFromHash() {
   const id = hashToolId();
-  if (!id || !deps || deps.state.decoy) return false;
+  if (!id || !deps) return false;
   if (openId === id) return true;
   const ok = openTool(id, { launch: false });
   if (!ok) deps.toast(t('tools.not_found'), true);
@@ -1772,7 +1770,7 @@ export async function saveToolsSettings() {
 // ===================== Wiring =====================
 
 /** Hand this module the app. `d`:
- *    state            the app state (decoy, selectedBotId, activeThreadId)
+ *    state            the app state (selectedBotId, activeThreadId)
  *    openers          {harness, studioforge, mail, practice} → the builtin openers
  *    openThread(id, {botId, hint, appId})  an app asked to open one of its threads
  *    closeToolPanes   main.js's pane closer (called with 'tool' before opening)

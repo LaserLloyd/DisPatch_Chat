@@ -918,7 +918,6 @@
     },
     "stale": "连不上服务器（{error}）— 显示的是 {ago} 的最后一次读数。",
     "stale_no_data": "连不上服务器：{error}",
-    "locked": "[zh] Sign in as Owner or Admin",
     "just_now": "刚刚",
     "secs_ago": {
       "other": "{count} 秒前"

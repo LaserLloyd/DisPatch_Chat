@@ -10,7 +10,7 @@
     ]
   },
   "title": "Image Studio",
-  "locked": "Unlock for full access",
+  "locked": "This profile cannot use Image Studio. Ask an Admin.",
   "loading": "Loading…",
   "nim.hidden": "Pictures are hidden in No-Image Mode.",
   "prompt.label": "Prompt",

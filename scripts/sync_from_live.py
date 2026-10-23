@@ -70,6 +70,8 @@ ALLOW: list[tuple[str, str, str]] = [
     ("backend/tests/livetools",      "backend/tests/livetools",     "*.py"),
     ("backend/tests/agents",         "backend/tests/agents",        "*.py"),
     ("backend/tests/agents/contract", "backend/tests/agents/contract", "*.py"),
+    # 4.0 (INT-3a): the opt-in synthetic-load benchmark (pytest -m scale) and its generator.
+    ("backend/tests/scale",         "backend/tests/scale",         "*.py"),
     ("backend",                     "backend",                     "pyproject.toml"),
     ("backend",                     "backend",                     "uv.lock"),
     ("frontend/static",             "frontend/static",             "index.html"),

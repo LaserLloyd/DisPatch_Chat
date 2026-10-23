@@ -23,9 +23,12 @@
 //   * a superseded request never wins (AbortController).
 
 import {
-  api, t, ready, theme, openThread, toast, onMessage, DecoyError,
+  api, t, ready, theme, openThread, toast, onMessage,
   iconLabel, RAIL_ICONS,
 } from '/static/js/app-sdk.js?v=3';
+
+/** A 403: this profile may not use the Job Board (4.0; 3.x sent a Safe-Mode DecoyError). */
+const refused = (e) => !!e && e.status === 403;
 
 // The router is mounted at /api/apps/jobboard (and, for the scout agent and
 // crons, at the legacy /api/jobs too). The page uses the app path.
@@ -45,7 +48,7 @@ const state = {
   findOpen: false,
   findStatus: '',
   error: null,
-  locked: false,             // Safe Mode answered: nothing here is shown
+  locked: false,             // a 403 answered: nothing here is shown
 };
 
 function chipClass(st) {
@@ -483,7 +486,7 @@ export async function refresh() {
     const [listResp, monthsResp] = await Promise.all([
       api(API_BASE, { signal: ctl.signal }),
       api(`${API_BASE}/months`, { query: { bot_id: BOT_ID }, signal: ctl.signal }).catch((e) => {
-        if (e instanceof DecoyError) throw e;
+        if (refused(e)) throw e;
         return { months: [] };
       }),
     ]);
@@ -494,7 +497,7 @@ export async function refresh() {
     loadedOnce = true;
   } catch (e) {
     if (ctl.signal.aborted || (e && e.name === 'AbortError')) return;
-    if (e instanceof DecoyError) {
+    if (refused(e)) {
       state.locked = true;
       renderLocked();
       return;

@@ -66,10 +66,10 @@ export function accessFrom(me) {
   const has = (p) => all || perms.includes(p);
   const role = me && me.role;
   return {
-    dispatch: !!(me && !me.restricted) && has('dispatch_agents'),
-    approve: !!(me && !me.restricted) && has('approve_agent_actions'),
-    manage: !!(me && !me.restricted) && has('manage_agents'),
-    operator: !!(me && !me.restricted) && (all || role === 'owner' || role === 'admin'),
+    dispatch: !!me && has('dispatch_agents'),
+    approve: !!me && has('approve_agent_actions'),
+    manage: !!me && has('manage_agents'),
+    operator: !!me && (all || role === 'owner' || role === 'admin'),
   };
 }
 
@@ -78,7 +78,7 @@ export const NO_ACCESS = Object.freeze({ dispatch: false, approve: false, manage
 // ----------------------------------------------------------------------------- the module
 
 /**
- * deps: { api?, toast, confirm, announce, isDecoy, sessionKey, navButton, onAssigned(task, {fromComposer}) }
+ * deps: { api?, toast, confirm, announce, sessionKey, navButton, onAssigned(task, {fromComposer}) }
  */
 export function createTasksUi(deps = {}) {
   const api = deps.api || realApi;
@@ -129,18 +129,12 @@ export function createTasksUi(deps = {}) {
   async function refreshAccess() {
     // The app calls this whenever the sign-in state may have changed; asking the server on every
     // call would be noise, so a burst within a few seconds is answered from the last answer.
-    const key = deps.sessionKey ? deps.sessionKey() : `${deps.isDecoy ? deps.isDecoy() : ''}`;
+    const key = deps.sessionKey ? deps.sessionKey() : '';
     const now = Date.now();
     if (refreshAccess.last && refreshAccess.key === key && now - refreshAccess.last < 3000) return access;
     refreshAccess.last = now;
     if (refreshAccess.key !== undefined && refreshAccess.key !== key) resetForNewSession();
     refreshAccess.key = key;
-    if (deps.isDecoy && deps.isDecoy()) {
-      access = NO_ACCESS;
-      agents = [];
-      paintNav();
-      return access;
-    }
     try {
       access = accessFrom(await api.me());
     } catch {

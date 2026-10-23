@@ -955,7 +955,6 @@
     },
     "stale": "Serveur injoignable ({error}) — voici le dernier relevé, {ago}.",
     "stale_no_data": "Serveur injoignable : {error}",
-    "locked": "[fr] Sign in as Owner or Admin",
     "just_now": "à l’instant",
     "secs_ago": {
       "one": "il y a {count} s",

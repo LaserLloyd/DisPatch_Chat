@@ -42,7 +42,8 @@ def datadir(tmp_path, monkeypatch):
     asyncio.run(build())
     # Back to a pre-011 shape: no 011 tables or indexes, auto_vacuum NONE.
     con = sqlite3.connect(d / "chats.db", isolation_level=None)
-    for t in ("maintenance_runs", "media_refs", "media_expired", "storage_stats", "maintenance_state"):
+    for t in ("maintenance_runs", "media_refs", "media_expired", "storage_stats", "maintenance_state",
+              "generated_media"):
         con.execute(f"DROP TABLE IF EXISTS {t}")
     for _t, name, _ddl in database.SCALE_INDEXES:
         con.execute(f"DROP INDEX IF EXISTS {name}")
@@ -132,7 +133,7 @@ def _schema(d):
             "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"))
         cols = {t: [tuple(r[1:6]) for r in con.execute(f"PRAGMA table_info({t})")]
                 for t in ("profiles", "messages", "threads", "maintenance_runs", "media_refs",
-                          "media_expired", "storage_stats", "maintenance_state")}
+                          "media_expired", "storage_stats", "maintenance_state", "generated_media")}
         return objs, cols, con.execute("PRAGMA auto_vacuum").fetchone()[0]
     finally:
         con.close()
@@ -193,3 +194,94 @@ def test_011_over_a_partial_older_copy_ends_exactly_like_a_fresh_011(datadir, tm
     (sql,) = con.execute("SELECT sql FROM sqlite_master WHERE name = 'idx_threads_owner_unread'").fetchone()
     con.close()
     assert "owner_profile_id, is_archived" in sql
+
+
+#: Every 011 / maintenance object an early build left on a 3.1.0 database before 011 ever ran
+#: (the 2026-10-22 incident: a CLI call and a test opened the live file), DDL exactly as
+#: sqlite_master kept it there: the five maintenance tables, the maintenance task's own
+#: ``generated_media``, the first-commit indexes (the unread one on the owner alone), and the two
+#: profiles columns (``household_bots`` from 010's accounts DDL, ``archive_after_months``).
+EARLY_OBJECTS = [
+    "CREATE TABLE maintenance_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, started TEXT NOT NULL, "
+    "finished TEXT, step TEXT NOT NULL, rows INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL "
+    "DEFAULT 0, ms INTEGER NOT NULL DEFAULT 0, error TEXT)",
+    "CREATE INDEX idx_maintenance_runs_started ON maintenance_runs(started)",
+    "CREATE INDEX idx_maintenance_runs_step ON maintenance_runs(step, started)",
+    "CREATE TABLE media_refs (name TEXT PRIMARY KEY, last_ref_at TEXT NOT NULL)",
+    "CREATE TABLE media_expired (name TEXT PRIMARY KEY, expired_at TEXT NOT NULL, kind TEXT NOT NULL)",
+    "CREATE TABLE storage_stats (area TEXT PRIMARY KEY, bytes INTEGER NOT NULL DEFAULT 0, "
+    "files INTEGER NOT NULL DEFAULT 0, measured_at TEXT NOT NULL)",
+    "CREATE TABLE maintenance_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+    "CREATE TABLE generated_media (name TEXT PRIMARY KEY, kind TEXT NOT NULL, "
+    "created_at TEXT NOT NULL, owner TEXT)",
+    "CREATE INDEX idx_threads_owner_list ON threads(owner_profile_id, is_archived, is_pinned, "
+    "updated_at DESC, id DESC)",
+    "CREATE INDEX idx_threads_owner_bot_list ON threads(owner_profile_id, bot_id, is_archived, "
+    "is_pinned, updated_at DESC, id DESC)",
+    "CREATE INDEX idx_threads_owner_unread ON threads(owner_profile_id) WHERE is_archived = 0 "
+    "AND (last_read_at IS NULL OR last_read_at < updated_at)",
+    "CREATE INDEX idx_files_owner_created ON files(owner_profile_id, created_at DESC)",
+    "CREATE INDEX idx_image_jobs_message ON image_jobs(message_id)",
+    "CREATE INDEX idx_sessions_device ON sessions(device_id)",
+    "CREATE INDEX idx_activity_category_ts ON activity(category, ts)",
+    "CREATE INDEX idx_task_events_ts ON task_events(ts)",
+    "CREATE INDEX idx_tasks_finished ON tasks(finished_at)",
+    "CREATE INDEX idx_job_events_created ON job_events(created_at)",
+    "CREATE INDEX idx_job_feedback_created ON job_feedback(created_at)",
+    "CREATE INDEX idx_usage_daily_day ON usage_daily(day)",
+    "CREATE INDEX idx_transcript_seen_created ON transcript_seen(created_at)",
+    "CREATE INDEX idx_image_jobs_state_updated ON image_jobs(state, updated_at)",
+    "CREATE INDEX idx_sessions_last_seen ON sessions(last_seen)",
+    "CREATE INDEX idx_devices_last_seen ON devices(last_seen)",
+    "CREATE INDEX idx_approvals_decided ON approvals(decided_at)",
+    "ALTER TABLE profiles ADD COLUMN household_bots TEXT DEFAULT '\"all\"'",
+    "ALTER TABLE profiles ADD COLUMN archive_after_months INTEGER",
+]
+
+
+def test_011_over_every_early_object_ends_exactly_like_a_fresh_011(datadir, tmp_path):
+    """Early copies of EVERY 011 / maintenance object (incl. generated_media and the profiles
+    columns), seeded before 011 runs, end as the exact schema of a fresh 011; and the
+    maintenance task's own connection afterwards changes nothing."""
+    import shutil
+
+    from app import agents_store, connections, maintenance, settings_store, tool_manifests
+    pristine = tmp_path / "pristine-early"
+    shutil.copytree(datadir, pristine)
+
+    def caches():
+        accounts.reset_for_tests()
+        settings_store.reset_schema_cache()
+        connections.reset_schema_cache()
+        tool_manifests.reset_schema_cache()
+        agents_store.reset_for_tests()
+
+    migrate.run(take_backup=False)
+    fresh = _schema(datadir)
+    assert any(n == "generated_media" for t, n, _s in fresh[0] if t == "table"), fresh[0]
+    shutil.rmtree(datadir)
+    shutil.copytree(pristine, datadir)
+    caches()
+    with accounts.connect():
+        pass
+    con = sqlite3.connect(datadir / "chats.db", isolation_level=None)
+    seeded = 0
+    for ddl in EARLY_OBJECTS:
+        try:
+            con.execute(ddl)
+            seeded += 1
+        except sqlite3.OperationalError as e:    # accounts.connect already added the column
+            assert "duplicate column" in str(e), e
+    con.close()
+    assert seeded >= len(EARLY_OBJECTS) - 2
+    rep = migrate.plan()
+    lines = [a.text for a in rep.actions if a.step == "011_scale"]
+    assert any("idx_threads_owner_unread" in t for t in lines), lines
+    assert not any("create tables" in t for t in lines), lines      # every table already there
+    migrate.run(take_backup=False)
+    got = _schema(datadir)
+    assert set(got[0]) ^ set(fresh[0]) == set(), sorted(set(got[0]) ^ set(fresh[0]))
+    assert got == fresh
+    # The maintenance task's own connection (it used to create generated_media itself) is a no-op.
+    maintenance.connect().close()
+    assert _schema(datadir) == fresh

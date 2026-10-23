@@ -44,7 +44,7 @@ def test_create_a_character_on_a_connection(owner, conn):
     assert r.status_code == 201, r.text
     ch = r.json()
     assert ch["backend"] == {"kind": "direct", "connection": conn, "model": "qwen-7b", "agent": None}
-    assert ch["audience"] == "members" and ch["description"] == "Quick and curious"
+    assert "audience" not in ch and "safe" not in ch and ch["description"] == "Quick and curious"
     assert ch["personality"]["preset"] == "tutor" and ch["voice_link"] == {
         "section": "voice", "anchor": "voices", "character": "nova"}
     entry = _roster()["nova"]["advisor"]["providers"][0]

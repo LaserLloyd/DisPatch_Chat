@@ -675,9 +675,10 @@ class Bot:
 
     @property
     def visible(self) -> bool:
-        """Derived and read-only (2.4.2) from the legacy flags -- kept on the wire for older
-        clients and the voice add-on. Never a gate."""
-        return bool(self.safe or not self.hide_unlocked)
+        """Derived and read-only: ``not hidden`` (4.0; 2.4.2-3.x derived it from the legacy
+        ``safe`` / ``hide_unlocked`` pair). Kept on the wire for older clients and the voice
+        add-on, which list only visible bots. Display only, never a gate."""
+        return not self.hidden
 
     # Whether an advisor turn may start agent work is decided per TURN, not per
     # bot: the caller's `dispatch_agents` permission becomes
@@ -732,10 +733,7 @@ class Bot:
             "visible": self.visible,
             "scope": self.scope,
             "cloned_from": self.cloned_from,
-            "safe": self.safe,
-            "hide_unlocked": self.hide_unlocked,
             "hidden": self.hidden,
-            "audience": self.audience,
             "description": self.description,
             "quick_actions": self.quick_actions,
             "color": self.color,

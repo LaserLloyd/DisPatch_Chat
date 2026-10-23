@@ -154,7 +154,7 @@ _ALLOWED_KEYS = {
 #: Settings tab sends rows back as it got them; these are dropped from a PUT
 #: when they still say what the package says, and refused when they do not —
 #: a title is changed in app.yaml, not through this API.
-_APP_MIRROR_KEYS = ("title", "icon", "safe", "order", "has_refresh", "bot_id",
+_APP_MIRROR_KEYS = ("title", "icon", "order", "has_refresh", "bot_id",
                     "thread_hook", "entry", "hook_version", "mounted")
 _REFRESH_KEYS = {"argv", "cwd", "timeout_s"}
 #: Keys GET /api/tools adds that are not part of the manifest. PUT drops them so
@@ -229,7 +229,8 @@ class Tool:
             if self.remote_url:
                 d["remote_url"] = self.remote_url
         d["enabled"] = self.enabled
-        d["safe"] = self.safe
+        if self.safe:                            # legacy 3.x flag: inert, kept only as data
+            d["safe"] = True
         if self.open != self.default_open():     # a default is never written
             d["open"] = self.open
         if self.refresh is not None:
@@ -952,7 +953,7 @@ def _member_visible(t: Tool) -> bool:
 
 def _out_operator(t: Tool) -> dict:
     d = {"id": t.id, "title": t.title, "icon": t.icon, "kind": t.kind,
-         "enabled": t.enabled, "safe": t.safe, "has_refresh": t.refresh is not None,
+         "enabled": t.enabled, "has_refresh": t.refresh is not None,
          "open": t.open}
     if t.kind == "static":
         d["root"] = t.root
@@ -967,7 +968,7 @@ def _out_operator(t: Tool) -> dict:
 
 def _out_limited(t: Tool) -> dict:
     d = {"id": t.id, "title": t.title, "icon": t.icon, "kind": t.kind,
-         "enabled": t.enabled, "safe": t.safe, "has_refresh": False, "open": t.open}
+         "enabled": t.enabled, "has_refresh": False, "open": t.open}
     if t.kind == "static":
         d["entry"] = t.entry
     else:
@@ -982,7 +983,7 @@ def _builtin_row(tid: str) -> dict:
             # `enabled` is the manifest SWITCH (what a Settings save round-trips),
             # never the resolved value — otherwise saving while a feature is
             # merely unavailable would persist `enabled: false` into tools.yaml.
-            "enabled": builtin_switch(tid), "safe": False,
+            "enabled": builtin_switch(tid),
             "has_refresh": False, "builtin_feature": feat,
             "available": _builtin_available(tid),
             "open": builtin_open(tid)}
@@ -997,7 +998,7 @@ def _app_row(la) -> dict:
     m = la.manifest
     d = {"id": m.id, "title": m.title, "icon": m.icon, "kind": "app",
          # The manifest SWITCH, like a builtin row (never a resolved value).
-         "enabled": _app_enabled(m.id), "safe": m.safe, "order": m.order,
+         "enabled": _app_enabled(m.id), "order": m.order,
          "has_refresh": False}
     if m.bot is not None:
         d["bot_id"] = m.bot.id
@@ -1251,6 +1252,10 @@ def api_tools_put(request: Request, payload: dict = Body(...)):
             continue
         tid = row.get("id")
         stored = current.get(tid) if isinstance(tid, str) else None
+        # `safe` is a legacy 3.x key (no Restricted tier in 4.0): GET no longer lists it, so a
+        # row sent back without it keeps what the file holds (inert data, round-tripped).
+        if "safe" not in row and stored is not None and stored.safe:
+            row["safe"] = True
         # The UI can never introduce or change a refresh argv: sent = must equal
         # what the file already holds; omitted/null = keep what the file holds.
         if row.get("refresh") is not None:
@@ -1301,6 +1306,7 @@ def _clean_app_row(i: int, row: dict, stored: Tool | None) -> dict:
     la = apps_loader.get(tid) if isinstance(tid, str) else None
     if la is None and (stored is None or stored.kind != "app"):
         raise ToolValidationError(i, "id", "no such app (an app is a package on disk)")
+    row = {k: v for k, v in row.items() if k != "safe"}     # legacy 3.x key, inert
     if la is not None:
         mirror = _app_row(la)
         for k in _APP_MIRROR_KEYS:

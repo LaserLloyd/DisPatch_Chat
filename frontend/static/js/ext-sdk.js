@@ -59,6 +59,7 @@ import { APP_VERSION } from './about.js?v=22';
 
 /** The extension API this shell speaks. Bump ONLY on a breaking change. */
 export const EXT_API = 1;
+// DEPRECATED alias kept for add-ons written against 3.x (never thrown in 4.0; see app-sdk.js).
 export { DecoyError };
 
 let impl = null;

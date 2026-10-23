@@ -135,3 +135,15 @@ def test_the_deploy_tool_carries_the_same_new_rows():
     assert rows is not None, "APP_PATHS not found in the deploy tool"
     assert ("frontend/static", "profiles.css") in rows
     assert ("backend/app/bot_templates", "*.md") in rows
+    assert ("backend/tests/scale", "*.py") in rows
+
+
+def test_the_scale_benchmark_rides_the_allowlist():
+    """4.0 (INT-3a): the opt-in benchmark lives in backend/tests/scale/, a directory the
+    non-recursive backend/tests row does not reach."""
+    allow = _allow()
+    files = sorted((REPO / "backend" / "tests" / "scale").glob("*.py"))
+    assert files
+    missing = [f.relative_to(REPO).as_posix() for f in files
+               if not _covered(f.relative_to(REPO).as_posix(), allow)]
+    assert not missing, missing

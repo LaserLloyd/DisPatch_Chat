@@ -937,7 +937,6 @@
     },
     "stale": "Der Server ist nicht erreichbar ({error}) — angezeigt wird der letzte Stand von {ago}.",
     "stale_no_data": "Der Server ist nicht erreichbar: {error}",
-    "locked": "[de] Sign in as Owner or Admin",
     "just_now": "gerade eben",
     "secs_ago": {
       "one": "vor {count} s",

@@ -11,8 +11,11 @@
 // fetched; the lightbox refuses too.
 
 import {
-  api, t, ready, theme, toast, lightbox, DecoyError, el, railIcon, RAIL_ICONS,
+  api, t, ready, theme, toast, lightbox, el, railIcon, RAIL_ICONS,
 } from '/static/js/app-sdk.js?v=3';
+
+/** A 403: this profile may not use Image Studio (4.0; 3.x sent a Safe-Mode DecoyError). */
+const refused = (e) => !!e && e.status === 403;
 import {
   PROMPT_MAX, isGenerateShortcut, shortcutLabel, promptStatus, canGenerate, clampCount,
   buildRequest, cropRect, defaultCropPos, galleryItems, isMetered,
@@ -453,7 +456,7 @@ async function generate() {
       : t('results.done', { n: r.images.length }));
     (S.sort === 'newest' ? R.grid.firstElementChild : R.grid.lastElementChild)?.scrollIntoView?.({ block: 'nearest' });
   } catch (e) {
-    setStatus(e instanceof DecoyError ? t('locked') : e.message, true);
+    setStatus(refused(e) ? t('locked') : e.message, true);
   } finally {
     S.busy = false; refreshForm();
   }
@@ -573,7 +576,7 @@ export async function mount(root = document.getElementById('st-root')) {
     renderGrid();
     refreshForm();
   } catch (e) {
-    root.replaceChildren(el('p', { class: 'st-locked', text: e instanceof DecoyError ? t('locked') : e.message }));
+    root.replaceChildren(el('p', { class: 'st-locked', text: refused(e) ? t('locked') : e.message }));
   }
   document.body.classList.add('st-ready');
 }

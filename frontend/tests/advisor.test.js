@@ -80,8 +80,8 @@ test('Send and Dismiss name the card message they were pressed on',
       strip.querySelector('.advisor-send').click();
       await new Promise((r) => setTimeout(r, 0));
       assert.deepEqual(calls, [['send', 'r1', 'card-7']]);
-      // A locked device gets no buttons at all.
-      assert.equal(handoffStripEl(m, { decoy: true }).querySelector('button'), null);
+      // 4.0: no locked tier; the old `decoy` option is ignored (the server decides who sends).
+      assert.ok(handoffStripEl(m, { decoy: true }).querySelector('button'));
     } finally {
       globalThis.document = prev;
     }

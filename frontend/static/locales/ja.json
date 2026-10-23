@@ -918,7 +918,6 @@
     },
     "stale": "サーバーに接続できません（{error}） — {ago}の状態を表示しています。",
     "stale_no_data": "サーバーに接続できません: {error}",
-    "locked": "オーナーまたは管理者としてサインインしてください",
     "just_now": "たった今",
     "secs_ago": {
       "other": "{count} 秒前"

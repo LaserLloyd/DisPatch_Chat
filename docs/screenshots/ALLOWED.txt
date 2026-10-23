@@ -54,7 +54,6 @@ guide/bots-tab.png
 guide/ai-models.png
 guide/plugins-tab.png
 guide/quick-actions.png
-guide/safe-mode.png
 guide/voice-screen.png
 
 # README gallery (docs/screenshots/readme/), opened one by one 2026-10-19: Atlas,

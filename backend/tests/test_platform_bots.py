@@ -84,12 +84,13 @@ def test_a_fresh_install_materialises_atlas_and_lists_it(env):
     written = yaml.safe_load((env.tmp_path / "config.yaml").read_text())
     assert written["bots"][0]["id"] == "atlas"      # (the Job Board app adds its own)
     assert written["bots"][0]["advisor"] == {"providers": [], "tools": True}
-    # An unlocked session gets the whole roster; the Job Board's bot rides
-    # along as "Hidden" (shown on no device -- the client keeps it off the
-    # rail) so the app can open its threads (2.4.2).
+    # The Admin gets the whole roster; the Job Board's bot rides along `hidden` (the client
+    # keeps it off the rail) so the app can open its threads. 4.0 payloads carry no
+    # legacy safe / hide_unlocked / audience keys.
     rows = c.get("/api/bots").json()["bots"]
-    assert [b["id"] for b in rows if not b["hide_unlocked"]] == ["atlas"]
+    assert [b["id"] for b in rows if not b["hidden"]] == ["atlas"]
     assert all(not b["visible"] for b in rows if b["id"] != "atlas")
+    assert not any(k in b for b in rows for k in ("safe", "hide_unlocked", "audience"))
     row = next(b for b in c.get("/api/bots/all").json()["bots"] if b["id"] == "atlas")
     assert (row["backend"], row["tools"], row["connected"]) == ("direct", True, False)
 

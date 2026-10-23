@@ -444,7 +444,7 @@ function editorEl(form, data, deps, api, ctl) {
     field(t('agents.budget_tokens'), bind(el('input', { type: 'number', min: '0', step: '1', inputmode: 'numeric' }), 'max_tokens')),
   ]);
 
-  const people = (data.agents.profiles || []).filter((p) => p.role !== 'restricted');
+  const people = data.agents.profiles || [];
   const pubBox = el('fieldset', { class: 'agents-publish' }, [
     el('legend', { text: t('agents.publish_legend') }),
     checkbox(t('agents.publish_all'), f.published_all, (v) => { f.published_all = v; paintPub(); }),

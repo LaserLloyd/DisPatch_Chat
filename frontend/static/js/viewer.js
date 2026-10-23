@@ -11,12 +11,12 @@
 //  * It builds `div.lightbox` with `_close` published on the node, exactly like
 //    openLightbox in main.js. The global Escape handler finds `.lightbox` and
 //    clicks its `.lightbox-close`; closeAllOverlays() calls `_close()` on every
-//    `.lightbox` when the app drops to Safe Mode. Rename either and locking the
+//    `.lightbox` when the device locks or signs out. Rename either and locking the
 //    app would leave someone's home directory on screen.
 //  * The iframe's `src` is REMOVED before the node is (the harness precedent in
 //    main.js): a detached-but-live frame keeps its page running.
-//  * Safe Mode never gets here. `isDecoy()` is the client half; the server 403s
-//    every viewer route for a decoy session. Both are required.
+//  * Only an Admin gets here: `refuse()` (true for anyone else) is the client half;
+//    the server 403s every viewer route for a non-Admin. Both are required.
 //
 // The pure parts (kind → pane decision, breadcrumbs, the history stack, the
 // icon-name table, error classification) are exported separately from the DOM
@@ -202,19 +202,21 @@ const DEFAULT_API = {
 
 const cfg = {
   onToast: () => {},
-  isDecoy: () => false,
+  refuse: () => false,
   api: DEFAULT_API,
 };
 
 /**
  * Wire the module to the app.
  *   onToast(message, isError)  — the app's toast (never imported from main.js)
- *   isDecoy()                  — true in Safe Mode; the viewer refuses to open
+ *   refuse()                   — true when this profile may not open it (not an Admin)
+ *   isDecoy()                  — deprecated 3.x name of refuse(), still accepted
  *   api                        — { stat(path), ls(path) }; defaults to fetch()
  */
-export function installViewerHandlers({ onToast, isDecoy, api } = {}) {
+export function installViewerHandlers({ onToast, refuse, isDecoy, api } = {}) {
   if (typeof onToast === 'function') cfg.onToast = onToast;
-  if (typeof isDecoy === 'function') cfg.isDecoy = isDecoy;
+  if (typeof refuse === 'function') cfg.refuse = refuse;
+  else if (typeof isDecoy === 'function') cfg.refuse = isDecoy;
   if (api && typeof api.stat === 'function' && typeof api.ls === 'function') cfg.api = api;
   return cfg;
 }
@@ -258,12 +260,12 @@ function iconBtn(name, labelKey, onClick, extraClass = '') {
  * Open the viewer.
  *   openViewer({ path })  — stat the path, then render by kind
  *   openViewer({ url })   — frame an http(s) URL directly (no stat)
- * Returns the overlay element, or null when Safe Mode refuses it.
+ * Returns the overlay element, or null when refuse() says no.
  */
 export function openViewer({ path, url, title, returnFocus } = {}) {
   const mode = viewMode({ path, url });
   if (!mode) return null;
-  if (cfg.isDecoy()) return null;
+  if (cfg.refuse()) return null;
   // One viewer at a time: a second open replaces the first rather than
   // stacking two modal dialogs (and two `app.inert = true` owners).
   //

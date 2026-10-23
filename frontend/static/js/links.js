@@ -160,10 +160,9 @@ export function removeLink(id) {
  *  local paths are simply not drawn: a raw path in an href would navigate the
  *  APP to a path it cannot serve, which is a broken button pretending to work.
  */
-export function renderLinkRail(container, { decoy = false, openViewer = null } = {}) {
+export function renderLinkRail(container, { openViewer = null } = {}) {
   if (!container) return;
   container.querySelectorAll('.link-btn').forEach((n) => n.remove());
-  if (decoy) return;                       // unlocked-only, no exceptions
   const anchor = container.querySelector('#manage-bots');   // links sit before Settings
   const place = (node) => {
     if (anchor) container.insertBefore(node, anchor);

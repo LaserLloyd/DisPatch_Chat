@@ -171,6 +171,16 @@
       "status": 422
     },
     {
+      "code": "archive_invalid",
+      "docs": "archive_invalid",
+      "fix": "Send months as null (off) or a whole number from 1 to 120.",
+      "message": "months must be a whole number from 1 to 120.",
+      "patterns": [
+        "months must be a whole number from 1 to 120."
+      ],
+      "status": 422
+    },
+    {
       "code": "avatar_invalid",
       "docs": "avatar_invalid",
       "fix": "Send a PNG, JPEG or WebP picture.",
@@ -722,6 +732,16 @@
       "status": 403
     },
     {
+      "code": "cursor_invalid",
+      "docs": "cursor_invalid",
+      "fix": "Pass back the next_cursor value a previous page returned, unchanged, or leave cursor out for the first page.",
+      "message": "Invalid cursor",
+      "patterns": [
+        "Invalid cursor"
+      ],
+      "status": 400
+    },
+    {
       "code": "daily_upload_limit",
       "docs": "daily_upload_limit",
       "fix": "Programs holding the API key may upload 200 MB a day together (the machine guard, people have no limit). It resets at local midnight; an Admin can change it in Settings > People & Access > Machines.",
@@ -989,6 +1009,16 @@
         "That guide is already in your chats"
       ],
       "status": 409
+    },
+    {
+      "code": "guide_force_signin",
+      "docs": "guide_force_signin",
+      "fix": "Re-seeding a guide over an existing chat (force) is for a signed-in Admin; a program with the API key can only add a missing guide.",
+      "message": "force needs a signed-in session",
+      "patterns": [
+        "force needs a signed-in session"
+      ],
+      "status": 403
     },
     {
       "code": "guide_needs_atlas",
@@ -1517,6 +1547,32 @@
       "status": 403
     },
     {
+      "code": "maintenance_blocked",
+      "docs": "maintenance_blocked",
+      "fix": "Wait for the backup or the box maintenance to finish; the task retries on its own every 30 minutes.",
+      "message": "Maintenance is paused: the maintenance marker is set or a backup is running.",
+      "patterns": [],
+      "status": 409
+    },
+    {
+      "code": "maintenance_running",
+      "docs": "maintenance_running",
+      "fix": "Wait for it to finish (GET /api/maintenance/status), then run it again if you still need to.",
+      "message": "A maintenance run is already in progress.",
+      "patterns": [
+        "A maintenance run is already in progress."
+      ],
+      "status": 409
+    },
+    {
+      "code": "maintenance_step_unknown",
+      "docs": "maintenance_step_unknown",
+      "fix": "Use the step names a dry run (POST /api/maintenance/run with dry_run: true) lists.",
+      "message": "Unknown maintenance step.",
+      "patterns": [],
+      "status": 422
+    },
+    {
       "code": "max_tokens_invalid",
       "docs": "max_tokens_invalid",
       "fix": "Fix the fields in detail and resend.",
@@ -1683,10 +1739,10 @@
     {
       "code": "password_role",
       "docs": "password_role",
-      "fix": "Only the Owner and Admins have a password; Members and Restricted profiles use a PIN.",
-      "message": "Only the Owner and Admins have a password; Members and Restricted profiles use a PIN.",
+      "fix": "Only Admins have a password; User and Basic profiles use a PIN.",
+      "message": "Only Admins have a password; User and Basic profiles use a PIN.",
       "patterns": [
-        "Only the Owner and Admins have a password; Members and Restricted profiles use a PIN."
+        "Only Admins have a password; User and Basic profiles use a PIN."
       ],
       "status": 409
     },
@@ -2048,6 +2104,14 @@
         "What would be deleted has changed. Look at the numbers again before confirming."
       ],
       "status": 409
+    },
+    {
+      "code": "retention_invalid",
+      "docs": "retention_invalid",
+      "fix": "Send setting keys from GET /api/maintenance/retention with values in range (months 1 to 120, time HH:MM).",
+      "message": "That retention setting is not valid.",
+      "patterns": [],
+      "status": 422
     },
     {
       "code": "role_change_stale",

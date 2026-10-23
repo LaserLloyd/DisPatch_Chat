@@ -1451,11 +1451,11 @@
   {
    "code": "password_role",
    "status": 409,
-   "message": "Only the Owner and Admins have a password; Members and Restricted profiles use a PIN.",
-   "fix": "Only the Owner and Admins have a password; Members and Restricted profiles use a PIN.",
+   "message": "Only Admins have a password; User and Basic profiles use a PIN.",
+   "fix": "Only Admins have a password; User and Basic profiles use a PIN.",
    "docs": "password_role",
    "patterns": [
-    "Only the Owner and Admins have a password; Members and Restricted profiles use a PIN."
+    "Only Admins have a password; User and Basic profiles use a PIN."
    ],
    "seeded": false
   },
@@ -2681,6 +2681,77 @@
    "patterns": [
     "That picture can't be made: sexual images of real, identifiable people aren't allowed. Remove the real person's name or likeness, or describe an original character instead."
    ]
+  },
+  {
+   "code": "maintenance_blocked",
+   "status": 409,
+   "message": "Maintenance is paused: the maintenance marker is set or a backup is running.",
+   "fix": "Wait for the backup or the box maintenance to finish; the task retries on its own every 30 minutes.",
+   "docs": "maintenance_blocked",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "maintenance_running",
+   "status": 409,
+   "message": "A maintenance run is already in progress.",
+   "fix": "Wait for it to finish (GET /api/maintenance/status), then run it again if you still need to.",
+   "docs": "maintenance_running",
+   "patterns": [
+    "A maintenance run is already in progress."
+   ],
+   "seeded": false
+  },
+  {
+   "code": "maintenance_step_unknown",
+   "status": 422,
+   "message": "Unknown maintenance step.",
+   "fix": "Use the step names a dry run (POST /api/maintenance/run with dry_run: true) lists.",
+   "docs": "maintenance_step_unknown",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "retention_invalid",
+   "status": 422,
+   "message": "That retention setting is not valid.",
+   "fix": "Send setting keys from GET /api/maintenance/retention with values in range (months 1 to 120, time HH:MM).",
+   "docs": "retention_invalid",
+   "patterns": [],
+   "seeded": false
+  },
+  {
+   "code": "archive_invalid",
+   "status": 422,
+   "message": "months must be a whole number from 1 to 120.",
+   "fix": "Send months as null (off) or a whole number from 1 to 120.",
+   "docs": "archive_invalid",
+   "patterns": [
+    "months must be a whole number from 1 to 120."
+   ],
+   "seeded": false
+  },
+  {
+   "code": "cursor_invalid",
+   "status": 400,
+   "message": "Invalid cursor",
+   "fix": "Pass back the next_cursor value a previous page returned, unchanged, or leave cursor out for the first page.",
+   "docs": "cursor_invalid",
+   "patterns": [
+    "Invalid cursor"
+   ],
+   "seeded": false
+  },
+  {
+   "code": "guide_force_signin",
+   "status": 403,
+   "message": "force needs a signed-in session",
+   "fix": "Re-seeding a guide over an existing chat (force) is for a signed-in Admin; a program with the API key can only add a missing guide.",
+   "docs": "guide_force_signin",
+   "patterns": [
+    "force needs a signed-in session"
+   ],
+   "seeded": false
   }
  ]
 }

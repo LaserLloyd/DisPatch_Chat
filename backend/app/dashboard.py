@@ -1139,8 +1139,8 @@ def _security_findings(bind: dict | None = None) -> list[dict]:
     if cfg.pin_set:
         out.append(_finding(
             "auth.lock", OK, "Lock configured",
-            "A PIN is set: unlisted bots and media stay behind it, and everything "
-            "else is served the limited Safe-Mode view."))
+            "A PIN is set: a device that is not signed in sees only the default profile "
+            "or the profile list, never another profile's chats, bots or files."))
     elif reachable:
         out.append(_finding(
             "auth.no_pin", FAIL, "No PIN set while reachable on the network",

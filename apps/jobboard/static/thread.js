@@ -137,7 +137,6 @@ export async function mount(ctx) {
 
   const failureText = (err) => {
     const s = err && err.status;
-    if (err && err.decoy) return t('detail.locked');
     if (s == null) return t('detail.offline');
     if (s === 404) return t('detail.not_found');
     if (s === 401 || s === 403) return t('detail.locked');

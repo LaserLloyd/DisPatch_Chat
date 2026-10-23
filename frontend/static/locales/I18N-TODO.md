@@ -1582,3 +1582,18 @@ because no code used them after wave 2. WP-FE-CORE removed 69; INT-2 removed 55.
 English only, for WP-LOC to translate: `nim.lock_label` is now "No-Image Mode" (it read the placeholder "NI_Mode") and `nim.lock_locked` is now "No-Image Mode — sign in to change". Every other locale still carries the old English placeholder text for both. `lock.submit` already reads "Sign in" in `en.json`; the "Unlock" left in `index.html` was only the pre-translation fallback text and now says "Sign in" too.
 
 Also English only (the other locales still carry the old wording, which WP-LOC should replace): `settings.sum_people`, `harness.sidebar_aria`, `harness.session_panel_body`, `mail.sidebar_aria`, `mail.session_panel_body`, `clients.sidebar_aria`, `clients.session_panel_body`, `studioforge.sidebar_aria`, `studioforge.session_panel_body`, `dash.limited` (now "Signed out"), `dash.locked`, `reactions.locked` and `security.note` lost their Restricted / Owner / limits wording. The keys `reactions.safe_label`, `reactions.safe_title`, `reactions.safe_short`, `reactions.pool_safe`, `reactions.pool_safe_hint` and `persona.safe_note` were deleted from every locale because the controls they labelled are gone.
+
+## INT-3a (4.0 wave 3a integration)
+
+Reworded in `en.json` only (the other seven locales still carry the old wording; WP-LOC translates the new English):
+
+- `bkp.profile_hint`: chats are private per profile in 4.0 and are not in a profile export.
+- `reset.confirm_counts`, `people.downgrade_confirm`, `chars.remove_body`, `mybots.delete_confirm`, `mybots.chats_count`: written as "label number" lists, so a count of 1 no longer reads "1 bots" in any language. Keep the list form when translating (no per-number plural agreement).
+- `agents.limits_hint`: daily limits belong to the agent (per-profile agent budgets are gone).
+
+Deleted from every locale (record only): `dash.locked` (the Health dashboard no longer has a locked tier to refuse).
+
+App packages (their own `locales/*.json`, English reworded, the other seven still old):
+
+- `apps/jobboard`: `locked`, `detail.locked` (a 403 is "this profile cannot open it", not "unlock").
+- `apps/imagestudio`: `locked`.

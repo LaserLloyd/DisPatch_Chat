@@ -33,6 +33,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`api_key_required`](#api_key_required) | 401 | API key required |
 | [`approval_not_found`](#approval_not_found) | 404 | That approval request is not pending any more. |
 | [`approval_scope_not_allowed`](#approval_scope_not_allowed) | 422 | That approval can only be given for this one call. |
+| [`archive_invalid`](#archive_invalid) | 422 | months must be a whole number from 1 to 120. |
 | [`avatar_invalid`](#avatar_invalid) | 422 | That file is not a picture DisPatch can read. |
 | [`avatar_not_capturable`](#avatar_not_capturable) | 409 | The bot has no capturable avatar right now |
 | [`avatar_not_found`](#avatar_not_found) | 404 | Avatar not found |
@@ -90,6 +91,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`crop_invalid`](#crop_invalid) | 400 | crop_x/crop_y/crop_size must be fractions in 0..1 |
 | [`csrf_origin`](#csrf_origin) | 403 | Cross-origin request refused |
 | [`current_pin_incorrect`](#current_pin_incorrect) | 403 | Current PIN is incorrect |
+| [`cursor_invalid`](#cursor_invalid) | 400 | Invalid cursor |
 | [`daily_upload_limit`](#daily_upload_limit) | 429 | Daily machine upload limit reached — try again tomorrow |
 | [`day_format`](#day_format) | 422 | day must be YYYY-MM-DD |
 | [`days_not_number`](#days_not_number) | 400 | days must be a number |
@@ -117,6 +119,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`gateway_models_failed`](#gateway_models_failed) | 502 | The gateway could not list models |
 | [`gpu_leased`](#gpu_leased) | 503 | The image server's GPU is leased. |
 | [`guide_exists`](#guide_exists) | 409 | That guide is already in your chats |
+| [`guide_force_signin`](#guide_force_signin) | 403 | force needs a signed-in session |
 | [`guide_needs_atlas`](#guide_needs_atlas) | 404 | The guide needs the Atlas bot |
 | [`guide_unknown`](#guide_unknown) | 404 | Unknown guide |
 | [`hidden_flag_invalid`](#hidden_flag_invalid) | 400 | hidden must be a boolean |
@@ -169,6 +172,9 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`lock_target_fence`](#lock_target_fence) | 422 | This is the shared default profile everyone lands on: agents and voice cloning cannot be switched on for it. |
 | [`lock_target_invalid`](#lock_target_invalid) | 422 | Pick an existing, enabled profile. |
 | [`machine_scope_denied`](#machine_scope_denied) | 403 | This API key is not allowed to call that endpoint. |
+| [`maintenance_blocked`](#maintenance_blocked) | 409 | Maintenance is paused: the maintenance marker is set or a backup is running. |
+| [`maintenance_running`](#maintenance_running) | 409 | A maintenance run is already in progress. |
+| [`maintenance_step_unknown`](#maintenance_step_unknown) | 422 | Unknown maintenance step. |
 | [`max_tokens_invalid`](#max_tokens_invalid) | 422 | max_tokens must be a whole number |
 | [`message_no_mood`](#message_no_mood) | 404 | This message has no mood |
 | [`message_not_found`](#message_not_found) | 404 | Message not found |
@@ -185,7 +191,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`panel_disabled`](#panel_disabled) | 404 | Clients panel disabled |
 | [`password_invalid`](#password_invalid) | 400 | Password invalid. |
 | [`password_required`](#password_required) | 409 | Set a password for the owner first. |
-| [`password_role`](#password_role) | 409 | Only the Owner and Admins have a password; Members and Restricted profiles use a PIN. |
+| [`password_role`](#password_role) | 409 | Only Admins have a password; User and Basic profiles use a PIN. |
 | [`path_invalid`](#path_invalid) | 400 | invalid path |
 | [`payload_too_large`](#payload_too_large) | 413 | File too large |
 | [`permission_denied`](#permission_denied) | 403 | Your profile does not have permission to do that. |
@@ -222,6 +228,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`reply_in_progress_delete`](#reply_in_progress_delete) | 409 | Cannot delete messages while a reply is in progress |
 | [`reply_in_progress_edit`](#reply_in_progress_edit) | 409 | Cannot edit messages while a reply is in progress |
 | [`reset_stale`](#reset_stale) | 409 | What would be deleted has changed. Look at the numbers again before confirming. |
+| [`retention_invalid`](#retention_invalid) | 422 | That retention setting is not valid. |
 | [`role_change_stale`](#role_change_stale) | 409 | What would be deleted has changed. Look at the numbers again before confirming. |
 | [`route_undeclared`](#route_undeclared) | 403 | This endpoint has no access policy. |
 | [`session_key_required`](#session_key_required) | 400 | session_key required |
@@ -392,6 +399,14 @@ HTTP **404** - That approval request is not pending any more.
 HTTP **422** - That approval can only be given for this one call.
 
 **Fix:** Destructive tools ask every time. Choose 'once'.
+
+## archive_invalid
+
+<a id="archive_invalid"></a>
+
+HTTP **422** - months must be a whole number from 1 to 120.
+
+**Fix:** Send months as null (off) or a whole number from 1 to 120.
 
 ## avatar_invalid
 
@@ -849,6 +864,14 @@ HTTP **403** - Current PIN is incorrect
 
 **Fix:** Enter your current PIN to change or remove it.
 
+## cursor_invalid
+
+<a id="cursor_invalid"></a>
+
+HTTP **400** - Invalid cursor
+
+**Fix:** Pass back the next_cursor value a previous page returned, unchanged, or leave cursor out for the first page.
+
 ## daily_upload_limit
 
 <a id="daily_upload_limit"></a>
@@ -1064,6 +1087,14 @@ HTTP **503** - The image server's GPU is leased.
 HTTP **409** - That guide is already in your chats
 
 **Fix:** The state conflicts with the request; reload and retry.
+
+## guide_force_signin
+
+<a id="guide_force_signin"></a>
+
+HTTP **403** - force needs a signed-in session
+
+**Fix:** Re-seeding a guide over an existing chat (force) is for a signed-in Admin; a program with the API key can only add a missing guide.
 
 ## guide_needs_atlas
 
@@ -1481,6 +1512,30 @@ HTTP **403** - This API key is not allowed to call that endpoint.
 
 **Fix:** Send an API key whose machine scopes include the one shown in required_permission (security.yaml machine_scopes).
 
+## maintenance_blocked
+
+<a id="maintenance_blocked"></a>
+
+HTTP **409** - Maintenance is paused: the maintenance marker is set or a backup is running.
+
+**Fix:** Wait for the backup or the box maintenance to finish; the task retries on its own every 30 minutes.
+
+## maintenance_running
+
+<a id="maintenance_running"></a>
+
+HTTP **409** - A maintenance run is already in progress.
+
+**Fix:** Wait for it to finish (GET /api/maintenance/status), then run it again if you still need to.
+
+## maintenance_step_unknown
+
+<a id="maintenance_step_unknown"></a>
+
+HTTP **422** - Unknown maintenance step.
+
+**Fix:** Use the step names a dry run (POST /api/maintenance/run with dry_run: true) lists.
+
 ## max_tokens_invalid
 
 <a id="max_tokens_invalid"></a>
@@ -1613,9 +1668,9 @@ HTTP **409** - Set a password for the owner first.
 
 <a id="password_role"></a>
 
-HTTP **409** - Only the Owner and Admins have a password; Members and Restricted profiles use a PIN.
+HTTP **409** - Only Admins have a password; User and Basic profiles use a PIN.
 
-**Fix:** Only the Owner and Admins have a password; Members and Restricted profiles use a PIN.
+**Fix:** Only Admins have a password; User and Basic profiles use a PIN.
 
 ## path_invalid
 
@@ -1904,6 +1959,14 @@ HTTP **409** - Cannot edit messages while a reply is in progress
 HTTP **409** - What would be deleted has changed. Look at the numbers again before confirming.
 
 **Fix:** Fetch the reset preview again and confirm with its new token.
+
+## retention_invalid
+
+<a id="retention_invalid"></a>
+
+HTTP **422** - That retention setting is not valid.
+
+**Fix:** Send setting keys from GET /api/maintenance/retention with values in range (months 1 to 120, time HH:MM).
 
 ## role_change_stale
 

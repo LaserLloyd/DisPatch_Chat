@@ -1,7 +1,7 @@
 // Host dashboard — the operator's "is this install healthy?" panel.
 //
 // Same contract as reactions.js: this module holds no app state of its own. It
-// is handed a `ctx` of shared helpers (toast, decoy check, the lock handler)
+// is handed a `ctx` of shared helpers (toast, the lock handler)
 // and everything else it needs it fetches itself.
 //
 // Deliberately self-contained on the network side too: it does its own fetch
@@ -66,7 +66,6 @@ let ctx = {
   // so a mount that forgot it is obvious on screen instead of fatal.
   t: (key) => key,
   toast: () => {},
-  isDecoy: () => false,
   onLocked: () => {},        // main.js swaps in handleLocked
   // Settings owns the modal now: the old openDashboard() entry point routes
   // through this rather than opening anything of its own.
@@ -241,7 +240,6 @@ function buildShell() {
  */
 export async function mountDashboard(host, footHost, next = {}) {
   ctx = { ...ctx, ...next };
-  if (ctx.isDecoy()) { ctx.toast(T('dash.locked'), true); return; }
   buildShell();
   root = host;
   foot = footHost || null;
@@ -276,7 +274,6 @@ export function unmountDashboard() {
  *  keeps working — it now opens Settings on the Health tab. */
 export async function openDashboard(next = {}) {
   ctx = { ...ctx, ...next };
-  if (ctx.isDecoy()) { ctx.toast(T('dash.locked'), true); return; }
   ctx.openSettingsTab('health');
 }
 

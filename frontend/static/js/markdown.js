@@ -648,9 +648,9 @@ export function parseFilePath(value) {
 // spellings become a file link: a bare path in prose, `[[view:/p|label]]`, and
 // a markdown link whose href is a local path.
 //
-// UNLOCKED ONLY. `noLocal` (renderMarkdown/enhanceContent option, set from
-// state.decoy) is the client half of the gate; the server 403s every viewer
-// route for a decoy session independently. Neither half is sufficient — and a
+// ADMINS ONLY. `noLocal` (renderMarkdown/enhanceContent option, set for anyone
+// but an Admin) is the client half of the gate; the server 403s every viewer
+// route for a non-Admin independently. Neither half is sufficient — and a
 // local href left in place would navigate the APP's own origin, which is why
 // the suppressed form is plain text/span rather than "a link that 404s".
 const LOCAL_ROOTS = 'var|home|tmp|mnt|opt|srv|media|run\\/media|Users|root';

@@ -76,8 +76,10 @@ export const APP_ID = HERE ? appIdFromPath(HERE.pathname) : null;
 // api()
 // ---------------------------------------------------------------------------
 
-/** The uniform Safe-Mode answer: the page should say "Unlock for full access",
- *  never pretend the data is empty. */
+/** DEPRECATED (3.x): the old Safe-Mode 403. 4.0 has no Restricted tier, so api() never
+ *  throws it any more; the class stays exported (here and by ext-sdk.js) because it is
+ *  public add-on API, and `err instanceof DecoyError` in an older add-on simply never
+ *  matches. A refused call is a plain Error with `status` 403. */
 export class DecoyError extends Error {
   constructor(message = 'Unlock for full access') {
     super(message);
@@ -99,7 +101,7 @@ function detailText(body, status) {
 }
 
 /** Same-origin JSON request. Resolves to the parsed body (null for 204);
- *  throws DecoyError on a Safe-Mode 403, else an Error carrying `status`,
+ *  throws an Error carrying `status`,
  *  `body` and the server's `detail` as its message. A network failure throws
  *  the platform's TypeError with `status` undefined. */
 export async function api(path, { method = 'GET', body, query, signal, headers } = {}) {
@@ -127,7 +129,6 @@ export async function api(path, { method = 'GET', body, query, signal, headers }
     try { data = await res.json(); } catch { data = null; }
   }
   if (res.ok) return data;
-  if (res.status === 403 && data && data.decoy === true) throw new DecoyError();
   const err = new Error(detailText(data, res.status));
   err.status = res.status;
   err.body = data;

@@ -474,7 +474,7 @@ test('downgrade User to Basic: a dialog with the counts including File Server fi
   assert.ok(d, 'the dialog');
   assert.equal(d.getAttribute('role'), 'alertdialog');
   assert.match(d.querySelector('.pe-dialog-title').textContent, /Make Riley a Basic profile\?/);
-  assert.match(d.textContent, /deletes 2 bots, 7 chats, 4 File Server files and 3 cloned voices/);
+  assert.match(d.textContent, /deletes: bots 2, chats 7, File Server files 4, cloned voices 3/);
   assert.deepEqual([...d.querySelectorAll('.pe-tally li')].map((li) => li.textContent), ['2bots', '7chats', '1pictures', '4File Server files', '3cloned voices']);
   assert.equal(document.activeElement.textContent, 'Cancel', 'the safe choice has focus');
   btn(d, 'Cancel').click();
@@ -525,7 +525,7 @@ test('reset another profile: counts in the dialog, the outcome, then the token g
   await settle();
   const d = dialog();
   assert.match(d.querySelector('.pe-dialog-title').textContent, /Reset Riley\?/);
-  assert.match(d.textContent, /1 bots, 4 chats, 2 pictures and 5 File Server files/);
+  assert.match(d.textContent, /bots 1, chats 4, pictures 2, File Server files 5/);
   assert.match(d.textContent, /Riley gets a fresh Atlas afterwards/);
   assert.match(d.textContent, /cloned voices are kept/);
   btn(d, 'Delete and reset').click();
@@ -729,7 +729,7 @@ test('Characters: delete shows what stays behind and offers Hide instead', { ski
   const { ctx } = charCtx();
   let p = CH.removeCharacter({ id: 'atlas', name: 'Atlas', hidden: false }, ctx);
   await settle();
-  assert.match(dialog().textContent, /12 chats in 3 profiles stay/);
+  assert.match(dialog().textContent, /chats stay but can't be continued \(chats: 12, profiles: 3\)/);
   btn(dialog(), 'Hide instead').click();
   assert.equal(await p, 'hidden');
   assert.deepEqual(call('PATCH /api/characters/atlas').body, { hidden: true });

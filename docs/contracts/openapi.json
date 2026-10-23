@@ -339,6 +339,26 @@
         "title": "AgentTaskResumeIn",
         "type": "object"
       },
+      "ArchiveIn": {
+        "additionalProperties": false,
+        "properties": {
+          "months": {
+            "anyOf": [
+              {
+                "maximum": 120.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months"
+          }
+        },
+        "title": "ArchiveIn",
+        "type": "object"
+      },
       "BackendsIn": {
         "additionalProperties": false,
         "properties": {
@@ -3092,30 +3112,6 @@
         "title": "ReactionSettingsIn",
         "type": "object"
       },
-      "RestoreIn": {
-        "additionalProperties": false,
-        "properties": {
-          "confirm": {
-            "default": false,
-            "title": "Confirm",
-            "type": "boolean"
-          },
-          "passphrase": {
-            "anyOf": [
-              {
-                "maxLength": 256,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Passphrase"
-          }
-        },
-        "title": "RestoreIn",
-        "type": "object"
-      },
       "RoleChangeIn": {
         "additionalProperties": false,
         "properties": {
@@ -3165,6 +3161,33 @@
           "role"
         ],
         "title": "RoleChangeIn",
+        "type": "object"
+      },
+      "RunIn": {
+        "additionalProperties": false,
+        "properties": {
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 40,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steps"
+          }
+        },
+        "title": "RunIn",
         "type": "object"
       },
       "ScoreIn": {
@@ -3532,6 +3555,64 @@
         ],
         "title": "WizardConnectionIn",
         "type": "object"
+      },
+      "app__backup_api__RestoreIn": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "passphrase": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passphrase"
+          }
+        },
+        "title": "RestoreIn",
+        "type": "object"
+      },
+      "app__maintenance_api__RestoreIn": {
+        "additionalProperties": false,
+        "properties": {
+          "date": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{8}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 5000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Names"
+          }
+        },
+        "title": "RestoreIn",
+        "type": "object"
       }
     }
   },
@@ -3559,7 +3640,7 @@
     },
     "/api/advisor/digest": {
       "post": {
-        "description": "Summarise a day of advisor chat into the corpus (default: yesterday).\n\nRun by a nightly cron on the box; idempotent unless `force`. `force`\n(rewrite an existing digest, one cloud call per advisor) is honoured for\na real unlocked session only: a machine caller always gets the\nidempotent behaviour, so a loop on the machine surface cannot burn\nprovider spend or churn the corpus.",
+        "description": "Summarise a day of advisor chat into the corpus (default: yesterday).\n\nRun by a nightly cron on the box; idempotent unless `force`. `force`\n(rewrite an existing digest, one cloud call per advisor) is honoured for\na real signed-in session only: a machine caller always gets the\nidempotent behaviour, so a loop on the machine surface cannot burn\nprovider spend or churn the corpus.",
         "operationId": "advisor_digest_api_advisor_digest_post",
         "parameters": [
           {
@@ -3835,7 +3916,7 @@
     },
     "/api/advisor/requests/{rid}/send": {
       "post": {
-        "description": "The handoff card's Send button. A real unlocked session only: the\nmachine surface must never be able to approve its own handoff.",
+        "description": "The handoff card's Send button. A real signed-in session only: the\nmachine surface must never be able to approve its own handoff.",
         "operationId": "advisor_request_send_api_advisor_requests__rid__send_post",
         "parameters": [
           {
@@ -5674,7 +5755,7 @@
     },
     "/api/auth/pin": {
       "post": {
-        "description": "Change YOUR OWN PIN (3.2): a Member, or an Admin who uses one.\n\nConfirmed with the current PIN (an Admin without a PIN yet confirms with the password).\nThe Owner's PIN is the install PIN and changes through ``/api/auth/setup``; a Restricted\nprofile's PIN is set for it by the Owner or an Admin (People & Access). Throttled like\nevery other credential check.",
+        "description": "Change YOUR OWN PIN: any signed-in Admin, User or Basic profile.\n\nConfirmed with the current PIN (an Admin without a PIN yet confirms with the password; a\nprofile with no credential at all sets its first PIN). The first Admin's PIN is the install\nPIN and changes through ``/api/auth/setup``; the default profile is shared by everyone who\nuses the device, so only an Admin sets its PIN (People & Access). Throttled like every\nother credential check.",
         "operationId": "auth_own_pin_api_auth_pin_post",
         "requestBody": {
           "content": {
@@ -5750,7 +5831,7 @@
     },
     "/api/auth/remember-config": {
       "post": {
-        "description": "Toggle the remember-device feature (0 = off, N = sliding days).\n\nRequires an unlocked session once a PIN exists. Enabling only makes the\nunlock screen OFFER the checkbox — becoming remembered still takes a\ncorrect PIN — and disabling forgets every remembered device.",
+        "description": "Toggle the remember-device feature (0 = off, N = sliding days).\n\nRequires a signed-in session once a PIN exists. Enabling only makes the\nunlock screen OFFER the checkbox — becoming remembered still takes a\ncorrect PIN — and disabling forgets every remembered device.",
         "operationId": "auth_remember_config_api_auth_remember_config_post",
         "requestBody": {
           "content": {
@@ -6249,7 +6330,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RestoreIn"
+                "$ref": "#/components/schemas/app__backup_api__RestoreIn"
               }
             }
           },
@@ -6298,7 +6379,7 @@
               "schema": {
                 "anyOf": [
                   {
-                    "$ref": "#/components/schemas/RestoreIn"
+                    "$ref": "#/components/schemas/app__backup_api__RestoreIn"
                   },
                   {
                     "type": "null"
@@ -11435,6 +11516,325 @@
         "summary": "Mail Status"
       }
     },
+    "/api/maintenance/images/preview": {
+      "get": {
+        "operationId": "images_preview_api_maintenance_images_preview_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "default": "months",
+              "title": "Mode",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "months",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Months"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Images Preview"
+      }
+    },
+    "/api/maintenance/images/restore": {
+      "post": {
+        "operationId": "images_restore_api_maintenance_images_restore_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/app__maintenance_api__RestoreIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Images Restore"
+      }
+    },
+    "/api/maintenance/retention": {
+      "get": {
+        "operationId": "get_retention_api_maintenance_retention_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Retention"
+      },
+      "put": {
+        "operationId": "put_retention_api_maintenance_retention_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Retention"
+      }
+    },
+    "/api/maintenance/run": {
+      "post": {
+        "operationId": "run_now_api_maintenance_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RunIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Now"
+      }
+    },
+    "/api/maintenance/status": {
+      "get": {
+        "operationId": "get_status_api_maintenance_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Status"
+      }
+    },
+    "/api/maintenance/storage": {
+      "get": {
+        "operationId": "get_storage_api_maintenance_storage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Storage"
+      }
+    },
+    "/api/maintenance/storage/refresh": {
+      "post": {
+        "operationId": "refresh_storage_api_maintenance_storage_refresh_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Refresh Storage"
+      }
+    },
+    "/api/me/archive": {
+      "get": {
+        "description": "The caller's own setting; with ``?months=N`` also how many of their chats that would archive.",
+        "operationId": "get_my_archive_api_me_archive_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "months",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Months"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get My Archive"
+      },
+      "put": {
+        "operationId": "put_my_archive_api_me_archive_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put My Archive"
+      }
+    },
     "/api/me/backends": {
       "get": {
         "description": "The connections the caller's own bots may use: chat-capable household connections\nwithin the profile's ``backends.allowed``. No key, no base URL, no usage - those stay\nwith the Admin's Connections page. A profile without ``choose_backend`` gets an empty\nlist (its bots run on the household default).",
@@ -15809,15 +16209,23 @@
     },
     "/api/threads": {
       "get": {
+        "description": "The caller's OWN threads, one page at a time (4.0 scale): page one is every pinned\nthread plus the ``limit`` (default 50) most recently updated others; ``next_cursor``\n(null at the end) fetches the next page. ``bot_id``: one character's threads (what 3.x\nclients ask; on a small install page one is the whole 3.x answer), else every character's.\n``archived=1``: the Archived view. ``include_archived=1`` (3.x): both, merged.",
         "operationId": "list_threads_api_threads_get",
         "parameters": [
           {
             "in": "query",
             "name": "bot_id",
-            "required": true,
+            "required": false,
             "schema": {
-              "title": "Bot Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bot Id"
             }
           },
           {
@@ -15828,6 +16236,45 @@
               "default": false,
               "title": "Include Archived",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 600,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],
@@ -17608,6 +18055,7 @@
     },
     "/api/threads/{thread_id}/messages": {
       "get": {
+        "description": "The newest ``limit`` messages (default 100), oldest first; ``before`` (or the 3.x name\n``before_id``: a message id of this thread) pages further back, ``has_more`` says whether\nthere is more. A keyset read on ``(created_at, rowid)`` - the same cost on page 1 and 500.",
         "operationId": "get_messages_api_threads__thread_id__messages_get",
         "parameters": [
           {
@@ -17624,7 +18072,7 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 200,
+              "default": 100,
               "maximum": 500,
               "minimum": 1,
               "title": "Limit",
@@ -17638,6 +18086,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 200,
                   "type": "string"
                 },
                 {
@@ -17645,6 +18094,23 @@
                 }
               ],
               "title": "Before Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
             }
           }
         ],
@@ -18865,6 +19331,7 @@
     },
     "/api/users/{profile_id}": {
       "delete": {
+        "description": "Erase a profile. One removal path: this is ``POST /api/people/{id}/delete`` (the same\n``profiles_api.people_delete``, so the same rank rules, the same purge of the profile's bots,\nchats, files, pictures, voices and push subscriptions, the same audit line) with the\nconfirmation token minted here, because this route is the older one-call form. The protected\nAdmin cannot be deleted and nobody deletes the profile they are using.",
         "operationId": "erase_user_api_users__profile_id__delete",
         "parameters": [
           {

@@ -247,7 +247,7 @@ test('My bots: delete asks with the chat count, deletes only after yes, and refr
   assert.equal(host.querySelectorAll('.mb-list:not(.mb-copy-list) .mb-row').length, 1);
   const del = () => [...host.querySelectorAll('.mb-row button')].find((b) => b.textContent === 'Delete');
   click(win, del()); await tick();
-  assert.match(asked[0], /Delete Pixel\? This also deletes your 2 chats with Pixel\./);
+  assert.match(asked[0], /Delete Pixel\? This also deletes your chats with Pixel \(2\)\./);
   assert.equal(posts(/^DELETE/).length, 0, 'a "no" deletes nothing');
   answer = true;
   click(win, del()); await tick(20);
@@ -315,13 +315,13 @@ test('Reset: preview names the counts, the POST carries the token, a stale 409 r
   const panel = host.querySelector('.ar-confirm');
   assert.equal(panel.hidden, false);
   assert.match(panel.textContent, /Reset Uma\?/);
-  assert.match(panel.textContent, /This deletes 2 bots, 5 chats, 3 pictures and 4 File Server files\. It can't be undone\./);
+  assert.match(panel.textContent, /This deletes: bots 2, chats 5, pictures 3, File Server files 4\. It can't be undone\./);
   assert.match(panel.textContent, /fresh Atlas/);
   assert.match(panel.textContent, /Your cloned voices are kept\./);
   click(win, host.querySelector('#ar-confirm')); await tick(30);
   assert.deepEqual(calls.find((c) => c.key === 'POST /api/me/reset').body, { token: 'tok-2' });
   assert.match(panel.textContent, /Something changed since you opened this/);
-  assert.match(panel.textContent, /This deletes 3 bots/);
+  assert.match(panel.textContent, /This deletes: bots 3,/);
   assert.equal(reloaded, 0, 'a stale token resets nothing');
   click(win, host.querySelector('#ar-confirm')); await tick(30);
   assert.deepEqual(calls.filter((c) => c.key === 'POST /api/me/reset').map((c) => c.body.token), ['tok-2', 'tok-3']);

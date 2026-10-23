@@ -576,6 +576,10 @@ def test_bot_provisioning_appends_once_and_never_edits(env, caplog):
     p = bots["provbot"]
     assert (p.name, p.emoji, p.avatar, p.agent, p.visible) == (
         "Prov", "🎯", "prov-face.png", "scout", False)
+    # 4.0: `hidden` alone keeps a bot off the rail; the app bot is written with it, and the
+    # legacy hide_unlocked flag is not used for it.
+    assert p.hidden is True and p.hide_unlocked is False
+    assert p.to_dict()["hidden"] is True and p.to_dict()["visible"] is False
     k = bots["keptbot"]
     assert (k.name, k.emoji, k.visible) == ("Operator's", "🦊", True)
     assert apps_loader.provision_bots() == []
@@ -589,6 +593,20 @@ def test_startup_provisions_the_jobboard_bot(env):
     make_client()                                   # lifespan runs provisioning
     jb = config.get_bot("jobboard")
     assert jb is not None and jb.agent == "scout" and jb.visible is False
+
+
+def test_an_app_bot_is_off_the_rail(env):
+    """The Job Board's bot (manifest `visible: false`) is hidden from the rail: the roster
+    row the rail draws from says `hidden`, which is the one flag the rail filters on."""
+    from app import characters
+    _, _, make_client = env
+    make_client()
+    jb = config.get_bot("jobboard")
+    assert characters.is_hidden(jb)
+    import yaml
+    doc = yaml.safe_load(config.CONFIG_PATH.read_text(encoding="utf-8"))
+    (row,) = [e for e in doc["bots"] if e.get("id") == "jobboard"]
+    assert row.get("hidden") is True and not row.get("hide_unlocked")
 
 
 # --------------------------------------------------------------------------- #
@@ -614,10 +632,11 @@ def test_api_tools_lists_app_rows_in_order(env, tmp_path):
     app_ids = [r["id"] for r in rows if r["kind"] == "app"]
     assert app_ids.index("early-test") < app_ids.index("jobboard") < app_ids.index("late-test")
     early = next(r for r in rows if r["id"] == "early-test")
-    assert {k: early[k] for k in ("id", "title", "icon", "kind", "enabled", "safe", "order",
+    assert "safe" not in early                      # legacy 3.x key: accepted in app.yaml, never sent
+    assert {k: early[k] for k in ("id", "title", "icon", "kind", "enabled", "order",
                                   "has_refresh", "bot_id", "thread_hook", "entry")} == {
         "id": "early-test", "title": "Early", "icon": "chart", "kind": "app", "enabled": True,
-        "safe": False, "order": 1, "has_refresh": False, "bot_id": "earlybot",
+        "order": 1, "has_refresh": False, "bot_id": "earlybot",
         "thread_hook": "/apps/early-test/thread.js", "entry": "/apps/early-test/"}
     late = next(r for r in rows if r["id"] == "late-test")
     assert late["thread_hook"] is None and "bot_id" not in late

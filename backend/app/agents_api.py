@@ -241,13 +241,8 @@ def _check_spec(spec: AgentSpec, principal: policy.Principal, old: AgentSpec | N
         seat = str(spec.backend_options.get("agent_id") or spec.name)
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", seat):
             raise TaskError("agent_invalid", "backend_options.agent_id: letters, digits, '.', '_' and '-' only", 422)
-        try:
-            from . import advisor
-            if seat.strip().lower() in advisor.safe_agent_ids():
-                raise TaskError("agent_invalid", f"backend_options.agent_id: {seat} is a character that "
-                                "Restricted profiles can chat with; a task is never handed to one", 422)
-        except ImportError:                                   # pragma: no cover
-            pass
+        # 3.x refused the seats Restricted characters answered through (advisor.safe_agent_ids);
+        # 4.0 has no restricted tier and that helper is gone, so any valid seat id is accepted.
     new_owner_only = owner_only_features(spec) - (owner_only_features(old) if old else set())
     if new_owner_only and not principal.can(Permission.ADMIN_SYSTEM):
         raise TaskError("agent_needs_owner",

@@ -1647,6 +1647,86 @@
     },
     {
       "method": "GET",
+      "path": "/api/maintenance/images/preview",
+      "requirement": {
+        "note": "host control: storage, retention and the daily maintenance task",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/images/restore",
+      "requirement": {
+        "note": "host control: storage, retention and the daily maintenance task",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/retention",
+      "requirement": {
+        "note": "host control: storage, retention and the daily maintenance task",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/maintenance/retention",
+      "requirement": {
+        "note": "host control: storage, retention and the daily maintenance task",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/run",
+      "requirement": {
+        "note": "host control: storage, retention and the daily maintenance task",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/status",
+      "requirement": {
+        "note": "host control: storage, retention and the daily maintenance task",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/maintenance/storage",
+      "requirement": {
+        "note": "host control: storage, retention and the daily maintenance task",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/maintenance/storage/refresh",
+      "requirement": {
+        "note": "host control: storage, retention and the daily maintenance task",
+        "permission": "admin_system"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/me/archive",
+      "requirement": {
+        "note": "the caller's OWN 'archive chats older than N months' value; nobody can set another profile's",
+        "permission": "manage_history"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/me/archive",
+      "requirement": {
+        "note": "the caller's OWN 'archive chats older than N months' value; nobody can set another profile's",
+        "permission": "manage_history"
+      }
+    },
+    {
+      "method": "GET",
       "path": "/api/me/backends",
       "requirement": {
         "note": "ids and names of the connections the caller's own bots may use; never a key or URL; empty without choose_backend",

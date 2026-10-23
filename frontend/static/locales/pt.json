@@ -955,7 +955,6 @@
     },
     "stale": "Não é possível contactar o servidor ({error}) — a mostrar a última leitura de {ago}.",
     "stale_no_data": "Não é possível contactar o servidor: {error}",
-    "locked": "[pt] Sign in as Owner or Admin",
     "just_now": "agora mesmo",
     "secs_ago": {
       "one": "há {count} s",

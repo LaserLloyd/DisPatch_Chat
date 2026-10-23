@@ -442,8 +442,8 @@ async def auth_password(request: Request, payload: PasswordIn):
     if prof is None:
         return _problem(409, "owner_required", "Create the owner account first.")
     if prof.role is not Role.ADMIN:
-        return _problem(403, "password_role", "Only the Owner and Admins have a password; "
-                        "Members and Restricted profiles use a PIN.")
+        return _problem(403, "password_role", "Only Admins have a password; "
+                        "User and Basic profiles use a PIN.")
     pkey = prof.id
     blocked = _throttled(request, pkey)
     if blocked is not None:
@@ -476,18 +476,19 @@ class OwnPinIn(BaseModel):
 
 @router.post("/api/auth/pin", dependencies=[_CHAT])
 async def auth_own_pin(request: Request, payload: OwnPinIn):
-    """Change YOUR OWN PIN (3.2): a Member, or an Admin who uses one.
+    """Change YOUR OWN PIN: any signed-in Admin, User or Basic profile.
 
-    Confirmed with the current PIN (an Admin without a PIN yet confirms with the password).
-    The Owner's PIN is the install PIN and changes through ``/api/auth/setup``; a Restricted
-    profile's PIN is set for it by the Owner or an Admin (People & Access). Throttled like
-    every other credential check."""
+    Confirmed with the current PIN (an Admin without a PIN yet confirms with the password; a
+    profile with no credential at all sets its first PIN). The first Admin's PIN is the install
+    PIN and changes through ``/api/auth/setup``; the default profile is shared by everyone who
+    uses the device, so only an Admin sets its PIN (People & Access). Throttled like every
+    other credential check."""
     pr = _caller(request)
     prof = pr.profile
     if prof is None:
         return _problem(403, "permission_denied", "Sign in to a profile to change its PIN.")
     if prof.protected:
-        return _problem(409, "owner_immutable", "The Owner's PIN is the install PIN; change it in Settings > Account.")
+        return _problem(409, "owner_immutable", "The first Admin's PIN is the install PIN; change it in Settings > Account.")
     if policy.is_lock_target(prof):
         return _problem(403, "lock_target_fence",
                         "This profile is shared by everyone who uses this device; only an Admin "
@@ -527,7 +528,7 @@ class MachineIn(BaseModel):
 @router.get("/api/auth/api-token", dependencies=[_SETTINGS])
 async def api_token_get(request: Request):
     if not _caller(request).is_admin:
-        return _problem(403, "permission_denied", "Only the Owner and Admins manage the API key.")
+        return _problem(403, "permission_denied", "Only Admins manage the API key.")
     cfg = auth.load()
     return {"has_token": bool(cfg.api_token), "machine_loopback_trust": cfg.machine_loopback_trust,
             "machine_scopes": cfg.machine_scopes if cfg.machine_scopes is not None
@@ -540,7 +541,7 @@ async def api_token_set(request: Request, payload: MachineIn):
     """Rotate the machine API key (shown once) and/or change how machines are
     recognised. The Owner and Admins."""
     if not _caller(request).is_admin:
-        return _problem(403, "permission_denied", "Only the Owner and Admins manage the API key.")
+        return _problem(403, "permission_denied", "Only Admins manage the API key.")
     cfg = auth.load()
     token = None
     with auth._lock:
@@ -853,7 +854,7 @@ async def people_set_pin(request: Request, profile_id: str, payload: SecretIn):
         return err
     assert prof is not None
     if prof.protected:
-        return _problem(409, "owner_immutable", "Change the Owner's PIN in Settings > Account.")
+        return _problem(409, "owner_immutable", "Change the first Admin's PIN in Settings > Account.")
     try:
         auth.set_profile_pin(profile_id, payload.pin)
     except accounts.AccountError as e:

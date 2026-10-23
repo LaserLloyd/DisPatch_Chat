@@ -2988,7 +2988,6 @@ async def fire_reaction(
         "name": r.name,
         "image_url": reactions.image_url(r.id, r.file.rsplit("/", 1)[-1]),
         "duration_ms": pack.settings.clamp_duration(duration_ms or r.duration_ms),
-        "safe": r.safe,
         "actor": actor,
         "actor_kind": actor_kind,
         "caption": (caption or "").strip()[:120],
@@ -8062,7 +8061,6 @@ async def auth_status(request: Request):
     return {
         "pin_set": cfg.pin_set,
         "authenticated": authed,
-        "decoy": claimed and not authed,       # nobody: the sign-in screen (3.x key the shell reads)
         # 3.0: accounts
         "claimed": claimed,
         # 4.0: where a lock and an unsigned device land, and (signed in on it) whether this is
@@ -10636,7 +10634,7 @@ async def reaction_pool_config(request: Request, payload: ReactionSettingsIn):
     except (TypeError, ValueError):
         raise HTTPException(400, "Invalid pool settings")
     _nudge_reaction_pool()
-    return {"pool": {**cfg.to_dict(), **reactions.pool_status(bot_id)}}
+    return {"pool": {**cfg.public(), **reactions.pool_status(bot_id)}}
 
 
 @app.get("/api/reactions/prompts")

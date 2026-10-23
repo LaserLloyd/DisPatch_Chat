@@ -50,11 +50,10 @@ export function handoffBodyMarkdown(msg) {
 }
 
 /**
- * The strip under a handoff card. `decoy` hides the buttons (a locked device
- * may see that something was proposed, never approve it). `send` / `dismiss`
- * are async callbacks taking (request id, card message id).
+ * The strip under a handoff card. `send` / `dismiss` are async callbacks taking
+ * (request id, card message id); the server checks who may send it.
  */
-export function handoffStripEl(msg, { decoy = false, send, dismiss } = {}) {
+export function handoffStripEl(msg, { send, dismiss } = {}) {
   const h = handoffState(msg);
   if (!h) return null;
   const strip = el('div', { class: `advisor-handoff advisor-${h.state}` });
@@ -63,7 +62,7 @@ export function handoffStripEl(msg, { decoy = false, send, dismiss } = {}) {
   if (h.state === 'failed' && h.error) {
     strip.append(el('span', { class: 'advisor-error', dir: 'auto', text: h.error }));
   }
-  if (!h.actionable || decoy) return strip;
+  if (!h.actionable) return strip;
 
   const sendBtn = el('button', { type: 'button', class: 'btn btn-primary advisor-send',
     text: t('advisor.send', { agent: h.agent }) });

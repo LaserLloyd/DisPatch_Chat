@@ -210,7 +210,7 @@ test('Feedback: an empty note is refused inline; a 404 is "not available", never
 test('a job that cannot be loaded says why (gone / locked / offline)', { skip: dom.skip }, async () => {
   let { host } = await mountHook({ routes: { [`GET ${BASE}/j-1`]: () => [404, { detail: 'Job not found' }] } });
   assert.equal(host.querySelector('.jb-thread__status').textContent, EN['detail.not_found']);
-  ({ host } = await mountHook({ routes: { [`GET ${BASE}/j-1`]: () => [403, { detail: 'Unlock', decoy: true }] } }));
+  ({ host } = await mountHook({ routes: { [`GET ${BASE}/j-1`]: () => [403, { detail: 'Permission denied' }] } }));
   assert.equal(host.querySelector('.jb-thread__status').textContent, EN['detail.locked']);
   ({ host } = await mountHook({ routes: { [`GET ${BASE}/j-1`]: () => { throw new TypeError('Failed to fetch'); } } }));
   assert.equal(host.querySelector('.jb-thread__status').textContent, EN['detail.offline']);

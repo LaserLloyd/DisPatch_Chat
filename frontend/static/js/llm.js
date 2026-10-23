@@ -19,7 +19,6 @@ import { mountQuickSetup, mountImageSection } from './integrations.js?v=2';
 
 let ctx = {
   toast: () => {},
-  isDecoy: () => false,
   onLocked: () => {},
   onConnected: async () => {},   // main.js: refresh roster, select bot, open chat
   // Settings owns the dialog: these are how this module asks for its section,
@@ -36,7 +35,6 @@ const $ = (id) => document.getElementById(id);
  *  card in an empty chat): it opens Settings -> AI & Connections -> Quick setup. */
 export async function openLlmPanel(next = {}) {
   ctx = { ...ctx, ...next };
-  if (ctx.isDecoy()) return;
   ctx.openSettingsTab('connections#quick-setup');
 }
 
@@ -45,7 +43,6 @@ export async function openLlmPanel(next = {}) {
  *  `quickOpen`: open the quick setup (the empty state: no connection yet). */
 export async function activateLlmPanel(next = {}) {
   ctx = { ...ctx, ...next };
-  if (ctx.isDecoy()) return;
   await mountQuickSetup($('llm-quick-host'), {
     open: !!ctx.quickOpen,
     onConfigured: async (r) => {
@@ -63,7 +60,7 @@ export function slugForBot(name) {
 }
 
 /** "I am done with this screen": close Settings, but only when it is on AI &
- *  Connections (the drop-to-Restricted teardown must not close somebody else's). */
+ *  Connections (a sign-out teardown must not close somebody else's). */
 export function closeLlmPanel() {
   if (llmPanelOpen()) ctx.closeSettings();
 }

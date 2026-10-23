@@ -1013,7 +1013,6 @@
     },
     "stale": "تعذّر الوصول إلى الخادم ({error}) — تُعرض آخر قراءة من {ago}.",
     "stale_no_data": "تعذّر الوصول إلى الخادم: {error}",
-    "locked": "[ar] Sign in as Owner or Admin",
     "just_now": "الآن",
     "secs_ago": {
       "zero": "قبل {count} ث",

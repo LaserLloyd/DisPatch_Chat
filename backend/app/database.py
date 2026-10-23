@@ -518,6 +518,14 @@ CREATE TABLE IF NOT EXISTS maintenance_state (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+-- Which /media files DisPatch generated (media_inventory records them). image_jobs rows are
+-- pruned after 90 days; without this record a picture could no longer be told from an upload.
+CREATE TABLE IF NOT EXISTS generated_media (
+    name TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    owner TEXT
+);
 """
 
 #: ``(table, name, DDL)`` for every index 011 adds. Each one is proven by

@@ -94,9 +94,8 @@ export async function disablePush(win = globalThis) {
   if (sub) { try { await sub.unsubscribe(); } catch { /* already gone */ } }
 }
 
-/** The Settings row, or null in Safe Mode. `t` is i18n's translate. */
-export function pushRow(t, { decoy = false, win = globalThis, onToast } = {}) {
-  if (decoy) return null;
+/** The Settings row. `t` is i18n's translate. */
+export function pushRow(t, { win = globalThis, onToast } = {}) {
   const doc = win.document;
   const label = doc.createElement('label');
   label.className = 'bm-avatar-style dev-row';

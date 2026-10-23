@@ -64,7 +64,9 @@ class ToolPluginManifest(_Manifest):
     description: str = Field(default="", max_length=400)
     entry: str | None = None
     permission: str = "use_tools"
-    restricted_ok: bool = False                  # LEGACY 3.x `safe: true` flag; inert in 4.0 (no Restricted tier)
+    #: DEPRECATED (3.x `safe: true`): part of the published tool-plugin schema, so still
+    #: accepted; 4.0 has no Restricted tier, nothing reads it and DisPatch always writes False.
+    restricted_ok: bool = False
     api_version: int = Field(default=1, ge=1)    # DisPatch extension API it targets
     network: list[str] = Field(default_factory=list)   # hosts it may call, declared up front
     license: str = Field(default="MIT", max_length=40)

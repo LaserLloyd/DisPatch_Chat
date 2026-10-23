@@ -60,10 +60,9 @@ test('urlBase64ToUint8Array decodes an unpadded base64url key', () => {
   assert.deepEqual(Array.from(urlBase64ToUint8Array('BAEC_-8')), [4, 1, 2, 255, 239]);
 });
 
-test('Safe Mode: the row is not built at all', { skip: domSkip(jsdom ? false : 'jsdom is not installed') }, () => {
-  const { win, calls } = fakeWin();
-  assert.equal(pushRow(t, { decoy: true, win }), null);
-  assert.equal(calls.length, 0, 'a locked device asks the server nothing');
+test('the row is built for every signed-in profile (no Safe Mode; `decoy` is ignored)', { skip: domSkip(jsdom ? false : 'jsdom is not installed') }, () => {
+  const { win } = fakeWin();
+  assert.ok(pushRow(t, { decoy: true, win }));
 });
 
 test('plain http (not a secure context): disabled, says to use the https address',

@@ -58,7 +58,7 @@ Steps (each idempotent; ``schema_migrations`` in chats.db records what ran):
 ``011_scale``          (4.0 scale and retention, BUILD-PLAN-v2 §1.13; additive, idempotent)
                        the maintenance tables (``maintenance_runs``,
                        ``media_refs``, ``media_expired``, ``storage_stats``,
-                       ``maintenance_state``), ``profiles.archive_after_months`` (NULL = off),
+                       ``maintenance_state``, ``generated_media``), ``profiles.archive_after_months`` (NULL = off),
                        the indexes of ``database.SCALE_INDEXES`` (per-owner thread lists and
                        unread, File Server, foreign-key children, the time columns the daily
                        maintenance prunes by), ``messages.owner_profile_id`` (the thread's
@@ -641,7 +641,7 @@ def scale_plan() -> list[str]:
     lines: list[str] = []
     tables = _table_names(dbp)
     new_tables = [t for t in ("maintenance_runs", "media_refs", "media_expired", "storage_stats",
-                              "maintenance_state") if t not in tables]
+                              "maintenance_state", "generated_media") if t not in tables]
     if new_tables:
         lines.append("create tables: " + ", ".join(new_tables))
     if not dbp.exists():

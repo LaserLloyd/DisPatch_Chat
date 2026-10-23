@@ -7,7 +7,7 @@ change within about a second (profile cache revision, ``app/accounts.py``) and s
 profile out.
 
     python -m app users list
-    python -m app users add <name> [--profile restricted|member|admin|owner] [--password-stdin | --password-env VAR]
+    python -m app users add <name> [--profile basic|user|admin|owner] [--password-stdin | --password-env VAR]
     python -m app users passwd <name> [--kind pin|password] [--password-stdin | --password-env VAR]
     python -m app users delete <name> [--yes]
     python -m app owner reset [--yes]
@@ -15,8 +15,10 @@ profile out.
 
 A secret is NEVER a command-line argument (it would sit in the shell history and ``ps``). It comes
 from ``--password-stdin`` (one line), ``--password-env VAR``, or a hidden prompt on a terminal.
-"Password" here means the credential of the profile's role: a PIN for Members and Restricted
-profiles, a password for Admins and the Owner (``--kind pin`` sets the Owner's PIN instead).
+"Password" here means the credential of the profile's role: a PIN for User and Basic
+profiles, a password for Admins (``--kind pin`` sets the protected first Admin's PIN instead:
+the install PIN). The 3.x role words ``restricted`` / ``member``
+are still accepted for ``basic`` / ``user``.
 
 ``--data-dir`` (before or after the verb) picks another data directory; otherwise
 ``DISPATCH_DATA_DIR`` (legacy ``LOCAL_CHAT_DATA_DIR``) or ``~/.local/share/local-chat``, the same
@@ -354,7 +356,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name")
     p.add_argument("--profile", choices=ROLE_CHOICES, default=DEFAULT_ROLE,
                    help="role of the new profile: basic (default), user, admin, or owner (the protected first "
-                        "Admin, only when there is none); restricted/member are the 3.x names")
+                        "Admin, only when there is none); the 3.x words restricted/member still work")
     _secret_flags(p)
     p.set_defaults(fn=cmd_users_add)
 

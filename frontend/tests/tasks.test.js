@@ -90,7 +90,7 @@ test('the list query leaves empty filters out', { skip: dom.skip }, async () => 
     { state: 'failed', agent_id: 'a1', profile: 'p', since: '2026-10-01', limit: 100 });
 });
 
-test('what a profile is offered follows /api/auth/me, and a Restricted one nothing', { skip: dom.skip }, async () => {
+test('what a profile is offered follows /api/auth/me alone', { skip: dom.skip }, async () => {
   const { Tasks } = await loadTasks();
   const owner = Tasks.accessFrom({ role: 'owner', permissions: ['*'], restricted: false });
   assert.deepEqual(owner, { dispatch: true, approve: true, manage: true, operator: true });
@@ -98,8 +98,8 @@ test('what a profile is offered follows /api/auth/me, and a Restricted one nothi
   assert.deepEqual(member, { dispatch: true, approve: false, manage: false, operator: false });
   const plain = Tasks.accessFrom({ role: 'member', permissions: ['use_chat'], restricted: false });
   assert.equal(plain.dispatch, false);
-  const kid = Tasks.accessFrom({ role: 'restricted', permissions: ['use_chat', 'dispatch_agents', '*'], restricted: true });
-  assert.deepEqual(kid, { dispatch: false, approve: false, manage: false, operator: false });
+  const basic = Tasks.accessFrom({ role: 'basic', permissions: ['use_chat'] });
+  assert.deepEqual(basic, { dispatch: false, approve: false, manage: false, operator: false });
   assert.deepEqual(Tasks.accessFrom(null), Tasks.NO_ACCESS);
 });
 

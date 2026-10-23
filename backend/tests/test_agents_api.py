@@ -582,3 +582,14 @@ def test_settings_roundtrip_and_the_flag_defaults_off(aw):
     aw.owner.put("/api/agents/settings", json={"unified_dispatch": True})
     assert agents_service.unified_dispatch_enabled() is True
     aw.owner.put("/api/agents/settings", json={"unified_dispatch": False})
+
+
+def test_an_openclaw_agent_with_a_seat_id_saves(aw):
+    """The 3.x Restricted-seat check called advisor.safe_agent_ids(), which 4.0 removed: any
+    OpenClaw agent spec answered 500. A valid seat id saves; a malformed one is still a 422."""
+    r = aw.owner.post("/api/agents", json={"name": "Seat", "published_to": [], "spec": spec(
+        backend="openclaw", backend_options={"agent_id": "worker_one"})})
+    assert r.status_code == 201, r.text
+    r = aw.owner.post("/api/agents", json={"name": "Seat2", "published_to": [], "spec": spec(
+        backend="openclaw", backend_options={"agent_id": "bad id!"})})
+    assert r.status_code == 422, r.text

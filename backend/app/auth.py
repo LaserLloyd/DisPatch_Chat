@@ -152,10 +152,11 @@ iterations: {iterations}
 recovery_hash: {recovery_hash}
 recovery_salt: {recovery_salt}
 
-# Auto-lock back to Safe Mode after this many seconds with no activity.
+# Lock the device (back to the default profile or the profile list) after this
+# many seconds with no activity.
 lock_timeout_seconds: {lock_timeout}
 
-# "Keep this device unlocked": 0 disables the offer. When > 0, the unlock
+# "Keep this device signed in": 0 disables the offer. When > 0, the sign-in
 # screen offers to remember the device for this many days (sliding — renewed
 # by use). Remembered devices skip the PIN across restarts and never
 # idle-lock. Only hashed tokens are stored, in trusted-devices.yaml next to
@@ -450,7 +451,7 @@ def load() -> SecurityConfig:
             # would silently serve everything unlocked on a LAN-reachable
             # port. Stay locked with no unlockable PIN until it's fixed.
             log.error("security.yaml exists but cannot be read/parsed (%s) — "
-                      "FAILING CLOSED: app stays locked in Safe Mode. Fix or "
+                      "FAILING CLOSED: every device stays signed out (sign-in screen only). Fix or "
                       "delete %s to recover.", e, SECURITY_PATH)
             # Fail closed means fail closed for sessions ALREADY MINTED too.
             # Lockdown made it impossible to unlock from here on, but every
@@ -1164,7 +1165,7 @@ def clear_profile_pin(profile_id: str) -> None:
         raise accounts.AccountError("profile_not_found", "No such profile.", 404)
     if p.protected:
         raise accounts.AccountError("owner_immutable",
-                                    "Remove the Owner's PIN from Security instead.", 409)
+                                    "Change the first Admin's PIN in Settings > Account instead.", 409)
     accounts.update_profile(profile_id, pin_hash=None)
     revoke_profile(profile_id)
 
@@ -1177,8 +1178,8 @@ def set_profile_password(profile_id: str, password: str) -> None:
     if p is None:
         raise accounts.AccountError("profile_not_found", "No such profile.", 404)
     if p.role is not Role.ADMIN:
-        raise accounts.AccountError("password_role", "Only the Owner and Admins have a password; "
-                                    "Members and Restricted profiles use a PIN.", 409)
+        raise accounts.AccountError("password_role", "Only Admins have a password; "
+                                    "User and Basic profiles use a PIN.", 409)
     accounts.update_profile(profile_id, password_hash=credentials.hash_secret(password))
     revoke_profile(profile_id)
     if p.protected:

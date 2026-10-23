@@ -328,7 +328,7 @@ def test_connect_creates_a_bot_that_round_trips_through_load_bots(llm_env):
     bot = r.json()["bot"]
     assert bot["id"] == "llm-openai"
     assert bot["name"] == "Nova"   # the Advanced override wins
-    assert bot["safe"] is False, "a new provider is never exposed to Safe Mode"
+    assert "safe" not in bot and bot["hidden"] is False   # 4.0: no legacy flags on the wire
     assert bot["reactions"] is False
     assert bot["api"]["has_key"] is True
     assert "api_key" not in json.dumps(bot), "the key must never come back out"

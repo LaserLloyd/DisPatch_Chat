@@ -57,7 +57,8 @@ def test_tools_yaml_rows_are_manifests_too(world, tmp_path_factory):
     by = _by_id()
     if sys.platform != "win32":
         n = by["notes"]["manifest"]
-        assert (n["kind"], n["restricted_ok"], n["permissions_requested"]) == ("static", True, ["ui"])
+        # restricted_ok stays in the published schema (deprecated) but DisPatch writes False.
+        assert (n["kind"], n["restricted_ok"], n["permissions_requested"]) == ("static", False, ["ui"])
     b = by["bench"]["manifest"]
     assert b["kind"] == "url" and b["network"] == ["bench.example.net"]
     assert b["permissions_requested"] == ["network:bench.example.net"]

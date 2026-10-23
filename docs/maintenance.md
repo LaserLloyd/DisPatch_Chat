@@ -33,7 +33,7 @@ one `run` summary row. Defaults are Admin-editable in Settings > System (`system
 
 | Step | Default |
 |---|---|
-| `sync_media_index` | keeps the "is this picture still shown?" index (`media_refs`) current from the messages added since the last run, and records which `media/` files were generated |
+| `sync_media_index` | keeps the "is this picture still shown?" index (`media_refs`) current from the messages added since the last run (a backstop: DisPatch also writes `media_refs` when a message is saved or edited), and records which `media/` files were generated |
 | `prune_activity` | activity rows older than 90 days; audit rows older than 400 days |
 | `prune_task_events` | event logs of finished agent tasks older than 90 days |
 | `prune_job_events` | Job Board event rows of closed jobs older than 60 days |

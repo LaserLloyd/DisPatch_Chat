@@ -198,10 +198,10 @@ test('with no configured provider the form is replaced by a plain pointer to Set
   assert.equal(doc.querySelector('.st-form').hidden, true);
 });
 
-test('the Safe-Mode decoy 403 shows a locked note, never an empty studio', { skip: dom.skip }, async () => {
+test('a 403 shows a locked note, never an empty studio', { skip: dom.skip }, async () => {
   const env = setupDom(PAGE, PAGE_URL, {
     'GET /apps/imagestudio/locales/en.json': () => [200, EN],
-    'GET /api/apps/imagestudio/state': () => [403, { detail: 'Unlock for full access', decoy: true }],
+    'GET /api/apps/imagestudio/state': () => [403, { detail: 'Permission denied' }],
   });
   env.win.localStorage.setItem('dispatch-lang', 'en');
   globalThis.__ST_NO_AUTOMOUNT = true;

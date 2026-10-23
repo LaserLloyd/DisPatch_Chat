@@ -74,16 +74,33 @@ release" further down are the changes made since 3.1.0; some of them describe th
 
 Designed for 20 profiles over three years (about 1-2 million messages) with no slowdown.
 
-- **Indexes for every owner-scoped hot query** (migration 011) with query-plan tests, paginated thread lists and
-  history, and an opt-in synthetic-load benchmark (`pytest -m scale`).
-- **A daily maintenance task** (04:30 local by default, skipped while the maintenance marker exists or a backup runs)
-  prunes old activity, task and job events, sessions and finished image jobs, sweeps orphaned files, optimizes the
-  full-text index and the database and keeps the backup folder small. Nothing in the defaults deletes a chat. A profile
-  can opt in to archiving chats older than N months (reversible; never deletes). An Admin card in Settings → Health shows
-  storage and the last run. See [docs/maintenance.md](docs/maintenance.md).
-- **Generated images: keep forever (the default) or N months**, an Admin setting that covers every generated image
-  (reaction pool, Image Studio, `[[pic:]]` pictures, avatar-pool snapshots). Images still in use are never removed; an
-  aged-out picture shows an "image expired" placeholder; a dry-run count appears before you save.
+- **Migration 011** adds indexes for every owner-scoped hot query (thread lists, unread counts, File Server lists, and
+  the time columns the maintenance prunes by), proven by query-plan tests; gives each message its thread's owner and
+  rebuilds the search index with it, so a search ranks only the caller's own messages; and switches the database to
+  incremental auto-vacuum with one `VACUUM` (the one long step on a large database; it is logged). The search index is
+  no longer rebuilt on every start.
+- **Paged lists:** `GET /api/threads` pages by `cursor` / `limit` (default 50, pinned first; `archived=1` for archived
+  chats), `hello` carries the first page and `next_cursor`, and a thread's history pages with `limit` / `before`. An
+  opt-in synthetic-load benchmark (`pytest -m scale`) checks the latency budgets.
+- **A daily maintenance task** (04:30 local by default; skipped, and retried 30 minutes later, while the maintenance
+  marker exists or a backup runs) prunes old activity (audit entries keep longer), task and job events, usage counters,
+  mirror bookkeeping, expired sessions and devices, finished image jobs, agent spend, decided approvals and closed-job
+  feedback, in small batches; moves orphaned files to `<data>/trash/` (purged after 14 days); runs the search-index and
+  SQLite upkeep; and keeps backup snapshots in tiers (8 six-hourly, 7 daily, 4 weekly, never fewer than 4; migration
+  backups: the newest 3). Every step is logged per run. Nothing in the defaults deletes a chat. An Admin can change
+  the time and every retention period and run it by hand (`POST /api/maintenance/run`, with a dry run).
+- **Archive old chats (per profile, off by default):** a profile can archive its own chats older than N months
+  (`/api/me/archive`). Archived chats leave the rail, stay searchable and open by link; pinned chats and chats with an
+  open job are skipped; nothing is deleted, and an un-archived chat stays un-archived.
+- **Generated images: keep forever (the default) or N months**, an Admin setting that covers every picture DisPatch
+  generated (fired reaction-pool images, Image Studio results, `[[pic:]]` and image-job pictures, spent avatar-pool
+  images, thread avatar snapshots nothing uses). Uploads and attachments are never touched. Pictures still in use
+  (current avatars, the unfired reaction shelf, anything a recent message shows, anything a running job needs) are
+  kept. An expired picture answers `410 Gone` with `X-Image-Expired: 1` and shows an "image expired" placeholder;
+  the files sit in `<data>/trash/` for 14 days and can be restored. A dry-run count
+  (`GET /api/maintenance/images/preview`) comes before saving.
+- The Storage and image-retention cards (Settings → Health) and the archive control (You → Account) are the
+  interface for the above. See [docs/maintenance.md](docs/maintenance.md).
 
 ### Interface
 
