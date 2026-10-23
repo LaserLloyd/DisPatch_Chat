@@ -308,7 +308,13 @@ def with_connection(b: Bot, connection_id: str, model: str | None = None) -> Bot
             "This character is answered by an agent runtime, so it has no connection. "
             "Create a direct character to use a connection.", 422)
     old = first_entry(b) or {}
-    mdl = (model if model is not None else "") or str(old.get("model") or "") or c.default_model
+    # The old model name only carries over onto the SAME connection (or onto the first one an
+    # inline entry is attached to): another connection's server does not serve it, so a move
+    # to a different connection without a model takes that connection's default.
+    old_conn = str(old.get("connection") or "")
+    keep_old = not old_conn or old_conn == c.id
+    mdl = ((model if model is not None else "") or (str(old.get("model") or "") if keep_old else "")
+           or c.default_model)
     if not mdl:
         raise CharacterError("character_invalid",
                              "Pick a model (run Test on the connection to list what it offers).", 422)

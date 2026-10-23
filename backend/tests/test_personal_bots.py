@@ -404,3 +404,22 @@ def test_the_avatar_face_is_the_square_the_user_placed(scratch):
     profiles_service.set_personal_avatar(u.id, bot.id, buf.getvalue())
     centre = Image.open(config.AVATAR_DIR / f"{bot.id}-face.png").convert("RGB")
     assert centre.getpixel((256, 256)) == (0, 0, 255), "no crop = a centred square"
+
+
+def test_moving_a_bot_to_another_connection_takes_that_connections_model(scratch):
+    """The editor's "Runs on" sends the connection only: the old server's model name must not
+    follow the bot to a server that does not serve it."""
+    s = scratch
+    c1 = s.connection(name="One")
+    c2 = s.connection(default=False, name="Two", model="m2")
+    s.admin()
+    u = s.profile("Bram")
+    bot = profiles_service.create_personal(u.id, {"name": "A"})
+    assert characters.connection_of(bot) == c1.id and characters.model_of(bot) == "m1"
+    moved = profiles_service.update_personal(u.id, bot.id, {"connection": c2.id})
+    assert characters.connection_of(moved) == c2.id and characters.model_of(moved) == "m2"
+    # A model sent with it still wins, and staying on the same connection keeps the model.
+    back = profiles_service.update_personal(u.id, bot.id, {"connection": c1.id, "model": "m1-big"})
+    assert characters.model_of(back) == "m1-big"
+    same = profiles_service.update_personal(u.id, bot.id, {"connection": c1.id})
+    assert characters.model_of(same) == "m1-big"
