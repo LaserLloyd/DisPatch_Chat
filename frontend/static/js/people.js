@@ -28,6 +28,7 @@ import { api as realApi } from './api.js?v=36';
 import { w5 as realW5 } from './w5-api.js?v=2';
 import { t, has, relTime, fullTimestamp } from './i18n.js?v=4';
 import { el } from './util.js?v=21';
+import { disclosureText } from './host-notice.js?v=3';
 import { ACTIVITY_COLUMNS, activityRows, activityTotals, avatarSpec } from './profiles.js?v=3';
 import {
   askDialog, countsTally, permTables, permissionsPanel, householdPanel, backendsPanel,
@@ -58,15 +59,9 @@ function errText(e) {
 const hintLine = (text, cls = '') =>
   el('span', { class: 'dev-row-hint' + (cls ? ` ${cls}` : ''), text });
 
-/** The line a non-Admin profile is told about what an Admin sees. The server sends a code
- *  (`disclosure_code`) mapped to a locale key here; an unknown code (a newer server) falls back
- *  to the server's English `disclosure`. */
-const DISCLOSURE_KEYS = Object.freeze({ activity_summary: 'people.disclosure_activity' });
-export function disclosureText(d) {
-  const key = d && typeof d.disclosure_code === 'string' ? DISCLOSURE_KEYS[d.disclosure_code] : null;
-  if (key) return t(key);
-  return d && typeof d.disclosure === 'string' ? d.disclosure : '';
-}
+/** The line a non-Admin profile is told about what an Admin sees (one mapping, in
+ *  host-notice.js: the sign-in popup and Settings -> Account show it too). */
+export { disclosureText };
 
 function group(id, title, hint, body) {
   return el('section', { class: 'dev-group', id, 'aria-labelledby': `${id}-h` }, [

@@ -16,8 +16,10 @@
 // with Escape. It is a note, not a gate: no backdrop, no focus trap, and a click
 // outside it still does whatever it was aimed at. It says two things beyond the
 // standing text: that the DisPatch profile is shared (when the person is signed
-// into it), and any tamper-evident PIN reset that happened to this profile
-// (notices[] from the server, kind "pin_reset").
+// into it), any tamper-evident PIN reset that happened to this profile
+// (notices[] from the server, kind "pin_reset"), and, for a profile that is not
+// an Admin, what an Admin can see about it (the server's disclosure_code, also
+// shown under the Settings -> Account notice).
 //
 // "Shown once per sign-in" is remembered per TAB in sessionStorage under
 // SEEN_KEY ("<role>:<profile id>"): a reload of the same tab does not show it
@@ -27,6 +29,28 @@
 
 import { t } from './i18n.js?v=4';
 import { el, spriteIcon } from './util.js?v=21';
+
+/** The line a non-Admin profile is told about what an Admin sees. The server sends a code
+ *  (`disclosure_code`) mapped to a locale key here; an unknown code (a newer server) falls back
+ *  to the server's English `disclosure`. An Admin gets neither: ''. */
+export const DISCLOSURE_KEYS = Object.freeze({ activity_summary: 'people.disclosure_activity' });
+export function disclosureText(d) {
+  const key = d && typeof d.disclosure_code === 'string' ? DISCLOSURE_KEYS[d.disclosure_code] : null;
+  if (key) return t(key);
+  return d && typeof d.disclosure === 'string' ? d.disclosure : '';
+}
+
+/** Settings -> Account: show the disclosure under the host notice (`node` is the
+ *  #host-notice-disclosure paragraph). A known code keeps a data-i18n key so a language
+ *  change re-translates it; nothing to say (an Admin) hides it. */
+export function paintDisclosure(node, d) {
+  if (!node) return;
+  const key = d && typeof d.disclosure_code === 'string' ? DISCLOSURE_KEYS[d.disclosure_code] : null;
+  const text = disclosureText(d);
+  if (key) node.setAttribute('data-i18n', key); else node.removeAttribute('data-i18n');
+  node.textContent = text;
+  node.hidden = !text;
+}
 
 /** sessionStorage: "<role>:<profile id>" the popup was last shown for in this tab. */
 export const SEEN_KEY = 'dispatch-signin-notice';
@@ -54,10 +78,11 @@ export function armSignInNotice() {
 /** Show the sign-in popup once for this sign-in. `ready()` says whether the app
  *  is on a normal page now (not the lock screen, setup or the wizard); `who`
  *  names the session ("<role>:<profile id>"); `shared` adds the shared-profile
- *  line; `notices` is the server's list (only kind "pin_reset" is shown).
- *  Returns the popup element or null. */
+ *  line; `notices` is the server's list (only kind "pin_reset" is shown);
+ *  `disclosure` is the auth body's {disclosure, disclosure_code} (what an Admin
+ *  can see about a non-Admin profile). Returns the popup element or null. */
 export function maybeShowSignInNotice({
-  ready = () => true, who = 'session', shared = false, notices = [], host = document.body,
+  ready = () => true, who = 'session', shared = false, notices = [], disclosure = null, host = document.body,
 } = {}) {
   if (current || !ready() || readSeen() === who) return null;
   writeSeen(who);
@@ -75,6 +100,8 @@ export function maybeShowSignInNotice({
       el('li', { text: t('host_notice.card_chats') }),
     ]),
   ];
+  const told = disclosureText(disclosure);
+  if (told) parts[2].append(el('li', { class: 'privacy-card-disclosure', text: told }));
   if (shared) parts.push(el('p', { class: 'privacy-card-shared', text: t('host_notice.shared') }));
   for (const n of Array.isArray(notices) ? notices : []) {
     if (n && n.kind === 'pin_reset') {

@@ -46,7 +46,7 @@ import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
 } from './ext-sdk.js?v=19';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { maybeShowSignInNotice, armSignInNotice } from './host-notice.js?v=2';
+import { maybeShowSignInNotice, armSignInNotice, paintDisclosure } from './host-notice.js?v=3';
 import { createChatDrop } from './chatdrop.js?v=2';
 // 4.0 scale round: the rail pages by cursor, a long thread is windowed, and the clean-up cards.
 import {
@@ -8758,6 +8758,7 @@ function showSignInNoticeWhenReady() {
     who: `${state.role || 'none'}:${(p && p.id) || ''}`,
     shared: !!(p && p.shared),
     notices: state.auth.notices,
+    disclosure: state.auth.disclosure,
   });
 }
 
@@ -8792,8 +8793,13 @@ function applyAuthStatus(s, { keepFeatures = false } = {}) {
     // Where a lock and an unsigned device land (Settings -> People): 'default_profile' | 'profile_list'.
     lockTarget: s.lock_target === 'default_profile' ? 'default_profile' : 'profile_list',
     defaultProfile: s.default_profile || null,
+    // What an Admin can see about this (non-Admin) profile: the sign-in popup and the
+    // Settings -> Account notice say it. Null for an Admin.
+    disclosure: (s.disclosure_code || s.disclosure)
+      ? { disclosure_code: s.disclosure_code || null, disclosure: s.disclosure || null } : null,
   };
   state.role = state.auth.role;
+  paintDisclosure(document.getElementById('host-notice-disclosure'), state.auth.disclosure);
   setMenuScope(state.auth.profile ? state.auth.profile.id : '');
 }
 

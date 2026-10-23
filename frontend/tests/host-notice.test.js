@@ -139,6 +139,37 @@ test('the shared-profile line and the PIN-reset notice show when given; other no
   assert.equal(plain.querySelector('.privacy-card-notice'), null);
 });
 
+test('a non-Admin is told what an Admin can see: in the popup (by code, translated) and under the Account notice', { skip: dom.skip }, async () => {
+  const { win, mod } = await boot();
+  const told = EN.people.disclosure_activity;
+  const c = mod.maybeShowSignInNotice({ who: 'user:p1', disclosure: { disclosure_code: 'activity_summary', disclosure: 'server text' } });
+  assert.equal(c.querySelector('.privacy-card-disclosure').textContent, told);
+  mod._resetForTest();
+  const unknown = mod.maybeShowSignInNotice({ who: 'user:p2', disclosure: { disclosure_code: 'newer_code', disclosure: 'server text' } });
+  assert.equal(unknown.querySelector('.privacy-card-disclosure').textContent, 'server text', 'an unknown code falls back');
+  mod._resetForTest();
+  const admin = mod.maybeShowSignInNotice({ who: 'admin:p3', disclosure: null });
+  assert.equal(admin.querySelector('.privacy-card-disclosure'), null, 'an Admin is told nothing');
+  const p = win.document.createElement('p');
+  p.hidden = true;
+  mod.paintDisclosure(p, { disclosure_code: 'activity_summary' });
+  assert.equal(p.hidden, false);
+  assert.equal(p.textContent, told);
+  assert.equal(p.getAttribute('data-i18n'), 'people.disclosure_activity', 're-translated on a language change');
+  mod.paintDisclosure(p, null);
+  assert.equal(p.hidden, true);
+  assert.equal(p.getAttribute('data-i18n'), null);
+  mod.paintDisclosure(null, null);   // no node: no throw
+});
+
+test('Settings -> Account has the disclosure line, hidden until the auth state fills it', () => {
+  const i = HTML.indexOf('id="sec-host-notice"');
+  const aside = HTML.slice(i, HTML.indexOf('</aside>', i));
+  assert.match(aside, /<p class="host-notice-body host-notice-disclosure" id="host-notice-disclosure" hidden><\/p>/);
+  assert.match(MAIN, /paintDisclosure\(document\.getElementById\('host-notice-disclosure'\), state\.auth\.disclosure\);/);
+  assert.match(MAIN, /disclosure: \(s\.disclosure_code \|\| s\.disclosure\)/);
+});
+
 test('the popup never mentions the Restricted tier, which is gone', { skip: dom.skip }, async () => {
   const { mod } = await boot();
   const c = mod.maybeShowSignInNotice({ who: 'restricted:x' });
@@ -163,7 +194,7 @@ test('the popup is a top-centre note with a neutral surface and danger only as t
 });
 
 test('main.js arms the notice at every sign-in and at lock, and shows it through one function', () => {
-  assert.match(MAIN, /import \{ maybeShowSignInNotice, armSignInNotice \} from '\.\/host-notice\.js\?v=2';/);
+  assert.match(MAIN, /import \{ maybeShowSignInNotice, armSignInNotice, paintDisclosure \} from '\.\/host-notice\.js\?v=3';/);
   assert.doesNotMatch(MAIN, /maybeShowPrivacyCard|showPrivacyCardWhenReady/);
   // PIN unlock, profile sign-in, first Owner's setup, and the lock itself.
   assert.match(MAIN, /armSignInNotice\(\);[^\n]*\n\s*\/\/ 3\.0: the install PIN signs in/);
@@ -172,11 +203,12 @@ test('main.js arms the notice at every sign-in and at lock, and shows it through
   assert.match(MAIN, /async function lockToTarget\(\{ announce = false \} = \{\}\) \{\n  if \(lockBusy\) return;[^\n]*\n  lockBusy = true;\n  try \{\n    armSignInNotice\(\);/);
   assert.match(MAIN, /if \(!wizard\) showSignInNoticeWhenReady\(\);/);
   assert.match(MAIN, /onClosed: \(\) => showSignInNoticeWhenReady\(\)/);
-  const fn = MAIN.slice(MAIN.indexOf('function showSignInNoticeWhenReady'), MAIN.indexOf('function showSignInNoticeWhenReady') + 500);
+  const fn = MAIN.slice(MAIN.indexOf('function showSignInNoticeWhenReady'), MAIN.indexOf('function showSignInNoticeWhenReady') + 600);
   assert.match(fn, /!document\.querySelector\('\.wizard-backdrop'\)/);
   assert.match(fn, /dom\['lock-screen'\]\.classList\.contains\('hidden'\)/);
   assert.match(fn, /shared: !!\(p && p\.shared\)/);
   assert.match(fn, /notices: state\.auth\.notices/);
+  assert.match(fn, /disclosure: state\.auth\.disclosure/);
   assert.doesNotMatch(MAIN.slice(MAIN.indexOf('setInterval(() => {'), MAIN.indexOf('setInterval(() => {') + 400), /showSignInNoticeWhenReady/, 'never from the minute tick');
   assert.match(read('sw.js'), /'\/static\/js\/host-notice\.js'/);
 });
