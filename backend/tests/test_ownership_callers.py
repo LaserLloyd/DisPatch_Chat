@@ -57,10 +57,9 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("backend/app/connections.py", "delete", "load_bots"): _ADMIN_CFG,     # household names for the 409
     ("backend/app/ext_profile_hooks.py", "bots_visible", "load_bots"): _FILTER,
     ("backend/app/extensions.py", "all", "load_bots"): "ctx.bots.all(): the trusted add-on's host view; per-caller views use ctx.bots_visible",
-    ("backend/app/firstrun.py", "seed_one", "load_bots"): _HOUSE,
     ("backend/app/firstrun.py", "seed_if_first_run", "load_bots"): _HOUSE,
     ("backend/app/firstrun.py", "_atlas_of", "load_bots"):
-        "server-side: which Atlas posts one profile's release notes (its own copy); returns an id only",
+        "server-side: which Atlas talks to one profile (its own copy, else the household one it may use) for its guides and release notes; returns an id only",
     ("backend/app/firstrun.py", "backfill_guides_once", "load_bots"):
         "server-side: queues each personal Atlas's guides for its own owner; returns a count only",
     ("backend/app/image_providers.py", "shared_chat_key", "load_bots"): _HOUSE,

@@ -146,3 +146,101 @@ def test_a_version_without_notes_posts_nothing(scratch, on):
     s.run(lambda db: db.create_thread("pack_otter", title="old", owner_profile_id=owner.id))
     config.upsert_bot(firstrun.atlas_template())
     assert _notes(s, "0.0.1") == []
+
+
+# ---- role changes, retries, the on-demand guide, What's new without a copy ---------------- #
+
+def _atlas_ids(pid):
+    return [b.id for b in config.load_bots() if b.owner_profile == pid and b.pack == firstrun.ATLAS_PACK]
+
+
+def test_basic_made_user_gets_an_atlas_with_the_guides_and_user_made_admin_gets_the_tour(scratch, on):
+    s = scratch
+    s.connection()
+    s.admin()
+    b = s.profile("Dee", Role.BASIC)
+    assert _atlas_ids(b.id) == []
+    profiles_service.change_role(b.id, "user")
+    (atlas,) = _atlas_ids(b.id)
+    _drain(s)
+    assert sorted(t for t, _ in _threads(s, atlas)) == ["Meet Atlas", "Using DisPatch"]
+    profiles_service.change_role(b.id, "admin")
+    assert _atlas_ids(b.id) == [atlas], "no second Atlas"
+    _drain(s)
+    assert sorted(t for t, _ in _threads(s, atlas)) == ["How DisPatch works", "Meet Atlas", "Using DisPatch"]
+
+
+def test_a_guide_post_that_fails_is_tried_again_and_only_adds_what_is_missing(scratch, on):
+    s = scratch
+    s.connection()
+    s.admin()
+    u = s.profile("Bram")
+    bot_id = profiles_service.spawn_atlas(u.id)
+    calls = {"n": 0}
+
+    def flaky(db):
+        real = _deliver(db)
+
+        async def deliver(*a, **k):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("disk hiccup")
+            return await real(*a, **k)
+        return deliver
+    s.run(lambda db: firstrun.drain_guides(db, flaky(db)))
+    assert len(_threads(s, bot_id)) >= 1
+    assert (config.DATA_DIR / firstrun.PENDING_NAME).exists(), "kept for another try"
+    _drain(s)
+    titles = sorted(t for t, _ in _threads(s, bot_id))
+    assert titles.count("Meet Atlas") == 1 and titles.count("Using DisPatch") == 1
+    assert not (config.DATA_DIR / firstrun.PENDING_NAME).exists()
+
+
+def test_a_user_without_an_own_atlas_gets_whats_new_on_the_household_one_in_their_own_chats(scratch, on):
+    s = scratch
+    owner = s.admin()
+    u = s.profile("Bram")                                # made before 4.0: no copy of its own
+    for bid in _atlas_ids(u.id):
+        config.remove_bot(bid)
+    s.run(lambda db: db.create_thread("pack_otter", title="old", owner_profile_id=owner.id))
+    config.upsert_bot(firstrun.atlas_template())
+    _notes(s, __version__)
+    owners = [o for _, o in _threads(s, firstrun.BOT_ID)]
+    assert sorted(owners) == sorted([owner.id, u.id])
+
+
+def test_a_patch_release_with_notes_names_its_full_version(scratch, on, monkeypatch, tmp_path):
+    s = scratch
+    owner = s.admin()
+    s.run(lambda db: db.create_thread("pack_otter", title="old", owner_profile_id=owner.id))
+    config.upsert_bot(firstrun.atlas_template())
+    (tmp_path / "whats-new-9.9.1.md").write_text("Fixes.", encoding="utf-8")
+    monkeypatch.setattr(firstrun, "GUIDE_DIR", tmp_path)
+    assert len(_notes(s, "9.9.1")) == 1
+    assert [t for t, _ in _threads(s, firstrun.BOT_ID)] == ["What's new in DisPatch 9.9.1"]
+
+
+def test_the_on_demand_guide_lands_in_the_callers_own_chats(scratch, on):
+    s = scratch
+    s.connection()
+    owner = s.admin()
+    config.upsert_bot(firstrun.atlas_template())
+    a = s.profile("Cy", Role.ADMIN)
+    mine = profiles_service.spawn_atlas(a.id)
+    tid = s.run(lambda db: firstrun.seed_one(db, _deliver(db), "set-up-add-ons", profile_id=a.id))
+    assert ("Set up add-ons", a.id) in _threads(s, mine)
+    with pytest.raises(firstrun.GuideExists):
+        s.run(lambda db: firstrun.seed_one(db, _deliver(db), "set-up-add-ons", profile_id=a.id))
+    # the main Admin (no copy of her own) gets hers on the household Atlas, separately
+    s.run(lambda db: firstrun.seed_one(db, _deliver(db), "set-up-add-ons", profile_id=owner.id))
+    assert ("Set up add-ons", owner.id) in _threads(s, firstrun.BOT_ID)
+    assert tid
+
+
+def test_whats_new_is_posted_after_the_guides_so_it_sits_on_top():
+    import inspect
+
+    from app import main
+    src = inspect.getsource(main._lifespan_startup)
+    assert src.index("fresh_install = await firstrun.count_threads(db)") < src.index("seed_if_first_run")
+    assert src.index("drain_guides") < src.index("post_release_notes(db, _deliver_assistant_text, fresh=fresh_install)")

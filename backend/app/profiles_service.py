@@ -877,6 +877,7 @@ def change_role(profile_id: str, new_role: str, *, confirm_token: str | None = N
         if not _loses_private_content(prof.role, new):
             updated = accounts.update_profile(profile_id, role=new)
             _revoke(profile_id)
+            _after_promotion(updated, prof.role)
             return updated
         # Moving to Basic. Resolve everything that can fail BEFORE deleting anything.
         chosen = _household_choice(prof, household_bots)
@@ -889,6 +890,26 @@ def change_role(profile_id: str, new_role: str, *, confirm_token: str | None = N
                                           grants=grants, denies=denies)
         _revoke(profile_id)
         return updated
+
+
+def _after_promotion(profile: Any, was: Role) -> None:
+    """A role change that keeps the chats. Basic -> User/Admin: the profile may now have bots
+    of its own, and a Basic profile never had an Atlas, so it gets one as a new profile does
+    (with its guide chats). -> Admin: its Atlas also gets the Admin tour (the guides already
+    posted are skipped). A User who deleted its Atlas does not get one back. Never raises:
+    the role change itself has happened."""
+    try:
+        if profile.role is Role.BASIC:
+            return
+        atlas = next((b for b in characters.personal_bots(profile.id)
+                      if b.pack == firstrun.ATLAS_PACK), None)
+        if atlas is None:
+            if was is Role.BASIC:
+                spawn_atlas(profile.id)
+        else:
+            firstrun.request_guides(profile.id, atlas.id)
+    except Exception:
+        log.warning("no Atlas for %s after its role change", profile.id, exc_info=True)
 
 
 def _revoke(profile_id: str) -> None:

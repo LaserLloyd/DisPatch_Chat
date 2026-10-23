@@ -77,24 +77,41 @@ class GuideExists(Exception):
     """That guide was already posted on this install."""
 
 
-async def seed_one(db, deliver, name: str, *, force: bool = False) -> str:
-    """Post ONE guide thread on Atlas now (an existing install never auto-seeds).
+async def seed_one(db, deliver, name: str, *, force: bool = False, profile_id: str | None = None) -> str:
+    """Post ONE guide thread now (an existing install never auto-seeds), on the Atlas that talks
+    to ``profile_id`` (the caller; None = the protected Admin, for a machine caller) and in that
+    profile's chats.
 
-    Raises KeyError for an unknown guide or a missing Atlas, GuideExists when the
-    guide was already posted (unless `force`). Returns the new thread id."""
+    Raises KeyError for an unknown guide or no Atlas for that profile, GuideExists when the
+    guide was already posted there (unless `force`). Returns the new thread id."""
+    from . import accounts
     title, fname = GUIDES[name]
-    bot = next((b for b in config.load_bots() if b.id == BOT_ID), None)
-    if bot is None:
+    pid = profile_id or ownership.owner_id()
+    prof = accounts.get_profile(pid) if pid else None
+    if prof is None and not pid:
+        # An open install (nobody owns it yet): the household Atlas, adopted by the first Admin.
+        bot_id = BOT_ID if config.get_bot(BOT_ID) is not None else None
+    else:
+        bot_id = _atlas_of(prof) if prof is not None else None
+    if bot_id is None:
         raise KeyError("atlas")
-    source = f"firstrun:{fname}"
-    if await db.source_id_seen(source):
-        if not force:
-            raise GuideExists(name)
-        source = f"{source}:{int(time.time())}"
+    house = bot_id == BOT_ID
+    # The household Atlas in the protected Admin's chats (or an open install's) is where the
+    # first-run seed put these.
+    legacy = house and (prof is None or getattr(prof, "protected", False))
+    sources = [f"firstrun:{fname}"] if legacy else \
+        [f"guide:{bot_id}:{pid}:{fname}" if house else f"guide:{bot_id}:{fname}"]
+    source = sources[-1]
+    for seen in sources:
+        if await db.source_id_seen(seen):
+            if not force:
+                raise GuideExists(name)
+            source = f"{source}:{int(time.time())}"
+            break
     text = _read_guide(fname)
     if not text:
         raise KeyError(name)
-    thread = await db.create_thread(BOT_ID, title=title, owner_profile_id=ownership.owner_id())
+    thread = await db.create_thread(bot_id, title=title, owner_profile_id=pid)
     await deliver(thread.id, text, metadata={"seeded": True}, source_id=source,
                   dedup_recent_window=False)
     log.info("guide %s posted on demand (thread %s)", name, thread.id)
@@ -256,6 +273,7 @@ def copy_atlas_avatar(bot_id: str) -> str:
 # ``guide/whats-new-<version>.md``. ``<data>/.release-notes-seen`` holds the last version
 # announced; a fresh install records its version without posting anything.
 
+import contextlib  # noqa: E402
 import json  # noqa: E402
 import threading  # noqa: E402
 
@@ -365,8 +383,14 @@ async def _post_guides(db: Any, deliver: Callable[..., Awaitable[Any]], profile:
         if not text:
             continue
         thread = await db.create_thread(bot_id, title=title, owner_profile_id=profile.id)
-        await deliver(thread.id, text, metadata={"seeded": True}, source_id=source,
-                      dedup_recent_window=False)
+        try:
+            await deliver(thread.id, text, metadata={"seeded": True}, source_id=source,
+                          dedup_recent_window=False)
+        except BaseException:
+            # No empty guide chat left behind: a later try posts it whole.
+            with contextlib.suppress(Exception):
+                await db.delete_thread(thread.id)
+            raise
         made.append(thread.id)
     return made
 
@@ -388,6 +412,7 @@ async def drain_guides(db: Any, deliver: Callable[..., Awaitable[Any]]) -> list[
         with _pending_lock:
             rows = _read_pending()
         done: list[dict[str, str]] = []
+        retry: list[dict[str, Any]] = []
         for row in rows:
             try:
                 prof = accounts.get_profile(row["profile"])
@@ -398,9 +423,14 @@ async def drain_guides(db: Any, deliver: Callable[..., Awaitable[Any]]) -> list[
                 done.append(row)
             except Exception:
                 log.warning("could not post the Atlas guides for one profile", exc_info=True)
-                done.append(row)          # a broken row must not retry forever
+                done.append(row)
+                # Posted guides are skipped next time (their source ids), so a later try only
+                # adds what is missing; a row that keeps failing is given up after 3 tries.
+                tries = int(row.get("tries") or 0) + 1
+                if tries < 3:
+                    retry.append({**row, "tries": tries})
         with _pending_lock:
-            _write_pending([r for r in _read_pending() if r not in done])
+            _write_pending([r for r in _read_pending() if r not in done] + retry)
     if made:
         log.info("posted %d Atlas guide thread(s)", len(made))
     return made
@@ -424,27 +454,42 @@ def backfill_guides_once() -> int:
     return n
 
 
+async def count_threads(db: Any) -> int:
+    cur = await db.db.execute("SELECT COUNT(*) FROM threads")
+    row = await cur.fetchone()
+    return int(row[0]) if row else 0
+
+
 def release_notes_file(version: str) -> Path:
     return GUIDE_DIR / f"whats-new-{version}.md"
 
 
 def _atlas_of(profile: Any) -> str | None:
-    """The Atlas that talks to ``profile``: its own copy, else (the protected Admin) the
-    household one."""
+    """The Atlas that talks to ``profile``: its own copy, else the household one when the
+    profile may use it (the protected Admin, a profile made before 4.0 that has no copy yet,
+    one that deleted its copy)."""
     own = next((b for b in config.load_bots() if b.scope == "personal"
                 and b.owner_profile == profile.id and b.pack == ATLAS_PACK), None)
     if own is not None:
         return own.id
+    house = config.get_bot(BOT_ID)
+    if house is None or house.scope == "personal":
+        return None
     if getattr(profile, "protected", False):
-        house = config.get_bot(BOT_ID)
-        if house is not None and house.scope != "personal":
-            return house.id
-    return None
+        return house.id
+    from . import characters, policy
+    try:
+        principal = policy.profile_principal(profile)
+    except Exception:
+        return None
+    return house.id if characters.may_use(house, principal) else None
 
 
 async def post_release_notes(db: Any, deliver: Callable[..., Awaitable[Any]],
-                             version: str | None = None) -> list[str]:
+                             version: str | None = None, *, fresh: bool | None = None) -> list[str]:
     """After an update: one "What's new" thread per Admin and User profile, on its Atlas.
+    ``fresh``: the install had no chats before this start (the caller counts BEFORE the
+    first-run seed and the guides, so What's new can be posted last, on top); None = count now.
     Returns the thread ids made. Never raises."""
     from . import __version__, accounts
     version = version or __version__
@@ -461,12 +506,13 @@ async def post_release_notes(db: Any, deliver: Callable[..., Awaitable[Any]],
         made: list[str] = []
         notes = _read_guide(release_notes_file(version).name) \
             if release_notes_file(version).is_file() else ""
-        cur = await db.db.execute("SELECT COUNT(*) FROM threads")
-        row = await cur.fetchone()
-        fresh = not row or int(row[0]) == 0
+        if fresh is None:
+            fresh = await count_threads(db) == 0
         if notes and not fresh:
-            major_minor = ".".join(version.split(".")[:2])
-            title = f"What's new in DisPatch {major_minor}"
+            # "4.0" for a x.y.0 release; a patch release with notes of its own names itself.
+            parts = version.split(".")
+            shown = ".".join(parts[:2]) if len(parts) < 3 or parts[2] in ("0", "") else version
+            title = f"What's new in DisPatch {shown}"
             for prof in accounts.list_profiles():
                 if prof.role is Role.BASIC or getattr(prof, "disabled", False):
                     continue
