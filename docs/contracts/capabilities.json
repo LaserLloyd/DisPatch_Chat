@@ -35,7 +35,7 @@
       "machine": [],
       "mcp": null,
       "permission": null,
-      "title": "Sign the Owner in with the install PIN",
+      "title": "Sign the main Admin in with the install PIN",
       "ui": "api.unlock",
       "ws": []
     },

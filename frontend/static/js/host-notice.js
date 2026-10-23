@@ -26,7 +26,7 @@
 // code -- docs/security.md "What you are trusting".
 
 import { t } from './i18n.js?v=4';
-import { el, spriteIcon } from './util.js?v=20';
+import { el, spriteIcon } from './util.js?v=21';
 
 /** sessionStorage: "<role>:<profile id>" the popup was last shown for in this tab. */
 export const SEEN_KEY = 'dispatch-signin-notice';

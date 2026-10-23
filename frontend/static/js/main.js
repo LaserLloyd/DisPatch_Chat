@@ -2,12 +2,12 @@
 // One cohesive module: state, rendering, events, and WebSocket dispatch.
 // Leaf modules (util/api/ws/markdown) hold no app state, so there are no cycles.
 
-import { api, setOnLocked, setOnSignInRequired } from './api.js?v=35';
+import { api, setOnLocked, setOnSignInRequired } from './api.js?v=36';
 import { ChatSocket } from './ws.js?v=10';
-import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=34';
-import { installChecklists, applyChecklistState } from './checklist.js?v=13';
-import { classifyNotice, noticeHeadline } from './notice.js?v=4';
-import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, spriteIcon, RAIL_ICONS } from './util.js?v=20';
+import { renderMarkdown, enhanceContent, normalizeMediaUrl, isVideoUrl, installMarkdownHandlers, linkifyPlain, retargetLinks, markSpeech, markParens, stripMediaSource, toPlainPreview } from './markdown.js?v=35';
+import { installChecklists, applyChecklistState } from './checklist.js?v=14';
+import { classifyNotice, noticeHeadline } from './notice.js?v=5';
+import { acquireInert, el, escapeHtml, glyphless, iconLabel, isMixedContent, loadScript, loadStyle, railIcon, releaseInert, spriteIcon, RAIL_ICONS } from './util.js?v=21';
 // The formatters come from i18n.js now, not util.js: they need the active
 // locale (Intl) and translatable unit labels, which the old hand-rolled 'en-US'
 // helpers could never provide. `fmtSize` was renamed `fileSize` on the way over.
@@ -21,57 +21,57 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl, botHasReactions,
-} from './reactions.js?v=28';
-import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=10';
-import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=13';
+} from './reactions.js?v=29';
+import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=11';
+import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=14';
 import {
   initLlmPanel, activateLlmPanel, closeLlmPanel, llmPanelOpen, repaintLlmPanel,
   firstRunCard,
-} from './llm.js?v=13';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=14';
+} from './llm.js?v=14';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=15';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
   wireQuickActions, repaintQuickActions, placeholderOverride as quickPlaceholder,
   setAllowed as setQuickAllowed, setUpload as setQuickUpload, getActions as quickActionList,
-} from './quick-actions.js?v=4';
-import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=5';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=18';
+} from './quick-actions.js?v=5';
+import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=6';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=19';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
 // DisPatch Voice add-on — mounted into the shell by the loader, through the
 // SDK's frozen shell object. With none installed, Settings → Voice explains
 // how to add it (voice-absent.js).
-import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=3';
+import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=4';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=18';
+} from './ext-sdk.js?v=19';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
-import { maybeShowSignInNotice, armSignInNotice } from './host-notice.js?v=1';
-import { createChatDrop } from './chatdrop.js?v=1';
+import { maybeShowSignInNotice, armSignInNotice } from './host-notice.js?v=2';
+import { createChatDrop } from './chatdrop.js?v=2';
 // 4.0 scale round: the rail pages by cursor, a long thread is windowed, and the clean-up cards.
 import {
   ThreadPager, showMoreRow, MessageWindow, renderArchiveControl, WINDOW_MAX, MESSAGE_PAGE,
 } from './thread-pager.js?v=1';
 import { renderStorageCard, renderRetentionCard } from './storage-card.js?v=1';
 import { installExpiredImages } from './media-expired.js?v=1';
-import { activeLayout, applyLayout, moveItem, saveLayout, wireRailDrag, openArrangeDialog } from './railmenu.js?v=1';
-import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=16';
-import { mountPluginsSettings } from './plugins.js?v=17';
-import { rowControls, addBotRow, backendKind } from './bots-edit.js?v=4';
+import { activeLayout, applyLayout, moveItem, saveLayout, wireRailDrag, openArrangeDialog } from './railmenu.js?v=2';
+import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=17';
+import { mountPluginsSettings } from './plugins.js?v=18';
+import { rowControls, addBotRow, backendKind } from './bots-edit.js?v=5';
 // 3.0 (W5): connections, the schema-driven settings page, character details + starter packs, the
 // first-run wizard. Their REST calls live in w5-api.js (api.js is imported at one ?v= by too many
 // modules to extend without a cascade).
-import { setOnLocked as w5SetOnLocked, failure as w5Failure, w5 as schemaApi, errorText as w5ErrorText } from './w5-api.js?v=1';
+import { setOnLocked as w5SetOnLocked, failure as w5Failure, w5 as schemaApi, errorText as w5ErrorText } from './w5-api.js?v=2';
 // 3.2: the Settings sections, the old tab ids that lead to them, and the settings search.
 import {
   SECTIONS, SECTION_IDS, RESERVED_TAB_IDS, resolveSettingsTarget, buildSearchIndex, mountSettingsSearch, createRevealer,
   runSectionHooks,
-} from './settings-nav.js?v=1';
-import { mountConnections } from './connections.js?v=2';
-import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=3';
-import { mountBackups } from './backup.js?v=2';
-import { characterPanel, isHidden, removeCharacter } from './characters.js?v=2';
-import { maybeStartWizard } from './wizard.js?v=3';
+} from './settings-nav.js?v=2';
+import { mountConnections } from './connections.js?v=3';
+import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=4';
+import { mountBackups } from './backup.js?v=3';
+import { characterPanel, isHidden, removeCharacter } from './characters.js?v=3';
+import { maybeStartWizard } from './wizard.js?v=4';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -79,51 +79,51 @@ import { maybeStartWizard } from './wizard.js?v=3';
 import {
   bucketThreads, filterSignature, shouldShowThreadSections, threadSectionHeadEl,
 } from './thread-sections.js?v=2';
-import { isMenuBot, toggleMenuBot, pruneMenuBots, menuBotIds, setMenuScope } from './menubots.js?v=3';
+import { isMenuBot, toggleMenuBot, pruneMenuBots, menuBotIds, setMenuScope } from './menubots.js?v=4';
 import {
   loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
   openFromHash, mountToolsSettings, rememberPrev,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen, findTool, toolTitle, toolGlyph, registerExtTiles, isExtFeature,
   openToolsMenu, toolsMenuOpen,
-} from './tools.js?v=18';
+} from './tools.js?v=19';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
-import { forApp, api as appApi } from './app-sdk.js?v=3';
-import { renderLinkRail, linksSection } from './links.js?v=7';
+import { forApp, api as appApi } from './app-sdk.js?v=4';
+import { renderLinkRail, linksSection } from './links.js?v=8';
 import { createGallery, createChrome, keyDirection, inBottomZone, swipeDirection, normalizeGalleryRequest } from './lightbox-nav.js?v=1';
 // The local viewer owns its own overlay (built like openLightbox, closed by the
 // same closeAllOverlays route). main.js only decides WHEN it may open: host paths
 // are an Admin surface, so refuse() is a live callback ("not an Admin") rather than a boolean.
-import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=7';
-import { aboutRow } from './about.js?v=22';
+import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=8';
+import { aboutRow } from './about.js?v=23';
 // Profiles (Admin / User / Basic): pure decisions (profiles.js), the sign-in /
 // setup DOM (signin.js) and Settings -> People (people.js).
 import { newChatAllowed, pickNewChatTarget, latestByBot, currentCharacter, reusableEmptyThread, readLastCharacter, rememberCharacter } from './newchat.js?v=2';
-import { normalizeRole, isAdminRole, signInMode, wsErrorKind, avatarSpec, railGroups, isMineBot } from './profiles.js?v=2';
+import { normalizeRole, isAdminRole, signInMode, wsErrorKind, avatarSpec, railGroups, isMineBot } from './profiles.js?v=3';
 import {
   renderSignIn, renderSetup, setupPage, renderPasswordForm, paintChip, chipLabel, attachChipMenu,
-} from './signin.js?v=3';
-import { mountPeopleSettings } from './people.js?v=3';
+} from './signin.js?v=4';
+import { mountPeopleSettings } from './people.js?v=4';
 // 3.0 agents: the Tasks page, Assign task / @agent, inline task cards (tasks.js, task_card.js,
 // approval_card.js) and Settings -> Agents (agents.js). The server decides who may do what.
-import { createTasksUi } from './tasks.js?v=1';
+import { createTasksUi } from './tasks.js?v=2';
 // 4.0 chat-first profiles (Foundation scaffolding: wired once here, filled by WP-FE-YOU /
 // WP-FE-PEOPLE in their own modules).
 import { initMyBots, copyMenuItem } from './my-bots.js?v=1';
 import { initBotEditor } from './bot-editor.js?v=1';
 import { initAccountReset } from './account-reset.js?v=1';
 import { initPeoplePerms } from './people-perms.js?v=1';
-import { mountAgentsSettings } from './agents.js?v=2';
-import { pushRow } from './push.js?v=2';
-import { imageJobMessageEl } from './imagejobs.js?v=5';
-import { handoffBodyMarkdown, handoffStripEl } from './advisor.js?v=2';
+import { mountAgentsSettings } from './agents.js?v=3';
+import { pushRow } from './push.js?v=3';
+import { imageJobMessageEl } from './imagejobs.js?v=6';
+import { handoffBodyMarkdown, handoffStripEl } from './advisor.js?v=3';
 import {
   THINKING_LEVELS, normalizeModelOptions, meterText, prefsPatchFrom, latestContextBudget,
 } from './modelchip.js?v=2';
 import {
   createStore, createCachePainter, TIER_FULL, MESSAGE_CACHE_ROWS,
-} from './store.js?v=2';
+} from './store.js?v=3';
 
 // ===================== Popout mode =====================
 // /?popout=1&thread=<id>&bot=<botId> boots straight into ONE conversation with

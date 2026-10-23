@@ -21,9 +21,9 @@
 // DOM is built incrementally: an event appends or patches one element, so a focused button in
 // an approval card is never torn down by an unrelated delta arriving.
 
-import { el, spriteIcon } from './util.js?v=20';
+import { el, spriteIcon } from './util.js?v=21';
 import { t } from './i18n.js?v=4';
-import { approvalCardEl, approvalView } from './approval_card.js?v=1';
+import { approvalCardEl, approvalView } from './approval_card.js?v=2';
 
 export const TERMINAL = new Set(['succeeded', 'failed', 'cancelled']);
 export const ACTIVE = new Set(['running', 'awaiting_approval']);

@@ -22,7 +22,7 @@
 // out). Every string goes through t(); every node is built with el() and
 // textContent, never innerHTML, because the labels come from an operator file.
 
-import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
+import { el, railIcon, RAIL_ICONS } from './util.js?v=21';
 import { t } from './i18n.js?v=4';
 
 const ICON_BOLT = RAIL_ICONS.bolt;

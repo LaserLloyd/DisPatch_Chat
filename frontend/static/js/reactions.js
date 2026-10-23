@@ -16,10 +16,10 @@
 // clicks but never moves focus, so a reaction landing mid-sentence doesn't eat
 // your keystrokes. The chat carries on underneath; dismissing takes one click.
 //
-import { api } from './api.js?v=35';
-import { el, railIcon, RAIL_ICONS, iconLabel, glyphless, spriteIcon } from './util.js?v=20';
+import { api } from './api.js?v=36';
+import { el, railIcon, RAIL_ICONS, iconLabel, glyphless, spriteIcon } from './util.js?v=21';
 import { t } from './i18n.js?v=4';
-import { nimEnabled } from './nim.js?v=5';
+import { nimEnabled } from './nim.js?v=6';
 
 // ===================== State =====================
 

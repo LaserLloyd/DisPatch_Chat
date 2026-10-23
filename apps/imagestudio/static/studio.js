@@ -12,7 +12,7 @@
 
 import {
   api, t, ready, theme, toast, lightbox, el, railIcon, RAIL_ICONS,
-} from '/static/js/app-sdk.js?v=3';
+} from '/static/js/app-sdk.js?v=4';
 
 /** A 403: this profile may not use Image Studio (4.0; 3.x sent a Safe-Mode DecoyError). */
 const refused = (e) => !!e && e.status === 403;
@@ -21,6 +21,7 @@ import {
   buildRequest, cropRect, defaultCropPos, galleryItems, isMetered,
   SORTS, normalizeSort, sortRows,
 } from './studio-logic.js?v=2';
+import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
 export const API = '/api/apps/imagestudio';
 
@@ -568,6 +569,10 @@ export async function mount(root = document.getElementById('st-root')) {
   document.title = t('title');
   root.setAttribute('aria-label', t('title'));
   document.documentElement.lang = document.documentElement.lang || 'en';
+  // A picture the image-retention setting removed answers 410 + X-Image-Expired: the tile
+  // shows the "image expired" placeholder instead of a broken image (the shell's listener
+  // does not reach into this frame).
+  installExpiredImages({ t: () => t('expired'), el, icon: () => railIcon(RAIL_ICONS.nim) });
   build(root);
   try {
     await reloadState();

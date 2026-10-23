@@ -22,10 +22,10 @@
 //
 // Every string is a text node; no markup is ever parsed.
 
-import { api as realApi } from './api.js?v=35';
+import { api as realApi } from './api.js?v=36';
 import { t } from './i18n.js?v=4';
-import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
-import { personaButton, personaPanel } from './personality.js?v=2';
+import { el, railIcon, RAIL_ICONS } from './util.js?v=21';
+import { personaButton, personaPanel } from './personality.js?v=3';
 
 export const NAME_MAX = 40;
 export const EMOJI_MAX = 8;

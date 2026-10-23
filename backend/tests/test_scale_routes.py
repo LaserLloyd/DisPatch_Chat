@@ -93,6 +93,40 @@ def test_archived_view_and_include_archived(two):
     assert a_ids[1] not in rail and arch == {a_ids[1]} and both == set(a_ids)
 
 
+def test_move_back_unarchives_only_the_callers_own_thread(two):
+    """PATCH {"archived": false} is the Archived view's "Move back": it sticks across a
+    refresh, {"archived": true} archives again, and another profile's thread is a 404 that
+    changes nothing (no Admin short-circuit)."""
+    world, owner, u, admin_id, uma_id, a_ids, u_ids = two
+    assert owner.delete(f"/api/threads/{a_ids[2]}").status_code == 200
+    assert u.delete(f"/api/threads/{u_ids[2]}").status_code == 200
+
+    def rail(c):
+        return {t["id"] for t in _page(c, bot_id=BOT, limit=50)["threads"]}
+
+    def archived(c):
+        return {t["id"] for t in _page(c, archived="true", limit=50)["threads"]}
+
+    assert a_ids[2] in archived(owner) and a_ids[2] not in rail(owner)
+    # Neither profile can move the other's chat back (or archive it): 404, nothing changes.
+    assert owner.patch(f"/api/threads/{u_ids[2]}", json={"archived": False}).status_code == 404
+    assert u.patch(f"/api/threads/{a_ids[2]}", json={"archived": False}).status_code == 404
+    assert u.patch(f"/api/threads/{a_ids[3]}", json={"archived": True}).status_code == 404
+    assert u_ids[2] in archived(u) and a_ids[2] in archived(owner) and a_ids[3] in rail(owner)
+    # A non-boolean is refused before anything is written.
+    assert owner.patch(f"/api/threads/{a_ids[2]}", json={"archived": "no"}).status_code == 400
+    assert a_ids[2] in archived(owner)
+    # Move back sticks (a fresh read, not just the frame).
+    r = owner.patch(f"/api/threads/{a_ids[2]}", json={"archived": False})
+    assert r.status_code == 200, r.text
+    assert a_ids[2] in rail(owner) and a_ids[2] not in archived(owner)
+    assert u.patch(f"/api/threads/{u_ids[2]}", json={"archived": False}).status_code == 200
+    assert u_ids[2] in rail(u) and not archived(u)
+    # And archiving through PATCH works the other way.
+    assert owner.patch(f"/api/threads/{a_ids[2]}", json={"archived": True}).status_code == 200
+    assert a_ids[2] in archived(owner) and a_ids[2] not in rail(owner)
+
+
 def test_hello_carries_the_first_page_of_own_threads(two):
     world, owner, u, admin_id, uma_id, a_ids, u_ids = two
     with u.websocket_connect("/ws") as ws:

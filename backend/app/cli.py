@@ -187,8 +187,8 @@ def cmd_users_add(args: argparse.Namespace) -> int:
     if role is Role.ADMIN and not protected:
         owner = accounts.get_owner()
         if not (owner and owner.has_password):
-            raise CliError("Give the owner a password first (python -m app users passwd <owner>): "
-                           "an Admin's password is only as safe as the Owner's.")
+            raise CliError("Give the main Admin a password first (python -m app users passwd <name>): "
+                           "an Admin's password is only as safe as the main Admin's.")
     needs_secret = role is not Role.BASIC
     what = "password" if role is Role.ADMIN else "PIN"
     secret = read_secret(args, what=what, required=needs_secret)

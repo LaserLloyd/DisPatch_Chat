@@ -111,10 +111,10 @@
     {
       "code": "agent_needs_owner",
       "docs": "agent_needs_owner",
-      "fix": "Ask the Owner. Running repository hooks, starting local MCP programs and unattended destructive tools are host-level powers.",
-      "message": "Only the Owner can give an agent that capability.",
+      "fix": "Ask an Admin. Running repository hooks, starting local MCP programs and unattended destructive tools are host-level powers.",
+      "message": "Only an Admin can give an agent that capability.",
       "patterns": [
-        "Only the Owner can give an agent that capability."
+        "Only an Admin can give an agent that capability."
       ],
       "status": 403
     },
@@ -179,6 +179,16 @@
         "months must be a whole number from 1 to 120."
       ],
       "status": 422
+    },
+    {
+      "code": "archived_not_bool",
+      "docs": "archived_not_bool",
+      "fix": "Send archived as true (archive the chat) or false (move it back).",
+      "message": "archived must be true or false",
+      "patterns": [
+        "archived must be true or false"
+      ],
+      "status": 400
     },
     {
       "code": "avatar_invalid",
@@ -1158,7 +1168,7 @@
     {
       "code": "imagestudio_cannot_delete_pictures",
       "docs": "imagestudio_cannot_delete_pictures",
-      "fix": "Ask the Owner or an Admin; deleting needs the manage_history permission.",
+      "fix": "Ask an Admin; deleting needs the manage_history permission.",
       "message": "Your profile cannot delete pictures",
       "patterns": [
         "Your profile cannot delete pictures"
@@ -1773,7 +1783,7 @@
     {
       "code": "permission_denied",
       "docs": "permission_denied",
-      "fix": "Ask an Admin or the Owner to grant your profile the permission shown in required_permission.",
+      "fix": "Ask an Admin to grant your profile the permission shown in required_permission.",
       "message": "Your profile does not have permission to do that.",
       "patterns": [
         "Your profile does not have permission to do that."

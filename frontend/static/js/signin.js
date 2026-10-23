@@ -11,10 +11,10 @@
 // callback main.js passes in, which owns the session state.
 
 import { t } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
+import { el } from './util.js?v=21';
 import {
   avatarSpec, createCountdown, credentialModes, credentialOptions, formatCountdown, sortTiles,
-} from './profiles.js?v=2';
+} from './profiles.js?v=3';
 
 const roleLabel = (role) => t(`role.${role}`);
 

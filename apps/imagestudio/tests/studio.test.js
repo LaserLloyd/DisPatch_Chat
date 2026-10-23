@@ -45,7 +45,7 @@ async function page({ nim = false, state = STATE, generate, clear, images, sort 
   Object.defineProperty(env.win, 'parent', { configurable: true, get: () => parentWin });
   const parentWin = { postMessage: (m, o) => posted.push([m, o]) };
   globalThis.__ST_NO_AUTOMOUNT = true;
-  const sdk = await import('/static/js/app-sdk.js?v=3');
+  const sdk = await import('/static/js/app-sdk.js?v=4');
   sdk._resetForTest();
   await sdk.ready('en');
   const mod = await import(`/apps/imagestudio/studio.js?t=${Math.random()}`);
@@ -205,7 +205,7 @@ test('a 403 shows a locked note, never an empty studio', { skip: dom.skip }, asy
   });
   env.win.localStorage.setItem('dispatch-lang', 'en');
   globalThis.__ST_NO_AUTOMOUNT = true;
-  const sdk = await import('/static/js/app-sdk.js?v=3');
+  const sdk = await import('/static/js/app-sdk.js?v=4');
   sdk._resetForTest();
   await sdk.ready('en');
   const mod = await import(`/apps/imagestudio/studio.js?t=${Math.random()}`);
@@ -378,5 +378,21 @@ test('no provider yet: a profile that may set one up gets a button that opens Se
   const env2 = await page({ state: { ...none, can_configure: false } });
   assert.equal(env2.doc.querySelector('.st-none button').hidden, true, 'no button that could only lead nowhere');
   assert.equal(env2.doc.querySelector('.st-none .st-muted').hidden, false);
-  assert.match(env2.doc.querySelector('.st-none').textContent, /Ask the Owner or an Admin/);
+  assert.match(env2.doc.querySelector('.st-none').textContent, /Ask an Admin to set one up/);
+});
+
+test('a picture the retention setting removed (410) becomes the "image expired" placeholder; a 404 stays as it is', { skip: dom.skip }, async () => {
+  const env = await page();
+  env.routes[`GET /media/${ID('a')}.png`] = () => [410, {}];
+  env.routes[`GET /media/${ID('b')}.jpg`] = () => [404, {}];
+  const imgs = [...env.doc.querySelectorAll('.st-tile img')];
+  assert.equal(imgs.length, 2);
+  for (const img of imgs) img.dispatchEvent(new env.win.Event('error'));
+  await flush();
+  const ph = env.doc.querySelectorAll('.media-expired');
+  assert.equal(ph.length, 1);
+  assert.equal(ph[0].getAttribute('aria-label'), EN.expired);
+  assert.equal(ph[0].dataset.expiredSrc, `/media/${ID('a')}.png`);
+  assert.equal(env.doc.querySelectorAll('.st-tile img').length, 1, 'the 404 picture is left alone');
+  assert.ok(EN.expired, 'the app locale carries the placeholder text');
 });

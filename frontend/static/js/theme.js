@@ -17,7 +17,7 @@
 //
 // Theme names are proper nouns and are deliberately NOT translated.
 import { applyDom, hasDictionary } from './i18n.js?v=4';
-import { el, railIcon, RAIL_ICONS, spriteIcon } from './util.js?v=20';
+import { el, railIcon, RAIL_ICONS, spriteIcon } from './util.js?v=21';
 
 // The badge labels are the only translated strings on a card. Literal keys,
 // never `t('theme.mode_' + mode)`: the i18n guard test reads keys out of the

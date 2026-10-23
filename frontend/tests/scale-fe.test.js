@@ -433,7 +433,7 @@ test('api: threads(), messages() and the maintenance calls use the paged shapes'
   const win = new jsdom.JSDOM('', { url: 'http://127.0.0.1:8794/' }).window;
   Object.defineProperty(globalThis, 'window', { value: win, configurable: true, writable: true });
   globalThis.fetch = async (u, o = {}) => { urls.push(`${(o.method || 'GET')} ${u}${o.body ? ' ' + o.body : ''}`); return { ok: true, status: 200, headers: new win.Headers(), json: async () => ({}) }; };
-  const { api } = await import('../static/js/api.js?v=35');
+  const { api } = await import('../static/js/api.js?v=36');
   await api.threads('b1');
   await api.threads('b1', { cursor: 'abc def', archived: true });
   await api.messages('t1');
@@ -780,7 +780,7 @@ test('css: rows are laid out for real (no content-visibility guesses that jump t
 
 test('backups: a rotating snapshot shows its tier (recent, daily, weekly); archives and unknown tiers show none', async () => {
   makeDom();
-  const bk = await import('../static/js/backup.js?v=2');
+  const bk = await import('../static/js/backup.js?v=3');
   const labels = ['recent', 'daily', 'weekly'].map((tier) => bk.tierLabel({ kind: 'snapshot', tier }));
   assert.ok(labels.every(Boolean) && new Set(labels).size === 3, labels.join(','));
   assert.equal(bk.tierLabel({ kind: 'archive', tier: 'daily' }), '');

@@ -1894,7 +1894,7 @@ def may_dispatch(principal, bot) -> bool:
     return bool(principal.can(Permission.DISPATCH_AGENTS))
 
 
-DISPATCH_REFUSED = ("Your profile may not run agents. Ask the Owner for the "
+DISPATCH_REFUSED = ("Your profile may not run agents. Ask an Admin for the "
                     "dispatch_agents permission.")
 
 #: Extension turns (``ctx.submit_turn``) carry no caller, so the host remembers WHO has a

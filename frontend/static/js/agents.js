@@ -21,9 +21,9 @@
 //
 // Pure-ish: nothing runs at import time; app-shaped things arrive through `deps`.
 
-import { api as realApi } from './api.js?v=35';
+import { api as realApi } from './api.js?v=36';
 import { t } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
+import { el } from './util.js?v=21';
 
 let uid = 0;
 const nid = (p) => `${p}-${++uid}`;

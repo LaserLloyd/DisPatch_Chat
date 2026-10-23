@@ -10,7 +10,7 @@
 // renderAccountReset() when Account mounts. Nothing runs at import time.
 
 import { t } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
+import { el } from './util.js?v=21';
 import { profileReq, withShell, initBotEditor } from './bot-editor.js?v=1';
 
 let shell = {};

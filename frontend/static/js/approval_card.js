@@ -12,7 +12,7 @@
 //
 // Pure DOM, no network: the caller passes `onAnswer(decision, scope)`.
 
-import { el, spriteIcon } from './util.js?v=20';
+import { el, spriteIcon } from './util.js?v=21';
 import { t } from './i18n.js?v=4';
 
 let seq = 0;

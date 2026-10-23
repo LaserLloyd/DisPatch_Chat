@@ -48,7 +48,7 @@ async function mountHook({ job = baseJob(), hint = { job_id: job.job_id }, route
     [`POST ${BASE}/${job.job_id}/archive`]: () => [200, { ok: true }],
     ...extra,
   });
-  const sdk = await import('/static/js/app-sdk.js?v=3');
+  const sdk = await import('/static/js/app-sdk.js?v=4');
   sdk._resetForTest();
   const app = sdk.forApp('jobboard');
   env.routes['GET /apps/jobboard/locales/en.json'] = () => [200, EN];
@@ -72,7 +72,7 @@ const card = (host) => host.querySelector('.job-card');
 
 test('the hook imports nothing from the shell but app-sdk.js', () => {
   const imports = [...SRC.matchAll(/^import .* from '([^']+)';$/gm)].map((m) => m[1]);
-  assert.deepEqual(imports, ['/static/js/app-sdk.js?v=3']);
+  assert.deepEqual(imports, ['/static/js/app-sdk.js?v=4']);
   assert.doesNotMatch(SRC, /window\.(?:__|toast)/, 'no window globals from the old job-thread.js');
 });
 

@@ -129,7 +129,7 @@ test('roles: only the targets this profile may use; none = no overlay', { skip: 
 
 test('main.js: the overlay replaces the old straight-to-composer drop and picks the right paths', () => {
   const main = read('js/main.js');
-  assert.match(main, /import \{ createChatDrop \} from '\.\/chatdrop\.js\?v=1';/);
+  assert.match(main, /import \{ createChatDrop \} from '\.\/chatdrop\.js\?v=2';/);
   assert.match(main, /createChatDrop\(\{\s+host: \$\('chatview'\)/);
   assert.match(main, /onInsert: \(files\) => handleFiles\(files\)/);
   assert.match(main, /onServer: \(files\) => \{ uploadToFileServer\(files\); \}/);

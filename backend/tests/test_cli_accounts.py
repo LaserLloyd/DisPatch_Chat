@@ -193,7 +193,7 @@ def test_add_enforces_the_pin_and_password_rules(data, run):
 
 def test_add_admin_needs_an_owner_password_first(data, run):
     code, _, err = run("users", "add", "Ada", "--profile", "admin", "--password-stdin", stdin="admin-pass1\n")
-    assert code == 1 and "owner a password first" in err
+    assert code == 1 and "main Admin a password first" in err
     make_owner()
     code, _, err = run("users", "add", "Ada", "--profile", "admin", "--password-stdin", stdin="admin-pass1\n")
     assert code == 0, err

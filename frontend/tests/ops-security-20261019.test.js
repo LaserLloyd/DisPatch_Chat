@@ -63,7 +63,7 @@ test('dashboard: a real downgrade (403 locked) still hands off to the lock handl
 });
 
 test('main.js imports the fixed dashboard at a new ?v=', () => {
-  assert.match(MAIN, /from '\.\/dashboard\.js\?v=10'/);
+  assert.match(MAIN, /from '\.\/dashboard\.js\?v=11'/);
 });
 
 test('main.js: since 2026-10-19 Health is an Admin\'s tab too (Admins hold admin_system)', () => {

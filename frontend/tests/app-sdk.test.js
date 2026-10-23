@@ -58,7 +58,7 @@ test('the SDK reads the SAME storage keys, languages and theme sheets as the she
 
 test('the SDK has no side effects at import and imports only util.js from the shell', () => {
   const imports = [...SDK_SRC.matchAll(/^import .* from '([^']+)';$/gm)].map((m) => m[1]);
-  assert.deepEqual(imports, ['./util.js?v=20']);
+  assert.deepEqual(imports, ['./util.js?v=21']);
   // No top-level listener, fetch or DOM write (they all live inside functions).
   const top = SDK_SRC.split('\n').filter((l) => /^(?:window|document|fetch|addEventListener)\b/.test(l));
   assert.deepEqual(top, []);
@@ -235,7 +235,7 @@ test('theme(): framed, it copies the shell’s own attributes and links the toke
   assert.equal(root.getAttribute('data-palette'), 'forest');
   assert.equal(root.getAttribute('data-theme'), 'dark');
   const links = [...win.document.head.querySelectorAll('link[rel="stylesheet"]')].map((l) => l.getAttribute('href'));
-  assert.deepEqual(links, ['/static/theme.css?v=7', '/static/ui-theme/ui-theme.css', '/static/ui-theme/adapters/dispatch-extra.css', '/apps/demo/app.css'],
+  assert.deepEqual(links, ['/static/theme.css?v=8', '/static/ui-theme/ui-theme.css', '/static/ui-theme/adapters/dispatch-extra.css', '/apps/demo/app.css'],
     'tokens first, the app’s own sheet last (it wins ties)');
   sdk.theme();
   assert.equal(win.document.head.querySelectorAll('link[rel="stylesheet"]').length, 4, 'idempotent');

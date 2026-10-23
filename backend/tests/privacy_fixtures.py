@@ -439,6 +439,8 @@ def foreign_intact(inst: Install, actor: str) -> list[str]:
                 problems.append(f"{owner}: thread was deleted")
             elif t.title != th.intact["title"]:
                 problems.append(f"{owner}: thread title changed to {t.title!r}")
+            elif t.is_archived:
+                problems.append(f"{owner}: thread was archived")
             msg = inst.run(lambda th=th: db.get_message(th.ids["m_user"]))
             if msg is None:
                 problems.append(f"{owner}: message was deleted")
@@ -548,6 +550,9 @@ PROBES: tuple[Probe, ...] = (
        reveals=False),
     _t("DELETE message", "DELETE", "/api/messages/{m_user}", perm="manage_history", reveals=False, destroys=True,
        machine="read"),
+    _t("PATCH thread archived", "PATCH", "/api/threads/{thread}", perm="manage_history", body={"archived": True},
+       reveals=False, mutates=True, machine="read",
+       note="Archive / Move back (INT-3): owner-scoped like the rename; foreign_intact checks is_archived"),
     _t("DELETE thread", "DELETE", "/api/threads/{thread}", perm="manage_history", reveals=False, destroys=True,
        machine="read"),
     # ---- files ---------------------------------------------------------------------------- #

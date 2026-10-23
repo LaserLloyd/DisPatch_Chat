@@ -262,6 +262,18 @@ test('People list: type badge, Protected, Lock screen, and a warning on an Admin
   assert.ok(pane.querySelector('.people-disclosure').textContent.includes('Chats are private'), "the server's disclosure, not a stale string");
 });
 
+test('People list: a disclosure code is shown in the locale, not the server English', { skip: dom.skip }, async () => {
+  const p = PEOPLE(); p.disclosure_code = 'activity_summary'; p.disclosure = 'SERVER ENGLISH';
+  const { pane } = await mount({ people: p });
+  const line = pane.querySelector('.people-disclosure').textContent;
+  const en = JSON.parse(readFileSync(new URL('../static/locales/en.json', import.meta.url), 'utf8'));
+  assert.equal(line, en.people.disclosure_activity);
+  // An unknown code (a newer server) falls back to the server's text.
+  const q = PEOPLE(); q.disclosure_code = 'something_new'; q.disclosure = 'Server text';
+  const again = await mount({ people: q });
+  assert.equal(again.pane.querySelector('.people-disclosure').textContent, 'Server text');
+});
+
 test('People list: the protected Admin edits only itself; others get Edit', { skip: dom.skip }, async () => {
   const { pane } = await mount({ deps: { role: 'admin' } });
   assert.ok(pane.querySelector('[data-person="a1"] button'), 'its own row');

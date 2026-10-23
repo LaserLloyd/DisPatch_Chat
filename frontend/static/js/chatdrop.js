@@ -13,7 +13,7 @@
 // overlay counts them (a depth counter) instead of trusting one dragleave.
 // Touch screens never drag files, so phones see nothing new.
 
-import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
+import { el, railIcon, RAIL_ICONS } from './util.js?v=21';
 import { t } from './i18n.js?v=4';
 
 /** Is this a drag of files (not text, a link or an element of the page)? */

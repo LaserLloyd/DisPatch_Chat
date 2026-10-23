@@ -15,7 +15,7 @@
 // sent once and never comes back (the server answers `has_key` only).
 
 import { t } from './i18n.js?v=4';
-import { el, spriteIcon } from './util.js?v=20';
+import { el, spriteIcon } from './util.js?v=21';
 
 async function json(url, opts = {}) {
   const r = await fetch(url, { headers: { Accept: 'application/json' }, ...opts });

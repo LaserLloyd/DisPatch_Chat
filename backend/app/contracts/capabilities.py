@@ -56,7 +56,7 @@ CAPABILITIES: tuple[Capability, ...] = (
     # ---- sign-in and accounts ----------------------------------------------
     _c("auth.status", "Read the sign-in state", None, http=["GET /api/auth/status"], ui="api.authStatus"),
     _c("auth.me", "Who am I, and what may I do", None, http=["GET /api/auth/me"], ui="api.me"),
-    _c("auth.unlock", "Sign the Owner in with the install PIN", None, http=["POST /api/auth/unlock"], ui="api.unlock"),
+    _c("auth.unlock", "Sign the main Admin in with the install PIN", None, http=["POST /api/auth/unlock"], ui="api.unlock"),
     _c("auth.login", "Sign in as a profile (PIN or password)", None, http=["POST /api/auth/login"], ui="api.login"),
     _c("auth.switch", "Quick-switch profile", None, http=["POST /api/auth/switch"], ui="api.switchProfile"),
     _c("auth.lock", "Sign out", None, http=["POST /api/auth/lock"], ui="api.lock"),

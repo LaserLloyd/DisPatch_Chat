@@ -273,8 +273,8 @@ _CORE: tuple[SettingDef, ...] = (
        legacy_prefix_alias=True, placeholder="mailto:you@example.com"),
 
     # ============================ PEOPLE ================================= #
-    _d("people.lock_timeout_seconds", "integer", 600, "Owner and Admin auto-lock",
-       "How long an Owner or Admin session may sit idle before it locks.", "people",
+    _d("people.lock_timeout_seconds", "integer", 600, "Admin auto-lock",
+       "How long an Admin session may sit idle before it locks.", "people",
        section="Sessions", min=30, max=7 * 86400, unit="seconds", binding="file:security"),
     _d("people.session_timeout_user", "integer", 3600, "User session length",
        "How long a User profile's session may sit idle before it ends.", "people", section="Sessions",
@@ -878,7 +878,7 @@ def markdown_reference() -> str:
         "`LOCAL_CHAT_X`. A setting set by an environment variable shows *set by environment* in the "
         "app and cannot be changed there. **Restart** means the new value is used from the next start. "
         "*Host control* settings run a program, name a server the host contacts, or change who can reach DisPatch: "
-        "they need `admin_system` (the Owner and Admins); a profile granted only `manage_settings` cannot change them.",
+        "they need `admin_system` (Admins); a profile granted only `manage_settings` cannot change them.",
         "",
     ]
     for gid, label, desc in GROUPS:

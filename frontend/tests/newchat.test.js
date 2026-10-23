@@ -118,7 +118,7 @@ test('wiring: index.html tab is an action, main.js routes and hides it', () => {
   assert.match(main, /rememberCharacter\(/);
   assert.match(main, /reusableEmptyThread\(/);
   assert.ok(read('js/privacy.js').includes("'dispatch-last-character'"));
-  assert.match(read('index.html'), /main\.js\?v=155/);
+  assert.match(read('index.html'), /main\.js\?v=156/);
   assert.match(readFileSync(join(STATIC, '..', '..', 'README.md'), 'utf8'), /Bots, Chats and New chat/);
 });
 

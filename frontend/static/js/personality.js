@@ -17,7 +17,7 @@
 // not part of the Bots tab's Save-button draft. Every string is a text node.
 
 import { t } from './i18n.js?v=4';
-import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
+import { el, railIcon, RAIL_ICONS } from './util.js?v=21';
 
 export const MAX_CHARS = 8000;
 export const CUSTOM = 'custom';

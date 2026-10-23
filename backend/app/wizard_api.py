@@ -146,9 +146,9 @@ def _checklist() -> list[dict]:
     others = [p for p in profiles if not p.protected]
     owner = accounts.get_owner()
     items = [
-        {"id": "owner", "title": "Owner account", "done": _claimed(), "optional": False,
-         "hint": "Create the owner on this computer, or with the setup token from the server log."
-         if not _claimed() else ("Give the owner a password in Settings > Account."
+        {"id": "owner", "title": "Main Admin account", "done": _claimed(), "optional": False,
+         "hint": "Create the main Admin on this computer, or with the setup token from the server log."
+         if not _claimed() else ("Give the main Admin a password in Settings > Account."
                                  if owner is not None and not owner.has_password else "")},
         {"id": "connection", "title": "A model connection", "done": (bool(conns) and tested) or bool(connected),
          "optional": False, "hint": "Add a connection and press Test." if not conns else

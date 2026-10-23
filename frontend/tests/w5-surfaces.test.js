@@ -594,15 +594,15 @@ test('Backups: a recovery key is shown once; restore asks first and stages', { s
   assert.deepEqual(staged, [['archive:b.dpbk', 'my-passphrase']]);
 });
 
-test('Backups: the Owner and Admins are offered them, a Member is not', { skip: dom.skip }, async () => {
+test('Backups: Admins are offered them, a User is not', { skip: dom.skip }, async () => {
   const win = await boot();
   const { mountBackups } = await fresh('backup.js');
   const host = win.document.createElement('div');
   mountBackups(host, { api: {}, role: 'member' });
-  assert.match(host.textContent, /managed by the Owner and Admins/);
+  assert.match(host.textContent, /managed by Admins/);
   const admin = win.document.createElement('div');
   mountBackups(admin, { api: { backups: async () => ({ backups: [], schedule: { enabled: false } }), pendingRestore: async () => ({ pending: false }), people: async () => ({ profiles: [] }) }, role: 'admin' });
-  assert.doesNotMatch(admin.textContent, /managed by the Owner and Admins/);
+  assert.doesNotMatch(admin.textContent, /managed by Admins/);
 });
 
 // ------------------------------------------------------------------ 4. wiring

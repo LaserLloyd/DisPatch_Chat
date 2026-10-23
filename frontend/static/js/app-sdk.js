@@ -29,7 +29,7 @@
 // Nothing runs at import time except reading location.pathname: no fetch, no
 // listener, no DOM write (it is in the sw.js SHELL and imported by main.js).
 
-import { el, railIcon, iconLabel, RAIL_ICONS } from './util.js?v=20';
+import { el, railIcon, iconLabel, RAIL_ICONS } from './util.js?v=21';
 
 export { el, railIcon, iconLabel, RAIL_ICONS };
 
@@ -53,7 +53,7 @@ const RTL = new Set(['ar', 'he', 'fa', 'ur', 'yi', 'dv', 'ckb']);
  *  (tokens + the DisPatch adapter). app.css is deliberately NOT here: it is
  *  the shell's own layout, not a theme. */
 const THEME_CSS = [
-  '/static/theme.css?v=7',
+  '/static/theme.css?v=8',
   '/static/ui-theme/ui-theme.css',
   '/static/ui-theme/adapters/dispatch-extra.css',
 ];

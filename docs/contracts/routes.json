@@ -135,7 +135,7 @@
       "method": "GET",
       "path": "/api/agents/available",
       "requirement": {
-        "note": "only agents published to the caller's profile (an Owner/Admin sees all)",
+        "note": "only agents published to the caller's profile (an Admin sees all)",
         "permission": "dispatch_agents"
       }
     },
@@ -542,7 +542,7 @@
       "method": "POST",
       "path": "/api/auth/api-token",
       "requirement": {
-        "note": "the Owner and Admins (checked in the handler); shown once",
+        "note": "Admins (checked in the handler); shown once",
         "permission": "manage_settings"
       }
     },
@@ -581,7 +581,7 @@
       "method": "POST",
       "path": "/api/auth/password",
       "requirement": {
-        "note": "YOUR password: only the Owner and Admins have one",
+        "note": "YOUR password: only Admins have one",
         "permission": "manage_settings"
       }
     },
@@ -589,7 +589,7 @@
       "method": "POST",
       "path": "/api/auth/pin",
       "requirement": {
-        "note": "YOUR OWN PIN (a Member or an Admin; current credential required, throttled); the Owner's is the install PIN",
+        "note": "YOUR OWN PIN (a User, Basic or Admin profile; current credential required, throttled); the main Admin's is the install PIN",
         "permission": "use_chat"
       }
     },
@@ -1062,7 +1062,7 @@
         "machine": [
           "machine:daily"
         ],
-        "owner_scoped": "none: the Owner's daily thread (a machine's sphere)",
+        "owner_scoped": "none: the main Admin's daily thread (a machine's sphere)",
         "permission": "manage_agents"
       }
     },
@@ -1301,7 +1301,7 @@
         "machine": [
           "machine:health_detail"
         ],
-        "note": "liveness for anyone; the handler adds detail only for Owner/Admin or a machine holding machine:health_detail",
+        "note": "liveness for anyone; the handler adds detail only for an Admin or a machine holding machine:health_detail",
         "public": true
       }
     },
@@ -2384,7 +2384,7 @@
       "method": "GET",
       "path": "/api/tasks",
       "requirement": {
-        "note": "own tasks; an Owner/Admin sees everyone's",
+        "note": "own tasks; an Admin sees everyone's",
         "permission": "dispatch_agents"
       }
     },
@@ -2392,7 +2392,7 @@
       "method": "POST",
       "path": "/api/tasks",
       "requirement": {
-        "note": "own tasks; an Owner/Admin sees everyone's",
+        "note": "own tasks; an Admin sees everyone's",
         "permission": "dispatch_agents"
       }
     },
@@ -2400,7 +2400,7 @@
       "method": "GET",
       "path": "/api/tasks/{task_id}",
       "requirement": {
-        "note": "own tasks; an Owner/Admin sees everyone's",
+        "note": "own tasks; an Admin sees everyone's",
         "owner_scoped": "task",
         "permission": "dispatch_agents"
       }
@@ -2409,7 +2409,7 @@
       "method": "POST",
       "path": "/api/tasks/{task_id}/cancel",
       "requirement": {
-        "note": "own tasks; an Owner/Admin sees everyone's",
+        "note": "own tasks; an Admin sees everyone's",
         "owner_scoped": "task",
         "permission": "dispatch_agents"
       }
@@ -2426,7 +2426,7 @@
       "method": "GET",
       "path": "/api/tasks/{task_id}/events",
       "requirement": {
-        "note": "own tasks; an Owner/Admin sees everyone's",
+        "note": "own tasks; an Admin sees everyone's",
         "owner_scoped": "task",
         "permission": "dispatch_agents"
       }
@@ -2435,7 +2435,7 @@
       "method": "POST",
       "path": "/api/tasks/{task_id}/interrupt",
       "requirement": {
-        "note": "own tasks; an Owner/Admin sees everyone's",
+        "note": "own tasks; an Admin sees everyone's",
         "owner_scoped": "task",
         "permission": "dispatch_agents"
       }
@@ -2453,7 +2453,7 @@
       "method": "POST",
       "path": "/api/tasks/{task_id}/resume",
       "requirement": {
-        "note": "own tasks; an Owner/Admin sees everyone's",
+        "note": "own tasks; an Admin sees everyone's",
         "owner_scoped": "task",
         "permission": "dispatch_agents"
       }
@@ -2462,7 +2462,7 @@
       "method": "POST",
       "path": "/api/tasks/{task_id}/send",
       "requirement": {
-        "note": "own tasks; an Owner/Admin sees everyone's",
+        "note": "own tasks; an Admin sees everyone's",
         "owner_scoped": "task",
         "permission": "dispatch_agents"
       }
@@ -2657,7 +2657,7 @@
       "method": "GET",
       "path": "/api/users/{profile_id}/export",
       "requirement": {
-        "note": "the Owner and Admins may export anyone; the Owner's own export is the Owner's",
+        "note": "Admins may export anyone; the main Admin's own export is the main Admin's",
         "owner_scoped": "none: account metadata only (no chats), manage_users; the own-data export is /api/me/export (WP-PROF)",
         "permission": "manage_users"
       }
@@ -2710,7 +2710,7 @@
       "method": "POST",
       "path": "/api/wizard/network",
       "requirement": {
-        "note": "network exposure is host control: the Owner's and the Admins'",
+        "note": "network exposure is host control: the Admins'",
         "permission": "admin_system"
       }
     },

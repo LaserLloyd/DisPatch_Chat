@@ -8084,6 +8084,8 @@ async def auth_status(request: Request):
         "profiles": people_api.lock_screen_profiles() if claimed else [],
         "disclosure": (people_api.DISCLOSURE if claimed and pr.kind == "profile"
                        and not pr.can(Permission.VIEW_ACTIVITY) else None),
+        "disclosure_code": (people_api.DISCLOSURE_CODE if claimed and pr.kind == "profile"
+                            and not pr.can(Permission.VIEW_ACTIVITY) else None),
         "lock_timeout_seconds": cfg.lock_timeout,
         "min_pin_length": auth.MIN_PIN_LENGTH,
         # Absolute local paths — recon for an unauthenticated caller on a
@@ -9836,6 +9838,14 @@ async def patch_thread(request: Request, thread_id: str, payload: dict = Body(..
         title = (payload.get("title") or "").strip()
         if not title:
             raise HTTPException(400, "title required")
+    archived: bool | None = None
+    if "archived" in payload:
+        # Archive / "Move back" from the Archived view. The thread is the caller's own
+        # (_thread_access above: 404 for anyone else's), and the same permission as the
+        # DELETE that archives it.
+        if not isinstance(payload["archived"], bool):
+            raise HTTPException(400, "archived must be true or false")
+        archived = payload["archived"]
     prefs_patch: dict | None = None
     if "prefs" in payload:
         # Operator configuration, not thread housekeeping — see
@@ -9883,6 +9893,8 @@ async def patch_thread(request: Request, thread_id: str, payload: dict = Body(..
         await db.rename_thread(thread_id, title[:120])
     if "pinned" in payload:
         await db.pin_thread(thread_id, bool(payload["pinned"]))
+    if archived is not None:
+        await db.set_archived(thread_id, archived)
     if prefs_patch is not None:
         await db.update_thread_prefs(thread_id, prefs_patch)
     await _broadcast_thread_update(thread_id)
@@ -11432,7 +11444,7 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
         _require_bot_use(request, owned.bot_id)
         if role != "user" and not pr.is_admin:
             raise policy.denied(pr, Permission.MANAGE_AGENTS,
-                                "Only an agent, the Owner or an Admin may post as a character or the system.")
+                                "Only an agent or an Admin may post as a character or the system.")
     # `text` accepted as an alias for the same reason InjectIn takes it: with a
     # silent "" default the caller's mistake persisted an empty bubble.
     #

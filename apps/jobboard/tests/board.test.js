@@ -52,7 +52,7 @@ async function page({ jobs = JOBS, routes: extra = {} } = {}) {
   env.win.localStorage.setItem('dispatch-lang', 'en');
   Object.defineProperty(env.win, 'parent', { configurable: true, get: () => parentWin });
   const parentWin = { postMessage: (m, o) => posted.push([m, o]) };
-  const sdk = await import('/static/js/app-sdk.js?v=3');
+  const sdk = await import('/static/js/app-sdk.js?v=4');
   sdk._resetForTest();
   return { ...env, posted, parentWin, sdk };
 }

@@ -60,7 +60,7 @@ async function boot() {
 // tasks.js pulls in i18n and the DOM helpers, so it is imported only after a DOM exists.
 async function loadTasks() {
   const win = await boot();
-  return { win, Tasks: await import('../static/js/tasks.js?v=1') };
+  return { win, Tasks: await import('../static/js/tasks.js?v=2') };
 }
 
 test('slug and @mention parsing', { skip: dom.skip }, async () => {
@@ -105,7 +105,7 @@ test('what a profile is offered follows /api/auth/me alone', { skip: dom.skip },
 
 test('the timeline model builds a tree from parent ids and merges tool results', { skip: dom.skip }, async () => {
   await boot();
-  const C = await import('../static/js/task_card.js?v=1');
+  const C = await import('../static/js/task_card.js?v=2');
   const evs = [
     { seq: 0, type: 'status', state: 'queued' },
     { seq: 1, type: 'status', state: 'running' },
@@ -145,7 +145,7 @@ test('the timeline model builds a tree from parent ids and merges tool results',
 
 test('costs are always labelled as estimates', { skip: dom.skip }, async () => {
   await boot();
-  const C = await import('../static/js/task_card.js?v=1');
+  const C = await import('../static/js/task_card.js?v=2');
   assert.equal(C.costLabel({ cost_usd: 0.0123 }), 'about $0.0123 (estimate)');
   assert.equal(C.costLabel({ cost_usd: 1.5 }), 'about $1.50 (estimate)');
   assert.equal(C.costLabel({ cost_usd: null, tokens: 1200 }), `Tokens: ${(1200).toLocaleString()} (estimate)`);
@@ -199,7 +199,7 @@ test('the agent form round-trips and keeps what the form does not show', async (
 
 test('an approval card offers "for this task" only when the server does, and answers through onAnswer', { skip: dom.skip }, async () => {
   const win = await boot();
-  const { approvalCardEl } = await import('../static/js/approval_card.js?v=1');
+  const { approvalCardEl } = await import('../static/js/approval_card.js?v=2');
   const answers = [];
   const onAnswer = async (d, s) => { answers.push([d, s]); };
   const destructive = approvalCardEl({ request_id: 'r1', tool: 'Bash', args_summary: '{"command": "rm -rf x"}', scopes: ['once'] }, { onAnswer });
@@ -226,7 +226,7 @@ test('an approval card offers "for this task" only when the server does, and ans
 
 test('someone who may not approve sees the request but no buttons', { skip: dom.skip }, async () => {
   await boot();
-  const { approvalCardEl } = await import('../static/js/approval_card.js?v=1');
+  const { approvalCardEl } = await import('../static/js/approval_card.js?v=2');
   const card = approvalCardEl({ request_id: 'r3', tool: 'Bash', scopes: ['once'] }, { canAnswer: false });
   assert.equal(card.querySelector('button'), null);
   assert.match(card.textContent, /Waiting for someone who can approve agent actions/);
@@ -234,7 +234,7 @@ test('someone who may not approve sees the request but no buttons', { skip: dom.
 
 test('a failed answer re-enables the buttons and says why', { skip: dom.skip }, async () => {
   await boot();
-  const { approvalCardEl } = await import('../static/js/approval_card.js?v=1');
+  const { approvalCardEl } = await import('../static/js/approval_card.js?v=2');
   const card = approvalCardEl({ request_id: 'r4', tool: 'Bash', scopes: ['once'] },
     { onAnswer: async () => { throw Object.assign(new Error('gone'), { userMessage: 'That approval request is not pending any more.' }); } });
   card.querySelector('[data-act="allow-once"]').click();
@@ -283,7 +283,7 @@ function fakeApi(over = {}) {
 
 test('the task card shows the timeline, the estimate, and live frames; a gap asks for what was missed', { skip: dom.skip }, async () => {
   const win = await boot();
-  const C = await import('../static/js/task_card.js?v=1');
+  const C = await import('../static/js/task_card.js?v=2');
   const api = fakeApi();
   const card = C.createTaskCard({ api, canApprove: true, showOwner: true, toast() {}, confirm: async () => true });
   win.document.body.append(card.el);
@@ -320,7 +320,7 @@ test('the task card shows the timeline, the estimate, and live frames; a gap ask
 
 test('Stop, steer, Resume and End are real buttons that call the right routes', { skip: dom.skip }, async () => {
   const win = await boot();
-  const C = await import('../static/js/task_card.js?v=1');
+  const C = await import('../static/js/task_card.js?v=2');
   const api = fakeApi();
   const asked = [];
   const card = C.createTaskCard({ api, canApprove: true, toast() {}, confirm: async (m, o) => { asked.push([m, o]); return true; } });
@@ -353,7 +353,7 @@ test('Stop, steer, Resume and End are real buttons that call the right routes', 
 
 test('live frames do not rebuild the controls: focus and a half-typed steer message survive', { skip: dom.skip }, async () => {
   const win = await boot();
-  const C = await import('../static/js/task_card.js?v=1');
+  const C = await import('../static/js/task_card.js?v=2');
   const card = C.createTaskCard({ api: fakeApi(), canApprove: true, toast() {}, confirm: async () => true });
   win.document.body.append(card.el);
   card.load(TASK({ state: 'running', last_seq: -1 }), [], []);
@@ -374,7 +374,7 @@ test('live frames do not rebuild the controls: focus and a half-typed steer mess
 
 test('a hand-off card waiting for Send shows Send / Dismiss only to someone who may approve', { skip: dom.skip }, async () => {
   const win = await boot();
-  const C = await import('../static/js/task_card.js?v=1');
+  const C = await import('../static/js/task_card.js?v=2');
   const api = fakeApi();
   for (const [canApprove, want] of [[true, ['Send', 'Dismiss']], [false, []]]) {
     const card = C.createTaskCard({ api, canApprove, toast() {}, confirm: async () => true });
@@ -388,7 +388,7 @@ test('a hand-off card waiting for Send shows Send / Dismiss only to someone who 
 
 test('agent and tool text is rendered as text, never as markup', { skip: dom.skip }, async () => {
   const win = await boot();
-  const C = await import('../static/js/task_card.js?v=1');
+  const C = await import('../static/js/task_card.js?v=2');
   const card = C.createTaskCard({ api: fakeApi(), canApprove: true, toast() {} });
   win.document.body.append(card.el);
   card.load(TASK(), [
@@ -700,7 +700,7 @@ test('api.js carries the agent, task and approval calls with the routes the serv
 });
 
 test('main.js routes task frames, intercepts @mentions before sending, and mounts the pane', () => {
-  assert.match(MAIN, /import \{ createTasksUi \} from '\.\/tasks\.js\?v=1'/);
+  assert.match(MAIN, /import \{ createTasksUi \} from '\.\/tasks\.js\?v=2'/);
   assert.match(MAIN, /import \{ mountAgentsSettings \} from '\.\/agents\.js\?v=\d+'/);
   assert.match(MAIN, /data\.type\.startsWith\('task\.'\)\) \{ tasksUi\.onFrame\(data\); return; \}/);
   const send = MAIN.slice(MAIN.indexOf('function sendMessage()'));
@@ -718,7 +718,7 @@ test('index.html: the rail button, the thread-menu item, the Agents subsection, 
   assert.match(HTML, /id="thread-menu-assign" hidden/);
   assert.match(HTML, /<details class="settings-sub" id="cxn-agents" data-anchor="agents">/);
   assert.match(HTML, /id="cxn-agents-host"/);
-  assert.match(HTML, /\/static\/tasks\.css\?v=1/);
+  assert.match(HTML, /\/static\/tasks\.css\?v=2/);
 });
 
 test('sw.js precaches the new modules and stylesheet', () => {

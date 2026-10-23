@@ -19,7 +19,7 @@
 // Safe Mode or NIM to hide — both see the same spinner or the same warning,
 // and neither issues a network request for it.
 
-import { el, spriteIcon } from './util.js?v=20';
+import { el, spriteIcon } from './util.js?v=21';
 
 // The metadata contract, in one place. `kind` is what marks the row; `status`
 // is the only field that changes over the job's life.

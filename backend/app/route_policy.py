@@ -45,7 +45,7 @@ def _r(methods: str | tuple[str, ...], path: str, req: Requirement) -> None:
 # --------------------------------------------------------------------------- #
 _r("GET", "/", public("the app shell; carries no data"))
 _r("GET", "/api/health", Requirement(public=True, machine=(M.HEALTH_DETAIL.value,),
-   note="liveness for anyone; the handler adds detail only for Owner/Admin or a machine holding machine:health_detail"))
+   note="liveness for anyone; the handler adds detail only for an Admin or a machine holding machine:health_detail"))
 _r("GET", "/api/quick-actions", public("static list of built-in prompt shortcuts"))
 _r("GET", "/api/auth/status", public("the lock screen needs it; detail is added only for a signed-in caller"))
 _r("GET", "/api/auth/me", public("who am I, what may I do - answers every caller"))
@@ -66,9 +66,9 @@ _r("GET", "/tools/_t/{ticket}/{rel:path}", public("capability URL: the random, e
 # --------------------------------------------------------------------------- #
 _r("POST", "/api/auth/remember-config", _R(P.MANAGE_SETTINGS))
 _r("POST", "/api/auth/forget-devices", _R(P.MANAGE_SETTINGS))
-_r("POST", "/api/auth/password", _R(P.MANAGE_SETTINGS, note="YOUR password: only the Owner and Admins have one"))
-_r("POST", "/api/auth/pin", _R(P.USE_CHAT, note="YOUR OWN PIN (a Member or an Admin; current credential required, throttled); the Owner's is the install PIN"))
-_r("POST", "/api/auth/api-token", _R(P.MANAGE_SETTINGS, note="the Owner and Admins (checked in the handler); shown once"))
+_r("POST", "/api/auth/password", _R(P.MANAGE_SETTINGS, note="YOUR password: only Admins have one"))
+_r("POST", "/api/auth/pin", _R(P.USE_CHAT, note="YOUR OWN PIN (a User, Basic or Admin profile; current credential required, throttled); the main Admin's is the install PIN"))
+_r("POST", "/api/auth/api-token", _R(P.MANAGE_SETTINGS, note="Admins (checked in the handler); shown once"))
 _r("GET", "/api/auth/api-token", _R(P.MANAGE_SETTINGS, note="reports whether a token exists; never the token"))
 
 # People & profiles
@@ -225,14 +225,14 @@ for _methods, _path in (
     ("GET", "/api/agents/usage"), ("POST", "/api/agents/retention/purge"),
 ):
     _r(_methods, _path, _R(P.MANAGE_AGENTS, note="define agents, credentials, agent budgets, retention (write-only secrets)"))
-_r("GET", "/api/agents/available", _R(P.DISPATCH_AGENTS, note="only agents published to the caller's profile (an Owner/Admin sees all)"))
+_r("GET", "/api/agents/available", _R(P.DISPATCH_AGENTS, note="only agents published to the caller's profile (an Admin sees all)"))
 for _methods, _path in (
     ("POST", "/api/tasks"), ("GET", "/api/tasks"), ("GET", "/api/tasks/{task_id}"),
     ("GET", "/api/tasks/{task_id}/events"), ("POST", "/api/tasks/{task_id}/send"),
     ("POST", "/api/tasks/{task_id}/interrupt"), ("POST", "/api/tasks/{task_id}/resume"),
     ("POST", "/api/tasks/{task_id}/cancel"),
 ):
-    _r(_methods, _path, _R(P.DISPATCH_AGENTS, note="own tasks; an Owner/Admin sees everyone's"))
+    _r(_methods, _path, _R(P.DISPATCH_AGENTS, note="own tasks; an Admin sees everyone's"))
 _r("POST", "/api/tasks/{task_id}/release", _R(P.APPROVE_AGENT_ACTIONS, note="the human Send for a held handoff; a machine may never press it"))
 _r("POST", "/api/tasks/{task_id}/dismiss", _R(P.APPROVE_AGENT_ACTIONS))
 _r("POST", "/api/approvals/{request_id}", _R(P.APPROVE_AGENT_ACTIONS, note="allow or deny one tool call; destructive tools are asked every time"))
@@ -292,7 +292,7 @@ _r("GET", "/api/wizard", public("answers only whether a first-run wizard is need
 _r("POST", "/api/wizard/detect", _R(P.MANAGE_CONNECTIONS))
 _r("POST", "/api/wizard/connection", _R(P.MANAGE_CONNECTIONS))
 _r("POST", "/api/wizard/family", _R(P.MANAGE_USERS))
-_r("POST", "/api/wizard/network", _R(P.ADMIN_SYSTEM, note="network exposure is host control: the Owner's and the Admins'"))
+_r("POST", "/api/wizard/network", _R(P.ADMIN_SYSTEM, note="network exposure is host control: the Admins'"))
 for _path in ("/api/wizard/step/{step}", "/api/wizard/finish"):
     _r("POST", _path, _R(P.MANAGE_SETTINGS))
 for _path, _m in (
@@ -302,7 +302,7 @@ for _path, _m in (
     ("/api/support-bundle", "POST"),
 ):
     _r(_m, _path, _R(P.ADMIN_SYSTEM))
-_r("GET", "/api/users/{profile_id}/export", _R(P.MANAGE_USERS, note="the Owner and Admins may export anyone; the Owner's own export is the Owner's"))
+_r("GET", "/api/users/{profile_id}/export", _R(P.MANAGE_USERS, note="Admins may export anyone; the main Admin's own export is the main Admin's"))
 _r("DELETE", "/api/users/{profile_id}", _R(P.MANAGE_USERS, note="same rank rules as /api/people"))
 _r("GET", "/api/plugins/manifests", _R(P.MANAGE_PLUGINS))
 _r("GET", "/api/settings/defaults", public("default theme / language / avatar style for a device that has not signed in; no secrets"))
@@ -487,7 +487,7 @@ OWNER_SCOPED: dict[str, str] = {
     "/api/search": "thread",
     "/api/export": "thread",
     "/api/inject": "thread",
-    "/api/daily": "none: the Owner's daily thread (a machine's sphere)",
+    "/api/daily": "none: the main Admin's daily thread (a machine's sphere)",
     "/api/reactions/fire": "thread",
     "/api/image-jobs": "thread",
     "/api/recover/transcript": "thread",

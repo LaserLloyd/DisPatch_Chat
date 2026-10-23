@@ -154,7 +154,7 @@ test('drag: rail -> popup button -> into the popup; popup row -> bar; reorder in
 test('"Arrange the bar" moves without dragging, and Reset restores the default', { skip: dom.skip }, async () => {
   const win = await boot();
   const M = await R();
-  const { el } = await import('../static/js/util.js?v=20');
+  const { el } = await import('../static/js/util.js?v=21');
   const { t } = await import('../static/js/i18n.js?v=4');
   let changes = 0;
   const { dialog } = M.openArrangeDialog({ t, el, labelOf: (id) => id, visible: () => true, onChange: () => { changes++; } });
@@ -174,7 +174,7 @@ test('"Arrange the bar" moves without dragging, and Reset restores the default',
 
 test('wiring: main.js applies the layout with the pins, the popup has the section, the key is wiped by privacy mode', () => {
   const main = read('js/main.js');
-  assert.match(main, /from '\.\/railmenu\.js\?v=1'/);
+  assert.match(main, /from '\.\/railmenu\.js\?v=2'/);
   assert.match(main, /renderLinkRail\(document\.getElementById\('gear-row'\), \{ openViewer \}\);\n  applyRailLayout\(\);/);
   assert.match(main, /applyLayout\(activeLayout\(\)/);
   assert.match(HTML, /<div class="tools-more" id="tools-more" role="none"><\/div>/);

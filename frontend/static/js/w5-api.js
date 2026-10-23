@@ -11,7 +11,7 @@
 //   - a 401 (the session ran out) calls the handler main.js registers with setOnLocked(),
 //   - nothing here may hang: every request is aborted after a generous timeout.
 
-import { errorExtras } from './api.js?v=35';
+import { errorExtras } from './api.js?v=36';
 
 let onLocked = null;
 export function setOnLocked(fn) { onLocked = fn; }

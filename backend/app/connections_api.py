@@ -186,7 +186,7 @@ async def patch_connection(request: Request, connection_id: str, payload: Connec
             # the agent editor applies to MCP header secrets, and POST /api/connections/test to a
             # borrowed key).
             raise fail(403, "permission_denied",
-                       "Changing this connection's server keeps its saved key, so only the Owner or an Admin can do it. "
+                       "Changing this connection's server keeps its saved key, so only an Admin can do it. "
                        "Paste the key again (or clear it) to change the address.")
     try:
         c = await asyncio.to_thread(connections.update, connection_id, changes)

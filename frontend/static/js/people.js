@@ -24,11 +24,11 @@
 // `deps` ({ toast, confirm, role, onChanged?, api?, w5?, extraGroups?, collapseActivity? }),
 // which is also how the tests drive it without main.js.
 
-import { api as realApi } from './api.js?v=35';
-import { w5 as realW5 } from './w5-api.js?v=1';
+import { api as realApi } from './api.js?v=36';
+import { w5 as realW5 } from './w5-api.js?v=2';
 import { t, has, relTime, fullTimestamp } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
-import { ACTIVITY_COLUMNS, activityRows, activityTotals, avatarSpec } from './profiles.js?v=2';
+import { el } from './util.js?v=21';
+import { ACTIVITY_COLUMNS, activityRows, activityTotals, avatarSpec } from './profiles.js?v=3';
 import {
   askDialog, countsTally, permTables, permissionsPanel, householdPanel, backendsPanel,
   profileCalls, errorText,
@@ -57,6 +57,16 @@ function errText(e) {
 
 const hintLine = (text, cls = '') =>
   el('span', { class: 'dev-row-hint' + (cls ? ` ${cls}` : ''), text });
+
+/** The line a non-Admin profile is told about what an Admin sees. The server sends a code
+ *  (`disclosure_code`) mapped to a locale key here; an unknown code (a newer server) falls back
+ *  to the server's English `disclosure`. */
+const DISCLOSURE_KEYS = Object.freeze({ activity_summary: 'people.disclosure_activity' });
+export function disclosureText(d) {
+  const key = d && typeof d.disclosure_code === 'string' ? DISCLOSURE_KEYS[d.disclosure_code] : null;
+  if (key) return t(key);
+  return d && typeof d.disclosure === 'string' ? d.disclosure : '';
+}
 
 function group(id, title, hint, body) {
   return el('section', { class: 'dev-group', id, 'aria-labelledby': `${id}-h` }, [
@@ -722,7 +732,7 @@ export async function mountPeopleSettings(pane, deps) {
   const role = deps.role || 'admin';
   const read = (d) => ({
     people: d.profiles || [], me: typeof d.me === 'string' ? d.me : (d.me && d.me.id) || '',
-    disclosure: typeof d.disclosure === 'string' ? d.disclosure : '',
+    disclosure: disclosureText(d),
   });
   const ctx = {
     api: a, w5, role, calls: profileCalls, data: read(data), tables: permTables(data),

@@ -15,7 +15,7 @@
 // every transition and broadcasts `message_update`, so a reload — or another
 // device — shows the same state without asking.
 
-import { el } from './util.js?v=20';
+import { el } from './util.js?v=21';
 import { t } from './i18n.js?v=4';
 
 const STATES = ['proposed', 'running', 'done', 'failed', 'dismissed'];

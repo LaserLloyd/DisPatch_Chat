@@ -12,9 +12,9 @@
 // convenience, not an account preference, and a tablet wanting a different
 // rail from the phone is the normal case, not an edge one.
 
-import { railIcon, RAIL_ICONS } from './util.js?v=20';
-import { nimEnabled, setNim, canDisableNim, minimalAvatarsEnabled, setMinimalAvatars } from './nim.js?v=5';
-import { privacyEnabled, setPrivacy } from './privacy.js?v=14';
+import { railIcon, RAIL_ICONS } from './util.js?v=21';
+import { nimEnabled, setNim, canDisableNim, minimalAvatarsEnabled, setMinimalAvatars } from './nim.js?v=6';
+import { privacyEnabled, setPrivacy } from './privacy.js?v=15';
 
 const KEY = 'dispatch-pinned-settings';
 // Defaults are stored as OPT-OUTS, not by seeding KEY. A device that already

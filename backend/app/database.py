@@ -2061,6 +2061,14 @@ class Database:
         )
         await self.db.commit()
 
+    async def set_archived(self, thread_id: str, archived: bool) -> None:
+        """Archive (True) or move back to the rail (False). The row, its messages and its
+        position (``updated_at``) are untouched, so a moved-back chat lands where it was."""
+        await self.db.execute(
+            "UPDATE threads SET is_archived = ? WHERE id = ?", (1 if archived else 0, thread_id)
+        )
+        await self.db.commit()
+
     async def delete_thread(self, thread_id: str) -> None:
         await self.db.execute("DELETE FROM threads WHERE id = ?", (thread_id,))
         await self.db.commit()

@@ -91,7 +91,7 @@ test('every static search row names a section, an anchor that exists in the mark
 
 test('search: static rows and schema rows, only what this session may see, label matches first', () => {
   const schema = { settings: [
-    { key: 'people.lock_timeout_seconds', label: 'Owner and Admin auto-lock', description: 'How long a session may sit idle.', group: 'people', ui_section: 'people#signin-rules' },
+    { key: 'people.lock_timeout_seconds', label: 'Admin auto-lock', description: 'How long a session may sit idle.', group: 'people', ui_section: 'people#signin-rules' },
     { key: 'system.backup_keep', label: 'Snapshots to keep', description: 'How many.', group: 'system', ui_section: 'system#backups' },
   ] };
   const t = (k) => get(EN, k) || k;

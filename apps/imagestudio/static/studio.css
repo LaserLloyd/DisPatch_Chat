@@ -103,3 +103,12 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
 .st-danger { background: var(--danger, #e5484d); color: var(--on-danger, #2a0808); border-color: transparent; font-weight: 600; }
 .st-danger:hover:not(:disabled) { background: var(--danger-hover, var(--danger, #e5484d)); }
 .st-clear-msg { margin: 0; }
+
+/* A picture the image-retention setting removed (media-expired.js swaps the <img> for this). */
+.media-expired {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 120px;
+  padding: 10px 14px; border-bottom: 1px dashed var(--border-strong);
+  color: var(--text-muted, var(--text-secondary)); font-size: 13px; text-align: center;
+}
+.media-expired > svg.rail-icon { flex: none; width: 18px; height: 18px; }
+.media-expired-text { overflow-wrap: anywhere; }

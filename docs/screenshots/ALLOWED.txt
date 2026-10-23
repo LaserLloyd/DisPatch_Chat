@@ -63,3 +63,9 @@ readme/chat.png
 readme/settings.png
 readme/people-profiles.png
 readme/tasks.png
+
+# Re-shot 2026-10-23 for 4.0.0 (INT-3) from a fresh scratch install with synthetic data
+# (Alex/Sam/Mia, Nova/Scout letter avatars, the shipped Atlas avatar, invented chatter, a
+# localhost connection address only) and opened one by one: welcome, ai-models,
+# quick-actions, plugins-tab, bot-manager, desktop-*, mobile-*, settings-theme and
+# readme/{people-profiles,settings}. voice-screen.png and live-locked-1280.png are 3.x captures.

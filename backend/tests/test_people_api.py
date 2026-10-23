@@ -374,6 +374,7 @@ def test_the_owner_sees_an_activity_summary_and_the_profile_is_told(world, owner
     # What the profile sees: the disclosure, and its own summary.
     me = c.get("/api/auth/me").json()
     assert "admin can see" in me["disclosure"].lower()
+    assert me["disclosure_code"] == "activity_summary"     # the UI's locale key, not the English
     assert c.get("/api/me/activity").status_code == 404      # 4.0: no per-profile activity page
     # What the owner sees: counts, not content.
     act = owner.get("/api/people/activity", params={"profile_id": mia["id"]}).json()
@@ -384,6 +385,7 @@ def test_the_owner_sees_an_activity_summary_and_the_profile_is_told(world, owner
     assert c.get("/api/people/activity").status_code == 403
     # An Admin is not told it is being summarised.
     assert owner.get("/api/auth/me").json()["disclosure"] is None
+    assert owner.get("/api/auth/me").json()["disclosure_code"] is None
 
 
 def test_admin_actions_are_audited(world, owner):

@@ -19,10 +19,10 @@
 // Wording: UI verbs are "Assign task" / "Send to agent" (the brief); the backend is "OpenClaw" or
 // "Claude Agent" as the server names it; costs are always "estimate".
 
-import { api as realApi } from './api.js?v=35';
+import { api as realApi } from './api.js?v=36';
 import { t, relTime } from './i18n.js?v=4';
-import { el, spriteIcon } from './util.js?v=20';
-import { createTaskCard, stateLabel, costLabel } from './task_card.js?v=1';
+import { el, spriteIcon } from './util.js?v=21';
+import { createTaskCard, stateLabel, costLabel } from './task_card.js?v=2';
 
 export const FILTER_STATES = ['', 'queued', 'running', 'awaiting_approval', 'succeeded', 'failed', 'cancelled'];
 const PROMPT_MAX = 20000;

@@ -25,8 +25,8 @@
 // repo's `v1` tag at each 1.x release and every install command follows.
 
 import { t } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
-import { SOURCE_URL, VOICE_REPO_URL } from './about.js?v=22';
+import { el } from './util.js?v=21';
+import { SOURCE_URL, VOICE_REPO_URL } from './about.js?v=23';
 
 export { VOICE_REPO_URL };
 /** The moving tag that always names the latest 1.x release (SPEC §3.4). */

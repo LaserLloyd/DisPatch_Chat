@@ -246,7 +246,7 @@ def _check_spec(spec: AgentSpec, principal: policy.Principal, old: AgentSpec | N
     new_owner_only = owner_only_features(spec) - (owner_only_features(old) if old else set())
     if new_owner_only and not principal.can(Permission.ADMIN_SYSTEM):
         raise TaskError("agent_needs_owner",
-                        "Only the Owner or an Admin can give an agent that capability.", 403)
+                        "Only an Admin can give an agent that capability.", 403)
 
 
 def _clean_published(ids: list[str]) -> list[str]:
@@ -570,7 +570,7 @@ async def create_task(body: AgentTaskIn, request: Request, _=_DISPATCH):
     repo = None
     if body.repo_path:
         if not pr.can(Permission.ADMIN_SYSTEM):
-            return _problem(403, "agent_needs_owner", "Only the Owner or an Admin can give an agent that capability.")
+            return _problem(403, "agent_needs_owner", "Only an Admin can give an agent that capability.")
         p = Path(body.repo_path).expanduser()
         if not p.is_dir():
             return _problem(422, "agent_invalid", "repo_path: that folder does not exist on this machine")

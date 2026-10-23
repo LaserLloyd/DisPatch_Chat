@@ -4,7 +4,7 @@
 
 Schema version 1. Every setting below can be read with `GET /api/settings` and changed with `PATCH /api/settings` (the `manage_settings` permission), or in **Settings** in the app (the *Shown in* column says where; a search box at the top of Settings finds any of them by name). How the store works, and how an environment variable interacts with it, is in [Settings store](#how-the-store-works) at the end.
 
-**Env** is the variable that overrides the setting. `DISPATCH_X` also answers to the legacy `LOCAL_CHAT_X`. A setting set by an environment variable shows *set by environment* in the app and cannot be changed there. **Restart** means the new value is used from the next start. *Host control* settings run a program, name a server the host contacts, or change who can reach DisPatch: they need `admin_system` (the Owner and Admins); a profile granted only `manage_settings` cannot change them.
+**Env** is the variable that overrides the setting. `DISPATCH_X` also answers to the legacy `LOCAL_CHAT_X`. A setting set by an environment variable shows *set by environment* in the app and cannot be changed there. **Restart** means the new value is used from the next start. *Host control* settings run a program, name a server the host contacts, or change who can reach DisPatch: they need `admin_system` (Admins); a profile granted only `manage_settings` cannot change them.
 
 ## Characters
 
@@ -76,7 +76,7 @@ Sign-in, session lengths, and what programs holding the API key may do.
 
 | Key | Type | Default | Level | Restart | Env | Shown in | What it does |
 |---|---|---|---|---|---|---|---|
-| `people.lock_timeout_seconds` | integer | `600` | basic |  |  | People & Access → Sign-in rules | How long an Owner or Admin session may sit idle before it locks. Range 30..604800 seconds. |
+| `people.lock_timeout_seconds` | integer | `600` | basic |  |  | People & Access → Sign-in rules | How long an Admin session may sit idle before it locks. Range 30..604800 seconds. |
 | `people.session_timeout_user` | integer | `3600` | advanced |  |  | People & Access → Sign-in rules | How long a User profile's session may sit idle before it ends. Range 30..2.592e+06 seconds. |
 | `people.session_timeout_basic` | integer | `1800` | advanced |  |  | People & Access → Sign-in rules | How long a Basic profile's session may sit idle before it ends. Range 30..2.592e+06 seconds. |
 | `people.lock_target` | choice | `profile_list` | basic |  |  | People & Access → When locked | Where a lock and a device that has not signed in land: the default profile (shared by everyone who uses it) or the profile list. One of: `default_profile`, `profile_list`. *(host control)* |

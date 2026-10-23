@@ -22,12 +22,12 @@
 // icon-name table, error classification) are exported separately from the DOM
 // so they can be unit-tested under plain node — see frontend/tests/viewer.test.js.
 
-import { RAIL_ICONS, acquireInert, el, railIcon, releaseInert } from './util.js?v=20';
+import { RAIL_ICONS, acquireInert, el, railIcon, releaseInert } from './util.js?v=21';
 import { t, fileSize } from './i18n.js?v=4';
 // markdown.js is versioned in lockstep across every importer (assets.test.js
 // enforces it) — this line moves with the rest when the integration pass bumps it.
-import { renderMarkdown, enhanceContent } from './markdown.js?v=34';
-import { nimEnabled } from './nim.js?v=5';
+import { renderMarkdown, enhanceContent } from './markdown.js?v=35';
+import { nimEnabled } from './nim.js?v=6';
 
 // ---------------------------------------------------------------------------
 // Pure helpers (no DOM, no network) — the testable core

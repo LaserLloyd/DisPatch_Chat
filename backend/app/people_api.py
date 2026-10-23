@@ -60,6 +60,9 @@ _DEVICE_MAX_AGE = 2 * 365 * 86400
 #: content); the chats themselves are private to the profile - no other profile, Admins
 #: included, opens them in the app. tests/test_people_api.py pins it against the ownership
 #: rules. The UI renders its own localised copy.
+#: The code the UI maps to its locale key (``people.disclosure_activity``); the English text
+#: stays in ``disclosure`` for clients that predate the code.
+DISCLOSURE_CODE = "activity_summary"
 DISCLOSURE = ("An Admin can see a summary of what happens in this profile (how much, not what). Chats are "
               "private to this profile: other profiles, Admins included, cannot open them in the app.")
 
@@ -406,6 +409,8 @@ def principal_document(request: Request) -> dict:
         # What an Admin may see about this profile (counts, never content): said to every
         # profile that is not itself an Admin (view_activity).
         "disclosure": DISCLOSURE if pr.kind == "profile" and not pr.can(Permission.VIEW_ACTIVITY) else None,
+        "disclosure_code": (DISCLOSURE_CODE if pr.kind == "profile"
+                            and not pr.can(Permission.VIEW_ACTIVITY) else None),
         # 4.0: the lock target, whether this is the shared default profile, and the notices
         # the sign-in popup shows once (a PIN reset by an Admin).
         "lock_target": cfg.lock_target,
@@ -683,6 +688,7 @@ async def people_list(request: Request):
         "can_create_admin": caller.is_admin,
         "owner_has_password": _owner_has_password(),
         "disclosure": DISCLOSURE,
+        "disclosure_code": DISCLOSURE_CODE,
     }
 
 
@@ -695,7 +701,7 @@ async def people_create(request: Request, payload: PersonIn):
         return _problem(409, "owner_required", "Create the owner account first (Settings > Account).")
     role = normalise_role(payload.role)
     if not _may_manage(caller, False):
-        return _problem(403, "permission_denied", "Only the Owner and Admins can create Admins.")
+        return _problem(403, "permission_denied", "Only an Admin can create Admins.")
     try:
         # 4.0: PINs and passwords are optional on every profile (People warns about an
         # Admin with neither: ``no_credential`` in the reply).

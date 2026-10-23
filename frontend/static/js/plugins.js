@@ -21,11 +21,11 @@
 // `deps` ({ mountTools(host), toast(msg, isErr), openTab(id), api? }), which
 // is also how the tests drive it without main.js.
 
-import { api as realApi } from './api.js?v=35';
+import { api as realApi } from './api.js?v=36';
 import { t } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
-import { COMMANDS, commandBlock } from './voice-absent.js?v=16';
-import { catalogGroup } from './integrations.js?v=2';
+import { el } from './util.js?v=21';
+import { COMMANDS, commandBlock } from './voice-absent.js?v=17';
+import { catalogGroup } from './integrations.js?v=3';
 import { has } from './i18n.js?v=4';
 
 let seq = 0;          // a newer mount supersedes a slower, older one

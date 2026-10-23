@@ -13,9 +13,9 @@
 // routing; back/forward inside the panel is handled by the tab buttons +
 // an internal history-less stack (Back always returns to the list).
 
-import { api } from './api.js?v=35';
+import { api } from './api.js?v=36';
 import { t } from './i18n.js?v=4';
-import { acquireInert, releaseInert, spriteIconHtml } from './util.js?v=20';
+import { acquireInert, releaseInert, spriteIconHtml } from './util.js?v=21';
 
 const JOB_POLL_MS = 1500;
 const JOB_TIMEOUT_MS = 30 * 60 * 1000;

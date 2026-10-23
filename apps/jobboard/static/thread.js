@@ -22,7 +22,7 @@
 //   * a failed load says WHY (offline / locked / gone), never just "not found";
 //   * a slow reload that lost a race never paints.
 
-import { el, iconLabel, railIcon, RAIL_ICONS } from '/static/js/app-sdk.js?v=3';
+import { el, iconLabel, railIcon, RAIL_ICONS } from '/static/js/app-sdk.js?v=4';
 
 export const API_BASE = '/api/apps/jobboard';
 // Bump with board.css: the panel links the board's stylesheet into the shell.

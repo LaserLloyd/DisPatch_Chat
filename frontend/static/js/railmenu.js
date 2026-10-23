@@ -1,4 +1,4 @@
-import { spriteIcon } from './util.js?v=20';
+import { spriteIcon } from './util.js?v=21';
 // Rail layout — which static rail buttons sit on the bar and which live in the
 // "Tools & more" popup (js/tools.js), in what order.
 //

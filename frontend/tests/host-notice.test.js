@@ -163,7 +163,7 @@ test('the popup is a top-centre note with a neutral surface and danger only as t
 });
 
 test('main.js arms the notice at every sign-in and at lock, and shows it through one function', () => {
-  assert.match(MAIN, /import \{ maybeShowSignInNotice, armSignInNotice \} from '\.\/host-notice\.js\?v=1';/);
+  assert.match(MAIN, /import \{ maybeShowSignInNotice, armSignInNotice \} from '\.\/host-notice\.js\?v=2';/);
   assert.doesNotMatch(MAIN, /maybeShowPrivacyCard|showPrivacyCardWhenReady/);
   // PIN unlock, profile sign-in, first Owner's setup, and the lock itself.
   assert.match(MAIN, /armSignInNotice\(\);[^\n]*\n\s*\/\/ 3\.0: the install PIN signs in/);

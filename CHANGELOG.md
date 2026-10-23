@@ -91,7 +91,9 @@ Designed for 20 profiles over three years (about 1-2 million messages) with no s
   the time and every retention period and run it by hand (`POST /api/maintenance/run`, with a dry run).
 - **Archive old chats (per profile, off by default):** a profile can archive its own chats older than N months
   (`/api/me/archive`). Archived chats leave the rail, stay searchable and open by link; pinned chats and chats with an
-  open job are skipped; nothing is deleted, and an un-archived chat stays un-archived.
+  open job are skipped; nothing is deleted. The Archived view (the archive button above the chat list, or Ctrl-K
+  "Archived chats") lists them with **Move back** (`PATCH /api/threads/{id}` with `archived: false`; `true` archives),
+  owner-scoped like every thread route; a moved-back chat stays on the rail.
 - **Generated images: keep forever (the default) or N months**, an Admin setting that covers every picture DisPatch
   generated (fired reaction-pool images, Image Studio results, `[[pic:]]` and image-job pictures, spent avatar-pool
   images, thread avatar snapshots nothing uses). Uploads and attachments are never touched. Pictures still in use
@@ -99,14 +101,20 @@ Designed for 20 profiles over three years (about 1-2 million messages) with no s
   kept. An expired picture answers `410 Gone` with `X-Image-Expired: 1` and shows an "image expired" placeholder;
   the files sit in `<data>/trash/` for 14 days and can be restored. A dry-run count
   (`GET /api/maintenance/images/preview`) comes before saving.
-- The Storage and image-retention cards (Settings → Health) and the archive control (You → Account) are the
-  interface for the above. See [docs/maintenance.md](docs/maintenance.md).
+- **In the app:** the chat list loads a page at a time (Show more, or scroll); a long chat opens on its newest 100
+  messages with Load earlier, and above about 300 messages on screen the list is windowed so it never grows without
+  bound; the Storage and Generated images cards live in Settings → System and the archive control in You → Account;
+  the "image expired" placeholder shows in chats, the reaction history and Image Studio. See
+  [docs/maintenance.md](docs/maintenance.md).
 
 ### Interface
 
 - ThemeForge 2.0.1 is vendored: the app's icons come from its shared icon set (`ui-theme/icons.svg`).
 - Settings is grouped You / Household, and People, Reset to default, My bots, the profile switch and the sign-in popup
   are new screens.
+- No screen says "Owner" any more: the protected first Admin is "the main Admin", and the host-level powers (agent
+  hooks, local MCP programs, Backups, Machine access) say "Admins", which is who holds them. The People disclosure line
+  arrives as a code (`disclosure_code`) and is shown in the reader's language; `disclosure` keeps the English text.
 
 <a id="400-upgrade-notes"></a>
 ### Upgrade notes
@@ -130,7 +138,8 @@ Designed for 20 profiles over three years (about 1-2 million messages) with no s
 
 - **Migration 012:** rename the stored role words (`owner/member/restricted` to `admin/user/basic`) with a 12-step table
   rebuild on a dedicated connection, once 4.0 has been live a while. Not part of 4.0.
-- Retire the 3.x client keys that are inert data today (`decoy` in `/api/auth/status`, the reaction and pool `safe` flag).
+- Retire the 3.x keys that are inert data today (the reaction and pool `safe` flag kept in yaml for a 3.x rollback;
+  `DecoyError`, a deprecated alias in the add-on SDKs).
 
 ### Earlier work in this release (since 3.1.0)
 

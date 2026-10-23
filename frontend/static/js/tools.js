@@ -43,9 +43,9 @@
 // Pure-ish module: no side effects at import time (it is in sw.js SHELL and
 // imported by main.js). main.js injects everything app-shaped via wireTools().
 
-import { api } from './api.js?v=35';
+import { api } from './api.js?v=36';
 import { t, relTimeLong } from './i18n.js?v=4';
-import { el, railIcon, RAIL_ICONS, spriteIcon } from './util.js?v=20';
+import { el, railIcon, RAIL_ICONS, spriteIcon } from './util.js?v=21';
 
 // Builtin ids are the pseudo-bot ids main.js has always used, in rail order.
 // `icon` names a RAIL_ICONS entry: a builtin tile is chrome, so it is drawn in

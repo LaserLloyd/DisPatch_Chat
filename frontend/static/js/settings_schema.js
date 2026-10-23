@@ -19,9 +19,9 @@
 // Pure functions first (buildModel, matches, parseInput, buildPatch, durations and sizes, which
 // rows go in which slot) so the tests drive them without a DOM. Nothing runs at import time.
 
-import { w5 as realApi, errorText } from './w5-api.js?v=1';
+import { w5 as realApi, errorText } from './w5-api.js?v=2';
 import { t, lang } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
+import { el } from './util.js?v=21';
 
 // ------------------------------------------------------------------ pure
 

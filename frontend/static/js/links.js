@@ -26,7 +26,7 @@
 // not an account preference. The key is in privacy.js APP_KEYS — privacy
 // mode's wipe must forget a device's links like everything else it forgets.
 
-import { el, railIcon, RAIL_ICONS, spriteIcon } from './util.js?v=20';
+import { el, railIcon, RAIL_ICONS, spriteIcon } from './util.js?v=21';
 
 const KEY = 'dispatch-custom-links';
 

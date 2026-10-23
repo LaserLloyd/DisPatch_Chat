@@ -37,7 +37,7 @@ test('sessionCan reads /api/auth/status permissions; an older server falls back 
 test('the shell offers can(permission) to add-ons (never true for a Restricted session)', () => {
   assert.match(SDK, /can: \(permission\) => !!call\('can', permission\),/);
   assert.match(MAIN, /can: \(perm\) => sessionCan\(String\(perm \|\| ''\)\),/);
-  assert.match(MAIN, /from '\.\/ext-sdk\.js\?v=18'/);
+  assert.match(MAIN, /from '\.\/ext-sdk\.js\?v=19'/);
 });
 
 test('a Member asks for neither the full roster nor the avatar pools', () => {

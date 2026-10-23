@@ -502,6 +502,17 @@
    "seeded": true
   },
   {
+   "code": "archived_not_bool",
+   "status": 400,
+   "message": "archived must be true or false",
+   "fix": "Send archived as true (archive the chat) or false (move it back).",
+   "docs": "archived_not_bool",
+   "patterns": [
+    "archived must be true or false"
+   ],
+   "seeded": false
+  },
+  {
    "code": "prefs_not_object",
    "status": 400,
    "message": "prefs must be an object",
@@ -834,7 +845,7 @@
    "code": "permission_denied",
    "status": 403,
    "message": "Your profile does not have permission to do that.",
-   "fix": "Ask an Admin or the Owner to grant your profile the permission shown in required_permission.",
+   "fix": "Ask an Admin to grant your profile the permission shown in required_permission.",
    "docs": "permission_denied",
    "patterns": [
     "Your profile does not have permission to do that."
@@ -1070,7 +1081,7 @@
    "code": "imagestudio_cannot_delete_pictures",
    "status": 403,
    "message": "Your profile cannot delete pictures",
-   "fix": "Ask the Owner or an Admin; deleting needs the manage_history permission.",
+   "fix": "Ask an Admin; deleting needs the manage_history permission.",
    "docs": "imagestudio_cannot_delete_pictures",
    "patterns": [
     "Your profile cannot delete pictures"
@@ -2314,11 +2325,11 @@
   {
    "code": "agent_needs_owner",
    "status": 403,
-   "message": "Only the Owner can give an agent that capability.",
-   "fix": "Ask the Owner. Running repository hooks, starting local MCP programs and unattended destructive tools are host-level powers.",
+   "message": "Only an Admin can give an agent that capability.",
+   "fix": "Ask an Admin. Running repository hooks, starting local MCP programs and unattended destructive tools are host-level powers.",
    "docs": "agent_needs_owner",
    "patterns": [
-    "Only the Owner can give an agent that capability."
+    "Only an Admin can give an agent that capability."
    ],
    "seeded": false
   },

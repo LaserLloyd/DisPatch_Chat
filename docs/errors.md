@@ -27,13 +27,14 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`agent_has_active_tasks`](#agent_has_active_tasks) | 409 | That agent has tasks that are still running. |
 | [`agent_invalid`](#agent_invalid) | 422 | The agent definition is not valid. |
 | [`agent_name_taken`](#agent_name_taken) | 409 | An agent with that name already exists. |
-| [`agent_needs_owner`](#agent_needs_owner) | 403 | Only the Owner can give an agent that capability. |
+| [`agent_needs_owner`](#agent_needs_owner) | 403 | Only an Admin can give an agent that capability. |
 | [`agent_not_found`](#agent_not_found) | 404 | Agent not found |
 | [`agents_only`](#agents_only) | 403 | Only agents may fire reactions |
 | [`api_key_required`](#api_key_required) | 401 | API key required |
 | [`approval_not_found`](#approval_not_found) | 404 | That approval request is not pending any more. |
 | [`approval_scope_not_allowed`](#approval_scope_not_allowed) | 422 | That approval can only be given for this one call. |
 | [`archive_invalid`](#archive_invalid) | 422 | months must be a whole number from 1 to 120. |
+| [`archived_not_bool`](#archived_not_bool) | 400 | archived must be true or false |
 | [`avatar_invalid`](#avatar_invalid) | 422 | That file is not a picture DisPatch can read. |
 | [`avatar_not_capturable`](#avatar_not_capturable) | 409 | The bot has no capturable avatar right now |
 | [`avatar_not_found`](#avatar_not_found) | 404 | Avatar not found |
@@ -356,9 +357,9 @@ HTTP **409** - An agent with that name already exists.
 
 <a id="agent_needs_owner"></a>
 
-HTTP **403** - Only the Owner can give an agent that capability.
+HTTP **403** - Only an Admin can give an agent that capability.
 
-**Fix:** Ask the Owner. Running repository hooks, starting local MCP programs and unattended destructive tools are host-level powers.
+**Fix:** Ask an Admin. Running repository hooks, starting local MCP programs and unattended destructive tools are host-level powers.
 
 ## agent_not_found
 
@@ -407,6 +408,14 @@ HTTP **422** - That approval can only be given for this one call.
 HTTP **422** - months must be a whole number from 1 to 120.
 
 **Fix:** Send months as null (off) or a whole number from 1 to 120.
+
+## archived_not_bool
+
+<a id="archived_not_bool"></a>
+
+HTTP **400** - archived must be true or false
+
+**Fix:** Send archived as true (archive the chat) or false (move it back).
 
 ## avatar_invalid
 
@@ -1206,7 +1215,7 @@ HTTP **409** - A generation is already running
 
 HTTP **403** - Your profile cannot delete pictures
 
-**Fix:** Ask the Owner or an Admin; deleting needs the manage_history permission.
+**Fix:** Ask an Admin; deleting needs the manage_history permission.
 
 ## imagestudio_generation_running_clear
 
@@ -1694,7 +1703,7 @@ HTTP **413** - File too large
 
 HTTP **403** - Your profile does not have permission to do that.
 
-**Fix:** Ask an Admin or the Owner to grant your profile the permission shown in required_permission.
+**Fix:** Ask an Admin to grant your profile the permission shown in required_permission.
 
 ## permissions_invalid
 
