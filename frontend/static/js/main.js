@@ -3565,7 +3565,7 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
   // — a keyboard user who opened a thumbnail lands back on that thumbnail, not
   // at the top of the document.
   const returnFocus = document.activeElement;
-  const chrome = createChrome({ delay: 350, onChange: (on) => lb.classList.toggle('chrome-on', on) });
+  const chrome = createChrome({ delay: 700, onChange: (on) => lb.classList.toggle('chrome-on', on) });
   const close = () => {
     try { if (itemVideo(nav.current())) media.pause(); } catch {}
     chrome.dispose();
@@ -3579,7 +3579,9 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
   // closeAllOverlays) can run the real cleanup instead of just removing it.
   lb._close = close;
   closeBtn.addEventListener('click', close);
-  lb.addEventListener('click', (e) => { if (e.target === lb) close(); });
+  // A click on the backdrop closes, unless it is on (or right by) a control that was still
+  // fading in: then it is a missed control click, not "close".
+  lb.addEventListener('click', (e) => { if (e.target === lb && !nearControl(e.clientX, e.clientY)) close(); });
 
   // ---- zoom / pan ----------------------------------------------------------
   let view = { s: 1, tx: 0, ty: 0 };
@@ -3800,10 +3802,16 @@ function openLightbox(src, { video = false, downloadUrl = null, downloadName = n
   });
 
   // ---- chrome: over the picture, touch tap, swipe, focus --------------------
+  // "On a control" is worked out from where the controls ARE, not from the element under the
+  // pointer: a faded control takes no pointer events, so a slow move from the picture to an
+  // arrow would otherwise reach it hidden and the click would land on the backdrop (= close).
+  const ctlRects = () => [...lb.querySelectorAll(`.${chromeCls}`)]
+    .filter((n) => !n.hidden && n.offsetParent !== null).map((n) => n.getBoundingClientRect());
+  const nearControl = (x, y) => ctlRects().some((r) => r.width > 0
+    && x >= r.left - 12 && x <= r.right + 12 && y >= r.top - 12 && y <= r.bottom + 12);
   const onPointerMove = (e) => {
     if (e.pointerType === 'touch') return;
-    const onCtl = !!e.target.closest?.(`.${chromeCls}`);
-    chrome.pointer(overMedia(e.clientX, e.clientY, media.getBoundingClientRect()), onCtl);
+    chrome.pointer(overMedia(e.clientX, e.clientY, media.getBoundingClientRect()), nearControl(e.clientX, e.clientY));
   };
   lb.addEventListener('pointermove', onPointerMove);
   lb.addEventListener('pointerleave', () => chrome.leave());
@@ -3901,9 +3909,16 @@ function chatGalleryFor(thumb) {
   if (index < 0) return null;
   return {
     gallery: nodes.map((n) => ({ src: n.dataset.full, video: false, downloadUrl: n.dataset.full, downloadName: null,
-      caption: '', info: chatImageInfo(n) })),
+      caption: chatImageCaption(n), info: chatImageInfo(n) })),
     index,
   };
+}
+
+/** A chat picture's own caption (its alt text, from `[[media:…|caption]]` or Markdown), never
+ *  the generic "Full-size image" fallback. */
+function chatImageCaption(node) {
+  const alt = String(node.getAttribute('alt') || '').trim();
+  return alt && alt !== t('msg.fullsize_alt') && alt !== t('common.image') ? alt : '';
 }
 
 /** What the details panel can say about a chat picture: when, which bot, and for a generated

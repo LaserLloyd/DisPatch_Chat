@@ -1066,6 +1066,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .lightbox.details-open { padding-inline-end: 340px; }
 .lightbox.details-open .lightbox-bar { left: calc((100vw - 340px) / 2); }
 .lightbox.details-open .lightbox-next { right: 354px; }
+.lightbox.details-open .lightbox-close { inset-inline-end: 356px; }
 :root[dir="rtl"] .lightbox.details-open .lightbox-bar { left: calc(340px + (100vw - 340px) / 2); }
 @media (max-width: 720px) {
   .lightbox-details {
@@ -1074,9 +1075,11 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
     box-shadow: 0 -8px 30px rgba(0,0,0,.35); padding-bottom: calc(24px + env(safe-area-inset-bottom));
   }
   .lightbox.details-open { padding-inline-end: 0; padding-bottom: 55vh; }
-  .lightbox.details-open img, .lightbox.details-open video { max-width: 94vw; max-height: calc(45vh - 80px); }
-  .lightbox.details-open .lightbox-bar, :root[dir="rtl"] .lightbox.details-open .lightbox-bar { left: 50%; bottom: calc(55vh + 10px); }
+  .lightbox.details-open img, .lightbox.details-open video { max-width: 94vw; max-height: calc(45vh - 72px); }
   .lightbox.details-open .lightbox-next { right: 6px; }
+  .lightbox.details-open .lightbox-close { inset-inline-end: 16px; }
+  /* The sheet has Download, and a pinch zooms: the toolbar would sit on the picture. */
+  .lightbox.details-open .lightbox-bar { display: none; }
   .lb-tool-text { display: none; }
   .lightbox-bar { bottom: calc(14px + env(safe-area-inset-bottom)); }
   .lb-tool { min-width: 44px; height: 44px; }
