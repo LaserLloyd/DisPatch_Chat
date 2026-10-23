@@ -80,6 +80,7 @@
   "avatar.done": "Avatar mis à jour pour {name}.",
   "avatar.failed": "Impossible de définir l'avatar : {error}",
   "avatar.note": "L'image entière et ce recadrage carré sont enregistrés. L'ancien avatar reste dans l'historique du bot.",
+  "avatar.no_bots": "Aucun bot dont tu peux changer l'image : crée d'abord le tien (Réglages → Mes bots).",
   "sort.label": "Trier",
   "sort.oldest": "Plus anciennes d’abord",
   "sort.newest": "Plus récentes d’abord",

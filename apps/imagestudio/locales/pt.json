@@ -80,6 +80,7 @@
   "avatar.done": "Avatar atualizado para {name}.",
   "avatar.failed": "Não foi possível definir o avatar: {error}",
   "avatar.note": "A imagem completa e este recorte quadrado são guardados. O avatar anterior fica no histórico do bot.",
+  "avatar.no_bots": "Não há nenhum bot cuja imagem possa mudar: crie primeiro um seu (Definições → Os meus bots).",
   "sort.label": "Ordenar",
   "sort.oldest": "Mais antigas primeiro",
   "sort.newest": "Mais recentes primeiro",

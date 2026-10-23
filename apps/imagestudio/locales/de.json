@@ -79,6 +79,7 @@
   "avatar.done": "Avatar für {name} aktualisiert.",
   "avatar.failed": "Avatar konnte nicht gesetzt werden: {error}",
   "avatar.note": "Das ganze Bild und dieser quadratische Ausschnitt werden gespeichert. Der alte Avatar bleibt im Verlauf des Bots.",
+  "avatar.no_bots": "Es gibt keinen Bot, dessen Bild du ändern kannst: Erstelle zuerst einen eigenen (Einstellungen → Meine Bots).",
   "sort.label": "Sortieren",
   "sort.oldest": "Älteste zuerst",
   "sort.newest": "Neueste zuerst",

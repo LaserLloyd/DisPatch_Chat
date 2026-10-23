@@ -57,3 +57,14 @@ test('rail: the + tile says "no bots yet" only when there are none', () => {
   assert.match(main, /'aria-label': hasMine \? t\('profiles\.rail_make_bot'\) :/);
   assert.match(main, /railMakeBotButton\(hasMine\)/);
 });
+
+test('Image Studio: Send is hidden where the server refuses it, and an own bot\'s avatar goes to its own route', () => {
+  const src = readFileSync(join(HERE, '..', '..', 'apps', 'imagestudio', 'static', 'studio.js'), 'utf8');
+  assert.match(src, /if \(S\.info && S\.info\.can_send === false\) actions\.children\[3\]\.hidden = true;/);
+  assert.match(src, /url = `\/api\/me\/characters\/\$\{encodeURIComponent\(bot\.value\)\}\/avatar\?\$\{q\}`;/);
+  assert.match(src, /if \(!targets\.bots\.length\) \{ setStatus\(t\('avatar\.no_bots'\), true\); return; \}/);
+  for (const l of LOCALES) {
+    const L = JSON.parse(readFileSync(join(HERE, '..', '..', 'apps', 'imagestudio', 'locales', `${l}.json`), 'utf8'));
+    assert.equal(typeof L['avatar.no_bots'], 'string', l);
+  }
+});

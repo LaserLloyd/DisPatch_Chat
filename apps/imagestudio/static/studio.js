@@ -239,6 +239,8 @@ function renderGrid() {
       iconBtn(RAIL_ICONS.user, t('tile.avatar'), () => openAvatar(r)),
     ]);
     if (!caps().reference) actions.children[2].hidden = true;
+    // Send posts through the inject route: only for a profile the server lets do that.
+    if (S.info && S.info.can_send === false) actions.children[3].hidden = true;
     if (S.info && S.info.can_clear) {
       const clear = iconBtn(RAIL_ICONS.trash, t('tile.clear'), () => openClear(r));
       clear.classList.add('st-icon-danger');
@@ -346,6 +348,7 @@ async function openAvatar(r) {
   let targets;
   try { targets = await api(`${API}/targets`); } catch (e) { setStatus(e.message, true); return; }
   if (S.nim) { setStatus(t('nim.hidden')); return; }
+  if (!targets.bots.length) { setStatus(t('avatar.no_bots'), true); return; }
   let im;
   try { im = await loadImage(r.url); } catch { setStatus(t('avatar.failed', { error: 'image' }), true); return; }
   const bot = el('select', { id: 'st-av-bot' }, targets.bots.map((b) => el('option', { value: b.id, text: b.name || b.id })));
@@ -371,8 +374,19 @@ async function openAvatar(r) {
       const faceBlob = await new Promise((res) => face.toBlob(res, 'image/png'));
       const fd = new FormData();
       fd.append('file', full, `studio-${r.id.slice(0, 8)}.${/\.jpe?g$/i.test(r.url) ? 'jpg' : 'png'}`);
-      fd.append('face', faceBlob, `studio-${r.id.slice(0, 8)}-face.png`);
-      const res = await fetch(`/api/bots/${encodeURIComponent(bot.value)}/avatar`, { method: 'POST', body: fd, credentials: 'same-origin' });
+      const pick = targets.bots.find((b) => b.id === bot.value) || {};
+      let url;
+      if (pick.personal) {
+        // The caller's own bot: its route takes the square as fractions and crops itself.
+        const rc = cropRect(im.naturalWidth, im.naturalHeight, Number(pos.value) / 100);
+        const q = new URLSearchParams({ crop_x: rc.sx / im.naturalWidth, crop_y: rc.sy / im.naturalHeight,
+          crop_size: rc.size / Math.min(im.naturalWidth, im.naturalHeight) });
+        url = `/api/me/characters/${encodeURIComponent(bot.value)}/avatar?${q}`;
+      } else {
+        fd.append('face', faceBlob, `studio-${r.id.slice(0, 8)}-face.png`);
+        url = `/api/bots/${encodeURIComponent(bot.value)}/avatar`;
+      }
+      const res = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const name = (targets.bots.find((b) => b.id === bot.value) || {}).name || bot.value;
       closeDialog();

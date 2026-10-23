@@ -377,6 +377,9 @@ def build(ctx):
             # The empty state's "Set up image generation" opens Settings -> AI & Connections;
             # offered only to a profile that may change it.
             "can_configure": policy.of(request).can("manage_connections"),
+            # "Send to chat" posts through /api/inject (manage_agents): offered only to a
+            # profile that may (anyone else would only ever meet a 403).
+            "can_send": policy.of(request).can("manage_agents"),
         }
 
     @router.get("/images", dependencies=op)
@@ -515,10 +518,17 @@ def build(ctx):
         threads.sort(key=lambda t: t.updated_at, reverse=True)
         bots = [b for b in ctx.config.load_bots() if characters.may_use(b, pr)]
         names = {b.id: b.name for b in bots}
+        # "Set as bot avatar" lists only the bots whose picture the caller may change: the
+        # caller's own (through /api/me/characters/{id}/avatar) and, for a character manager,
+        # the household ones (/api/bots/{id}/avatar).
+        manage = policy.of(request).can("manage_characters")
+        own = policy.of(request).can("create_characters")
+        pickable = [b for b in bots if (b.scope == "personal" and b.owner_profile == pr.profile_id and own)
+                    or (b.scope != "personal" and manage)]
         return {
             "threads": [{"id": t.id, "title": t.title or "", "bot_id": t.bot_id,
                          "bot": names.get(t.bot_id, t.bot_id)} for t in threads[:60]],
-            "bots": [{"id": b.id, "name": b.name} for b in bots],
+            "bots": [{"id": b.id, "name": b.name, "personal": b.scope == "personal"} for b in pickable],
         }
 
     return router

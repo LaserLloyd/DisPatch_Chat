@@ -79,6 +79,7 @@
   "avatar.done": "Avatar updated for {name}.",
   "avatar.failed": "Could not set the avatar: {error}",
   "avatar.note": "The full picture and this square crop are saved. The old avatar stays in the bot's history.",
+  "avatar.no_bots": "There is no bot whose picture you can change: make one of your own first (Settings → My bots).",
   "sort.label": "Sort",
   "sort.oldest": "Oldest first",
   "sort.newest": "Newest first",
