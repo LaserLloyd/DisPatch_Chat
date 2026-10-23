@@ -790,6 +790,11 @@ def check_lock_target(target: str, default_profile: str | None = None):
         raise accounts.AccountError(
             "lock_target_invalid", "An Admin profile cannot be the default profile: it opens "
             "without a credential on every device.", 422)
+    if prof.has_pin or prof.has_password:
+        # It would open on every unsigned device without its PIN, private chats and all.
+        raise accounts.AccountError(
+            "lock_target_invalid", "A profile with a PIN or password cannot be the default "
+            "profile: it would open without it on every device. Pick a profile with no PIN.", 422)
     return prof
 
 

@@ -278,6 +278,10 @@ def unsigned(cfg: auth.SecurityConfig | None = None) -> Principal | None:
     prof = accounts.get_profile(cfg.default_profile)
     if prof is None or prof.disabled:
         return None
+    if prof.has_pin or prof.has_password:
+        # A PIN an Admin set on the default profile afterwards is honoured: unsigned devices
+        # get the sign-in screen instead of opening it without the PIN.
+        return None
     return profile_principal(prof, via="default")
 
 

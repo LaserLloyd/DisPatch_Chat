@@ -2477,7 +2477,7 @@
    "code": "lock_target_invalid",
    "status": 422,
    "message": "Pick an existing, enabled profile.",
-   "fix": "Choose a User or Basic profile (not an Admin) that exists and is enabled, or the profile list.",
+   "fix": "Choose a User or Basic profile with no PIN or password (not an Admin) that exists and is enabled, or the profile list.",
    "docs": "lock_target_invalid",
    "patterns": [
     "Pick an existing, enabled profile."

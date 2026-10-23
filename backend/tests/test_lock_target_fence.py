@@ -111,3 +111,21 @@ def test_the_shared_default_profile_can_never_be_made_an_admin(lobby):
     # Once another profile is the landing (or the profile list is), it may be promoted.
     auth.set_lock_target("profile_list", None)
     assert o.post(f"/api/people/{pid}/role", json={"role": "admin"}).status_code == 200
+
+
+def test_a_profile_with_a_pin_is_never_opened_by_the_lock_target(world):
+    """A profile with a PIN (or password) cannot be made the default profile: it would open on
+    every unsigned device without it. A PIN an Admin sets on the default profile later is
+    honoured: unsigned devices get the sign-in screen."""
+    owner = world.create_owner(world.client())
+    pinned = world.person(owner, "Kit", "basic", pin="1357")
+    with pytest.raises(accounts.AccountError):
+        auth.set_lock_target("default_profile", pinned["id"])
+    r = owner.patch("/api/settings", json={"set": {"people.lock_target": "default_profile",
+                                                    "people.default_profile": pinned["id"]}})
+    assert r.status_code == 422, r.text
+    lobby = world.person(owner, "Hall", "user")
+    auth.set_lock_target("default_profile", lobby["id"])
+    assert policy.unsigned() is not None
+    assert owner.post(f"/api/people/{lobby['id']}/pin", json={"pin": "2580"}).status_code == 200
+    assert policy.unsigned() is None

@@ -1520,7 +1520,7 @@ HTTP **422** - This is the shared default profile everyone lands on: agents and 
 
 HTTP **422** - Pick an existing, enabled profile.
 
-**Fix:** Choose a User or Basic profile (not an Admin) that exists and is enabled, or the profile list.
+**Fix:** Choose a User or Basic profile with no PIN or password (not an Admin) that exists and is enabled, or the profile list.
 
 ## machine_scope_denied
 

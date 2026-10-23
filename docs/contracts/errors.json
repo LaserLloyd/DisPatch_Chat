@@ -1549,7 +1549,7 @@
     {
       "code": "lock_target_invalid",
       "docs": "lock_target_invalid",
-      "fix": "Choose a User or Basic profile (not an Admin) that exists and is enabled, or the profile list.",
+      "fix": "Choose a User or Basic profile with no PIN or password (not an Admin) that exists and is enabled, or the profile list.",
       "message": "Pick an existing, enabled profile.",
       "patterns": [
         "Pick an existing, enabled profile."
