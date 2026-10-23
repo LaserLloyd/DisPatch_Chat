@@ -277,6 +277,21 @@ class Connection:
         }
 
 
+def neutral_labels(conns: list[Connection]) -> dict[str, str]:
+    """A label per connection that says only what kind it is: the type label, plus a number when
+    there is more than one of that type ("OpenAI-compatible server 2"), in creation order. This is
+    what non-Admins see: an Admin-chosen or auto-made name may carry an address or an account."""
+    by_type: dict[str, list[Connection]] = {}
+    for c in conns:
+        by_type.setdefault(c.type, []).append(c)
+    out: dict[str, str] = {}
+    for rows in by_type.values():
+        rows.sort(key=lambda c: (c.created or "", c.id))
+        for i, c in enumerate(rows, 1):
+            out[c.id] = c.ctype.label + (f" {i}" if len(rows) > 1 else "")
+    return out
+
+
 def _row(r: sqlite3.Row) -> Connection:
     def j(text: str, default: Any) -> Any:
         try:
@@ -1114,7 +1129,10 @@ def adopt_inline(roster: list[dict], *, dry_run: bool = False) -> AdoptPlan:
             cid = sigs.get(sig) or planned.get(sig)
             if cid is None:
                 ct = TYPES[TYPE_BY_PROVIDER[pid]]
-                label = ct.label + (f" ({sig[1].split('//')[-1]})" if ct.editable_base_url else "")
+                # Never derive a name from the address: names reach non-Admin screens.
+                n_same = sum(1 for c in list_all_ro() if c.type == ct.id) + sum(
+                    1 for s in planned if TYPE_BY_PROVIDER.get(s[0]) == ct.id)
+                label = ct.label + (f" {n_same + 1}" if n_same else "")
                 if dry_run:
                     cid = "<new>"
                     planned[sig] = cid

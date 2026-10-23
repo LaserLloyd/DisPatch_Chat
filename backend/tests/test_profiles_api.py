@@ -386,8 +386,13 @@ def test_a_user_reads_the_presets_and_only_its_allowed_backends(team):
     body = max_.get("/api/me/backends").json()
     assert body["may_choose"] is True
     assert {r["id"] for r in body["connections"]} == {a.id, b.id}
+    # Never the Admin's own name for it (a name may carry an address): the kind plus a number.
+    assert sorted(r["name"] for r in body["connections"]) == ["OpenAI 1", "OpenAI 2"]
+    olive = team["Olive"].get("/api/me/backends")                       # an Admin's editor: real names
+    assert olive.status_code == 200 and olive.json()["may_choose"] is True, olive.text
+    assert sorted(r["name"] for r in olive.json()["connections"]) == ["Probe A", "Probe B"]
     text = json.dumps(body)
-    for leak in ("sk-probe", "base_url", "credential", "api.openai.com", "in_use_by"):
+    for leak in ("sk-probe", "base_url", "credential", "api.openai.com", "in_use_by", "Probe"):
         assert leak not in text, leak
     # The Admin narrows the profile to one connection: only that one is listed.
     r = team["Olive"].put(f"/api/people/{team['ids']['Max']}/backends", json={"allowed": [b.id]})

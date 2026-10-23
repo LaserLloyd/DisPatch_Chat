@@ -272,10 +272,15 @@ async def my_backends(request: Request):
     rows: list[dict[str, Any]] = []
     default = ""
     if may_choose:
-        for c in await asyncio.to_thread(connections.list_all):
+        every = await asyncio.to_thread(connections.list_all)
+        # Non-Admins never see the Admin's name for a connection (it may hold an address or an
+        # account): the kind plus a number. An Admin's own editor shows the real names.
+        labels = ({c.id: c.name for c in every} if caller(request).is_admin
+                  else connections.neutral_labels(every))
+        for c in every:
             if "chat" not in c.capabilities or not backends_policy.permits(prof, c.id):
                 continue
-            rows.append({"id": c.id, "name": c.name, "type": c.type, "type_label": c.ctype.label,
+            rows.append({"id": c.id, "name": labels[c.id], "type": c.type, "type_label": c.ctype.label,
                          "default_model": c.default_model, "models": list(c.models)})
         default = await asyncio.to_thread(backends_policy.resolve_connection, prof, None)
     return {"may_choose": may_choose, "default": default, "connections": rows}

@@ -360,6 +360,24 @@ def test_adoption_reuses_one_connection_per_server_and_moves_only_the_key(tmp_pa
     assert again.created == [] and again.linked == 0
 
 
+def test_adoption_never_names_a_connection_after_its_address(tmp_path, monkeypatch):
+    """A connection's name reaches non-Admin screens; the address must not be in it."""
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    roster = [
+        {"id": "a", "api": {"provider": "custom", "base_url": "http://192.0.2.7:1234/v1", "model": "m"}},
+        {"id": "b", "api": {"provider": "custom", "base_url": "http://192.0.2.6:4321/v1", "model": "m"}},
+    ]
+    dry = connections.adopt_inline([dict(r, api=dict(r["api"])) for r in roster], dry_run=True)
+    assert not any("192.0.2" in a.split("->")[0] for a in dry.actions), dry.actions
+    plan = connections.adopt_inline(roster)
+    assert len(plan.created) == 2
+    names = [connections.get(cid).name for cid in plan.created]
+    assert all("192.0.2" not in n and "1234" not in n for n in names), names
+    assert len(set(names)) == 2, names                               # still told apart
+    labels = connections.neutral_labels(connections.list_all())
+    assert sorted(labels.values()) == ["OpenAI-compatible server 1", "OpenAI-compatible server 2"]
+
+
 def test_adoption_dry_run_creates_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     roster = _roster()
