@@ -788,9 +788,10 @@ def find_orphans(con: sqlite3.Connection, data_dir: Path | str | None, *, grace_
                 continue
             if st.st_mtime > cutoff:
                 continue
-            if referenced(e.name):
-                continue
             p = Path(e.path)
+            # the name under the store (media/ may nest: /media/feed/x.png is keyed "feed/x.png")
+            if referenced(p.relative_to(root).as_posix()):
+                continue
             found.append((p, _rel(data, p), st.st_size))
         if len(found) > ORPHAN_MIN_RECORDS and len(found) > total * ORPHAN_MAX_FRACTION:
             out["refused"][store] = f"{len(found)} of {total} files look unreferenced: that reads as a gap in the index, not as orphans"

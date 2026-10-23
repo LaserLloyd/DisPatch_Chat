@@ -282,7 +282,9 @@ def test_archive_after_n_archives_exactly_the_aged_threads_and_deletes_nothing(s
     # still found by search and openable by id, and the user can un-archive it
     assert con.execute("SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'needle'").fetchone()[0] == 1
     assert scratch.run(lambda d: d.get_thread(ids["old"])) is not None
-    con.execute("UPDATE threads SET is_archived = 0, last_read_at = ? WHERE id = ?", (iso(0), ids["old"]))
+    # Move back exactly as the route does (PATCH archived:false -> Database.set_archived),
+    # without opening the chat: tonight's run must not archive it again.
+    scratch.run(lambda d: d.set_archived(ids["old"], False))
     run(["archive_chats"])
     assert ids["old"] not in _ids(con, "SELECT id FROM threads WHERE is_archived = 1")      # stays un-archived
 
@@ -347,6 +349,19 @@ def test_orphan_sweep_honours_the_grace_period_and_the_trash(scratch):
     # the row whose blob is missing is reported, never deleted
     assert con.execute("SELECT COUNT(*) FROM files WHERE id='f2'").fetchone()[0] == 1
     assert run(["orphan_sweep"])["orphan_sweep"]["rows"] == 0      # idempotent
+
+
+def test_orphan_sweep_keeps_a_nested_media_file_a_message_shows(scratch):
+    """/media/<dir>/<file> is keyed by its path under the store ("feed/pic.png"), not its
+    basename: a picture a message shows is never swept because it sits in a sub-folder."""
+    scratch.admin()
+    root = scratch.root
+    scratch.thread(None, "pack_otter", "nested", messages=[("assistant", "look ![](/media/feed/pic.png)")])
+    os_age(put(root / "media" / "feed" / "pic.png"), 30)
+    os_age(put(root / "media" / "feed" / "lost.png"), 30)
+    out = run(["sync_media_index", "orphan_sweep"])
+    assert (root / "media" / "feed" / "pic.png").exists()
+    assert out["orphan_sweep"]["rows"] == 1 and not (root / "media" / "feed" / "lost.png").exists()
 
 
 def test_orphan_sweep_reports_files_rows_without_a_blob(scratch):

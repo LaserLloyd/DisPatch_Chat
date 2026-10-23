@@ -2064,9 +2064,14 @@ class Database:
     async def set_archived(self, thread_id: str, archived: bool) -> None:
         """Archive (True) or move back to the rail (False). The row, its messages and its
         position (``updated_at``) are untouched, so a moved-back chat lands where it was."""
-        await self.db.execute(
-            "UPDATE threads SET is_archived = ? WHERE id = ?", (1 if archived else 0, thread_id)
-        )
+        if archived:
+            await self.db.execute("UPDATE threads SET is_archived = 1 WHERE id = ?", (thread_id,))
+        else:
+            # moved back by hand: counts as a visit, or tonight's "archive after N months"
+            # (which skips a chat read since the cutoff) would archive it again
+            await self.db.execute(
+                "UPDATE threads SET is_archived = 0, last_read_at = MAX(COALESCE(last_read_at, ''), ?) "
+                "WHERE id = ?", (now_iso(), thread_id))
         await self.db.commit()
 
     async def delete_thread(self, thread_id: str) -> None:
