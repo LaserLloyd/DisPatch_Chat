@@ -1597,3 +1597,9 @@ App packages (their own `locales/*.json`, English reworded, the other seven stil
 
 - `apps/jobboard`: `locked`, `detail.locked` (a 403 is "this profile cannot open it", not "unlock").
 - `apps/imagestudio`: `locked`.
+
+## WP-SCALE-FE keys
+
+New in 4.0 wave 3b, English copies in the other seven locales (WP-LOC translates them): `archive.back`, `archive.would` (`{count}`), `archive.moved_back`, `storage.total`, `storage.measured` (`{when}`), `storage.blocked`, `storage.by_area`, `storage.started`, `storage.scanning`, `retention.months_label`, `retention.hint`.
+
+The Foundation keys `storage.*`, `retention.*`, `archive.*` and `media.expired` are used as created.
