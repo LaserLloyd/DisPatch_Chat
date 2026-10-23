@@ -896,9 +896,11 @@ DisPatch ships with no model and talks to no cloud until you tell it to. Making
 it answer takes about a minute and needs no agent stack:
 
 1. Open **⚙ Settings → AI & Connections**.
-2. Choose the bot to connect (Atlas by default, any other direct-API bot, or a
-   new one), pick a provider, paste a key if it needs one, press **Test**, pick a
-   model from the list, press **Connect**.
+2. Press **Add a connection** (or **Set up everything with one provider**), pick
+   a provider, paste a key if it needs one, press **Test**, pick a model from the
+   list and **Save**.
+3. In **Settings → Characters**, open Atlas's **Details** (or any other
+   direct-API bot's) and pick that connection.
 
 That is it. The bot keeps its threads and history and works like every other
 conversation in the app. Behind the scenes this fills in the bot's `advisor:`
