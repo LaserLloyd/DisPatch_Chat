@@ -49,7 +49,8 @@ long-term support branches.
 - Cross-site scripting, CSRF, or WebSocket cross-origin hijacking.
 - Leaks of secrets, tokens or hashes through logs, error responses, or the
   diagnostics dashboard.
-- Anything that lets a limited/guest session act as a full one.
+- Anything that lets a profile act beyond its role, or read another profile's
+  private data.
 
 **Out of scope:**
 
@@ -75,16 +76,21 @@ Understanding these assumptions will tell you whether something is a bug:
 - **Messages are not end-to-end encrypted.** The server necessarily sees
   plaintext — it stores conversation history and hands messages to agent
   backends. Transport is protected by TLS; storage is protected by the host.
-- **There is one account today, not many.** DisPatch is currently
-  single-account: one PIN grants full access, and everyone who unlocks sees
-  everything. Per-person accounts are designed and not built
-  (`docs/design/multi-user.md`), so "user A can read user B's messages" is not
-  yet a meaningful report. What *is* a real bug, and worth reporting, is a
-  crossing of the boundary that does exist: a Safe-Mode (no-PIN) client
-  reaching anything reserved for an unlocked session — an unsafe bot, media,
-  a mutating endpoint, the harness pane, the dashboard.
-  DisPatch is in any case not designed to withstand a determined insider who
-  also controls the host.
+- **Each profile is its own boundary.** DisPatch 4.0 has profiles with three
+  roles (Admin, User, Basic), private chats per profile, and a shared default
+  profile, "DisPatch", that a device lands on when nobody is signed in. What is a
+  real bug, and worth reporting, is a crossing of one of these boundaries:
+  - a profile reading another profile's chats, bots, files or Image Studio
+    history (Admins included: an Admin manages profiles but does not read
+    their chats);
+  - a User or Basic profile reaching a permission it does not hold, or an
+    Admin-only route;
+  - the shared DisPatch profile running agents or cloning voices;
+  - a machine call without the install's API key succeeding where loopback
+    trust is off.
+  The full table is in `docs/security.md#what-each-role-may-do`. DisPatch is in
+  any case not designed to withstand a determined insider who also controls the
+  host.
 - **Anything exposed to the internet belongs behind TLS.** The shipped
   deployment configurations do this. See `docs/remote-access.md`.
 
@@ -96,11 +102,13 @@ resolves that path on the server and, if it is a readable regular file with a
 recognised media extension inside one of the allowed media bases (the configured
 media directory, `~/.openclaw/media`, and `/tmp/openclaw` when that is a real
 directory owned by the service account), copies the bytes into the media store
-and rewrites the directive to a `/media/<uuid>` URL that any unlocked session
-(and, subject to the Safe-Mode redactor, any locked one) can fetch. This is by
+and rewrites the directive to a `/media/<uuid>` URL that anyone holding the
+address can fetch (media is protected by an unguessable name, not a per-owner
+check; see `docs/security.md`). This is by
 design — it is how on-box agents deliver pictures they have just produced. The
-consequence: anyone who can reach that endpoint — a process on the loopback
-interface, or a remote caller holding the configured `api_token` — can publish
+consequence: anyone who can reach that endpoint — a caller holding the configured
+`api_token`, or a process on the loopback interface while
+`machine_loopback_trust` is on — can publish
 any media-extension file readable by the service account under those bases into
 the chat. The inbound API key is therefore a scoped file-read capability, not
 merely a "post a message" capability. Keep the token secret, keep sensitive

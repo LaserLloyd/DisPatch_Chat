@@ -405,7 +405,7 @@ export async function mountSchemaRows(host, opts = {}) {
   if (!defs.length) return null;
 
   const ctx = {
-    // Host-control (owner_only) settings need admin_system: the Owner and Admins. A profile merely
+    // Host-control (owner_only) settings need admin_system, which every Admin holds. A profile merely
     // granted manage_settings is refused by the server; the page just doesn't offer it.
     owner: opts.role === 'owner' || opts.role === 'admin' || opts.role == null,
     async commit(row, value, control) {

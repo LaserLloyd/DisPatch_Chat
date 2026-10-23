@@ -113,7 +113,6 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`folder_refused`](#folder_refused) | 400 | Not an existing folder, or a folder that is always refused |
 | [`folder_too_broad`](#folder_too_broad) | 400 | That folder is too broad to share — pick a folder inside it |
 | [`forbidden`](#forbidden) | 403 | Forbidden |
-| [`force_needs_session`](#force_needs_session) | 403 | force needs an unlocked session |
 | [`frontend_missing`](#frontend_missing) | 404 | no index |
 | [`frontend_missing_2`](#frontend_missing_2) | 404 | frontend not built |
 | [`gateway_abort_failed`](#gateway_abort_failed) | 502 | The gateway would not stop that turn |
@@ -226,7 +225,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`reaction_not_found`](#reaction_not_found) | 404 | reaction not found |
 | [`recovery_needs_new_pin`](#recovery_needs_new_pin) | 409 | Choose a new PIN: other people have profiles here, so the lock cannot simply be removed. |
 | [`refresh_running`](#refresh_running) | 409 | A refresh is already running for this tool |
-| [`remember_device_required`](#remember_device_required) | 403 | Notifications need a remembered device: lock, then unlock with "Remember this device" ticked. |
+| [`remember_device_required`](#remember_device_required) | 403 | Notifications need a remembered device: sign out, then sign in again with "Keep this device signed in" ticked. |
 | [`reply_in_progress_delete`](#reply_in_progress_delete) | 409 | Cannot delete messages while a reply is in progress |
 | [`reply_in_progress_edit`](#reply_in_progress_edit) | 409 | Cannot edit messages while a reply is in progress |
 | [`reset_stale`](#reset_stale) | 409 | What would be deleted has changed. Look at the numbers again before confirming. |
@@ -262,7 +261,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`transcript_missing`](#transcript_missing) | 404 | No transcript for that session |
 | [`unauthorized`](#unauthorized) | 401 | Authentication required. |
 | [`unknown_image_job`](#unknown_image_job) | 404 | Unknown image job |
-| [`unlock_first`](#unlock_first) | 403 | Unlock with your PIN first |
+| [`unlock_first`](#unlock_first) | 403 | Sign in as the main Admin first |
 | [`unsupported_media_type`](#unsupported_media_type) | 415 | Reaction images must be PNG, JPEG, GIF, WebP or AVIF |
 | [`use_delete_route`](#use_delete_route) | 409 | Delete a profile with POST /api/people/{id}/delete (preview the counts first). |
 | [`use_household_route`](#use_household_route) | 409 | Set the household bots with PUT /api/people/{id}/household-bots. |
@@ -944,7 +943,7 @@ HTTP **502** - The AI did not return a usable bot. Try again, or add more detail
 
 HTTP **503** - No AI connection is available for building a bot.
 
-**Fix:** Connect an AI in Settings (AI models), or ask an Admin to allow one for your profile.
+**Fix:** Add a connection in Settings → AI & Connections, or ask an Admin to allow one for your profile.
 
 ## empty_file
 
@@ -1041,14 +1040,6 @@ HTTP **400** - That folder is too broad to share — pick a folder inside it
 HTTP **403** - Forbidden
 
 **Fix:** You are not allowed to do this; sign in as a profile with permission.
-
-## force_needs_session
-
-<a id="force_needs_session"></a>
-
-HTTP **403** - force needs an unlocked session
-
-**Fix:** Sign in first; --force is not available to a machine.
 
 ## frontend_missing
 
@@ -1950,9 +1941,9 @@ HTTP **409** - A refresh is already running for this tool
 
 <a id="remember_device_required"></a>
 
-HTTP **403** - Notifications need a remembered device: lock, then unlock with "Remember this device" ticked.
+HTTP **403** - Notifications need a remembered device: sign out, then sign in again with "Keep this device signed in" ticked.
 
-**Fix:** Sign out and in again with "Remember this device" ticked to get notifications.
+**Fix:** Sign out and in again with "Keep this device signed in" ticked to get notifications.
 
 ## reply_in_progress_delete
 
@@ -2238,9 +2229,9 @@ HTTP **404** - Unknown image job
 
 <a id="unlock_first"></a>
 
-HTTP **403** - Unlock with your PIN first
+HTTP **403** - Sign in as the main Admin first
 
-**Fix:** Sign in as the owner first, then retry.
+**Fix:** Sign in as the main Admin first, then retry.
 
 ## unsupported_media_type
 

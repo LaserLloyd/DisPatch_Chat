@@ -3,8 +3,7 @@
 ``advisor.tools`` offers OpenAI tool calling over app/livetools. The loop lives
 in ``advisor._tool_rounds``: stream a round; when the model called tools, run
 them, append the call and the (data-marked) results, go again; the last round
-is always without tools so the model must answer. A locked (Safe-Mode) turn is
-offered only ``tools_locked``.
+is always without tools so the model must answer.
 """
 from __future__ import annotations
 

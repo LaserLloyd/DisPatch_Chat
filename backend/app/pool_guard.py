@@ -666,7 +666,7 @@ def refill_failure_stats(window_s: float = 24 * 3600.0) -> dict:
     which is how sixty identical rig-outage refusals sat behind one number for
     a day. The breakdown separates "the renderer is down" from "the GPU is
     busy" from "the host did not answer" without putting a prompt, a bot name
-    or a rig log line on a route a locked device can reach.
+    or a rig log line on a route a signed-out device or a Basic profile can reach.
     """
     cutoff = time.time() - window_s
     recent = [f for f in _REFILL_FAILURES if f["at"] >= cutoff]

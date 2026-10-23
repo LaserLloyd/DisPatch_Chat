@@ -284,7 +284,7 @@ What each feature needs, and what a fresh install shows without it.
 | Web Push | the https address | — | Settings → Appearance | explains it needs https |
 | File Server, Local Viewer, quick actions, profiles | nothing | — | built in | — |
 
-Known gaps (tracked for a later release): the Plugins tab's "not available" rows
+Known gaps (tracked for a later release): the "not available" rows in Settings → Plugins & Apps
 for built-in panels do not yet say what each needs; Add bot → Agent does not yet
 warn when OpenClaw is missing; the Job Board is listed even with no agent runtime;
 quick actions that ask for lookups are offered to bots without them.

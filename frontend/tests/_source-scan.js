@@ -64,12 +64,14 @@ function regexCanStart(src, i) {
  * newlines so offsets and line numbers are unchanged.
  *
  * @param {string} src
- * @param {{keepStrings?: boolean}} [opts] - keepStrings leaves quoted string
- *   CONTENT in place (i18n-keys needs to read `t('some.key')`) while still
- *   removing comments, templates and regexes.
+ * @param {{keepStrings?: boolean, keepTemplates?: boolean}} [opts] - keepStrings
+ *   leaves quoted string CONTENT in place (i18n-keys needs to read `t('some.key')`)
+ *   while still removing comments, templates and regexes; keepTemplates also
+ *   leaves template literals (with their substitutions) in place.
  */
 export function blankNonCode(src, opts = {}) {
   const keepStrings = !!opts.keepStrings;
+  const keepTemplates = !!opts.keepTemplates;
   const out = src.split('');
   const blank = (from, to) => {
     for (let k = from; k < to && k < out.length; k++) {
@@ -134,7 +136,7 @@ export function blankNonCode(src, opts = {}) {
         if (depth > 0 && d === '`') { depths.push(0); i += 1; continue; }
         i += 1;
       }
-      blank(start, i);
+      if (!keepTemplates) blank(start, i);
       continue;
     }
 

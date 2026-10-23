@@ -570,7 +570,7 @@
       "machine": [],
       "mcp": null,
       "permission": "manage_characters",
-      "title": "Change a character (including its audience)",
+      "title": "Change a character (including whether it is hidden)",
       "ui": "api.patchBot",
       "ws": []
     },

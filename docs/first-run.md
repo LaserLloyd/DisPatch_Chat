@@ -28,7 +28,7 @@ listens on is set by how you start it**:
 - *My home network*: `--host 0.0.0.0` (Docker: `BIND_ADDR=0.0.0.0`). The wizard refuses to choose this before an Admin
   exists. Phones and tablets need **HTTPS** for install-to-home-screen, push notifications and the microphone: put DisPatch
   behind a reverse proxy (the compose file has a Caddy profile) or Tailscale Serve - see [remote-access.md](remote-access.md).
-  Set `system.public_url` to the https address so the Health tab knows the connection is encrypted.
+  Set `system.public_url` to the https address so Settings → System knows the connection is encrypted.
 
 If what you chose and what DisPatch reports it is listening on disagree, the wizard says so.
 

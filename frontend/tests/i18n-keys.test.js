@@ -118,15 +118,24 @@ const DYNAMIC = [
   // js/people.js + js/signin.js  activity table:  t(`people.col_${c}`), profiles.js ACTIVITY_COLUMNS
   { re: /^people\.col_(login|turn|thread|upload|feedback)$/,
     built: 'people.js / signin.js  t(`people.col_${c}`)' },
-  // js/people.js  auditKind():  t(`people.audit_${kind}`) for the kinds the server writes (people_api._audit, main.py)
-  { re: /^people\.audit_[a-z_]+$/, built: 'people.js  t(`people.audit_${kind}`)' },
-  // 4.0 chat-first profiles: keys the Foundation package created AHEAD of the wave-3
-  // packages that use them (storage, image retention, chat archiving, expired media:
-  // WP-SCALE-OPS / WP-SCALE-FE). The wave-2 namespaces were released at INT-2, so every
-  // profiles/reset/mybots/editor/aibuild/perms/copybot/lock key is now checked like any other.
-  // WP-LOC (wave 3b) removes whatever is left here.
-  { re: /^(voices|storage|retention|archive|media)\.[a-z_]+$/,
-    built: '4.0 Foundation: reserved for the wave-3 packages' },
+  // js/people.js  auditKind():  t(`people.audit_${kind}`), dots in the kind read as `_`
+  // (plugin.approve -> audit_plugin_approve). EXPLICIT list of the kinds the server writes
+  // with category="audit" (people_api, main.py, recovery.py, cli.py, backup_api.py,
+  // plugins_api.py, agents_api.py, agents_service.py); a kind without a label shows raw.
+  // device_bound is no longer written (4.0 removed device binding) but stays as a history
+  // label: upgraded installs still have 3.x rows of that kind in their activity table.
+  { re: new RegExp('^people\\.audit_(' + [
+    'login_failed', 'owner_created', 'owner_reset', 'owner_password_reset',
+    'profile_created', 'profile_updated', 'profile_deleted',
+    'pin_set', 'pin_cleared', 'pin_changed', 'password_set', 'password_changed',
+    'signed_out', 'device_removed', 'device_bound', 'recovered', 'recovery_failed',
+    'api_token_changed', 'support_bundle', 'plugin_approve',
+    'agent_created', 'agent_changed', 'agent_deleted', 'agent_credentials', 'agent_secret',
+    'agent_settings', 'agent_task_started', 'agent_task_sent', 'agent_task', 'agent_approval',
+  ].join('|') + ')$'), built: 'people.js  auditKind()' },
+  // js/storage-card.js  t(`storage.${r.key}`), key from areaRows()
+  { re: /^storage\.(database|media|reactions|imagestudio|avatars|avatar_pool|files|voices|backups|trash|stray|rest)$/,
+    built: 'storage-card.js  t(`storage.${r.key}`)' },
   // js/people.js  typeLabel() / typeHint():  t(`people.type_${role}`), role from TYPES (user | basic | admin)
   { re: /^people\.type_(admin|user|basic)(_hint)?$/, built: 'people.js  t(`people.type_${role}`)' },
   // js/people-perms.js  permissionsPanel():  t(`perms.${r.perm}`), perm from PERM_ORDER
@@ -134,9 +143,21 @@ const DYNAMIC = [
     built: 'people-perms.js  t(`perms.${r.perm}`)' },
 ];
 
+// A key counts as used only where it appears as a whole token in CODE (comments
+// stripped, strings kept): `SOURCE.includes(key)` let a key live on through a
+// comment that mentioned it, or as the prefix of a longer key.
+// index.html is NOT run through the JS lexer here (an apostrophe in its text
+// would open a pseudo string); only its HTML comments are blanked.
+const USE_CODE = [readFileSync(join(STATIC, 'index.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, ' ')]
+  .concat(readdirSync(JS_DIR).filter((f) => f.endsWith('.js'))
+    .map((f) => blankNonCode(readFileSync(join(JS_DIR, f), 'utf8'), { keepStrings: true, keepTemplates: true })))
+  .join('\n');
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const usedInCode = (key) => new RegExp(`(?<![\\w.])${escapeRe(key)}(?![\\w])`).test(USE_CODE);
+
 test('every key in en.json is used by the app', () => {
   const dead = flatten(EN).filter((key) => {
-    if (SOURCE.includes(key)) return false;
+    if (usedInCode(key)) return false;
     return !DYNAMIC.some((d) => d.re.test(key));
   });
   assert.deepEqual(dead, [],

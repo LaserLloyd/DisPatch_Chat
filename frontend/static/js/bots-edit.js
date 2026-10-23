@@ -6,7 +6,7 @@
 //   DELETE /api/bots/{id}                                        -> {removed}; 409 for an app bot
 //   (Personality -- PATCH {persona} -- lives in js/personality.js.)
 //
-// Unlike the Safe / Reactions / visible toggles, which wait for the Save
+// Unlike the Reactions / Pool toggles, which wait for the Save
 // button, these act at once (a rename, a new bot and a removal are server
 // facts, not draft state). main.js owns the roster (`bmBots`) and the sidebar;
 // this module only builds controls and talks to the API, reporting back

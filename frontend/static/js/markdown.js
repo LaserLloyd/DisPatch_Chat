@@ -583,7 +583,7 @@ function expandDocDirectives(text, parker) {
   }));
 }
 
-// Strip media from the markdown SOURCE — for Safe Mode. Removing media before
+// Strip media from the markdown SOURCE — for No-Image Mode. Removing media before
 // parsing matters: assigning innerHTML containing an <img> starts the network
 // fetch immediately, even on a detached node, so post-render removal would
 // still hit the server / disk cache.
@@ -970,7 +970,7 @@ function expandViewDirectives(text, parker, noLocal) {
   return subOutsideCode(text, (seg) => seg.replace(/\[\[view:([^\]|]+)(?:\|([^\]]*))?\]\]/g, (_, p, label) => {
     const path = stripFileScheme(p.trim());
     const shown = (label || '').trim() || shortenHome(path);
-    // Safe Mode: the directive degrades to its label as plain text. Leaving
+    // noLocal (a non-Admin): the directive degrades to its label as plain text. Leaving
     // the raw `[[view:…]]` would show the reader syntax instead of words.
     if (noLocal) return shown;
     const card = `<div class="doc-card view-card"><span class="md-doc-icon eye-icon" aria-hidden="true"></span>` +
@@ -1248,7 +1248,7 @@ function ensureRenderer() {
       // file grammar declines it — but it is exactly what the viewer opens as a
       // listing, and it is what agents write when they name a folder.
       const f = parseFilePath(decoded) || parseLocalDir(decoded);
-      // Safe Mode produces no local affordance at all: plain quoted code.
+      // noLocal (a non-Admin) produces no local affordance at all: plain quoted code.
       if (!f || _noLocal) return html;
       return fileLinkHtml(f.path, f.line, html);
     },
@@ -1636,7 +1636,7 @@ export function enhanceContent(container, { noLocal = false } = {}) {
   // renderer already handles the common case; this is the backstop, and the
   // ONLY place that can catch an href the sanitizer left navigable.
   //
-  // `/var/x` matches ALLOWED_URI_REGEXP, so without this a Safe-Mode session
+  // `/var/x` matches ALLOWED_URI_REGEXP, so without this a non-Admin session
   // would be offered a link that navigates the APP's origin to a path that
   // isn't a route. Under noLocal the anchor is replaced by a plain span: the
   // words survive, the affordance does not.
@@ -1731,7 +1731,7 @@ export function enhanceContent(container, { noLocal = false } = {}) {
     // picture did nothing at all. Chat media is stored once, so the original
     // is the same URL — the affordance is what was missing, not the file.
     //
-    // Nothing to gate on here: when media is not allowed (Safe Mode, NIM) the
+    // Nothing to gate on here: when media is not allowed (No-Image Mode) the
     // sanitizer has already stripped <img> from the allowed tags, so an image
     // that exists at this point is one the viewer is permitted to open.
     if (!img.dataset.full && norm) img.dataset.full = norm;
@@ -1799,7 +1799,7 @@ export function installMarkdownHandlers(onToast, { onOpenFile } = {}) {
     }
     // Upstream opens a side panel here; DisPatch has the Local Viewer, so a
     // plain click OPENS the path and the modifier/long-press keeps the old
-    // copy. Without an onOpenFile (Safe Mode, or a host that has no viewer)
+    // copy. Without an onOpenFile (a non-Admin, or a host that has no viewer)
     // copying stays the only behaviour.
     const fileLink = e.target.closest?.('a[data-file-path]');
     if (fileLink) {

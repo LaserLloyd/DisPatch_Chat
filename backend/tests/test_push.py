@@ -97,7 +97,7 @@ def test_a_session_that_is_not_remembered_is_refused(env):
     _enable(30)
     assert _unlock(client, remember=False).status_code == 200
     r = client.post("/api/push/subscribe", json=SUB)
-    assert r.status_code == 403 and "Remember this device" in r.json()["detail"]
+    assert r.status_code == 403 and "Keep this device signed in" in r.json()["detail"]
     assert _subs() == {}
 
 

@@ -99,8 +99,8 @@ class SettingDef(BaseModel):
     unit: str = ""
     binding: str = "store"                   # "store" | "file:<adapter>" (see settings_store.ADAPTERS)
     owner: str = "core"                      # "core" | "voice" | "tool:<id>"
-    #: Host control and access posture: only a caller who may administer the system (the Owner,
-    #: ``admin_system``) can change it - an Admin holding ``manage_settings`` cannot. Set from
+    #: Host control and access posture: only a caller holding ``admin_system`` (every Admin) can
+    #: change it; a profile merely granted ``manage_settings`` cannot. Set from
     #: OWNER_ONLY_PREFIXES, not by hand on each row.
     owner_only: bool = False
     since: int = 1
@@ -150,15 +150,15 @@ _CORE: tuple[SettingDef, ...] = (
     # ============================ SYSTEM ================================= #
     _d("system.public_url", "url", "", "Public address",
        "The address other devices use to reach DisPatch, e.g. https://chat.example.net. An https:// "
-       "address tells the Health tab the connection is encrypted.", "system", section="Network",
+       "address tells Settings → System the connection is encrypted.", "system", section="Network",
        env="DISPATCH_PUBLIC_URL", placeholder="https://chat.example.net"),
     _d("system.behind_tls", "boolean", False, "A reverse proxy provides HTTPS",
-       "Say so when TLS ends at a proxy in front of DisPatch (Caddy, Tailscale Serve) so Health does "
-       "not warn about plain HTTP.", "system", section="Network", env="DISPATCH_BEHIND_TLS"),
+       "Say so when TLS ends at a proxy in front of DisPatch (Caddy, Tailscale Serve) so Settings → System "
+       "does not warn about plain HTTP.", "system", section="Network", env="DISPATCH_BEHIND_TLS"),
     _d("system.network_exposure", "choice", "local", "Who can reach DisPatch",
        "Local only (this computer), or your home network. The listen address itself is set by the "
        "launcher (--host, or BIND_ADDR in the Docker compose file); this records the decision so "
-       "Health can tell you when the two disagree.", "system", section="Network",
+       "the setup wizard can warn when the two disagree.", "system", section="Network",
        choices=["local", "lan"], choice_labels={"local": "This computer only", "lan": "My home network"}),
     _d("system.host", "string", "127.0.0.1", "Listen address (informational)",
        "What DisPatch reports as its own address. The launcher flag (--host) is what binds the port.",
@@ -193,7 +193,7 @@ _CORE: tuple[SettingDef, ...] = (
        "Either way it is kept in this install's secret store (the schedule needs it) and never shown again, "
        "so keep your own copy somewhere else.", "system", section="Backups", level="advanced", secret=True),
     _d("system.log_file", "path", "", "Log file",
-       "Where the Health tab reads log lines from. Empty uses <data folder>/logs/dispatch.log.",
+       "Where Settings → System reads log lines from. Empty uses <data folder>/logs/dispatch.log.",
        "system", section="Diagnostics", level="advanced", env="DISPATCH_LOG_FILE"),
     _d("system.files_total_max", "integer", 20 * 1024 ** 3, "File Server size limit",
        "How much the File Server may hold before uploads are refused (20 GB by default).",
@@ -470,7 +470,7 @@ _CORE: tuple[SettingDef, ...] = (
 )
 
 #: Settings that run a program, name a file or a server the host will contact, or change who can
-#: reach DisPatch and how: host control (``admin_system``), which the Owner and Admins hold and a
+#: reach DisPatch and how: host control (``admin_system``), which every Admin holds and a
 #: profile merely granted ``manage_settings`` does not. The flag keeps its 3.0 name ``owner_only``.
 #: Everything under ``system.`` is here; the rest are the named ones.
 OWNER_ONLY_PREFIXES: tuple[str, ...] = (

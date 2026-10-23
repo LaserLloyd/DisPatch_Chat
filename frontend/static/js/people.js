@@ -568,7 +568,8 @@ function auditList(entries, ctx) {
 // A kind we have words for is localized; anything else is shown as the server
 // wrote it, so a new audit kind is never invisible.
 function auditKind(kind) {
-  const key = `people.audit_${kind}`;
+  // A dotted kind (plugin.approve) would walk a nested path; its key uses `_`.
+  const key = `people.audit_${String(kind).replace(/\./g, '_')}`;
   return has(key) ? t(key) : String(kind);
 }
 
@@ -616,7 +617,7 @@ function activityGroup(ctx) {
     ]));
 }
 
-// ---- Machine access (Owner and Admins) -----------------------------------------------
+// ---- Machine access (Admins) ---------------------------------------------------------
 
 async function machineGroup(ctx) {
   let info;

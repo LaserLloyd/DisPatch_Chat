@@ -42,7 +42,7 @@ function errMessage(e, fallbackKey) {
  *   currentId  the profile already signed in here (switching), or null
  *   onSubmit   async (profile, {pin?, password?, remember?}) -> resolves on
  *              success, rejects with the api Error otherwise
- *   remember   () -> bool, whether the "keep this device unlocked" box is on
+ *   remember   () -> bool, whether the "keep this device signed in" box is on
  * Returns { reset(), pick(id), destroy() }.
  */
 export function renderSignIn(host, { profiles, currentId = null, onSubmit, remember = () => false }) {
@@ -200,7 +200,7 @@ export function renderSignIn(host, { profiles, currentId = null, onSubmit, remem
 // ---- First-run setup -----------------------------------------------------------
 
 /**
- * The "create the Owner" form.
+ * The "create the first Admin" form.
  *   setupRequired  show the Setup token field (network install)
  *   onSubmit       async ({name, password, newPin, setupToken})
  *   onCancel       optional; adds a Cancel/Not now button
@@ -286,7 +286,7 @@ export function setupPage(host, { setupRequired, onSubmit }) {
 
 // ---- Rail chip + menu ----------------------------------------------------------------
 
-/** The label for the chip button, e.g. "Sam, Member". */
+/** The label for the chip button, e.g. "Sam, User". */
 export function chipLabel(profile, role) {
   const name = (profile && profile.name) || t(`role.${role}`);
   return t('chip.label', { name, role: roleLabel(role) });
@@ -347,11 +347,11 @@ export function attachChipMenu(btn, menu, { header, items }) {
   return { open, close, isOpen: () => !menu.hidden };
 }
 
-// ---- Password (Owner / Admin) ------------------------------------------------------------
+// ---- Password (Admins) ------------------------------------------------------------------
 
 /**
  * Set or change YOUR password.
- *   mode        'first' (a PIN-only Owner setting the first one: confirmed with
+ *   mode        'first' (a PIN-only Admin setting the first one: confirmed with
  *               the install PIN, when there is one) | 'change'
  *   needsPin    first mode only: ask for the current PIN
  *   onSubmit    async ({current?, currentPin?, newPassword})

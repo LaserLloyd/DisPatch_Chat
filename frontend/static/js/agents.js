@@ -1,4 +1,4 @@
-// Settings -> AI & Connections -> Agents (Owner and Admin).
+// Settings -> AI & Connections -> Agents (Admins).
 //
 // Four groups in the Settings modal's own .dev-group / .dev-row vocabulary, so every palette applies:
 //
@@ -17,7 +17,7 @@
 //
 // The server enforces everything here. This module decides what to OFFER: the capabilities that
 // are host-level in effect (running a repository's own hooks, local MCP programs, unattended
-// destructive tools) are only enabled for the Owner, because the server refuses them to an Admin.
+// destructive tools) need admin_system, which every Admin holds; the server refuses them to anyone else.
 //
 // Pure-ish: nothing runs at import time; app-shaped things arrive through `deps`.
 
@@ -119,7 +119,7 @@ export function specToForm(agent) {
 /**
  * The request body for POST/PATCH /api/agents, or {error: key} for a number the person mistyped.
  * `spec` carries only what the form sets; the server fills every other default (and validates
- * the lot: quarantine rule, secret names, the Owner-only capabilities).
+ * the lot: quarantine rule, secret names, the admin_system-only capabilities).
  */
 export function formToBody(f) {
   const nums = {
@@ -518,7 +518,7 @@ function addLines(f, key, extra) {
 function mcpRow(m, i, f, owner, repaint) {
   const row = el('div', { class: 'agents-mcp-row' });
   const bindv = (input, key) => { input.value = m[key] ?? ''; input.addEventListener('input', () => { m[key] = input.value; }); return input; };
-  // A local program is code execution on this machine: only the Owner may add one.
+  // A local program is code execution on this machine: only an Admin (admin_system) may add one.
   const stdioOpt = el('option', { value: 'stdio', text: t('agents.mcp_stdio') });
   stdioOpt.disabled = !owner;
   const transport = el('select', { class: 'ui-select' }, [el('option', { value: 'http', text: 'http' }), stdioOpt]);

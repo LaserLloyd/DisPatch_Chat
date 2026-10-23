@@ -235,7 +235,7 @@ export function durationLabel(seconds) {
  *   toast             (message, isError) => void
  *   announce          (message) => void   - optional screen-reader live text
  *   compact           in a chat bubble: only the tail of the timeline, expandable
- *   showOwner         show who started it (an Owner / Admin looking at everyone's)
+ *   showOwner         show who started it (an Admin looking at everyone's)
  *   onChange          (task) => void      - the task row changed (state, cost)
  * }
  */

@@ -68,7 +68,7 @@ async def test_doc_ref_with_a_traversing_stored_name_is_not_read(tmp_path, monke
     assert "x.txt" in out
 
 
-async def test_read_routes_refuse_a_decoy_caller_without_the_middleware(tmp_path, monkeypatch):
+async def test_read_routes_refuse_a_signed_out_caller_without_the_middleware(tmp_path, monkeypatch):
     """The middleware matrix in test_auth_gate pins the 403; this pins the
     in-route check so a future route-table edit cannot silently uncover it."""
     from app import auth

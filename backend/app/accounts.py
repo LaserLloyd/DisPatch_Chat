@@ -9,7 +9,7 @@ Why a synchronous ``sqlite3`` module and not the app's ``aiosqlite`` handle: the
 auth gate, the WebSocket handshake and a dozen sync helpers ask "who is this?" on
 every request. The tables are tiny, the answers are cached in memory (keyed by the
 database path, so a test that points the data dir elsewhere gets a fresh cache), and
-writes are rare (a login, a role change) or one small UPSERT (a budget charge). WAL
+writes are rare (a login, a role change) or one small UPSERT (a usage row). WAL
 mode and ``busy_timeout`` make the second connection safe next to the app's own.
 
 The schema is additive only: ``CREATE TABLE IF NOT EXISTS``, nothing dropped. A 2.x

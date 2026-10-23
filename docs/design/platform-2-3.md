@@ -4,7 +4,8 @@
 > Safe Mode, the locked tier, `tools_locked` or "the PIN" as the line between full and limited
 > access, that model is gone: 4.0 has Admin, User and Basic profiles, a shared no-PIN DisPatch
 > profile that unsigned devices land on, and private chats. The current rules are in
-> [../security.md](../security.md); the 4.0 design record is in [multi-user.md](multi-user.md).
+> [../security.md](../security.md); the 4.0 change list is the [CHANGELOG 4.0.0 entry](../../CHANGELOG.md#400--2026-10-23);
+> [multi-user.md](multi-user.md) is the superseded 3.0 record.
 
 *Design note, 2026-10-14. The brief, in the owner's words: "setup DisPatch as a
 platform that facilitates these chats, with speech being an add-on package, tools

@@ -46,7 +46,7 @@ tag per-job from the chat itself.
 Auth matrix (unchanged in effect by the move to an app):
 - The whole mounted API is on the shell's machine-inbound surface, so an
   on-box agent (loopback, or a remote holding the api_token) reaches every
-  route without a PIN-derived session; a locked browser never does.
+  route without a PIN-derived session; a signed-out browser never does.
 - Every write route (vote, applied, find, feedback, tags, archive,
   profile/recompute) calls ``ctx.require_access``: a full operator session,
   a no-PIN install, or an on-box machine. Since 2026-09-15 none of them was

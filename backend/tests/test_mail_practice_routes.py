@@ -55,7 +55,7 @@ def _unlock(client: TestClient, pin: str = "1234") -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Locked / Safe Mode gating — the load-bearing requirement for both tabs.
+# Signed-out gating — the load-bearing requirement for both tabs.
 # --------------------------------------------------------------------------- #
 
 
@@ -94,8 +94,8 @@ def test_signed_out_blocked_prefixes_cover_mail_and_practice():
     assert main._signed_out_blocked("POST", "/api/practice/clients/c1/actions/build") is True
     # The DisPatch-local "site links" overlay is a sibling feature under a
     # sibling path, not literally /api/practice/* — it must be covered by the
-    # SAME belt-and-braces prefix, or a decoy session could read/write it even
-    # though _require_practice's own _deny_decoy_mutation also blocks it.
+    # SAME belt-and-braces prefix, or a signed-out session could read/write it
+    # (the route's own use_tools:practice requirement is the second layer).
     assert main._signed_out_blocked("GET", "/api/practice-links/c1") is True
     assert main._signed_out_blocked("PUT", "/api/practice-links/c1") is True
 

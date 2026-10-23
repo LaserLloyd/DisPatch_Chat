@@ -5595,7 +5595,7 @@
         "summary": "Api Token Get"
       },
       "post": {
-        "description": "Rotate the machine API key (shown once) and/or change how machines are\nrecognised. The Owner and Admins.",
+        "description": "Rotate the machine API key (shown once) and/or change how machines are\nrecognised. Admins.",
         "operationId": "api_token_set_api_auth_api_token_post",
         "requestBody": {
           "content": {
@@ -13726,7 +13726,7 @@
     },
     "/api/people/{profile_id}/password": {
       "post": {
-        "description": "Set another Admin's password (the Owner or an Admin). Your own is /api/auth/password;\nthe Owner's is the Owner's alone.",
+        "description": "Set another Admin's password (an Admin). Your own is /api/auth/password;\nthe protected main Admin's is theirs alone.",
         "operationId": "people_set_password_api_people__profile_id__password_post",
         "parameters": [
           {

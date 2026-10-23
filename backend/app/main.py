@@ -428,9 +428,9 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # fd on the file after re-claiming would drop the new lock with it.
     _release_instance_lock(app)
     app.state.instance_lock = _claim_single_instance()
-    # Data migrations (accounts, audience, security keys), with a backup first. A
-    # failure aborts startup: better a refusal with a backup in place than a
-    # half-migrated install serving traffic.
+    # Data migrations (accounts, ownership, profiles, security keys), with a
+    # backup first. A failure aborts startup: better a refusal with a backup in
+    # place than a half-migrated install serving traffic.
     report = await asyncio.to_thread(migrate.run)
     if report.applied:
         log.info("migrated the data directory to %s: %s%s", migrate.TARGET_VERSION,
@@ -1652,9 +1652,8 @@ def _quote_excerpt(content: str | None) -> str:
     """A short, media-free preview of a message for a reply quote.
 
     Media/doc directives are stripped first (see _strip_media_text) — the
-    result is stored on the QUOTING message's own metadata, so a locked
-    device rendering its quote chip needs no further lookup of the (possibly
-    unsafe-bot) original.
+    result is stored on the QUOTING message's own metadata, so a reader
+    rendering the quote chip needs no lookup of the original.
     """
     text = (_strip_media_text(content) or "").strip()
     if len(text) > _REPLY_EXCERPT_MAX:
@@ -1951,7 +1950,7 @@ def _on_box_machine(request: Request) -> bool:
     The same three-part test the machine branch of the auth gate applies:
     loopback socket, no proxy in front, and no browser fingerprint. It grants
     nothing on its own — callers use it to decide whether a response may carry
-    operator detail that a locked browser tab must not see.
+    operator detail that a browser tab must not see.
     """
     return (_loopback_socket(request) and not _proxied_request(request)
             and not _browser_request(request))
@@ -7987,8 +7986,8 @@ def _push_device_key(request: Request) -> str | None:
         raise HTTPException(403, "Notifications need a signed-in, remembered device.")
     if not session.persistent:
         raise HTTPException(
-            403, "Notifications need a remembered device: lock, then unlock "
-                 "with \"Remember this device\" ticked.")
+            403, "Notifications need a remembered device: sign out, then sign in "
+                 "again with \"Keep this device signed in\" ticked.")
     return auth.device_hash(session.token)
 
 
@@ -8296,7 +8295,7 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
     # ---- already claimed: only the Owner, with the current credential, may change it
     sess = _session_of(request)
     if sess is None or not pr.is_protected:
-        return JSONResponse({"detail": "Unlock with your PIN first",
+        return JSONResponse({"detail": "Sign in as the main Admin first",
                              "error": errors.envelope("unlock_first")}, status_code=403)
     owner = accounts.get_owner()
     ok = (cfg.pin_set and auth.verify_pin(current)) or bool(
@@ -11416,7 +11415,7 @@ async def _prune_avatar_snapshots() -> None:
 
 
 def _bot_allows_quick_actions(bot_id: str | None) -> bool:
-    """False when the bot opted out with `quick_actions: false` (the kids' bots)."""
+    """False when the bot opted out with `quick_actions: false`."""
     bot = config.get_bot(bot_id) if bot_id else None
     return bot is None or bot.quick_actions
 

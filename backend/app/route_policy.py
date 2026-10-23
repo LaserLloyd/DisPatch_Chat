@@ -10,7 +10,7 @@ with no entry (fail closed).
 Reading an entry::
 
     ("POST", "/api/bots", R(MANAGE_CHARACTERS))
-        needs the manage_characters permission (Owner, Admin; or a profile granted it)
+        needs the manage_characters permission (Admins, or a profile granted it)
     ("GET",  "/api/bots", R(USE_CHAT, scoped=True, machine=[BOTS_READ]))
         any role that can chat; a caller is let through but the handler narrows the
         list to the characters ``characters.may_use`` allows it. A machine holding the
@@ -238,7 +238,7 @@ _r("POST", "/api/tasks/{task_id}/dismiss", _R(P.APPROVE_AGENT_ACTIONS))
 _r("POST", "/api/approvals/{request_id}", _R(P.APPROVE_AGENT_ACTIONS, note="allow or deny one tool call; destructive tools are asked every time"))
 
 # --------------------------------------------------------------------------- #
-# Settings / system / host control (Owner and Admins: admin_system)
+# Settings / system / host control (Admins: admin_system)
 # --------------------------------------------------------------------------- #
 _r("GET", "/api/openapi.json", _R(P.MANAGE_SETTINGS, machine=[M.OPENAPI]))
 _r("POST", "/api/guide/seed", _R(P.MANAGE_SETTINGS, machine=[M.GUIDE_SEED]))
@@ -280,7 +280,7 @@ for _path, _m in (
 ):
     _r(_m, _path, _R(P.MANAGE_CONNECTIONS))
 _r("GET", "/api/characters", _R(P.USE_CHAT, scoped=True, machine=[M.BOTS_READ],
-                                note="the characters this caller may talk to (audience and profile list)"))
+                                note="the characters this caller may talk to (household list, own personal characters)"))
 for _path, _m in (
     ("/api/characters/all", "GET"), ("/api/characters/personas", "GET"), ("/api/characters/order", "PUT"),
     ("/api/characters", "POST"), ("/api/characters/{character_id}", ("GET", "PATCH", "DELETE")),
@@ -597,7 +597,7 @@ def extension_requirement(method: str, path: str) -> Requirement:
     """What one request on an add-on's own routes needs. While an add-on has declared
     per-profile clones: ``use_voice`` for the voice reads (status, preview, the voice list,
     one voice and its recordings) and ``voice_lab`` for creating and changing one's own
-    clones; ``manage_plugins`` (Admin) for everything else. Otherwise the 3.x table:
+    clones; ``manage_plugins`` (Admin) for everything else. Otherwise the shared-voice table:
     ``use_voice`` for the reads in EXTENSION_USE_ROUTES, ``manage_plugins`` for the rest."""
     from . import ext_profile_hooks
     m = "GET" if method.upper() == "HEAD" else method.upper()

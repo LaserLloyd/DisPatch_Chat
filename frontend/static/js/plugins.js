@@ -3,7 +3,7 @@
 //
 // Four groups, in the Settings modal's own group/row style (.dev-group /
 // .dev-row, so every palette applies and this file carries no colour), in
-// the order an Owner uses them (3.2):
+// the order an Admin uses them (3.2):
 //
 //   Add-ons          one row per extension the host knows (GET /api/plugins):
 //                    name, version, state and an install-wide switch bound to

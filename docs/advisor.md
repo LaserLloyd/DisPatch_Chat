@@ -168,7 +168,7 @@ up as a collapsible notice row (`🔧 Weather: Lisbon, Portugal`) before the ans
 Every profile can use the lookups (`use_lookups`): they are read-only and the fetch cannot reach the box or
 the LAN. List the names in `tools:` to narrow a bot, for example to drop `fetch_url`. There is no separate
 locked list any more (the 3.x `tools_locked` key is gone).
-Switching a bot's lookups off in the Bots tab (or `PATCH /api/bots/{id}`
+Switching a bot's lookups off in its Details in Settings → Characters (or `PATCH /api/bots/{id}`
 `tools: false`) while `tools:` is a list parks that list under `tools_picked`
 and restores it when the switch goes back on. Both MiniMax-M3 and
 a llama.cpp-style server (StudioForge) make tool calls; a provider that

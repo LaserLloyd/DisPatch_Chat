@@ -37,7 +37,7 @@ WANTED = {"default", "sleek", "catgirl", "challenger", "contrarian",
 
 #: Presets are pure character (owner, 2026-10-14): no ethics, limitation or
 #: disclaimer phrasing, nothing that talks about rules or tools. The tier rules
-#: are appended by the code (RULES / LOCKED_RULES), never by a preset.
+#: are appended by the code (RULES / NO_DISPATCH_RULES), never by a preset.
 BANNED = [r"\bas an ai\b", r"\bai (language )?model\b", r"\bi can'?t\b", r"\bi cannot\b",
           r"\bi'?m (not )?able to\b", r"ethic", r"\bappropriate", r"\bharm", r"disclaimer",
           r"\bsfw\b", r"\bnsfw\b", r"\bsafety\b", r"\bsafe\b", r"\brefus", r"\bpolicy\b",
@@ -110,7 +110,7 @@ def test_the_preset_route_refuses_locked_and_cookieless(env):
 def test_bots_all_rows_carry_the_personality(env):
     c = _unlocked(env)
     c.patch("/api/bots/atlas", json={"persona": "Secret-ish {name} voice."})
-    # The public roster (also what Safe-Mode devices and the WS frame get)
+    # The public roster (also what non-Admin profiles and the WS frame get)
     # never carries a persona; only the full-access row does.
     assert "Secret-ish" not in c.get("/api/bots").text
     assert all("persona" not in b for b in c.get("/api/bots").json()["bots"])

@@ -33,8 +33,8 @@
 // else), so a hash-restore of such a tool opens the pane with a card and one
 // button. A framed tool that turns out to be unembeddable, unreachable, empty
 // or stuck gets the same themed card with "Open in a new window" rather than
-// a blank pane. `open` only moves WHERE a page opens: every tier gate on WHO
-// may open it (Safe Mode, the loopback rule) runs first, unchanged.
+// a blank pane. `open` only moves WHERE a page opens: every gate on WHO
+// may open it (the profile's permissions, the loopback rule) runs first, unchanged.
 //
 // Every opener, builtin or generic, puts `tool-full` on <body>: the thread
 // column goes away and the pane owns the whole content area. Closing takes the
@@ -418,7 +418,7 @@ const APPS_ICON = [
 
 // Bots parked in the menu (menubots.js decides WHICH; main.js hands the rows
 // over on every sidebar repaint via setParkedBots): [{id, name, avatar(),
-// dot, active, open()}]. Ignored in Safe Mode, like the placement itself.
+// dot, active, open()}].
 let parked = [];
 let menuOpen = false;
 let menuMode = 'tools';     // 'tools' (tools + parked) | 'bots' (parked only — no tools to list)
@@ -438,7 +438,7 @@ function visibleParked() {
 
 // The static rail buttons the person moved into this popup (js/railmenu.js puts
 // the real elements into #tools-more). Only the visible ones count: a button
-// hidden for this profile stays hidden wherever it sits. Never in Restricted.
+// hidden for this profile stays hidden wherever it sits.
 function moreItems() {
   const host = $('tools-more');
   if (!host) return [];
@@ -1081,7 +1081,7 @@ export function openTool(id, { launch = true } = {}) {
     const opener = b.open ? () => b.open(b.id) : (deps.openers && deps.openers[b.feature]);
     if (typeof opener !== 'function') return false;
     // Only once the pane's own probe found the feature on (the rail's rule):
-    // the tab is another way into the SAME unlocked-only page, never a way
+    // the tab is another way into the SAME gated page, never a way
     // around its gate. No address from here (loopback seen off the host) →
     // the pane, whose notes explain why.
     if (tool && openMode(tool) === 'window' && deps.builtinOn(b.feature)
@@ -1381,7 +1381,7 @@ export function hashToolId(hash = location.hash) {
   try { return decodeURIComponent(m[1]); } catch { return null; }
 }
 
-/** Open the tool named in the URL hash, if any. Unlocked only (see spec). */
+/** Open the tool named in the URL hash, if any (the tool's own gate still applies). */
 export function openFromHash() {
   const id = hashToolId();
   if (!id || !deps) return false;

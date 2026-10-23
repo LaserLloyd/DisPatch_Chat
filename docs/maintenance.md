@@ -17,7 +17,7 @@ the migration notes; this page covers the housekeeping.
   maintenance marker `~/.local/state/openclaw/maintenance` exists. If the marker appears in the
   middle of a run, the run stops before its next step and records why.
 * A run that was missed (the server was off at 04:30) happens ten minutes after the next start.
-* An Admin can run it on demand: **Settings > Health > Storage > Run now**
+* An Admin can run it on demand: **Settings → System → Storage → Run now**
   (`POST /api/maintenance/run`), or `uv run python -m app.maintenance run [--dry-run] [--step NAME]`.
 * One run at a time (a process-wide lock). It uses its own database connection with a busy
   timeout and deletes in **batches of 5,000 rows** with a short pause between them, so a request
@@ -188,6 +188,6 @@ A hard-linked file is counted once, so the total matches `du`.
 
 ## Reading a failed step
 
-Settings > Health > Storage shows each step of the last run; a step with an error is red with the
+Settings → System → Storage shows each step of the last run; a step with an error is red with the
 message. The same rows are in the `maintenance_runs` table. Common causes: a locked database for
 longer than the busy timeout (the next run retries), a read-only data folder, a full disk.

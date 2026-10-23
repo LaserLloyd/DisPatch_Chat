@@ -194,15 +194,15 @@ LLM_ROUTES = [
 def test_sessionless_caller_is_refused_when_a_pin_is_set(llm_env, method, path, body):
     client = llm_env()
     _unlock(client)                       # sets a PIN and hands us a session
-    client.cookies.clear()                # …and now we are Safe Mode
+    client.cookies.clear()                # …and now we are signed out
     r = client.request(method, path, json=body)
     assert r.status_code in (401, 403)
     assert "unlock" in r.text.lower() or "sign in" in r.text.lower()
 
 
 @pytest.mark.parametrize("method,path,body", LLM_ROUTES)
-def test_decoy_is_blocked_by_the_middleware_too(llm_env, method, path, body):
-    """Belt-and-braces: the prefix is in _signed_out_blocked, so a limited session is
+def test_signed_out_is_blocked_by_the_middleware_too(llm_env, method, path, body):
+    """Belt-and-braces: the prefix is in _signed_out_blocked, so a signed-out caller is
     turned away one layer before the route's own dependency runs."""
     assert main._signed_out_blocked(method, path) is True
     client = llm_env()
@@ -408,7 +408,7 @@ def test_public_bot_list_exposes_the_provider_but_no_url_or_key(llm_env):
         "provider": "openai", "model": "gpt-4o", "api_key": "sk-secret-abc"})
     body = client.get("/api/bots").text
     assert "sk-secret-abc" not in body
-    assert "api.openai.com" not in body, "Safe Mode has no business knowing the URL"
+    assert "api.openai.com" not in body, "a non-Admin has no business knowing the URL"
     entry = next(b for b in client.get("/api/bots").json()["bots"]
                  if b["id"] == "llm-openai")
     assert entry["api_provider"] == "openai"

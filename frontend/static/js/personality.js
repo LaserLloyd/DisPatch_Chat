@@ -8,8 +8,7 @@
 // text the bot runs with) and `persona_custom`. A direct-API bot's text is
 // `advisor.persona`, a legacy-API bot's `api.system_prompt`: the same field the
 // AI models Connect panel writes, so the two never disagree. The text is only
-// the first block of the prompt; the date, the rules (locked rules on a
-// Safe-Mode device), the lookups and the profile are appended by the server
+// the first block of the prompt; the date, the rules, the lookups and the profile are appended by the server
 // and are not shown or editable here. An agent bot gets a short note: its
 // personality lives in its OpenClaw workspace.
 //

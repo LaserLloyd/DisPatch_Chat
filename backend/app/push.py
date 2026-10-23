@@ -9,7 +9,7 @@ session rules decide what is shown.
 
 Who gets one
 ------------
-Only a REMEMBERED device (auth.py, "keep this device unlocked"). A
+Only a REMEMBERED device (auth.py, "keep this device signed in"). A
 subscription is stored under the SHA-256 of that device's session token — the
 same key ``trusted-devices.yaml`` uses — and before every send the key is
 checked against the trusted store. A device that locks, is forgotten, expires

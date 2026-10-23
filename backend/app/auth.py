@@ -69,7 +69,7 @@ PBKDF2_ITERATIONS = int(os.environ.get("DISPATCH_PBKDF2_ITERATIONS", "200000"))
 DEFAULT_LOCK_TIMEOUT = 600          # seconds of inactivity before auto-lock
 MIN_PIN_LENGTH = 4
 
-# Remembered ("keep this device unlocked") devices.
+# Remembered ("keep this device signed in") devices.
 DEFAULT_REMEMBER_DAYS = 30          # what the UI toggle enables
 _MAX_TRUSTED = 10                   # oldest evicted beyond this
 _TRUSTED_TOUCH_MIN = 3600.0         # persist last_seen at most this often (s)
@@ -193,7 +193,7 @@ machine_scopes: {machine_scopes}
 lock_target: {lock_target}
 default_profile: {default_profile}
 
-# Idle seconds before a session of each role locks. owner/admin follow
+# Idle seconds before a session of each role locks. Admins follow
 # lock_timeout_seconds above. A profile can override its own in People & Profiles.
 session_timeout_user: {timeout_member}
 session_timeout_basic: {timeout_restricted}
@@ -703,7 +703,7 @@ def _save_trusted() -> None:
     global _trusted_sig
     store = _trusted_store()
     text = (
-        "# DisPatch Chat — remembered (\"keep this device unlocked\") devices.\n"
+        "# DisPatch Chat — remembered (\"keep this device signed in\") devices.\n"
         "# Only SHA-256 hashes of the device tokens live here — the tokens\n"
         "# themselves exist only in each device's cookie. DELETE THIS FILE to\n"
         "# forget every remembered device at once (picked up immediately).\n"
@@ -823,7 +823,7 @@ def set_lock_target(target: str, default_profile: str | None = None) -> Security
 
 def set_remember_days(days: int) -> None:
     """Persist the feature toggle. Turning it OFF also forgets every device —
-    the natural reading of "stop keeping devices unlocked"."""
+    the natural reading of "stop keeping devices signed in"."""
     days = max(0, min(int(days), 365))
     with _lock:
         cfg = load()

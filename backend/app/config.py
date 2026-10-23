@@ -503,8 +503,8 @@ class Settings:
     # (ui_port + ui_launcher_key under ~/.local/share/mailforge) exist —
     # an install with no MailForge never grows a stray tab. DISPATCH_MAIL=1
     # forces it on (the pane then reports "not running"), =0 disables +
-    # 404s the routes. Full-session only: unlocked-tier feature, never Safe
-    # Mode (see _require_mail).
+    # 404s the routes. Needs a signed-in profile with the mail
+    # permission (see _require_mail).
     mail_data_dir: Path = Path(env("MAIL_DATA_DIR",
                                    str(Path.home() / ".local" / "share" / "mailforge")))
     mail_enabled: bool = _mail_default(env("MAIL", "auto"), mail_data_dir)
@@ -665,7 +665,7 @@ class Bot:
     def audience(self) -> str:
         """LEGACY (3.x): ``all`` / ``members`` / ``restricted``, derived from the two legacy
         flags ``safe`` and ``hide_unlocked``. 4.0 has no Restricted tier, so this is kept only
-        as round-trip data on the wire and in config.yaml; no access decision reads it
+        as round-trip data in config.yaml (``Bot.to_dict`` does not send it); no access decision reads it
         (characters.may_use does that)."""
         if self.safe and self.hide_unlocked:
             return "restricted"

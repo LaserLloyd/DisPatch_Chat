@@ -6,7 +6,7 @@
 // notification opens the thread (sw.js `notificationclick`).
 //
 // Rules the row follows:
-//   * Safe Mode: not built at all (the routes 403 anyway).
+//   * Signed out: not built at all (the routes refuse anyway).
 //   * Push needs a secure context. http://<lan-ip>:8765 is not one, so there
 //     the switch is disabled and says to open the https address instead.
 //   * The server binds a subscription to a REMEMBERED device; on an ordinary

@@ -228,28 +228,26 @@ def test_the_voice_socket_of_an_unclaimed_install_is_closed_to_the_network(ext_e
     assert KNOBS.sockets == []
 
 
-def test_the_voice_socket_honours_anonymous_access_none(ext_env):
+def test_the_voice_socket_refuses_a_signed_out_device(ext_env):
     from _extfake import KNOBS, install, lock, thread_for
     c, _ = ext_env
     install()
-    tid = thread_for(c, "alpha")                                        # a safe bot
-    lock(c)
-    cfg = auth.load()
-    cfg.anonymous_access = "none"
-    auth._write(cfg)
-    auth._bust_cache()
+    tid = thread_for(c, "alpha")
+    lock(c)                                                             # signed out
     assert _ws_refused(c, f"/ws/voice/{tid}") == 1008
     assert KNOBS.sockets == []
 
 
-def test_the_voice_socket_honours_the_characters_profiles_list(ext_env):
+def test_a_legacy_profiles_list_opens_no_voice_socket_to_a_signed_out_device(ext_env):
+    """A 3.x ``profiles`` list left in config.yaml is inert data in 4.0 (it was folded
+    into each profile's household_bots): it grants a signed-out device nothing."""
     from _extfake import KNOBS, install, lock, thread_for
     c, _ = ext_env
     install()
-    tid = thread_for(c, "alpha")                                        # a safe bot ...
-    _set_bot("alpha", profiles=["someone-else"])                        # ... made for one profile
-    lock(c)
-    assert _ws_refused(c, f"/ws/voice/{tid}") == 1008                   # not for an anonymous device
+    tid = thread_for(c, "alpha")
+    _set_bot("alpha", profiles=["someone-else"])                        # legacy 3.x key
+    lock(c)                                                             # signed out
+    assert _ws_refused(c, f"/ws/voice/{tid}") == 1008
     assert KNOBS.sockets == []
 
 

@@ -448,12 +448,7 @@ def test_machine_upload_needs_its_scope_and_the_key(world, owner, monkeypatch):
     big = {"file": ("big.txt", b"y" * 200, "text/plain")}
     assert local.post("/api/upload", headers={"X-API-Key": token}, files=big).status_code == 429
     # Without the key an on-box process is no machine (trust is off): it is a
-    # signed-out device, which this install refuses (anonymous_access: none) ...
-    with auth._lock:
-        cfg = auth.load()
-        cfg.anonymous_access = "none"
-        auth._write(cfg)
-        auth._bust_cache()
+    # signed-out device, which needs a sign-in to upload ...
     r = local.post("/api/upload", files=files)
     assert r.status_code == 401 and r.json()["error"]["code"] == "signin_required", r.text
     # ... and a WRONG key is refused outright, not downgraded.

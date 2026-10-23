@@ -141,10 +141,9 @@ Designed for 20 profiles over three years (about 1-2 million messages) with no s
 - Retire the 3.x keys that are inert data today (the reaction and pool `safe` flag kept in yaml for a 3.x rollback;
   `DecoyError`, a deprecated alias in the add-on SDKs).
 
-### Earlier work in this release (since 3.1.0)
+### Earlier work in this release (since 3.1.0, on the 3.x model; superseded where 4.0 above differs)
 
-
-### Security
+#### Security
 
 - **Machines can upload again, and the host scripts carry the API key.** `POST /api/upload` has a machine
   scope, `machine:upload`; since 3.0 an agent or cron that handed a document back got 401 `signin_required`,
@@ -179,7 +178,7 @@ Designed for 20 profiles over three years (about 1-2 million messages) with no s
   `find_or_create_daily_thread` (`owner=`) require the owner keyword since the ownership groundwork below
   (docs/extensions.md). `EXT_API` stays 1.
 
-### Ownership groundwork (data model only)
+#### Ownership groundwork (data model only)
 
 Groundwork for per-profile privacy. **Nothing anyone can see or do changes in this step**: who may read a chat,
 a file or a character is decided exactly as before.
@@ -207,13 +206,13 @@ a file or a character is decided exactly as before.
   (`household` | `personal`, absent = household), `owner_profile`, `cloned_from` (written to config.yaml only
   when set).
 
-### Settings, simpler
+#### Settings, simpler
 
 - **Seven sections instead of thirteen tabs.** Settings is grouped by who it is for. *You*: Appearance (theme,
   language, avatar style, menu-bar shortcuts), Account (who you are, sign-in, notifications, pictures and privacy,
   the host-storage notice, recovery, About) and Voice. *Household* (the Owner and Admins): Characters (with their
   reactions and avatar pools), AI & Connections (connections, the one-key quick setup, image generation, agents),
-  People & Access (profiles, this device, sign-in rules, Restricted limits, machine access, activity), Plugins &
+  People & Access (profiles, this device, sign-in rules, Restricted limits (3.x; replaced in 4.0), machine access, activity), Plugins &
   Apps and System (health, backups, network). Add-on tabs form a third group. On a desktop the sections are a
   side nav; on a phone Settings opens on a list with a one-line summary per section, and a section slides in with a
   back button (the phone's Back returns to the list).
@@ -236,7 +235,7 @@ a file or a character is decided exactly as before.
   restart says so, and the section shows one "Restart DisPatch to apply N changes" line. Forms that need several
   fields (a connection, a person, a PIN) keep their own button.
 - **Characters.** A compact row per character: picture, name with small feature icons, a **Who can see it**
-  dropdown (Everyone / Members and up / Restricted profiles only / Hidden, exactly the two `safe` /
+  dropdown (3.x; replaced in 4.0) (Everyone / Members and up / Restricted profiles only / Hidden, exactly the two `safe` /
   `hide_unlocked` flags; widening to Restricted asks first), **Details** (Reactions, Avatar pool, Pictures in
   chat, Lookups and the voice add-on's control as switches, then connection, model, description and which profiles
   may see it) and a **⋯** menu (Change photo, Rename, Personality, Remove). **Add ▾** offers a new character or a
@@ -259,7 +258,7 @@ a file or a character is decided exactly as before.
 - **Help texts point at the new sections** (server problem fixes and messages too: Settings > Account, AI &
   Connections, People & Access, Plugins & Apps).
 
-### Fixed
+#### Fixed
 
 - Changing your PIN or password no longer ends "remember this device": the session it re-issues keeps the old
   one's persistence (a plain sign-in is not promoted).
@@ -272,7 +271,7 @@ a file or a character is decided exactly as before.
   chats too; zh no longer calls the Owner an administrator there.
 - The markup fallback of the host-storage notice matches its English string.
 
-### Image Studio, the rail, uploads and the host-storage notice
+#### Image Studio, the rail, uploads and the host-storage notice
 
 - **Image Studio: Sort and Clear from here down.** The results grid has a "Sort:" control (Oldest first, the old
   layout and default, or Newest first), remembered per device (`dispatch-imagestudio-sort`). Each picture has

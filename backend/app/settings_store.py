@@ -414,7 +414,7 @@ def set_many(changes: dict[str, Any], *, actor: str = "", reset: list[str] | Non
         if d is None:
             continue
         if d.owner_only and not owner:
-            res.errors[k] = f"{d.label}: only the Owner or an Admin can change this"
+            res.errors[k] = f"{d.label}: only an Admin can change this"
             continue
         hit = _env_hit(d)
         if hit is not None:

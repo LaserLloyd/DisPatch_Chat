@@ -203,7 +203,7 @@ function installWidget(widget, { checked, readonly, messageId, listIndex = 0 }) 
 
 /** Install checkboxes + interaction on every ```checklist table under `root`.
  *  Called once per rendered message bubble, with the message for its id and
- *  persisted state. `readonly` (Safe Mode) renders the checkboxes disabled. */
+ *  persisted state. `readonly` renders a read-only view (checkboxes disabled). */
 export function installChecklists(root, { message, readonly = false } = {}) {
   if (!root) return;
   const stored = message?.metadata?.checklist || {};

@@ -525,7 +525,7 @@ def remove(bot_id: str) -> None:
 MAX_PERSONAL_PERSONA = 4000
 #: A cap per profile, so a runaway client cannot grow config.yaml without bound.
 MAX_PERSONAL_BOTS = 50
-#: What the owner's PATCH may carry. Everything else (flags, agent, pools, audience) is household.
+#: What the owner's PATCH may carry. Everything else (flags, agent, pools) is household.
 PERSONAL_PATCH_FIELDS = frozenset({
     "name", "emoji", "description", "color", "quick_actions", "tools", "persona", "personality",
     "voice", "connection", "model"})
