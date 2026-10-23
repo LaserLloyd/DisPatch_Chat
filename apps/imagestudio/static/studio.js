@@ -12,7 +12,7 @@
 
 import {
   api, t, ready, theme, toast, lightbox, el, railIcon, RAIL_ICONS,
-} from '/static/js/app-sdk.js?v=4';
+} from '/static/js/app-sdk.js?v=5';
 
 /** A 403: this profile may not use Image Studio (4.0; 3.x sent a Safe-Mode DecoyError). */
 const refused = (e) => !!e && e.status === 403;
@@ -20,7 +20,7 @@ import {
   PROMPT_MAX, isGenerateShortcut, shortcutLabel, promptStatus, canGenerate, clampCount,
   buildRequest, cropRect, defaultCropPos, galleryItems, isMetered,
   SORTS, normalizeSort, sortRows,
-} from './studio-logic.js?v=2';
+} from './studio-logic.js?v=3';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
 export const API = '/api/apps/imagestudio';

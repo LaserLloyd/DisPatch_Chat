@@ -36,7 +36,7 @@ import {
   setAllowed as setQuickAllowed, setUpload as setQuickUpload, getActions as quickActionList,
 } from './quick-actions.js?v=5';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=6';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=19';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=20';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
 // DisPatch Voice add-on — mounted into the shell by the loader, through the
 // SDK's frozen shell object. With none installed, Settings → Voice explains
@@ -44,7 +44,7 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=19';
 import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=4';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=19';
+} from './ext-sdk.js?v=20';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
 import { maybeShowSignInNotice, armSignInNotice, paintDisclosure } from './host-notice.js?v=3';
 import { createChatDrop } from './chatdrop.js?v=2';
@@ -66,7 +66,7 @@ import { setOnLocked as w5SetOnLocked, failure as w5Failure, w5 as schemaApi, er
 import {
   SECTIONS, SECTION_IDS, RESERVED_TAB_IDS, resolveSettingsTarget, buildSearchIndex, mountSettingsSearch, createRevealer,
   runSectionHooks,
-} from './settings-nav.js?v=3';
+} from './settings-nav.js?v=4';
 import { mountConnections } from './connections.js?v=3';
 import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=4';
 import { mountBackups } from './backup.js?v=3';
@@ -89,7 +89,7 @@ import {
 } from './tools.js?v=19';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
-import { forApp, api as appApi } from './app-sdk.js?v=4';
+import { forApp, api as appApi } from './app-sdk.js?v=5';
 import { renderLinkRail, linksSection } from './links.js?v=8';
 import {
   createGallery, createChrome, keyDirection, overMedia, swipeDirection, normalizeGalleryRequest,
@@ -103,19 +103,19 @@ import { aboutRow } from './about.js?v=23';
 // Profiles (Admin / User / Basic): pure decisions (profiles.js), the sign-in /
 // setup DOM (signin.js) and Settings -> People (people.js).
 import { newChatAllowed, pickNewChatTarget, latestByBot, currentCharacter, reusableEmptyThread, readLastCharacter, rememberCharacter } from './newchat.js?v=3';
-import { normalizeRole, isAdminRole, signInMode, wsErrorKind, avatarSpec, railGroups, isMineBot } from './profiles.js?v=3';
+import { normalizeRole, isAdminRole, signInMode, wsErrorKind, avatarSpec, railGroups, isMineBot } from './profiles.js?v=4';
 import {
   renderSignIn, renderSetup, setupPage, renderPasswordForm, paintChip, chipLabel, attachChipMenu,
-} from './signin.js?v=4';
-import { mountPeopleSettings } from './people.js?v=5';
+} from './signin.js?v=5';
+import { mountPeopleSettings } from './people.js?v=6';
 // 3.0 agents: the Tasks page, Assign task / @agent, inline task cards (tasks.js, task_card.js,
 // approval_card.js) and Settings -> Agents (agents.js). The server decides who may do what.
 import { createTasksUi } from './tasks.js?v=2';
 // 4.0 chat-first profiles (Foundation scaffolding: wired once here, filled by WP-FE-YOU /
 // WP-FE-PEOPLE in their own modules).
-import { initMyBots, copyMenuItem } from './my-bots.js?v=1';
-import { initBotEditor } from './bot-editor.js?v=1';
-import { initAccountReset } from './account-reset.js?v=1';
+import { initMyBots, copyMenuItem } from './my-bots.js?v=2';
+import { initBotEditor } from './bot-editor.js?v=2';
+import { initAccountReset } from './account-reset.js?v=2';
 import { initProfilePicture } from './profile-picture.js?v=1';
 import { initPeoplePerms } from './people-perms.js?v=2';
 import { mountAgentsSettings } from './agents.js?v=3';

@@ -31,7 +31,7 @@ import { el } from './util.js?v=21';
 import { nimEnabled } from './nim.js?v=6';
 import { pictureRow, isUploadedPicture } from './profile-picture.js?v=1';
 import { disclosureText } from './host-notice.js?v=3';
-import { ACTIVITY_COLUMNS, activityRows, activityTotals, avatarSpec } from './profiles.js?v=3';
+import { ACTIVITY_COLUMNS, activityRows, activityTotals, avatarSpec } from './profiles.js?v=4';
 import {
   askDialog, countsTally, permTables, permissionsPanel, householdPanel, backendsPanel,
   profileCalls, errorText,

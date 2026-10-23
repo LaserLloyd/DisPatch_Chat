@@ -12,7 +12,7 @@ const read = (p) => readFileSync(join(STATIC, p), 'utf8');
 const LOCALES = ['ar', 'de', 'en', 'es', 'fr', 'ja', 'pt', 'zh'];
 
 test('own-bot editor: the AI build keeps the description the model wrote and the editor sends it', async () => {
-  const be = await import('../static/js/bot-editor.js?v=1');
+  const be = await import('../static/js/bot-editor.js?v=2');
   const f = be.draftToForm({ name: 'Mochi', emoji: '🍡', description: 'A cheerful home-cooking helper.', persona: 'Be brief.' });
   assert.equal(f.description, 'A cheerful home-cooking helper.');
   assert.equal(be.botPayload({ name: 'Mochi', description: '  A helper.  ', persona: '' }).description, 'A helper.');

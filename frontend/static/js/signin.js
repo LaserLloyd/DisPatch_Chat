@@ -15,7 +15,7 @@ import { el } from './util.js?v=21';
 import { nimEnabled } from './nim.js?v=6';
 import {
   avatarSpec, createCountdown, credentialModes, credentialOptions, formatCountdown, sortTiles,
-} from './profiles.js?v=3';
+} from './profiles.js?v=4';
 
 const roleLabel = (role) => t(`role.${role}`);
 

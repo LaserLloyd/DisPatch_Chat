@@ -56,7 +56,7 @@ const tick = async (n = 8) => { for (let i = 0; i < n; i++) await new Promise((r
 // ------------------------------------------------------------------ pure
 
 test('avatarSpec: a served picture is an image, an emoji a glyph, and No-Image Mode falls back to the initial', async () => {
-  const P = await import('../static/js/profiles.js?v=3');
+  const P = await import('../static/js/profiles.js?v=4');
   assert.deepEqual(P.avatarSpec({ name: 'Uma', avatar: URL1 }), { kind: 'img', src: URL1 });
   assert.deepEqual(P.avatarSpec({ name: 'Uma', avatar: URL1 }, { noImages: true }), { kind: 'initial', text: 'U' });
   assert.deepEqual(P.avatarSpec({ name: 'Uma', avatar: '🦊' }, { noImages: true }), { kind: 'glyph', text: '🦊' });
@@ -173,7 +173,7 @@ test('No-Image Mode: the preview is the initial, no <img> is created', { skip: d
 // ------------------------------------------------------------------ wiring
 
 test('People: the emoji box never clears an uploaded picture; Admins get the picture row only on an existing profile', async () => {
-  const P = await import('../static/js/people.js?v=5');
+  const P = await import('../static/js/people.js?v=6');
   const person = { id: 'abc', name: 'Uma', role: 'user', avatar: URL1 };
   assert.deepEqual(P.patchBody(person, { name: 'Uma', avatar: '' }).patch, {});
   assert.deepEqual(P.patchBody(person, { name: 'Uma', avatar: '🦊' }).patch, { avatar: '🦊' });

@@ -61,9 +61,9 @@ async function setup(extra = {}) {
   const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   calls.length = 0;
-  const editor = await import('../static/js/bot-editor.js?v=1');
-  const mybots = await import('../static/js/my-bots.js?v=1');
-  const reset = await import('../static/js/account-reset.js?v=1');
+  const editor = await import('../static/js/bot-editor.js?v=2');
+  const mybots = await import('../static/js/my-bots.js?v=2');
+  const reset = await import('../static/js/account-reset.js?v=2');
   const toasts = [];
   const shell = { toast: (m) => toasts.push(m), confirm: async () => true,
     state: { auth: { permissions: ['create_characters', 'choose_backend', 'manage_history', 'use_images'], profile: { id: 'p1', name: 'Uma' } } } };

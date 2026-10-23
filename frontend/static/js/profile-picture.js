@@ -12,8 +12,8 @@
 
 import { t } from './i18n.js?v=5';
 import { el } from './util.js?v=21';
-import { profileReq } from './bot-editor.js?v=1';
-import { avatarSpec } from './profiles.js?v=3';
+import { profileReq } from './bot-editor.js?v=2';
+import { avatarSpec } from './profiles.js?v=4';
 import { nimEnabled } from './nim.js?v=6';
 
 export const MAX_BYTES = 5 * 1024 * 1024;

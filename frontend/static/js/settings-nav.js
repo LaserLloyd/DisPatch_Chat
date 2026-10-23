@@ -13,8 +13,8 @@
 // Nothing runs at import time.
 
 import { el } from './util.js?v=21';
-import { renderMyBots } from './my-bots.js?v=1';
-import { renderAccountReset } from './account-reset.js?v=1';
+import { renderMyBots } from './my-bots.js?v=2';
+import { renderAccountReset } from './account-reset.js?v=2';
 import { renderProfilePicture } from './profile-picture.js?v=1';
 import { renderPeoplePerms } from './people-perms.js?v=2';
 

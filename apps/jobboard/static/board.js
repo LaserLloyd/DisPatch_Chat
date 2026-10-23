@@ -25,7 +25,7 @@
 import {
   api, t, ready, theme, openThread, toast, onMessage,
   iconLabel, RAIL_ICONS,
-} from '/static/js/app-sdk.js?v=4';
+} from '/static/js/app-sdk.js?v=5';
 
 /** A 403: this profile may not use the Job Board (4.0; 3.x sent a Safe-Mode DecoyError). */
 const refused = (e) => !!e && e.status === 403;

@@ -11,7 +11,7 @@
 
 import { t } from './i18n.js?v=5';
 import { el } from './util.js?v=21';
-import { profileReq, withShell, initBotEditor } from './bot-editor.js?v=1';
+import { profileReq, withShell, initBotEditor } from './bot-editor.js?v=2';
 
 let shell = {};
 /** Called once at boot with the shell's helpers. */

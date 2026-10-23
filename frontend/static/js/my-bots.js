@@ -16,7 +16,7 @@ import { el } from './util.js?v=21';
 import { isHidden } from './characters.js?v=4';
 import {
   can, profileReq, renderAiBuild, renderBotEditor, loadEditorOptions, withShell, initBotEditor,
-} from './bot-editor.js?v=1';
+} from './bot-editor.js?v=2';
 
 let shell = {};
 /** Called once at boot with the shell's helpers ({ t, toast, confirm, api, state }). */
