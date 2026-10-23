@@ -591,7 +591,7 @@ def prune_snapshot_tiers(*, keep_recent: int = 8, keep_daily: int = 7, keep_week
 
 def prune_premigration(keep: int = 3, *, dry_run: bool = False) -> dict[str, int]:
     """Keep the newest ``keep`` ``<version>-<stamp>/`` pre-migration copies (``migrate.KEEP_BACKUPS``
-    is 5; at the size a year-old database reaches, three is enough)."""
+    is 3; at the size a year-old database reaches, three is enough)."""
     root = backup_root()
     rows = {"removed": 0, "bytes": 0}
     if not root.is_dir():

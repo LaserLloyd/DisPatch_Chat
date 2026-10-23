@@ -407,6 +407,18 @@ def test_default_profile_is_refused_after_a_plain_run(tmp_path, monkeypatch, cap
     assert "010_profiles has already run" in capsys.readouterr().err
 
 
+def test_the_same_default_profile_again_after_010_is_a_no_op(tmp_path, monkeypatch, capsys):
+    """A deploy that always runs the documented command: the second time it names the profile
+    that already is the default, so it is a no-op (exit 0), not a failure."""
+    built = build_shape("a", tmp_path, monkeypatch)
+    d = built["dir"]
+    assert migrate.main(["--data-dir", str(d), "--default-profile", "Playground"]) == 0
+    capsys.readouterr()
+    for ref in ("Playground", built["Playground"]):
+        assert migrate.main(["--data-dir", str(d), "--default-profile", ref]) == 0
+        assert "already" in capsys.readouterr().err
+
+
 def test_default_profile_is_accepted_before_010(tmp_path, monkeypatch, capsys):
     built = build_shape("a", tmp_path, monkeypatch)
     rc = migrate.main(["--data-dir", str(built["dir"]), "--dry-run", "--default-profile", "Playground"])

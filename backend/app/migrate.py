@@ -1275,6 +1275,18 @@ def run(*, dry_run: bool = False, take_backup: bool = True,
 # --------------------------------------------------------------------------- #
 
 
+def _is_current_default(wanted: str) -> bool:
+    """Is ``wanted`` (an id or a name) the lock-target default profile already?"""
+    from . import accounts, auth
+    with contextlib.suppress(Exception):
+        cfg = auth.load()
+        if cfg.lock_target != "default_profile" or not cfg.default_profile:
+            return False
+        prof = accounts.get_profile(cfg.default_profile)
+        return bool(prof) and wanted.strip() in (prof.id, prof.name)
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m app.migrate",
                                  description="Migrate a DisPatch data directory to 4.0.")
@@ -1312,9 +1324,15 @@ def main(argv: list[str] | None = None) -> int:
               "only shape that first run (restore its backup to run it again)", file=sys.stderr)
         return 2
     if args.default_profile and "010_profiles" in _applied_ids(_db_file()):
-        print("010_profiles has already run on this data directory; --default-profile only shapes "
-              "that first run (change the lock target in People & Access instead)", file=sys.stderr)
-        return 2
+        if _is_current_default(args.default_profile):
+            # The same command run again (a deploy wrapper that always passes it): a no-op.
+            print("010_profiles has already run; the default profile is already "
+                  f"{args.default_profile!r}", file=sys.stderr)
+            args.default_profile = None
+        else:
+            print("010_profiles has already run on this data directory; --default-profile only shapes "
+                  "that first run (change the lock target in People & Access instead)", file=sys.stderr)
+            return 2
     try:
         rep = run(dry_run=args.dry_run, take_backup=not args.no_backup,
                   assign=assign or None, all_to_owner=args.all_to_owner,
