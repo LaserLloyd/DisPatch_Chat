@@ -5788,7 +5788,14 @@ function wireCropModal() {
 
   const closeCrop = closeCropModal;
   dom['crop-close'].addEventListener('click', closeCrop);
-  dom['crop-backdrop'].addEventListener('click', (e) => { if (e.target === dom['crop-backdrop']) closeCrop(); });
+  // Only a click that STARTED on the backdrop closes it: dragging the square and letting go
+  // outside the card fires a click on the backdrop too, and must not throw the picture away.
+  let cropDownOnBackdrop = false;
+  dom['crop-backdrop'].addEventListener('pointerdown', (e) => { cropDownOnBackdrop = e.target === dom['crop-backdrop']; });
+  dom['crop-backdrop'].addEventListener('click', (e) => {
+    const start = cropDownOnBackdrop; cropDownOnBackdrop = false;
+    if (e.target === dom['crop-backdrop'] && start) closeCrop();
+  });
 
   dom['crop-save'].addEventListener('click', async () => {
     if (!crop.file) return;

@@ -178,12 +178,16 @@ export async function loadEditorOptions(deps = {}) {
   const exts = await tryGet('/api/extensions');
   const voiceOn = !!(exts && Array.isArray(exts.extensions)
     && exts.extensions.some((e) => e && e.id === 'voice' && e.entry));
-  const [personas, voices, conns, status] = await Promise.all([
+  const [personas, conns, status] = await Promise.all([
     tryGet('/api/me/personas'),
-    voiceOn ? tryGet('/api/voice/profiles') : Promise.resolve(null),
     can('choose_backend', deps) ? tryGet('/api/me/backends') : Promise.resolve(null),
     voiceOn ? tryGet('/api/voice/status') : Promise.resolve(null),
   ]);
+  // The add-on serves /profiles (cloned voices) only once voice cloning is set up: before
+  // that the route does not exist, and asking would only log a 403/404.
+  const plugins = (status && status.plugins) || {};
+  const cloningReady = !!(plugins.cloning && plugins.cloning.ready);
+  const voices = voiceOn && cloningReady ? await tryGet('/api/voice/profiles') : null;
   const rows = (voices && (voices.voices || voices.profiles)) || [];
   const builtin = ((status && (status.builtin_voices || (status.voice_choices && status.voice_choices.builtin_voices))) || [])
     .filter((v) => v && v.id).map((v) => ({ id: String(v.id), name: String(v.name || v.id) }));

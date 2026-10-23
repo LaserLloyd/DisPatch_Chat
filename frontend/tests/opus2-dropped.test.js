@@ -68,3 +68,11 @@ test('Image Studio: Send is hidden where the server refuses it, and an own bot\'
     assert.equal(typeof L['avatar.no_bots'], 'string', l);
   }
 });
+
+test('face picker: letting go of a drag outside the card does not close it; the editor skips /profiles until cloning is ready', () => {
+  const main = read('js/main.js');
+  assert.match(main, /addEventListener\('pointerdown', \(e\) => \{ cropDownOnBackdrop = e\.target === dom\['crop-backdrop'\]; \}\)/);
+  assert.match(main, /if \(e\.target === dom\['crop-backdrop'\] && start\) closeCrop\(\);/);
+  const be = read('js/bot-editor.js');
+  assert.match(be, /const voices = voiceOn && cloningReady \? await tryGet\('\/api\/voice\/profiles'\) : null;/);
+});

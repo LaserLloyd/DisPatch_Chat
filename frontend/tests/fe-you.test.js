@@ -46,7 +46,7 @@ async function setup(extra = {}) {
     'GET /api/me/personas': () => [200, PRESETS],
     'GET /api/extensions': () => [200, { extensions: [{ id: 'voice', entry: 'index.js' }] }],
     'GET /api/voice/profiles': () => [200, VOICES],
-    'GET /api/voice/status': () => [404, { detail: 'Not Found' }],
+    'GET /api/voice/status': () => [200, { plugins: { cloning: { ready: true } } }],
     'GET /api/me/backends': () => [200, { may_choose: false, default: '', connections: [] }],
     ...extra,
   };
@@ -115,6 +115,14 @@ test('without the voice add-on the editor never calls the voice routes (no 404 i
   const o = await editor.loadEditorOptions({ state: { auth: { permissions: ['create_characters'] } } });
   assert.deepEqual(o.voices, { mine: [], household: [], builtin: [] });
   assert.equal(posts(/\/api\/voice\//).length, 0);
+});
+
+test('with the add-on but voice cloning not set up, the editor never asks for /profiles (no 403/404 in the console)', { skip: dom.skip }, async () => {
+  const { editor } = await setup({ 'GET /api/voice/status': () => [200, { plugins: { cloning: { ready: false } } }] });
+  const o = await editor.loadEditorOptions({ state: { auth: { permissions: ['create_characters'] } } });
+  assert.deepEqual(o.voices.mine, []);
+  assert.equal(posts(/\/api\/voice\/profiles/).length, 0);
+  assert.equal(posts(/\/api\/voice\/status/).length, 1);
 });
 
 // ------------------------------------------------------------------ the editor
