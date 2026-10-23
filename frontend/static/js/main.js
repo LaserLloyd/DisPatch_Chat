@@ -5707,6 +5707,8 @@ function setThreadListCollapsed(collapsed) {
 const crop = { botId: null, file: null, boxX: 0, boxY: 0, boxSize: 0, resolve: null, returnFocus: null };
 
 function openCropModal(botId, file, name, hint) {
+  // A household upload never answers a face picker some closed editor is still waiting on.
+  if (botId && crop.resolve) { const r = crop.resolve; crop.resolve = null; r(null); }
   const bot = botId ? (botById(botId) || (bmBots.find((b) => b.id === botId))) : null;
   crop.botId = botId;
   crop.file = file;
@@ -5834,6 +5836,11 @@ function closeCropModal() {
  *  dialog's line under the title. */
 function chooseFace(file, name, { hint = '' } = {}) {
   if (crop.resolve) { const r = crop.resolve; crop.resolve = null; r(null); }
+  // Every caller lives in Settings: once it has closed (Esc, a lock, a profile switch) a late
+  // answer - a generated picture arriving afterwards - opens nothing, on nobody's screen.
+  if (!dom['botmanager-backdrop'] || dom['botmanager-backdrop'].classList.contains('hidden')) {
+    return Promise.resolve(null);
+  }
   return new Promise((resolve) => {
     crop.resolve = resolve;
     openCropModal(null, file, name, hint);
@@ -8172,6 +8179,9 @@ function wireEvents() {
   window.addEventListener('keydown', (e) => {
     // The sign-in overlay owns the keyboard while it's open (handled elsewhere).
     if (!dom['lock-screen'].classList.contains('hidden')) return;
+    // One Esc closes one layer: a native dialog on top (a confirm, the Ctrl+K palette) takes
+    // this Esc itself, and a layer that already handled it says so with preventDefault.
+    if (e.key === 'Escape' && (e.defaultPrevented || document.querySelector('dialog[open]'))) return;
     if (e.key === 'Escape') {
       const lb = [...document.querySelectorAll('.lightbox')].at(-1);
       // Route through the ✕ button so the lightbox's own close() runs
@@ -8180,7 +8190,7 @@ function wireEvents() {
       // The face picker opens over Settings (Characters, My bots, Account, People): Esc closes
       // the picker alone, never the Settings under it, and settles a waiting chooseFace().
       if (isCropOpen()) { closeCropModal(); return; }
-      closeBotManager();   // confirms first if there are unsaved edits
+      closeBotManager();   // closes Settings (an open own-bot editor's unsaved edits go with it)
       dom['fileserver-backdrop'].classList.add('hidden');
       dom['search-backdrop'].classList.add('hidden');
       dom['recover-backdrop'].classList.add('hidden');
@@ -10375,7 +10385,12 @@ function closePalette() { const dlg = $('cmdk'); if (dlg && dlg.open) dlg.close(
 function wireCmdk() {
   const dlg = $('cmdk'); const inp = $('cmdk-input');
   window.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); openPalette(); }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      // Never over the sign-in overlay: its actions would act on the profile behind it.
+      if (dom['lock-screen'] && !dom['lock-screen'].classList.contains('hidden')) return;
+      openPalette();
+    }
   });
   if (!dlg || !inp) return;
   inp.addEventListener('input', () => { cmdkItems = cmdkBuild(inp.value); cmdkSel = 0; cmdkRender(); });

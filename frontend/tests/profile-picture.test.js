@@ -274,3 +274,17 @@ test('Account on the shared default profile says only an Admin can give it a PIN
     assert.match(L.acct.status_shared, new RegExp(L.settings.sec_people.replace(/[&]/g, '\\$&')), loc);
   }
 });
+
+test('overlays: one Esc closes one layer, no palette over the sign-in overlay, no face picker once Settings closed, a late render is dropped', () => {
+  const main = readFileSync(join(STATIC, 'js', 'main.js'), 'utf8');
+  assert.match(main, /if \(e\.key === 'Escape' && \(e\.defaultPrevented \|\| document\.querySelector\('dialog\[open\]'\)\)\) return;/);
+  assert.match(main, /if \(dom\['lock-screen'\] && !dom\['lock-screen'\]\.classList\.contains\('hidden'\)\) return;\s*openPalette\(\);/);
+  const cf = main.slice(main.indexOf('function chooseFace('));
+  assert.ok(cf.indexOf("classList.contains('hidden')") < cf.indexOf('return new Promise'));
+  assert.match(main, /if \(botId && crop\.resolve\) \{ const r = crop\.resolve; crop\.resolve = null; r\(null\); \}/);
+  const be = readFileSync(join(STATIC, 'js', 'bot-editor.js'), 'utf8');
+  assert.match(be, /if \(!root\.isConnected \|\| who\(\) !== before\) return;/);
+  const css = readFileSync(join(STATIC, 'app.css'), 'utf8');
+  assert.match(css, /\.msg:has\(:focus-visible\) \.msg-actions \{ opacity: 1; \}/);
+  assert.doesNotMatch(css, /\.msg:focus-within \.msg-actions/);
+});

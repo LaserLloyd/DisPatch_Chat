@@ -364,7 +364,15 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
         const errs = validateBot({ name: nameIn.value });
         if (errs.name) { nameIn.focus(); banner.textContent = errs.name; banner.hidden = false; return; }
         busy = true; genBtn.disabled = true; genBtn.textContent = t('aibuild.working');
-        try { await setPicture(await generatePicture(nameIn.value.trim(), personaIn.value), { keepOnCancel: true }); banner.hidden = true; }
+        // A render takes a while: if the editor was closed, or the device locked or switched
+        // profile meanwhile, the picture is dropped (never shown to whoever is there now).
+        const who = () => String((d.state && d.state.auth && d.state.auth.profile && d.state.auth.profile.id) || '');
+        const before = who();
+        try {
+          const pic = await generatePicture(nameIn.value.trim(), personaIn.value);
+          if (!root.isConnected || who() !== before) return;
+          await setPicture(pic, { keepOnCancel: true }); banner.hidden = true;
+        }
         catch (e) { banner.textContent = e.message || t('aibuild.failed'); banner.hidden = false; }
         finally { busy = false; genBtn.disabled = false; genBtn.textContent = t('editor.picture_generate'); }
       } });

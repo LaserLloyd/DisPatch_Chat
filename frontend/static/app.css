@@ -1870,7 +1870,8 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 /* ---- Message actions: visible on touch + focus, bigger taps (F6) ---- */
 .msg-act-btn { transition: background .12s, color .12s, transform .1s; }
 .msg-act-btn:active { transform: scale(.94); }
-.msg:focus-within .msg-actions { opacity: 1; }
+/* Keyboard focus shows them; a mouse click (which focuses too) does not pin them. */
+.msg:has(:focus-visible) .msg-actions { opacity: 1; }
 @media (hover: none) {
   /* Always visible on touch (no hover to reveal it), but quiet: two small
      icons, not a row of words. 36px keeps them honest tap targets. */
