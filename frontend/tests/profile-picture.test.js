@@ -188,7 +188,7 @@ test('Settings -> Account runs the picture hook, main.js hands it the shell, and
   assert.match(nav, /account: \[renderAccountReset, renderProfilePicture\]/);
   const main = readFileSync(join(STATIC, 'js', 'main.js'), 'utf8');
   assert.match(main, /initPeoplePerms, initProfilePicture\]/);
-  assert.match(main, /onProfileChanged: async \(\) => \{ await refreshAuthQuiet\(\); paintAccountWho\(\); \}/);
+  assert.match(main, /onProfileChanged: async \(\) => \{ await refreshAuthQuiet\(\); paintProfileChrome\(\); paintAccountWho\(\); \}/);
   for (const k of ['title', 'note', 'upload', 'change', 'remove', 'uploading', 'saved', 'removed', 'formats',
     'err_type', 'err_size', 'err_generic', 'shared_admin_only', 'save_first']) {
     assert.equal(typeof EN.picture[k], 'string', k);

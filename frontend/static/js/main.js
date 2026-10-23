@@ -10481,7 +10481,7 @@ async function init() {
   const profileDeps = {
     t, toast, confirm: (msg, o) => uiConfirm(msg, o), api, state,
     // A new profile picture: learn it from the server, then repaint the chip and the Account card.
-    onProfileChanged: async () => { await refreshAuthQuiet(); paintAccountWho(); },
+    onProfileChanged: async () => { await refreshAuthQuiet(); paintProfileChrome(); paintAccountWho(); },
   };
   for (const init of [initMyBots, initBotEditor, initAccountReset, initPeoplePerms, initProfilePicture]) {
     try { init(profileDeps); } catch (e) { console.warn('profiles module init failed', e); }
