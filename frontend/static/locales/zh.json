@@ -2296,6 +2296,7 @@
     "saved": "头像已更新。",
     "removed": "头像已移除。",
     "formats": "PNG、JPEG、WebP 或 GIF，最大 5 MB。会裁剪为正方形。",
+    "crop_hint": "把方框拖到脸上。只保留方框内的部分，存为一张小图。",
     "err_type": "请使用 PNG、JPEG、WebP 或 GIF 图片。",
     "err_size": "图片太大（最大 5 MB）。",
     "err_generic": "无法保存头像：{error}",

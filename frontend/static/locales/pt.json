@@ -2349,6 +2349,7 @@
     "saved": "Foto de perfil atualizada.",
     "removed": "Foto de perfil removida.",
     "formats": "PNG, JPEG, WebP ou GIF, até 5 MB. É recortada em quadrado.",
+    "crop_hint": "Arraste o quadrado sobre o rosto. Só o quadrado é guardado, como uma imagem pequena.",
     "err_type": "Use uma imagem PNG, JPEG, WebP ou GIF.",
     "err_size": "A imagem é demasiado grande (máximo de 5 MB).",
     "err_generic": "Não foi possível guardar a foto: {error}",

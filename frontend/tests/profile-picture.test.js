@@ -197,3 +197,57 @@ test('Settings -> Account runs the picture hook, main.js hands it the shell, and
   const css = readFileSync(join(STATIC, 'app.css'), 'utf8');
   assert.match(css, /\.pp-actions \.ui-btn \{ min-height: 44px/);
 });
+
+// ------------------------------------------------------------------ the face picker
+
+test('with the face picker, the square placed is uploaded with the picture; closing it uploads nothing', { skip: dom.skip }, async () => {
+  const Q = '?crop_x=0.25&crop_y=0&crop_size=0.5';
+  const { win, pp } = await setup({ [`POST /api/me/avatar${Q}`]: () => [200, { id: 'abc', name: 'Uma', avatar: URL1 }] });
+  const asked = [];
+  let answer = { x: 0.25, y: 0, size: 0.5 };
+  const row = pp.pictureRow({ profile: { id: 'abc', name: 'Uma', avatar: '' }, base: '/api/me/avatar',
+    chooseFace: async (file, name, opts) => { asked.push([file.name, name, opts && opts.hint]); return answer; } });
+  win.document.body.append(row);
+  const input = row.querySelector('input[type=file]');
+  const pick = () => {
+    Object.defineProperty(input, 'files', { value: [new win.File([new Uint8Array(10)], 'me.png', { type: 'image/png' })], configurable: true });
+    input.dispatchEvent(new win.Event('change'));
+  };
+  pick();
+  await tick();
+  assert.deepEqual(asked, [['me.png', 'Uma', EN.picture.crop_hint]]);
+  assert.deepEqual(calls.map((c) => c.key), [`POST /api/me/avatar${Q}`]);
+  assert.equal(row.querySelector('img.pp-preview').getAttribute('src'), URL1);
+  // Closed without saving: no request, the picture and the status stay as they were.
+  answer = null;
+  calls.length = 0;
+  pick();
+  await tick();
+  assert.equal(asked.length, 2);
+  assert.equal(calls.length, 0);
+  assert.equal(row.querySelector('img.pp-preview').getAttribute('src'), URL1);
+});
+
+test('Account and People hand the row the shell face picker; Esc and a lock close the picker alone and settle it', async () => {
+  const pp = readFileSync(join(STATIC, 'js', 'profile-picture.js'), 'utf8');
+  assert.match(pp, /chooseFace: d\.chooseFace/);
+  const people = readFileSync(join(STATIC, 'js', 'people.js'), 'utf8');
+  assert.match(people, /chooseFace: ctx\.chooseFace/);
+  assert.match(people, /chooseFace: deps\.chooseFace/);
+  const main = readFileSync(join(STATIC, 'js', 'main.js'), 'utf8');
+  assert.match(main, /mountPeopleSettings\(pane, \{\s*toast, confirm: \(msg, o\) => uiConfirm\(msg, o\), role: state\.role, chooseFace,/);
+  // Esc: the picker first, before anything that would close Settings under it.
+  const esc = main.slice(main.indexOf("if (e.key === 'Escape') {\n      const lb"));
+  assert.ok(esc.indexOf('if (isCropOpen()) { closeCropModal(); return; }') > 0);
+  assert.ok(esc.indexOf('if (isCropOpen()) { closeCropModal(); return; }') < esc.indexOf('closeBotManager();'));
+  // A lock / profile switch settles a waiting picker instead of only hiding it.
+  const sweep = main.slice(main.indexOf('function closeAllOverlays()'), main.indexOf('closeToolPanes();', main.indexOf('function closeAllOverlays()')));
+  assert.match(sweep, /closeCropModal\(\);/);
+  assert.doesNotMatch(sweep, /'crop-backdrop'/);
+  // Focus moves into the dialog so an Esc never reaches the editor under it.
+  assert.match(main, /crop\.returnFocus = document\.activeElement;\s*try \{ dom\['crop-save'\]\.focus/);
+  for (const loc of ['ar', 'de', 'en', 'es', 'fr', 'ja', 'pt', 'zh']) {
+    const L = JSON.parse(readFileSync(join(STATIC, 'locales', `${loc}.json`), 'utf8'));
+    assert.equal(typeof L.picture.crop_hint, 'string', loc);
+  }
+});

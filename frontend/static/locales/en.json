@@ -2324,6 +2324,7 @@
     "saved": "Profile picture updated.",
     "removed": "Profile picture removed.",
     "formats": "PNG, JPEG, WebP or GIF, up to 5 MB. It is cropped to a square.",
+    "crop_hint": "Drag the square over the face. Only the square is kept, as a small picture.",
     "err_type": "Use a PNG, JPEG, WebP or GIF picture.",
     "err_size": "That picture is too large (5 MB at most).",
     "err_generic": "Could not save the picture: {error}",

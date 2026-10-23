@@ -4784,7 +4784,7 @@ async function setSettingsTab(target, { focusTab = false } = {}) {
       break;
     case 'people':
       await mountPeopleSettings(pane, {
-        toast, confirm: (msg, o) => uiConfirm(msg, o), role: state.role,
+        toast, confirm: (msg, o) => uiConfirm(msg, o), role: state.role, chooseFace,
         extraGroups: () => peopleRuleGroups(),
         collapseActivity: true,
       });
@@ -5704,14 +5704,17 @@ function setThreadListCollapsed(collapsed) {
 // source image are sent to the server, which crops from the full-res original.
 // `resolve` set = chooseFace() mode: Save hands back the fractions instead of uploading (the
 // personal-bot editor uploads them with the bot).
-const crop = { botId: null, file: null, boxX: 0, boxY: 0, boxSize: 0, resolve: null };
+const crop = { botId: null, file: null, boxX: 0, boxY: 0, boxSize: 0, resolve: null, returnFocus: null };
 
-function openCropModal(botId, file, name) {
+function openCropModal(botId, file, name, hint) {
   const bot = botId ? (botById(botId) || (bmBots.find((b) => b.id === botId))) : null;
   crop.botId = botId;
   crop.file = file;
   const who = name || (bot ? bot.name : botId) || '';
   dom['crop-title'].textContent = who ? t('crop.title_for', { name: who }) : t('crop.title');
+  // A profile picture keeps only the square, so it says so instead of "the original is saved too".
+  const hintEl = dom['crop-backdrop'].querySelector('.modal-hint');
+  if (hintEl) hintEl.textContent = hint || t('crop.hint');
   const url = URL.createObjectURL(file);
   dom['crop-img'].onload = () => {
     URL.revokeObjectURL(url);
@@ -5719,6 +5722,10 @@ function openCropModal(botId, file, name) {
   };
   dom['crop-img'].src = url;
   dom['crop-backdrop'].classList.remove('hidden');
+  // Focus moves into the dialog (it is modal): Esc then reaches the picker, not the editor
+  // under it (the own-bot editor and Settings both close on an Esc that reaches them).
+  crop.returnFocus = document.activeElement;
+  try { dom['crop-save'].focus({ preventScroll: true }); } catch { /* ignore */ }
 }
 
 function imgRect() {
@@ -5775,11 +5782,7 @@ function wireCropModal() {
     clampCropBox(); applyCropBox();
   });
 
-  const closeCrop = () => {
-    dom['crop-backdrop'].classList.add('hidden'); crop.file = null;
-    const r = crop.resolve; crop.resolve = null;
-    if (r) r(null);                          // closed without saving
-  };
+  const closeCrop = closeCropModal;
   dom['crop-close'].addEventListener('click', closeCrop);
   dom['crop-backdrop'].addEventListener('click', (e) => { if (e.target === dom['crop-backdrop']) closeCrop(); });
 
@@ -5811,13 +5814,29 @@ function wireCropModal() {
   });
 }
 
+/** Close the face picker. Every way out (✕, a click outside, Esc, a lock) comes here, so a
+ *  waiting chooseFace() always settles: null = closed without saving. */
+function isCropOpen() { return !!dom['crop-backdrop'] && !dom['crop-backdrop'].classList.contains('hidden'); }
+function closeCropModal() {
+  const wasOpen = isCropOpen();
+  if (dom['crop-backdrop']) dom['crop-backdrop'].classList.add('hidden');
+  crop.file = null;
+  const back = crop.returnFocus; crop.returnFocus = null;
+  if (wasOpen && back && back.isConnected && typeof back.focus === 'function') {
+    try { back.focus({ preventScroll: true }); } catch { /* ignore */ }
+  }
+  const r = crop.resolve; crop.resolve = null;
+  if (r) r(null);
+}
+
 /** Let the user place the face square on `file` (a Blob) and resolve to the crop fractions
- *  `{x, y, size}`, or null when they close the dialog. Nothing is uploaded. */
-function chooseFace(file, name) {
+ *  `{x, y, size}`, or null when they close the dialog. Nothing is uploaded. `hint` replaces the
+ *  dialog's line under the title. */
+function chooseFace(file, name, { hint = '' } = {}) {
   if (crop.resolve) { const r = crop.resolve; crop.resolve = null; r(null); }
   return new Promise((resolve) => {
     crop.resolve = resolve;
-    openCropModal(null, file, name);
+    openCropModal(null, file, name, hint);
   });
 }
 
@@ -8158,9 +8177,11 @@ function wireEvents() {
       // Route through the ✕ button so the lightbox's own close() runs
       // (pauses video, detaches its window pan listeners).
       if (lb) { const x = lb.querySelector('.lightbox-close'); if (x) x.click(); else lb.remove(); return; }
+      // The face picker opens over Settings (Characters, My bots, Account, People): Esc closes
+      // the picker alone, never the Settings under it, and settles a waiting chooseFace().
+      if (isCropOpen()) { closeCropModal(); return; }
       closeBotManager();   // confirms first if there are unsaved edits
       dom['fileserver-backdrop'].classList.add('hidden');
-      dom['crop-backdrop'].classList.add('hidden');
       dom['search-backdrop'].classList.add('hidden');
       dom['recover-backdrop'].classList.add('hidden');
       dom['tx-backdrop'].classList.add('hidden');
@@ -9137,9 +9158,10 @@ function closeAllOverlays() {
   // Settings carries Security, Reactions, Health and AI models as tabs now, so
   // hiding its one backdrop closes all five — the tab observer stops whatever
   // the active pane had running.
-  ['botmanager-backdrop', 'fileserver-backdrop', 'crop-backdrop',
+  ['botmanager-backdrop', 'fileserver-backdrop',
    'search-backdrop', 'recover-backdrop', 'tx-backdrop']
     .forEach((k) => dom[k] && dom[k].classList.add('hidden'));
+  closeCropModal();          // settles a waiting face picker too
   // The tool panes are Admin-only — never leave a view alive across a lock or
   // a profile switch.
   //

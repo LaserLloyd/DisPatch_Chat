@@ -2349,6 +2349,7 @@
     "saved": "Photo de profil mise à jour.",
     "removed": "Photo de profil supprimée.",
     "formats": "PNG, JPEG, WebP ou GIF, 5 Mo maximum. Elle est recadrée en carré.",
+    "crop_hint": "Fais glisser le carré sur le visage. Seul le carré est conservé, en petite image.",
     "err_type": "Utilisez une image PNG, JPEG, WebP ou GIF.",
     "err_size": "Cette image est trop volumineuse (5 Mo maximum).",
     "err_generic": "Impossible d'enregistrer la photo : {error}",

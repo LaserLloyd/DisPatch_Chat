@@ -2324,6 +2324,7 @@
     "saved": "Profilbild aktualisiert.",
     "removed": "Profilbild entfernt.",
     "formats": "PNG, JPEG, WebP oder GIF, bis 5 MB. Es wird quadratisch zugeschnitten.",
+    "crop_hint": "Zieh das Quadrat über das Gesicht. Nur das Quadrat wird behalten, als kleines Bild.",
     "err_type": "Nutze ein Bild als PNG, JPEG, WebP oder GIF.",
     "err_size": "Das Bild ist zu groß (höchstens 5 MB).",
     "err_generic": "Das Bild konnte nicht gespeichert werden: {error}",
