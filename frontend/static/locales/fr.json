@@ -2283,7 +2283,7 @@
     "trash": "Trash",
     "stray": "Old .bak files",
     "stray_hint": "Listed only. Nothing here is deleted automatically.",
-    "other": "Other",
+    "rest": "Other",
     "free": "Free disk space",
     "last_run": "Last clean-up: {when} ({duration})",
     "next_run": "Next clean-up: {when}",

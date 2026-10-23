@@ -1603,3 +1603,5 @@ App packages (their own `locales/*.json`, English reworded, the other seven stil
 New in 4.0 wave 3b, English copies in the other seven locales (WP-LOC translates them): `archive.back`, `archive.would` (`{count}`), `archive.moved_back`, `storage.total`, `storage.measured` (`{when}`), `storage.blocked`, `storage.by_area`, `storage.started`, `storage.scanning`, `retention.months_label`, `retention.hint`.
 
 The Foundation keys `storage.*`, `retention.*`, `archive.*` and `media.expired` are used as created.
+
+`storage.other` was renamed `storage.rest` (same text, all eight locales): a group that has a key called `other` is read as a plural object, which hid the whole `storage.*` group from the key-parity test and from `t()`.

@@ -405,6 +405,8 @@ const SHELL = [
   '/static/js/people-perms.js',
   // Drop files on a chat: Insert into chat / Upload to File Server (main.js).
   '/static/js/chatdrop.js',
+  // 4.0 scale round: rail paging and the windowed message list, the Storage and image cards, the "image expired" placeholder.
+  '/static/js/thread-pager.js', '/static/js/storage-card.js', '/static/js/media-expired.js',
   // Install metadata + icons. These were missing, so a cold offline start had
   // the shell but no manifest and no icon — the PWA that is the whole reason
   // this worker exists degraded to an unnamed, iconless page.

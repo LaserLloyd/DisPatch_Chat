@@ -176,7 +176,7 @@ test('wiring: main.js applies the layout with the pins, the popup has the sectio
   const main = read('js/main.js');
   assert.match(main, /from '\.\/railmenu\.js\?v=1'/);
   assert.match(main, /renderLinkRail\(document\.getElementById\('gear-row'\), \{ openViewer \}\);\n  applyRailLayout\(\);/);
-  assert.match(main, /applyLayout\(activeLayout\(false\)/);
+  assert.match(main, /applyLayout\(activeLayout\(\)/);
   assert.match(HTML, /<div class="tools-more" id="tools-more" role="none"><\/div>/);
   assert.match(read('js/privacy.js'), /'dispatch-rail-layout'/);
   assert.match(read('sw.js'), /'\/static\/js\/railmenu\.js'/);
