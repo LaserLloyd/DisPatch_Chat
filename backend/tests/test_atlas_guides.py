@@ -6,7 +6,7 @@ import pytest
 
 from app import __version__, config, firstrun, profiles_service
 from app.contracts.permissions import Role
-from tests.profiles_fixtures import scratch  # noqa: F401  (fixture)
+from tests.profiles_fixtures import scratch
 
 
 @pytest.fixture

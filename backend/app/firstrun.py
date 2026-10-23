@@ -378,6 +378,7 @@ async def drain_guides(db: Any, deliver: Callable[..., Awaitable[Any]]) -> list[
     """Post every queued guide set whose Atlas and profile still exist. Returns the thread ids
     made. Never raises."""
     import asyncio
+
     from . import accounts
     global _drain_lock
     if _drain_lock is None:
