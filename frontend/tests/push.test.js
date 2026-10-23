@@ -38,7 +38,7 @@ function fakeWin({ secure = true, apis = true, vapid = { public_key: 'AQ', subsc
   win.fetch = async (url, opts = {}) => {
     calls.push({ url, method: opts.method || 'GET' });
     const body = vapidStatus === 200 ? vapid
-      : { detail: 'Notifications need a remembered device: lock, then unlock with "Remember this device" ticked.' };
+      : { detail: 'Notifications need a remembered device: sign out, then sign in again with "Keep this device signed in" ticked.' };
     return { ok: vapidStatus === 200, status: vapidStatus, statusText: '', json: async () => body };
   };
   return { win, calls };

@@ -898,7 +898,7 @@
         "machine": [
           "machine:bots_read"
         ],
-        "note": "the characters this caller may talk to (audience and profile list)",
+        "note": "the characters this caller may talk to (household list, own personal characters)",
         "permission": "use_chat",
         "scoped": true
       }

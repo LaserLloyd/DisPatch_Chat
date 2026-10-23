@@ -438,7 +438,7 @@ class PasswordIn(BaseModel):
 
 @router.post("/api/auth/password", dependencies=[_SETTINGS])
 async def auth_password(request: Request, payload: PasswordIn):
-    """Set or change YOUR password (Owner or Admin).
+    """Set or change YOUR password (any Admin).
 
     The first password of a PIN-only owner (the migration leaves it unset) is
     confirmed with the install PIN; after that, with the current password."""
@@ -544,7 +544,7 @@ async def api_token_get(request: Request):
 @router.post("/api/auth/api-token", dependencies=[_SETTINGS])
 async def api_token_set(request: Request, payload: MachineIn):
     """Rotate the machine API key (shown once) and/or change how machines are
-    recognised. The Owner and Admins."""
+    recognised. Admins."""
     if not _caller(request).is_admin:
         return _problem(403, "permission_denied", "Only Admins manage the API key.")
     cfg = auth.load()
@@ -898,8 +898,8 @@ async def people_clear_pin(request: Request, profile_id: str):
 
 @router.post("/api/people/{profile_id}/password", dependencies=[_MANAGE])
 async def people_set_password(request: Request, profile_id: str, payload: SecretIn):
-    """Set another Admin's password (the Owner or an Admin). Your own is /api/auth/password;
-    the Owner's is the Owner's alone."""
+    """Set another Admin's password (an Admin). Your own is /api/auth/password;
+    the protected main Admin's is theirs alone."""
     caller = _caller(request)
     prof, err = _target(request, profile_id)
     if err is not None:

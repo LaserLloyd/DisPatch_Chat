@@ -121,7 +121,7 @@ CAPABILITIES: tuple[Capability, ...] = (
     _c("characters.manage_list", "List every character with its settings", "manage_characters",
        http=["GET /api/bots/all"], ui="api.allBots"),
     _c("characters.create", "Add a character", "manage_characters", http=["POST /api/bots"], ui="api.addBot"),
-    _c("characters.update", "Change a character (including its audience)", "manage_characters",
+    _c("characters.update", "Change a character (including whether it is hidden)", "manage_characters",
        http=["PATCH /api/bots/{bot_id}"], ui="api.patchBot"),
     _c("characters.delete", "Remove a character", "manage_characters", http=["DELETE /api/bots/{bot_id}"],
        ui="api.deleteBot"),

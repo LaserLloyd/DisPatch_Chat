@@ -46,7 +46,7 @@
       "choices": [],
       "choices_from": "",
       "default": "",
-      "description": "The address other devices use to reach DisPatch, e.g. https://chat.example.net. An https:// address tells the Health tab the connection is encrypted.",
+      "description": "The address other devices use to reach DisPatch, e.g. https://chat.example.net. An https:// address tells Settings → System the connection is encrypted.",
       "env": "DISPATCH_PUBLIC_URL",
       "env_names": [
         "DISPATCH_PUBLIC_URL",
@@ -76,7 +76,7 @@
       "choices": [],
       "choices_from": "",
       "default": false,
-      "description": "Say so when TLS ends at a proxy in front of DisPatch (Caddy, Tailscale Serve) so Health does not warn about plain HTTP.",
+      "description": "Say so when TLS ends at a proxy in front of DisPatch (Caddy, Tailscale Serve) so Settings → System does not warn about plain HTTP.",
       "env": "DISPATCH_BEHIND_TLS",
       "env_names": [
         "DISPATCH_BEHIND_TLS",
@@ -112,7 +112,7 @@
       ],
       "choices_from": "",
       "default": "local",
-      "description": "Local only (this computer), or your home network. The listen address itself is set by the launcher (--host, or BIND_ADDR in the Docker compose file); this records the decision so Health can tell you when the two disagree.",
+      "description": "Local only (this computer), or your home network. The listen address itself is set by the launcher (--host, or BIND_ADDR in the Docker compose file); this records the decision so the setup wizard can warn when the two disagree.",
       "env": null,
       "env_names": [],
       "group": "system",
@@ -408,7 +408,7 @@
       "choices": [],
       "choices_from": "",
       "default": "",
-      "description": "Where the Health tab reads log lines from. Empty uses <data folder>/logs/dispatch.log.",
+      "description": "Where Settings → System reads log lines from. Empty uses <data folder>/logs/dispatch.log.",
       "env": "DISPATCH_LOG_FILE",
       "env_names": [
         "DISPATCH_LOG_FILE",

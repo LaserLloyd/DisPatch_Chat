@@ -798,17 +798,6 @@
    "seeded": true
   },
   {
-   "code": "force_needs_session",
-   "status": 403,
-   "message": "force needs an unlocked session",
-   "fix": "Sign in first; --force is not available to a machine.",
-   "docs": "force_needs_session",
-   "patterns": [
-    "force needs an unlocked session"
-   ],
-   "seeded": false
-  },
-  {
    "code": "image_requests_disabled",
    "status": 403,
    "message": "Image requests aren't enabled for {}",
@@ -875,11 +864,11 @@
   {
    "code": "remember_device_required",
    "status": 403,
-   "message": "Notifications need a remembered device: lock, then unlock with \"Remember this device\" ticked.",
-   "fix": "Sign out and in again with \"Remember this device\" ticked to get notifications.",
+   "message": "Notifications need a remembered device: sign out, then sign in again with \"Keep this device signed in\" ticked.",
+   "fix": "Sign out and in again with \"Keep this device signed in\" ticked to get notifications.",
    "docs": "remember_device_required",
    "patterns": [
-    "Notifications need a remembered device: lock, then unlock with \"Remember this device\" ticked.",
+    "Notifications need a remembered device: sign out, then sign in again with \"Keep this device signed in\" ticked.",
     "Notifications need a signed-in, remembered device."
    ],
    "seeded": false
@@ -931,11 +920,11 @@
   {
    "code": "unlock_first",
    "status": 403,
-   "message": "Unlock with your PIN first",
-   "fix": "Sign in as the owner first, then retry.",
+   "message": "Sign in as the main Admin first",
+   "fix": "Sign in as the main Admin first, then retry.",
    "docs": "unlock_first",
    "patterns": [
-    "Unlock with your PIN first"
+    "Sign in as the main Admin first"
    ],
    "seeded": false
   },
@@ -2657,7 +2646,7 @@
    "code": "draft_unavailable",
    "status": 503,
    "message": "No AI connection is available for building a bot.",
-   "fix": "Connect an AI in Settings (AI models), or ask an Admin to allow one for your profile.",
+   "fix": "Add a connection in Settings → AI & Connections, or ask an Admin to allow one for your profile.",
    "docs": "draft_unavailable",
    "patterns": [
     "No AI connection is available for building a bot."

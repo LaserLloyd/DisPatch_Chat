@@ -933,7 +933,7 @@ def _is_operator(request: Request) -> bool:
 
 
 def _is_member(request: Request) -> bool:
-    """Signed in with the blanket ``use_tools`` (a Member) but not an operator."""
+    """Signed in with the blanket ``use_tools`` (a User granted it) but not an operator."""
     pol = policy.of(request)
     return (not pol.can(Permission.MANAGE_PLUGINS)) and pol.can(Permission.USE_TOOLS)
 
@@ -943,7 +943,7 @@ def _require_operator(request: Request) -> None:
 
 
 def _member_visible(t: Tool) -> bool:
-    """What a Member may open: any enabled static page or URL tool the owner added."""
+    """What a non-operator holding ``use_tools`` may open: any enabled static page or URL tool an Admin added."""
     return t.kind in ("static", "url") and t.enabled
 
 

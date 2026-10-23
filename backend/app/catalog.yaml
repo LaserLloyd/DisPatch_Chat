@@ -22,14 +22,14 @@ entries:
   - id: ai-provider
     name: An AI provider
     summary: Chat with any OpenAI-compatible API (MiniMax, OpenAI, xAI Grok, OpenRouter, DeepSeek...), Anthropic, or a local model server.
-    connects: "Settings → AI models → Connect an AI, or Set up everything with one provider."
+    connects: "Settings → AI & Connections → Add a connection, or Set up everything with one provider."
     probe: chat
     guide: true
 
   - id: image-api
     name: Image generation (API)
     summary: Pictures in chat ([[pic:…]]) from MiniMax image-01, OpenAI, xAI Grok or any OpenAI-compatible images endpoint. Billed per picture.
-    connects: "Settings → AI models → Image generation."
+    connects: "Settings → AI & Connections → Image generation."
     probe: image_api
     guide: true
 

@@ -822,7 +822,7 @@
     {
       "code": "draft_unavailable",
       "docs": "draft_unavailable",
-      "fix": "Connect an AI in Settings (AI models), or ask an Admin to allow one for your profile.",
+      "fix": "Add a connection in Settings → AI & Connections, or ask an Admin to allow one for your profile.",
       "message": "No AI connection is available for building a bot.",
       "patterns": [
         "No AI connection is available for building a bot."
@@ -947,16 +947,6 @@
       "message": "Forbidden",
       "patterns": [
         "Forbidden"
-      ],
-      "status": 403
-    },
-    {
-      "code": "force_needs_session",
-      "docs": "force_needs_session",
-      "fix": "Sign in first; --force is not available to a machine.",
-      "message": "force needs an unlocked session",
-      "patterns": [
-        "force needs an unlocked session"
       ],
       "status": 403
     },
@@ -2077,10 +2067,10 @@
     {
       "code": "remember_device_required",
       "docs": "remember_device_required",
-      "fix": "Sign out and in again with \"Remember this device\" ticked to get notifications.",
-      "message": "Notifications need a remembered device: lock, then unlock with \"Remember this device\" ticked.",
+      "fix": "Sign out and in again with \"Keep this device signed in\" ticked to get notifications.",
+      "message": "Notifications need a remembered device: sign out, then sign in again with \"Keep this device signed in\" ticked.",
       "patterns": [
-        "Notifications need a remembered device: lock, then unlock with \"Remember this device\" ticked.",
+        "Notifications need a remembered device: sign out, then sign in again with \"Keep this device signed in\" ticked.",
         "Notifications need a signed-in, remembered device."
       ],
       "status": 403
@@ -2441,10 +2431,10 @@
     {
       "code": "unlock_first",
       "docs": "unlock_first",
-      "fix": "Sign in as the owner first, then retry.",
-      "message": "Unlock with your PIN first",
+      "fix": "Sign in as the main Admin first, then retry.",
+      "message": "Sign in as the main Admin first",
       "patterns": [
-        "Unlock with your PIN first"
+        "Sign in as the main Admin first"
       ],
       "status": 403
     },

@@ -1070,7 +1070,7 @@ def require_operator(request: Request) -> None:
     must equal the Host — the same rule as the websocket gate — and
     ``Sec-Fetch-Site`` must not say ``cross-site`` or ``same-site``. A raw-body or
     multipart POST is a CORS "simple" request that a page on another port of the
-    same host name sends with the unlocked cookie and no preflight (FR-hardening
+    same host name sends with the session cookie and no preflight (FR-hardening
     L1: a cross-origin ``POST /api/voice/lab/test`` loaded the speech models).
     Non-browser callers send neither header and are judged by the session alone."""
     if request.method not in SAFE_METHODS:
@@ -1086,7 +1086,7 @@ def require_extension_route(request: Request) -> None:
 
     The same Origin rule as :func:`require_operator`, then the requirement the route
     table declares for this add-on path (``route_policy.extension_requirement``): the
-    reads a voice user needs (``use_voice``, 2026-10-19: Members have voice) or, for
+    reads a voice user needs (``use_voice``: every role by default) or, for
     everything else, ``manage_plugins``."""
     if request.method not in SAFE_METHODS:
         if not origin_ok(request.headers) or \
@@ -1788,7 +1788,7 @@ def origin_ok(headers) -> bool:
 
 
 def slot_key(ws, token: str | None) -> str:
-    """Whose sockets this one counts against: the unlocked session; without a
+    """Whose sockets this one counts against: the signed-in session; without a
     PIN the browser's device id (``?d=``), else a list of its own."""
     if token:
         return token
