@@ -1,12 +1,13 @@
+import { spriteIcon } from './util.js?v=20';
 // Rail layout — which static rail buttons sit on the bar and which live in the
 // "Tools & more" popup (js/tools.js), in what order.
 //
 // The same idea as menubots.js (a bot parked in the Tools popup), applied to the
 // fixed buttons under the roster: the profile chip, Tasks, the File Server, the
-// theme button, Lock / Unlock, Settings. The rail had grown a column of glyphs;
-// most of them are opened rarely, so by default the profile chip, Tasks, the
-// File Server and the theme button go into the popup and the bar keeps Lock /
-// Unlock and Settings (and the Restricted send-a-file button, see below).
+// theme button, Lock, Settings. The rail had grown a column of glyphs;
+// most of them are opened rarely, so by default Tasks, the File Server and the
+// theme button go into the popup and the bar keeps the profile chip, Lock and
+// Settings.
 //
 // HOW IT WORKS. The buttons are the real elements from index.html, with their
 // ids, handlers and visibility classes; this module only MOVES them between
@@ -17,11 +18,6 @@
 //
 // A DEVICE setting, like menubots.js and pins.js: localStorage, wrapped in
 // try/catch, and a missing or corrupt value is the default layout.
-//
-// RESTRICTED IGNORES THIS ENTIRELY, like parked bots: a locked / Restricted
-// device always gets every button back on the bar in the shipped order, so its
-// reduced set is exactly what it was, and nothing it cannot reach is hidden in
-// a popup it may not even have.
 
 export const KEY = 'dispatch-rail-layout';
 
@@ -102,10 +98,9 @@ export function nudgeItem(layout, id, delta) {
   return l;
 }
 
-/** The layout to draw with, given the tier: Restricted always gets the shipped
- *  bar with nothing in the popup. */
-export function activeLayout(decoy) {
-  return decoy ? { rail: RAIL_ITEMS.slice(), menu: [] } : loadLayout();
+/** The layout to draw with: the stored one, or the default. */
+export function activeLayout() {
+  return loadLayout();
 }
 
 /** Put the buttons where `layout` says. Rail buttons keep their place relative
@@ -114,7 +109,7 @@ export function activeLayout(decoy) {
  *  #gear-row stays just before ⚙ when ⚙ is on the bar, at the end otherwise.
  *  Menu buttons become menu items (role=menuitem, a label from aria-label in
  *  CSS). Returns how many menu buttons are visible. */
-export function applyLayout(layout, { rail, menu, decoy = false } = {}) {
+export function applyLayout(layout, { rail, menu } = {}) {
   if (!rail || !menu) return 0;
   const byId = (id) => document.getElementById(id);
   const others = [...rail.children].filter((n) => !RAIL_ITEMS.includes(n.id));
@@ -124,7 +119,7 @@ export function applyLayout(layout, { rail, menu, decoy = false } = {}) {
     b.removeAttribute('role');
     b.removeAttribute('tabindex');
     b.classList.remove('rail-menu-item');
-    b.setAttribute('draggable', decoy ? 'false' : 'true');
+    b.setAttribute('draggable', 'true');
     rail.append(b);
   }
   const gear = byId('manage-bots');
@@ -155,8 +150,8 @@ export function applyLayout(layout, { rail, menu, decoy = false } = {}) {
  *  every repaint.
  *
  *  opts: rail (#gear-row), menu (#tools-more), toolList (#tool-list, holds the
- *  popup's button), isDecoy(), openMenu(), onMove(id, zone, beforeId). */
-export function wireRailDrag({ rail, menu, toolList, isDecoy, openMenu, onMove }) {
+ *  popup's button), openMenu(), onMove(id, zone, beforeId). */
+export function wireRailDrag({ rail, menu, toolList, openMenu, onMove }) {
   let dragId = null;
   const item = (e) => {
     const b = e.target && e.target.closest ? e.target.closest('[id]') : null;
@@ -187,7 +182,7 @@ export function wireRailDrag({ rail, menu, toolList, isDecoy, openMenu, onMove }
     const zone = host === rail ? 'rail' : 'menu';
     host.addEventListener('dragstart', (e) => {
       const b = item(e);
-      if (!b || isDecoy()) return;
+      if (!b) return;
       dragId = b.id;
       b.classList.add('dragging');
       // Our own type, never text/plain: a text payload would be typed into the
@@ -261,17 +256,18 @@ export function openArrangeDialog({ t, el, labelOf, visible, onChange }) {
       const ul = el('ul', { class: 'rail-arrange-list', 'aria-label': t(zone === 'rail' ? 'rail.on_bar' : 'rail.in_menu') });
       ids.forEach((id, i) => {
         const name = labelOf(id);
-        const act = (key, label, fn, disabled = false) => {
-          const b = el('button', { type: 'button', class: 'btn-secondary rail-arrange-btn', text: label,
-            'aria-label': `${label}: ${name}`, dataset: { key: `${id}:${key}` } });
+        const act = (key, label, fn, disabled = false, icon = null) => {
+          const b = el('button', { type: 'button', class: 'btn-secondary rail-arrange-btn',
+            'aria-label': icon ? t(icon === 'arrow-up' ? 'settings.move_up_aria' : 'settings.move_down_aria', { name }) : `${label}: ${name}`,
+            dataset: { key: `${id}:${key}` } }, [icon ? spriteIcon(icon, 14) : label]);
           if (disabled) b.disabled = true;
           b.addEventListener('click', () => { focusKey = `${id}:${key}`; onChange(saveLayout(fn(loadLayout()))); paint(); });
           return b;
         };
         ul.append(el('li', { class: 'rail-arrange-row', dataset: { id } }, [
           el('span', { class: 'rail-arrange-name', text: name }),
-          act('up', '↑', (l) => nudgeItem(l, id, -1), i === 0),
-          act('down', '↓', (l) => nudgeItem(l, id, +1), i === ids.length - 1),
+          act('up', '', (l) => nudgeItem(l, id, -1), i === 0, 'arrow-up'),
+          act('down', '', (l) => nudgeItem(l, id, +1), i === ids.length - 1, 'arrow-down'),
           act('move', t(zone === 'rail' ? 'rail.to_menu' : 'rail.to_bar'),
             (l) => moveItem(l, id, zone === 'rail' ? 'menu' : 'rail', null)),
         ]));

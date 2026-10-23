@@ -140,4 +140,43 @@
 
 /* ===== WP-UIREV: review fixes (wave 3) ===== */
 
+/* Buttons that hold a sprite icon and a label: one line, centred, a steady gap. */
+.btn-primary:has(> svg.rail-icon), .btn-secondary:has(> svg.rail-icon), .ui-btn:has(> svg.rail-icon) {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+}
+.btn-primary > svg.rail-icon, .btn-secondary > svg.rail-icon, .ui-btn > svg.rail-icon { flex: none; }
+
+/* Sprite icons in places the old glyph font-size rules used to size. The width/height
+   attributes are the fallback; these keep one weight and scale per context. */
+.dash-banner-dot .rail-icon, .dash-finding-pill .rail-icon { width: 14px; height: 14px; }
+.health-card-glyph .rail-icon { width: 22px; height: 22px; }
+.needs-glyph .rail-icon, .step-glyph .rail-icon, .waiting-glyph .rail-icon, .chip-glyph .rail-icon { width: 14px; height: 14px; vertical-align: -2px; }
+.theme-check .rail-icon, .qm-check .rail-icon, .wizard-dot .rail-icon, .typing-hint .rail-icon, .bm-move-btn .rail-icon, .hs-step .rail-icon { width: 12px; height: 12px; vertical-align: -1px; }
+.bm-handle .rail-icon { width: 18px; height: 18px; }
+.alt-btn .rail-icon, .link-viewer-mark .rail-icon, .site-link-ext .rail-icon, .tools-item-ext .rail-icon { width: 14px; height: 14px; }
+.list-chevron .rail-icon, .tools-menu-chevron .rail-icon { width: 16px; height: 16px; }
+.empty-emoji .rail-icon { width: 48px; height: 48px; opacity: .8; }
+/* Direction-bearing chevrons mirror in right-to-left languages. */
+[dir="rtl"] .list-chevron .rail-icon, [dir="rtl"] .alt-btn .rail-icon, [dir="rtl"] .hs-step .rail-icon,
+[dir="rtl"] .tools-menu-chevron .rail-icon { transform: scaleX(-1); }
+
+/* My bots: the "copy a household bot" list lines up with the list above it. */
+.mb-main .mb-group { margin-inline: 0; }
+
+/* Sign-in tiles centre when they wrap, so a lone last tile is not stranded at the start. */
+.signin-tiles { display: flex; flex-wrap: wrap; justify-content: center; }
+.signin-tiles > li { flex: 0 0 min(124px, calc(50% - 5px)); min-width: 0; }
+
+/* Arrange the bar: both move buttons the same width so the columns line up. */
+.rail-arrange-row > .rail-arrange-btn:last-child { min-width: 7.5rem; }
+
+/* Menu items without an icon (a bot's "Make my own copy") line up with the ones that have one. */
+.menu > button:not(:has(> .icn, > svg)) { padding-inline-start: 36px; }
+
+/* The count tiles in the confirmation dialogs sit in one row even at phone width. */
+.pe-tally { grid-template-columns: repeat(auto-fit, minmax(62px, 1fr)); }
+
+/* Tools & more: the label column starts at the same place for tools, buttons and Arrange. */
+.tools-arrange { padding-inline-start: 46px; }
+
 /* ===== WP-SCALE-FE: thread pager, Archived view, load earlier, Storage and image cards ===== */

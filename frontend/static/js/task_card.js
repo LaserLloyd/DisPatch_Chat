@@ -21,7 +21,7 @@
 // DOM is built incrementally: an event appends or patches one element, so a focused button in
 // an approval card is never torn down by an unrelated delta arriving.
 
-import { el } from './util.js?v=20';
+import { el, spriteIcon } from './util.js?v=20';
 import { t } from './i18n.js?v=4';
 import { approvalCardEl, approvalView } from './approval_card.js?v=1';
 
@@ -294,7 +294,7 @@ export function createTaskCard(deps) {
     if (!rec) return;
     const isSub = node.kind === 'subagent';
     rec.el.className = `task-tool${isSub ? ' task-sub' : ''}${node.done ? (node.ok ? ' task-ok' : ' task-bad') : ' task-wait'}`;
-    rec.mark.textContent = node.done ? (node.ok ? '✓' : '✕') : '…';
+    rec.mark.replaceChildren(...(node.done ? [spriteIcon(node.ok ? 'check' : 'x', 14)] : ['…']));
     if (isSub) {
       rec.label.textContent = t('tasks.subagent', { name: node.agentType || node.name });
       rec.prev.textContent = node.description || '';

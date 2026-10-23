@@ -26,7 +26,7 @@
 // not an account preference. The key is in privacy.js APP_KEYS — privacy
 // mode's wipe must forget a device's links like everything else it forgets.
 
-import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
+import { el, railIcon, RAIL_ICONS, spriteIcon } from './util.js?v=20';
 
 const KEY = 'dispatch-custom-links';
 
@@ -164,7 +164,7 @@ export function renderLinkRail(container, { decoy = false, openViewer = null } =
   if (!container) return;
   container.querySelectorAll('.link-btn').forEach((n) => n.remove());
   if (decoy) return;                       // unlocked-only, no exceptions
-  const anchor = container.querySelector('#manage-bots');   // links sit before ⚙
+  const anchor = container.querySelector('#manage-bots');   // links sit before Settings
   const place = (node) => {
     if (anchor) container.insertBefore(node, anchor);
     else container.append(node);
@@ -227,8 +227,7 @@ export function linksSection(t, { onChange = null } = {}) {
               class: 'link-viewer-mark',
               title: t('links.open_in_viewer'),
               'aria-label': t('links.open_in_viewer'),
-              text: ' ⧉',
-            })
+            }, [' ', spriteIcon('external-link', 12)])
             : null,
         ]),
         el('span', { class: 'bm-links-url', text: entry.url }),
@@ -249,7 +248,7 @@ export function linksSection(t, { onChange = null } = {}) {
   paint();
 
   const glyph = el('input', {
-    class: 'bm-links-in-glyph', maxlength: '4', placeholder: '🔗',
+    class: 'bm-links-in-glyph', maxlength: '4', placeholder: '🔗',  // forgeui: allow-icons
     'aria-label': t('links.glyph'),
   });
   const label = el('input', {

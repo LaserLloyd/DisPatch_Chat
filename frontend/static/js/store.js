@@ -13,29 +13,15 @@
 //
 // == THE PART THAT IS NOT ABOUT CONVENIENCE ==================================
 //
-// This device runs in two tiers. A locked "Safe Mode" session sees a redacted
-// view of the same threads an unlocked one sees in full. Putting either on the
-// same disk without a partition would mean a family tablet could be handed
-// over locked and still read, out of a cache, the messages the lock exists to
-// hide.
+// A cache is a copy of chats on the disk of a shared device. Every key is
+// scoped to a tier (`full` is the only one in use), and a store instance only
+// ever composes keys in its OWN tier: the tier is fixed at construction, never
+// read per call, so no caller chooses which tier it reads. That is the
+// invariant frontend/tests/store.test.js pins down first.
 //
-// So EVERY key is scoped to the tier it was written in, and a store instance
-// only ever composes keys in its OWN tier. A locked session cannot address an
-// unlocked key — not "is not supposed to": the key it would have to ask for is
-// not a key it can build. That is the invariant frontend/tests/store.test.js
-// pins down first, and it is why the tier is fixed at construction rather than
-// read per call — there is no code path where a caller chooses which tier it
-// reads.
-//
-// Rows cached in Safe Mode are the rows THE SERVER SENT to a Safe-Mode
-// session: already redacted, upstream, before they reached this file. Nothing
-// here un-redacts anything, and nothing here should ever be handed a full-tier
-// row to write into the safe tier. The cache sits downstream of the gate, never
-// beside it.
-//
-// Dropping to Safe Mode wipes the unlocked tier outright (wipeTier), because a
-// cache that merely stops being readable is still a cache sitting on the disk
-// of a device somebody has just handed to a child.
+// Signing out, locking and switching profile wipe the tier outright
+// (wipeTier), because a cache that merely stops being readable is still a
+// cache of somebody's chats sitting on a device the next person picks up.
 
 export const DB_NAME = 'dispatch-store';
 export const DB_VERSION = 1;
@@ -46,7 +32,6 @@ export const STORE_MESSAGES = 'messages';
 export const STORES = [STORE_DRAFTS, STORE_OUTBOX, STORE_MESSAGES];
 
 export const TIER_FULL = 'full';
-export const TIER_SAFE = 'safe';
 
 // How many rows of a thread are worth keeping: enough to read the tail of a
 // conversation, not so many that the cache becomes a second copy of the app.
@@ -56,9 +41,6 @@ export const MESSAGE_CACHE_ROWS = 50;
 // `tier + SEP + id` is unambiguous in both directions. A printable separator
 // would let an id that contained it forge a key in the other tier.
 const SEP = '\u0000';
-
-/** The tier a session with this `decoy` flag reads and writes. */
-export function tierFor(decoy) { return decoy ? TIER_SAFE : TIER_FULL; }
 
 /** tier + id -> the one key that pair is allowed to touch. */
 export function scopedKey(tier, id) { return `${tier}${SEP}${id}`; }
@@ -310,8 +292,8 @@ export function createStore({ factory = defaultFactory(), tier = TIER_FULL } = {
     /** Delete every row of one tier, across all three stores.
      *
      *  Takes the tier explicitly because its whole job is to reach a tier this
-     *  store is not scoped to: the locked session that has just been created is
-     *  the one that must destroy what the unlocked session left behind.
+     *  store is not scoped to: whichever session starts next must be able to
+     *  destroy what the previous one left behind.
      */
     async wipeTier(which) {
       const d = await db();

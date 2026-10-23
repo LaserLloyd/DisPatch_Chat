@@ -178,18 +178,6 @@ test('a refused Save keeps the text and says why', { skip: dom.skip }, async () 
   assert.equal(rec.toasts.at(-1)[1], true);
 });
 
-test('safe bots carry the family-device note; others do not', { skip: dom.skip }, async () => {
-  const { mod, ctx, win } = await setup();
-  for (const [bot, want] of [[{ ...ATLAS }, true], [{ ...ATLAS, id: 'sage', safe: false }, false]]) {
-    const c = mod.rowControls(bot, ctx);
-    fire(win, c.persona);
-    await tick();
-    const note = c.personaPanel.querySelector('[data-bm="persona-safe-note"]');
-    assert.equal(!!note, want, bot.id);
-    if (note) assert.equal(note.textContent, EN.persona.safe_note);
-  }
-});
-
 test('an agent bot gets a pointer to its workspace and no editor; an app bot gets nothing', { skip: dom.skip }, async () => {
   const { mod, ctx, win } = await setup();
   const agent = mod.rowControls({ id: 'main', name: 'Nova', backend: 'agent', persona_kind: 'none' }, ctx);
@@ -223,7 +211,7 @@ test('wiring: main.js places the slots, bots-edit imports the module, Connect re
   // The Details panel does not draw a second personality picker beside it.
   assert.match(MAIN, /skip: \['personality'\]/);
   assert.match(SW, /'\/static\/js\/personality\.js'/);
-  for (const k of ['title', 'preset', 'custom', 'revert', 'reset', 'saved', 'safe_note', 'agent_note', 'hint']) {
+  for (const k of ['title', 'preset', 'custom', 'revert', 'reset', 'saved', 'agent_note', 'hint']) {
     assert.ok(EN.persona[k], k);
   }
 });

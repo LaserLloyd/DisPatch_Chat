@@ -21,9 +21,9 @@
 // before the convention (and senders that never adopted it).
 
 // A leading alert glyph, optionally inside the **bold** box-smoke uses.
-const LEAD = /^\s*(?:\*\*)?\s*(⚠️|⚠|❌|🚨|✅\s*RECOVERED\b)/u;
+const LEAD = /^\s*(?:\*\*)?\s*(⚠️|⚠|❌|🚨|✅\s*RECOVERED\b)/u;  // forgeui: allow-icons
 // Just the leading glyph — the headline keeps words like RECOVERED.
-const GLYPH = /^\s*(?:\*\*)?\s*(?:⚠️|⚠|❌|🚨|✅)\s*/u;
+const GLYPH = /^\s*(?:\*\*)?\s*(?:⚠️|⚠|❌|🚨|✅)\s*/u;  // forgeui: allow-icons
 // Words that make a SHORT un-injected reply read as an error rather than a
 // bot deliberately opening with a warning sign.
 const ERRORISH = /\b(fail(?:ed|ing|ure)?|error|timed out|unavailable|unreachable|crash(?:ed)?)\b/i;
@@ -44,8 +44,8 @@ const LEVELS = ['info', 'ok', 'warn', 'error'];
 
 function levelFor(glyph) {
   if (!glyph) return 'warn';
-  if (glyph.startsWith('❌') || glyph.startsWith('🚨')) return 'error';
-  if (glyph.startsWith('✅')) return 'ok';
+  if (glyph.startsWith('❌') || glyph.startsWith('🚨')) return 'error';  // forgeui: allow-icons
+  if (glyph.startsWith('✅')) return 'ok';  // forgeui: allow-icons
   return 'warn';
 }
 
@@ -90,7 +90,7 @@ export function classifyNotice(msg) {
   // pair to NEW FAIL and carries no error word by design.
   const injected = meta.origin === 'inject' || !!meta.delivery_key;
   if (injected) {
-    if (m[1].startsWith('✅') || INJECT_ERRORISH.test(content)) {
+    if (m[1].startsWith('✅') || INJECT_ERRORISH.test(content)) {  // forgeui: allow-icons
       return { level: levelFor(m[1]), headline };
     }
     return null;

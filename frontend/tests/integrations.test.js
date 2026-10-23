@@ -86,7 +86,11 @@ test('the checklist marks each capability', { skip: dom.skip }, async () => {
     { id: 'embeddings', label: 'Knowledge search', status: 'absent', detail: 'not offered' },
     { id: 'images', label: 'Image generation', status: 'failed', detail: 'HTTP 403' },
   ]);
-  assert.deepEqual([...ul.querySelectorAll('.qs-mark')].map((n) => n.textContent), ['✓', '—', '✗']);
+  // ok / failed are ThemeForge sprite icons now (check, x); absent stays a dash.
+  const marks = [...ul.querySelectorAll('.qs-mark')];
+  assert.deepEqual(marks.map((n) => n.textContent), ['', '—', '']);
+  assert.ok(marks[0].querySelector('use[href$="#check"]'));
+  assert.ok(marks[2].querySelector('use[href$="#x"]'));
   assert.equal(ul.querySelector('[data-cap="images"]').dataset.status, 'failed');
 });
 

@@ -23,8 +23,8 @@ const dom = { skip: domSkip(jsdom ? false : 'jsdom is not installed') };
 
 const PACK = () => ({
   reactions: [
-    { id: 'wow', name: 'Wow', aliases: ['omg'], safe: true, source: 'pack', image_url: '/api/reactions/wow/image' },
-    { id: 'nope', name: 'Nope', aliases: [], safe: false, source: 'custom', image_url: '/api/reactions/nope/image' },
+    { id: 'wow', name: 'Wow', aliases: ['omg'], source: 'pack', image_url: '/api/reactions/wow/image' },
+    { id: 'nope', name: 'Nope', aliases: [], source: 'custom', image_url: '/api/reactions/nope/image' },
   ],
   settings: { enabled: true, default_duration_ms: 10000, cooldown_ms: 0, queue_max: 3 },
   can_manage: true, can_generate: false, pool: { remaining: 4, per_mood: 20, available: false, image_cli: 'unset' },
@@ -57,12 +57,11 @@ async function setup() {
   return { win, mod, host, calls, toasts };
 }
 
-test('the pack is a grid of tiles with an R badge for the Restricted-visible ones; no row has its own Save', { skip: dom.skip }, async () => {
+test('the pack is a grid of tiles, no badge and no row Save', { skip: dom.skip }, async () => {
   const { host } = await setup();
   const tiles = [...host.querySelectorAll('.rx-tile')];
   assert.deepEqual(tiles.map((t) => t.dataset.reaction), ['wow', 'nope']);
-  assert.equal(tiles[0].querySelector('.rx-tile-badge').textContent, 'R');
-  assert.equal(tiles[1].querySelector('.rx-tile-badge'), null);
+  assert.equal(host.querySelectorAll('.rx-tile-badge').length, 0);
   assert.equal(host.querySelectorAll('.rx-row-save').length, 0);
   assert.equal(host.querySelector('.rx-sheet'), null, 'no sheet until a tile is chosen');
   // Behaviour comes first and starts closed.
@@ -84,7 +83,7 @@ test('a tile opens its edit sheet; a field saves when it changes', { skip: dom.s
   name.dispatchEvent(new win.Event('change'));
   await tick(); await tick();
   const patch = calls.find((c) => c.key === 'PATCH /api/reactions/nope');
-  assert.deepEqual(patch.body, { name: 'Nah', aliases: [], safe: false });
+  assert.deepEqual(patch.body, { name: 'Nah', aliases: [] });
   // Escape closes the sheet.
   const again = host.querySelector('.rx-sheet');
   again.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));

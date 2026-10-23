@@ -62,9 +62,6 @@
 
 /* ---- Character details and starter packs ------------------------------ */
 .chr-panel { margin: .25rem 0 .75rem 1rem; padding-left: .75rem; border-left: 2px solid var(--divider); }
-.chr-visibility { border: 0; padding: 0; margin: .5rem 0; display: grid; gap: .2rem; }
-.chr-details-btn { margin-left: auto; }
-.chr-packs { margin-bottom: 1rem; }
 
 /* ---- First-run wizard -------------------------------------------------- */
 .wizard-backdrop { z-index: 1200; }

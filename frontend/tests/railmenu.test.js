@@ -75,13 +75,13 @@ test('moving in, out and along both lists; normalize repairs junk and keeps new 
   assert.deepEqual(M.normalizeLayout('garbage'), M.defaultLayout());
 });
 
-test('the layout persists per device, and Restricted gets the shipped bar whatever is stored', { skip: dom.skip }, async () => {
+test('the layout persists per device, and a corrupt value reads as the default', { skip: dom.skip }, async () => {
   const win = await boot();
   const M = await R();
   M.saveLayout(M.moveItem(M.defaultLayout(), 'manage-bots', 'menu', null));
   assert.ok(JSON.parse(win.localStorage.getItem('dispatch-rail-layout')).menu.includes('manage-bots'));
   assert.ok(M.loadLayout().menu.includes('manage-bots'));
-  assert.deepEqual(M.activeLayout(true), { rail: M.RAIL_ITEMS, menu: [] });
+  assert.deepEqual(M.activeLayout(), M.loadLayout());
   win.localStorage.setItem('dispatch-rail-layout', '{not json');
   assert.deepEqual(M.loadLayout(), M.defaultLayout());
 });
@@ -102,12 +102,6 @@ test('applyLayout moves the real buttons; hidden ones stay hidden; pins stay bef
   assert.equal(tasks.getAttribute('role'), 'menuitem');
   assert.ok(tasks.classList.contains('hidden'), 'its own visibility rule still applies');
   assert.equal(shown, [...menu.children].filter((b) => !b.classList.contains('hidden')).length);
-  // Restricted: everything back on the bar, no menu roles, nothing draggable.
-  M.applyLayout(M.activeLayout(true), { rail, menu, decoy: true });
-  assert.deepEqual(ids(menu), []);
-  assert.deepEqual(ids(rail), [...M.RAIL_ITEMS.slice(0, -1), 'pin-x', 'manage-bots']);
-  assert.equal(tasks.getAttribute('role'), null);
-  assert.equal(doc.getElementById('lock-now').getAttribute('draggable'), 'false');
 });
 
 const dragData = [];
@@ -157,19 +151,6 @@ test('drag: rail -> popup button -> into the popup; popup row -> bar; reorder in
   assert.equal(drag(win, gear, 'dragover').defaultPrevented, false);
 });
 
-test('a Restricted device cannot start a rail drag', { skip: dom.skip }, async () => {
-  const win = await boot();
-  const M = await R();
-  const doc = win.document;
-  const rail = doc.getElementById('gear-row');
-  let moved = 0;
-  M.wireRailDrag({ rail, menu: doc.getElementById('tools-more'), toolList: null, isDecoy: () => true,
-    openMenu() {}, onMove: () => { moved++; } });
-  drag(win, doc.getElementById('lock-now'), 'dragstart');
-  drag(win, doc.getElementById('manage-bots'), 'drop');
-  assert.equal(moved, 0);
-});
-
 test('"Arrange the bar" moves without dragging, and Reset restores the default', { skip: dom.skip }, async () => {
   const win = await boot();
   const M = await R();
@@ -207,7 +188,7 @@ test('a rail drag carries only its own MIME type, never text (so a drop on the c
   const M = await R();
   const doc = win.document;
   const rail = doc.getElementById('gear-row');
-  M.wireRailDrag({ rail, menu: doc.getElementById('tools-more'), toolList: null, isDecoy: () => false, openMenu() {}, onMove() {} });
+  M.wireRailDrag({ rail, menu: doc.getElementById('tools-more'), toolList: null, openMenu() {}, onMove() {} });
   dragData.length = 0;
   drag(win, doc.getElementById('lock-now'), 'dragstart');
   assert.deepEqual(dragData, [['application/x-dispatch-rail', 'lock-now']]);

@@ -19,7 +19,7 @@
 // Safe Mode or NIM to hide — both see the same spinner or the same warning,
 // and neither issues a network request for it.
 
-import { el } from './util.js?v=20';
+import { el, spriteIcon } from './util.js?v=20';
 
 // The metadata contract, in one place. `kind` is what marks the row; `status`
 // is the only field that changes over the job's life.
@@ -88,10 +88,9 @@ export function imageJobMessageEl(msg) {
     // who cannot see the animation loses nothing.
     card.append(el('span', { class: 'image-job-spinner', 'aria-hidden': 'true' }));
   }
-  card.append(el('span', {
-    class: 'image-job-text',
-    text: msg.content || (job.pending ? '🖼️ Generating an image…' : '⚠️ image failed'),
-  }));
+  card.append(el('span', { class: 'image-job-text' }, msg.content
+    ? [msg.content]
+    : [spriteIcon(job.pending ? 'image' : 'triangle-alert', 14), job.pending ? ' Generating an image…' : ' image failed']));
   if (job.pending && job.percent !== null) {
     // Text, not a bar: the number can go backwards when a second stage
     // starts, and a bar that resets reads as a bug rather than as progress.

@@ -16,12 +16,8 @@
 // clicks but never moves focus, so a reaction landing mid-sentence doesn't eat
 // your keystrokes. The chat carries on underneath; dismissing takes one click.
 //
-// Safe Mode: the server only ever sends frames for reactions flagged `safe`,
-// and 403s the image of anything else. The `safe` re-check here is the same
-// belt-and-suspenders layer the message renderer uses for media.
-
 import { api } from './api.js?v=35';
-import { el, railIcon, RAIL_ICONS, iconLabel, glyphless } from './util.js?v=20';
+import { el, railIcon, RAIL_ICONS, iconLabel, glyphless, spriteIcon } from './util.js?v=20';
 import { t } from './i18n.js?v=4';
 import { nimEnabled } from './nim.js?v=5';
 
@@ -191,7 +187,6 @@ export function handleReactionFrame(ev) {
   // crucially no image URL ever constructed. Returning here rather than at the
   // render layer is what keeps the promise that nothing is downloaded.
   if (nimEnabled()) return;
-  if (ctx.isDecoy() && !ev.safe) return;         // server already filtered; re-check
   if (ev.event_id) {
     if (R.seen.has(ev.event_id)) return;
     R.seen.add(ev.event_id);
@@ -265,7 +260,7 @@ function showReaction(ev) {
     ovImg.alt = ev.name ? t('reactions.alt', { name: ev.name }) : t('reactions.alt_generic');
     ovTitle.textContent = ev.name || ev.reaction_id;
     const who = ev.actor || t(ev.actor_kind === 'agent' ? 'common.assistant' : 'common.you');
-    ovMeta.textContent = `${ev.actor_kind === 'agent' ? '⚡' : '🫵'} ${who}`;
+    ovMeta.replaceChildren(spriteIcon(ev.actor_kind === 'agent' ? 'zap' : 'user', 14), ` ${who}`);
     if (ev.caption) {
       ovCaption.textContent = ev.caption;
       ovCaption.hidden = false;
@@ -471,7 +466,7 @@ function renderManager() {
     ctx.toast(t('reactions.saved'));
   });
   for (const c of [enabled, dur, cool, queue]) c.addEventListener('change', saveBehaviour);
-  const reseedBtn = el('button', { class: 'btn-secondary', text: t('reactions.reseed') });
+  const reseedBtn = el('button', { class: 'btn-secondary' }, [spriteIcon('refresh-cw', 14), ` ${t('reactions.reseed')}`]);
   reseedBtn.title = t('reactions.reseed_title');
   reseedBtn.addEventListener('click', async () => {
     await withBusy(async () => {
@@ -495,7 +490,7 @@ function renderManager() {
   const add = el('section', { class: 'rx-section' });
   add.append(el('h3', { class: 'rx-h3', text: t('reactions.add_heading') }));
   const fileInput = el('input', { type: 'file', accept: 'image/*', hidden: true });
-  const uploadBtn = el('button', { class: 'btn-secondary', text: t('reactions.upload') });
+  const uploadBtn = el('button', { class: 'btn-secondary' }, [spriteIcon('upload', 14), ` ${t('reactions.upload')}`]);
   uploadBtn.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', async () => {
     const f = fileInput.files && fileInput.files[0];
@@ -503,7 +498,7 @@ function renderManager() {
     if (!f) return;
     const name = (f.name || 'reaction').replace(/\.[^.]+$/, '').slice(0, 60);
     await withBusy(async () => {
-      await api.addReaction(f, { name, category: 'custom', safe: 'false' });
+      await api.addReaction(f, { name, category: 'custom' });
       ctx.toast(t('reactions.added', { name }));
       await loadReactions(true);
       renderManager();
@@ -523,7 +518,7 @@ function renderManager() {
     if (!p) { genPrompt.focus(); return; }
     await withBusy(async () => {
       ctx.toast(t('reactions.generating'));
-      const r = await api.generateReaction({ prompt: p, safe: false });
+      const r = await api.generateReaction({ prompt: p });
       genPrompt.value = '';
       ctx.toast(t('reactions.generated', { name: r.reaction.name }));
       await loadReactions(true);
@@ -557,8 +552,7 @@ function renderManager() {
   mgrEl.append(content);
 }
 
-/** One tile: the picture (a letter block under No-Image Mode) and the name;
- *  an R badge when Restricted profiles may see it. */
+/** One tile: the picture (a letter block under No-Image Mode) and the name. */
 function managerTile(r) {
   const thumb = nimEnabled()
     ? el('span', { class: 'rx-tile-thumb rx-row-thumb-none', 'aria-hidden': 'true', text: (r.name || '?').charAt(0).toUpperCase() })
@@ -570,7 +564,6 @@ function managerTile(r) {
   }, [
     thumb,
     el('span', { class: 'rx-tile-name', text: r.name }),
-    r.safe ? el('span', { class: 'rx-tile-badge', title: t('reactions.safe_title'), text: t('reactions.safe_short') }) : null,
   ]);
   b.addEventListener('click', () => {
     editingId = editingId === r.id ? null : r.id;
@@ -588,13 +581,10 @@ function editSheet(r) {
     class: 'rx-input', type: 'text', id: 'rx-sheet-aliases',
     value: (r.aliases || []).join(' '), placeholder: t('reactions.aliases_placeholder'),
   });
-  const safe = el('input', { type: 'checkbox', role: 'switch', id: 'rx-sheet-safe' });
-  safe.checked = !!r.safe;
   const patch = () => withBusy(async () => {
     await api.patchReaction(r.id, {
       name: name.value.trim() || r.name,
       aliases: aliases.value.split(/[\s,]+/).filter(Boolean),
-      safe: safe.checked,
     });
     ctx.toast(t('reactions.saved'));
     await loadReactions(true);
@@ -603,8 +593,7 @@ function editSheet(r) {
   });
   name.addEventListener('change', patch);
   aliases.addEventListener('change', patch);
-  safe.addEventListener('change', patch);
-  const test = el('button', { class: 'btn-secondary rx-row-test', text: `▶ ${t('reactions.test_button')}`, title: t('reactions.test') });
+  const test = el('button', { class: 'btn-secondary rx-row-test', title: t('reactions.test') }, [spriteIcon('play', 14), ` ${t('reactions.test_button')}`]);
   // App-wide test pop, fired as the enabled reaction bot (agents-only API).
   test.addEventListener('click', () => fireReaction(r.id, { thread_id: null, trace: false }));
   const del = el('button', { class: 'btn-secondary danger-text rx-row-del' }, iconLabel(RAIL_ICONS.trash, t('common.delete')));
@@ -627,8 +616,6 @@ function editSheet(r) {
     el('div', { class: 'rx-sheet-fields' }, [
       el('label', { class: 'rx-field', for: 'rx-sheet-name' }, [el('span', { class: 'rx-field-label', text: t('reactions.name_label') }), name]),
       el('label', { class: 'rx-field', for: 'rx-sheet-aliases' }, [el('span', { class: 'rx-field-label', text: t('reactions.aliases_label') }), aliases]),
-      el('label', { class: 'rx-field', for: 'rx-sheet-safe' }, [el('span', { class: 'rx-field-label', text: t('reactions.safe_label') }), safe,
-        el('span', { class: 'rx-field-hint', text: t('reactions.safe_title') })]),
       el('div', { class: 'rx-row-meta' }, [
         el('code', { class: 'rx-row-id', text: `:react:${r.id}:` }),
         el('span', { class: 'rx-row-src muted', text: r.source }),
@@ -685,8 +672,6 @@ function poolSection() {
   dailyAdd.value = pool.daily_add_per_mood ?? 2;
   const refillSpent = el('input', { type: 'checkbox', role: 'switch' });
   refillSpent.checked = pool.refill_spent_today !== false;
-  const poolSafe = el('input', { type: 'checkbox', role: 'switch' });
-  poolSafe.checked = !!pool.safe;
   const savePool = () => withBusy(async () => {
     const r = await api.reactionPool({
       enabled: poolOn.checked,
@@ -695,12 +680,11 @@ function poolSection() {
       refresh_hour: Number(hour.value || 4),
       daily_add_per_mood: Number(dailyAdd.value || 0),
       refill_spent_today: refillSpent.checked,
-      safe: poolSafe.checked,
     });
     R.pool = r.pool;
     ctx.toast(t('reactions.saved'));
   });
-  for (const c of [poolOn, perMood, minMood, hour, dailyAdd, refillSpent, poolSafe]) c.addEventListener('change', savePool);
+  for (const c of [poolOn, perMood, minMood, hour, dailyAdd, refillSpent]) c.addEventListener('change', savePool);
   poolSec.append(
     fieldRow(t('reactions.pool_enabled'), poolOn, t('reactions.pool_enabled_hint')),
     fieldRow(t('reactions.pool_per_mood'), perMood, t('reactions.pool_per_mood_hint')),
@@ -708,13 +692,12 @@ function poolSection() {
     fieldRow(t('reactions.pool_hour'), hour, t('reactions.pool_hour_hint')),
     fieldRow(t('reactions.pool_daily_add'), dailyAdd, t('reactions.pool_daily_add_hint')),
     fieldRow(t('reactions.pool_refill_spent'), refillSpent, t('reactions.pool_refill_spent_hint')),
-    fieldRow(t('reactions.pool_safe'), poolSafe, t('reactions.pool_safe_hint')),
   );
-  const topUp = el('button', { class: 'btn-secondary', text: t('reactions.pool_topup') });
+  const topUp = el('button', { class: 'btn-secondary' }, [spriteIcon('arrow-up', 14), ` ${t('reactions.pool_topup')}`]);
   topUp.disabled = !pool.available;
   topUp.title = t(pool.available ? 'reactions.pool_topup_title' : 'reactions.pool_topup_disabled');
   topUp.addEventListener('click', () => runRefill(false));
-  const replaceNow = el('button', { class: 'btn-secondary', text: t('reactions.pool_replace') });
+  const replaceNow = el('button', { class: 'btn-secondary' }, [spriteIcon('refresh-cw', 14), ` ${t('reactions.pool_replace')}`]);
   replaceNow.disabled = !pool.available;
   replaceNow.title = t('reactions.pool_replace_title');
   replaceNow.addEventListener('click', () => runRefill(true));
@@ -832,7 +815,6 @@ export function reactionMessageEl(msg, { decoy = false } = {}) {
         image_url: api.reactionImageUrl(rid),
         actor: meta.actor || t('common.someone'),
         actor_kind: meta.actor_kind || 'agent',
-        safe: true,
         caption: '',
         duration_ms: null,
       }, { auto: false });
@@ -877,20 +859,13 @@ function paintEmbed(row, ev) {
   const caption = row.querySelector('.reaction-caption');
   const actor = row.querySelector('.reaction-actor');
   const name = row.querySelector('.reaction-name');
-  // Safe Mode may only paint safe reactions — the server already filtered the
-  // frame, but this is the same belt-and-suspenders layer the renderer uses.
-  if (!ctx.isDecoy() || ev.safe) {
-    img.src = ev.image_url || api.reactionImageUrl(ev.reaction_id);
-    img.alt = ev.name ? t('reactions.alt', { name: ev.name }) : t('reactions.alt_generic');
-    // Fired images are kept, but a blob can still vanish (hand-deleted, or a
-    // legacy purge) — collapse back to the chip, never a broken picture.
-    img.onerror = () => collapseReactionRow(row);
-  } else {
-    img.removeAttribute('src');
-    img.alt = '';
-  }
+  img.src = ev.image_url || api.reactionImageUrl(ev.reaction_id);
+  img.alt = ev.name ? t('reactions.alt', { name: ev.name }) : t('reactions.alt_generic');
+  // Fired images are kept, but a blob can still vanish (hand-deleted, or a
+  // legacy purge): collapse back to the chip, never a broken picture.
+  img.onerror = () => collapseReactionRow(row);
   name.textContent = ev.name || ev.reaction_id;
-  actor.textContent = `${ev.actor_kind === 'agent' ? '⚡' : '🫵'} ${who(ev)}`;
+  actor.replaceChildren(spriteIcon(ev.actor_kind === 'agent' ? 'zap' : 'user', 14), ` ${who(ev)}`);
   if (ev.caption) { caption.textContent = ev.caption; caption.hidden = false; }
   else { caption.textContent = ''; caption.hidden = true; }
 }

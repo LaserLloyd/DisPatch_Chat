@@ -15,7 +15,7 @@
 // sent once and never comes back (the server answers `has_key` only).
 
 import { t } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
+import { el, spriteIcon } from './util.js?v=20';
 
 async function json(url, opts = {}) {
   const r = await fetch(url, { headers: { Accept: 'application/json' }, ...opts });
@@ -52,7 +52,8 @@ const note = (text, id) => el('p', { class: 'sec-note muted', id, text });
 
 // ===================== One key, every capability =====================
 
-const MARK = { ok: '✓', absent: '—', failed: '✗', skipped: '•' };
+const MARK = { ok: 'check', absent: null, failed: 'x', skipped: null };
+const MARK_TEXT = { absent: '—', skipped: '•' };
 
 // The last checklist, kept for the life of the page: connecting Atlas pushes a
 // new roster, and the AI tab re-mounts on that — which used to wipe the result
@@ -63,7 +64,7 @@ export function renderChecklist(list, rows) {
   list.replaceChildren(...(rows || []).map((r) => el('li', {
     class: `qs-row qs-${r.status}`, dataset: { cap: r.id, status: r.status },
   }, [
-    el('span', { class: 'qs-mark', 'aria-hidden': 'true', text: MARK[r.status] || '•' }),
+    el('span', { class: 'qs-mark', 'aria-hidden': 'true' }, [MARK[r.status] ? spriteIcon(MARK[r.status], 14) : (MARK_TEXT[r.status] || '•')]),
     el('span', { class: 'qs-text' }, [
       el('strong', { text: r.label }),
       r.detail ? el('span', { class: 'qs-detail', text: ` — ${r.detail}` }) : null,

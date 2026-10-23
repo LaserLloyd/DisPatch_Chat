@@ -21,6 +21,7 @@
 // state is checkbox state + check order, exactly what the feature promises to
 // survive a reload.
 import { api } from './api.js?v=35';
+import { spriteIcon } from './util.js?v=20';
 import { t } from './i18n.js?v=4';
 import { cellSortValue, compareCells } from './markdown.js?v=34';
 
@@ -126,7 +127,7 @@ function installWidget(widget, { checked, readonly, messageId, listIndex = 0 }) 
     th.className = 'cl-check';
     th.setAttribute('scope', 'col');
     th.setAttribute('aria-label', t ? t('checklist.done') : 'Completed');
-    th.textContent = '✓';
+    th.append(spriteIcon('check', 14));
     headRow.insertBefore(th, headRow.cells[0]);
     Array.from(headRow.cells).forEach((cell, i) => {
       if (i === CHECK_COL) return;
