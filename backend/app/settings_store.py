@@ -420,9 +420,42 @@ def set_many(changes: dict[str, Any], *, actor: str = "", reset: list[str] | Non
         if hit is not None:
             res.errors[k] = (f"{d.label} is set by the environment variable {hit[0]}; "
                              "change it there (or unset it) and restart")
+    # The lock target and the default profile are one decision (auth.set_lock_target): check
+    # the pair they make together BEFORE anything is written, so a refusal is a 422 with the
+    # reason and never a half-applied PATCH, and apply them in one step below.
+    lock_keys = [k for k in ("people.lock_target", "people.default_profile") if k in coerced or k in reset]
+    lock_pair: tuple[str, str | None] | None = None
+    if lock_keys and not res.errors:
+        from . import accounts, auth
+        cfg = auth.load()
+
+        def _want(key: str, now: Any) -> Any:
+            if key in reset:
+                d = settings_schema.get_def(key)
+                return d.default if d is not None else now
+            return coerced.get(key, now)
+        target = str(_want("people.lock_target", cfg.lock_target) or "profile_list")
+        pid = str(_want("people.default_profile", cfg.default_profile or "") or "") or None
+        try:
+            auth.check_lock_target(target, pid)
+            lock_pair = (target, pid)
+        except accounts.AccountError as e:
+            for k in lock_keys:
+                res.errors[k] = str(e)
     if res.errors:
         return res
     with _lock:
+        if lock_pair is not None:
+            from . import auth
+            auth.set_lock_target(*lock_pair)
+            for k in lock_keys:
+                if k in reset:
+                    _del_row(k)
+                else:
+                    _put_row(k, coerced[k], "user", actor)
+                res.changed.append(k)
+            coerced = {k: v for k, v in coerced.items() if k not in lock_keys}
+            reset = [k for k in reset if k not in lock_keys]
         for k in reset:
             d = settings_schema.get_def(k)
             assert d is not None

@@ -66,10 +66,37 @@ def test_the_settings_store_sets_the_lock_target_through_the_same_check(lobby):
     from app import settings_store
     from app.settings_schema import SettingError
     a = lobby["world"].person(lobby["owner"], "Boss", "admin")
-    with pytest.raises(SettingError):
-        settings_store.set_many({"people.default_profile": a["id"]}, actor="t", owner=True)
+    refused = settings_store.set_many({"people.default_profile": a["id"]}, actor="t", owner=True)
+    assert not refused.ok and "Admin" in refused.errors["people.default_profile"]
+    assert auth.load().default_profile == lobby["id"]                  # nothing was written
     res = settings_store.set_many({"people.lock_target": "profile_list"}, actor="t", owner=True)
     assert auth.load().lock_target == "profile_list", res
+    assert SettingError is not None
+
+
+def test_a_refused_lock_target_is_a_422_with_the_reason_and_writes_nothing(lobby):
+    """PATCH /api/settings: an Admin as the default profile, or the default-profile landing with
+    no profile named, is a plain 422 (not a 500), and no other key of the PATCH is applied."""
+    o = lobby["owner"]
+    a = lobby["world"].person(o, "Boss", "admin")
+    before = auth.load()
+    r = o.patch("/api/settings", json={"set": {"people.default_profile": a["id"],
+                                                "people.lock_timeout_seconds": 1234}})
+    assert r.status_code == 422, r.text
+    assert "people.default_profile" in r.json()["errors"]
+    after = auth.load()
+    assert (after.default_profile, after.lock_target, after.lock_timeout) == (
+        before.default_profile, before.lock_target, before.lock_timeout)
+    auth.set_lock_target("profile_list", None)
+    r = o.patch("/api/settings", json={"set": {"people.lock_target": "default_profile",
+                                                "people.default_profile": ""}})
+    assert r.status_code == 422, r.text
+    # Both keys in one PATCH are one decision: target + profile together are accepted.
+    r = o.patch("/api/settings", json={"set": {"people.lock_target": "default_profile",
+                                                "people.default_profile": lobby["id"]}})
+    assert r.status_code == 200, r.text
+    cfg = auth.load()
+    assert (cfg.lock_target, cfg.default_profile) == ("default_profile", lobby["id"])
 
 
 def test_the_shared_default_profile_can_never_be_made_an_admin(lobby):

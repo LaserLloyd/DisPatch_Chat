@@ -773,6 +773,26 @@ def remember_days() -> int:
     return load().remember_days
 
 
+def check_lock_target(target: str, default_profile: str | None = None):
+    """Validate a lock target without writing anything: raises ``accounts.AccountError`` (422)
+    for one :func:`set_lock_target` would refuse; returns the default profile for
+    ``default_profile`` (else None)."""
+    if target not in LOCK_TARGETS:
+        raise accounts.AccountError("lock_target_invalid",
+                                    "lock_target must be default_profile or profile_list.", 422)
+    pid = (default_profile or "").strip() or None
+    if target != "default_profile":
+        return None
+    prof = accounts.get_profile(pid) if pid else None
+    if prof is None or prof.disabled:
+        raise accounts.AccountError("lock_target_invalid", "Pick an existing, enabled profile.", 422)
+    if prof.role is Role.ADMIN:
+        raise accounts.AccountError(
+            "lock_target_invalid", "An Admin profile cannot be the default profile: it opens "
+            "without a credential on every device.", 422)
+    return prof
+
+
 def set_lock_target(target: str, default_profile: str | None = None) -> SecurityConfig:
     """Set where a lock and an unsigned device land (4.0, BUILD-PLAN-v2 §1.4): the default
     profile (``"default_profile"`` + its id) or the profile list. The default profile must
@@ -780,18 +800,9 @@ def set_lock_target(target: str, default_profile: str | None = None) -> Security
     lock-target fence: stored grants of agents / voice cloning on the new target are removed
     (``policy.effective_permissions`` already ignores them; this keeps the row honest)."""
     from .contracts.permissions import LOCK_TARGET_FENCE
-    if target not in LOCK_TARGETS:
-        raise accounts.AccountError("lock_target_invalid",
-                                    "lock_target must be default_profile or profile_list.", 422)
     pid = (default_profile or "").strip() or None
-    if target == "default_profile":
-        prof = accounts.get_profile(pid) if pid else None
-        if prof is None or prof.disabled:
-            raise accounts.AccountError("lock_target_invalid", "Pick an existing, enabled profile.", 422)
-        if prof.role is Role.ADMIN:
-            raise accounts.AccountError(
-                "lock_target_invalid", "An Admin profile cannot be the default profile: it opens "
-                "without a credential on every device.", 422)
+    prof = check_lock_target(target, pid)
+    if prof is not None:
         fenced = {p.value for p in LOCK_TARGET_FENCE}
         if any(g in fenced for g in prof.grants):
             accounts.update_profile(prof.id, grants=[g for g in prof.grants if g not in fenced])
