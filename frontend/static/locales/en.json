@@ -899,7 +899,7 @@
   },
   "nim": {
     "title": "No-Image Mode",
-    "hint": "hide every picture — chat images, avatars and reactions. Nothing is downloaded. Once on, it takes the PIN to turn off.",
+    "hint": "hide every picture — chat images, avatars and reactions. Nothing is downloaded. Once on, a device nobody is signed in on keeps it on until someone signs in.",
     "hint_locked": "pictures are hidden. Sign in to turn this off.",
     "hint_nopin": "hide every picture — chat images, avatars and reactions. Nothing is downloaded. Set a PIN to stop this being switched off.",
     "lock_label": "No-Image Mode",
@@ -2110,6 +2110,7 @@
     "status_admin": "You sign in with your password.",
     "status_admin_nopw": "You have no password yet.",
     "status_member": "You sign in with your PIN.",
+    "status_no_pin": "You have no PIN: anyone using this device can open this profile. Set one below if you want.",
     "status_remembered": "This device stays signed in.",
     "my_pin_saved": "Your PIN is changed.",
     "device_title": "This device"

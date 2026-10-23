@@ -66,7 +66,7 @@ export const APP_KEYS = [
   'lc-remember',              // main.js (sign-in keypad "keep this device signed in")
   'dp-firstrun-dismissed',    // main.js (the "create the first Admin account" card was put away here)
   // DELIBERATELY ABSENT: 'dispatch-nim'. No-Image Mode is a RATCHET — once on,
-  // it takes the PIN to turn off (js/nim.js canDisableNim). Wiping it here
+  // a signed-out device cannot turn it off (js/nim.js canDisableNim). Wiping it here
   // would make "clear this device" a one-click way around that gate on a
   // handed-over tablet, which is the exact scenario NIM exists for. It is not
   // an oversight; do not "fix" it by adding the key.

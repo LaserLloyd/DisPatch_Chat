@@ -40,7 +40,7 @@ const EXEMPT = new Map([
   // The privacy flag itself. Wiping it would turn privacy mode off on the way
   // out and the device would silently start caching again on the next load.
   ['dispatch-privacy', 'privacy.js FLAG_KEY — the setting that drives the wipe'],
-  // No-Image Mode is a RATCHET: once on, it takes the PIN to turn off. Wiping
+  // No-Image Mode is a RATCHET: once on, a signed-out device cannot turn it off. Wiping
   // it would make "clear this device" a one-click way around that gate on a
   // handed-over tablet, which is the exact scenario NIM exists for. See the
   // matching note in privacy.js — do not "fix" this by wiping it.

@@ -194,8 +194,8 @@ export function shouldDropMessage(msg, stripSource) {
  *  is locked we still show it CHECKED — hiding the control would leave the user
  *  wondering why there are no pictures.
  *
- *  `pinSet` picks the hint. Three states, three sentences: locked ("unlock with
- *  your PIN"), PIN set ("once on, it takes the PIN to turn off"), and no PIN at
+ *  `pinSet` picks the hint. Three states, three sentences: locked ("sign in to turn
+ *  this off"), PIN set ("a device nobody is signed in on keeps it on"), and no PIN at
  *  all — where the ratchet is vacuous (canDisableNim returns true with no PIN)
  *  and promising a PIN gate would be a lie. That third string (nim.hint_nopin)
  *  was translated into all eight locales and then never rendered.
@@ -215,10 +215,10 @@ export function nimRow(t, { locked: deviceLocked = false, pinSet = true, onChang
   strong.textContent = t ? t('nim.title') : 'No-Image Mode';
   const hintKey = locked ? 'nim.hint_locked' : (pinSet ? 'nim.hint' : 'nim.hint_nopin');
   const hintEn = locked
-    ? ' — pictures are hidden. Unlock with your PIN to turn this off.'
+    ? ' — pictures are hidden. Sign in to turn this off.'
     : ' — hide every picture: chat images, avatars and reactions. Nothing is'
       + ' downloaded.' + (pinSet
-        ? ' Once on, it takes the PIN to turn off.'
+        ? ' Once on, a device nobody is signed in on keeps it on until someone signs in.'
         : ' Set a PIN to stop this being switched off.');
   text.append(strong, document.createTextNode(t ? ` — ${t(hintKey)}` : hintEn));
   label.append(box, text);

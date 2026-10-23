@@ -161,7 +161,7 @@ test('Account: one sign-in change at a time, by profile; every non-shared profil
   assert.match(fn, /if \(a\.claimed\) out\.push\(a\.needsPassword \? 'pw_set' : 'pw_change'\);/);
   assert.match(fn, /if \(a\.pinSet\) out\.push\('pin_remove'\);/);
   assert.match(fn, /\} else if \(!\(a\.profile && a\.profile\.shared\)\) \{/);
-  assert.match(fn, /if \(state\.role === 'admin'\) out\.push\(a\.needsPassword \? 'pw_set' : 'pw_change'\);\s+out\.push\('my_pin'\);/);
+  assert.match(fn, /if \(state\.role === 'admin'\) out\.push\(a\.needsPassword \? 'pw_set' : 'pw_change'\);\s+\/\/[^\n]*\n\s+out\.push\(selfCredential\(\) === 'none' \? 'my_pin_set' : 'my_pin'\);/);
   // The PIN form and the password form never show together.
   const open = MAIN.slice(MAIN.indexOf('function openAccountForm('), MAIN.indexOf('function activateSecurityPane('));
   assert.match(open, /pinForm\.hidden = !pinModes\.includes\(accountChoice\);/);

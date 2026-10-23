@@ -914,7 +914,7 @@
   },
   "nim": {
     "title": "Modo sem imagens",
-    "hint": "ocultar todas as imagens — fotos do chat, avatares e reações. Nada é baixado. Depois de ativado, é preciso o PIN para desativar.",
+    "hint": "ocultar todas as imagens — fotos do chat, avatares e reações. Nada é baixado. Depois de ativado, num dispositivo sem sessão iniciada fica ligado até alguém iniciar sessão.",
     "hint_locked": "as imagens estão ocultas. Inicia sessão para desativar.",
     "hint_nopin": "ocultar todas as imagens — fotos do chat, avatares e reações. Nada é baixado. Defina um PIN para impedir que seja desativado.",
     "lock_label": "Modo sem imagens",
@@ -2135,6 +2135,7 @@
     "status_admin": "Inicias sessão com a tua palavra-passe.",
     "status_admin_nopw": "Ainda não tens palavra-passe.",
     "status_member": "Inicias sessão com o teu PIN.",
+    "status_no_pin": "Não tens PIN: qualquer pessoa que use este dispositivo pode abrir este perfil. Define um abaixo, se quiseres.",
     "status_remembered": "Este dispositivo mantém a sessão iniciada.",
     "my_pin_saved": "O teu PIN foi alterado.",
     "device_title": "Este dispositivo"

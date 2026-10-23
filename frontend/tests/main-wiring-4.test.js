@@ -20,11 +20,19 @@ test('4.0 sends no "owner" role: main.js never compares with it or falls back to
 test('a pinned No-Image Mode button keeps the same ratchet as the Settings row', () => {
   const at = MAIN.indexOf("renderPinnedRail(document.getElementById('gear-row')");
   assert.ok(at > 0);
-  assert.match(MAIN.slice(at, at + 400), /decoy: nimLocked\(\)/);
+  assert.match(MAIN.slice(at, at + 400), /locked: nimLocked\(\)/);
 });
 
 test('the first password asks for the PIN this Admin signs in with (install PIN for the main Admin, else its own)', () => {
   assert.match(MAIN, /needsPin: accountChoice === 'pw_set' && \(ownerAccountView\(\) \? a\.pinSet : selfHasPin\(\)\)/);
-  const fn = MAIN.slice(MAIN.indexOf('function selfHasPin()'), MAIN.indexOf('function selfHasPin()') + 300);
-  assert.match(fn, /\/pin\/\.test\(String\(me\.credential/);
+  assert.match(MAIN, /const selfHasPin = \(\) => \/pin\/\.test\(selfCredential\(\)\);/);
+  const fn = MAIN.slice(MAIN.indexOf('function selfCredential()'), MAIN.indexOf('function selfCredential()') + 300);
+  assert.match(fn, /String\(me\.credential/);
+});
+
+test('a profile with no credential sets its first PIN without a "current" one', () => {
+  assert.match(MAIN, /out\.push\(selfCredential\(\) === 'none' \? 'my_pin_set' : 'my_pin'\);/);
+  assert.match(MAIN, /const needCurrent = accountChoice !== 'pin_set' && accountChoice !== 'my_pin_set';/);
+  assert.match(MAIN, /accountChoice !== 'pin_set' && accountChoice !== 'my_pin_set' && !cur/);
+  assert.match(MAIN, /selfCredential\(\) === 'none' \? 'acct\.status_no_pin' : 'acct\.status_member'/);
 });

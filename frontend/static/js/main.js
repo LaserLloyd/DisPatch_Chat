@@ -8669,7 +8669,7 @@ function renderPins() {
   renderPinnedRail(document.getElementById('gear-row'), {
     // A device nobody signed in on (the shared landing included) may not turn No-Image Mode
     // off from the rail either: the same ratchet as the Settings row.
-    decoy: nimLocked(),
+    locked: nimLocked(),
     t,
     onChange: (id) => {
       // A pinned toggle changes the same device setting the Settings pane
@@ -9353,12 +9353,15 @@ function setSecError(m) { dom['sec-error'].textContent = m || ''; dom['sec-error
 
 /** Is this the protected first Admin (whose PIN is the install PIN), or an install nobody has claimed yet? */
 const ownerAccountView = () => !state.auth.claimed || state.auth.protected;
-/** Does the signed-in profile have a PIN of its own? (Its sign-in tile says what it asks for.) */
-function selfHasPin() {
+/** What the signed-in profile signs in with, from its own sign-in tile: 'pin', 'password',
+ *  'pin_or_password' or 'none' ('' when unknown). */
+function selfCredential() {
   const a = state.auth;
   const me = a.profile && (a.profiles || []).find((p) => p.id === a.profile.id);
-  return !!(me && /pin/.test(String(me.credential || '')));
+  return me ? String(me.credential || '') : '';
 }
+/** Does the signed-in profile have a PIN of its own? */
+const selfHasPin = () => /pin/.test(selfCredential());
 
 // Every string in the sign-in card that depends on server state, split out of
 // activateSecurityPane() so a language switch repaints it without re-running the
@@ -9373,7 +9376,7 @@ function renderSecurityStrings() {
     else if (a.claimed && a.needsPassword) key = 'acct.status_pin_only';
     else key = a.claimed ? 'acct.status_pin_password' : 'security.status_set';
   } else if (state.role === 'admin') key = a.needsPassword ? 'acct.status_admin_nopw' : 'acct.status_admin';
-  else key = 'acct.status_member';
+  else key = selfCredential() === 'none' ? 'acct.status_no_pin' : 'acct.status_member';
   setI18nText(dom['sec-status-line'], key);
   if (a.remembered) dom['sec-status-line'].append(' ', t('acct.status_remembered'));
   // The recovery note names two files on the host. Only the Owner can use them, and
@@ -9404,7 +9407,8 @@ function accountChoices() {
     // Another Admin has a password; every profile may set a PIN of its own, except the
     // shared landing profile, whose PIN only an Admin sets (People).
     if (state.role === 'admin') out.push(a.needsPassword ? 'pw_set' : 'pw_change');
-    out.push('my_pin');
+    // No credential at all: the first PIN needs no "current" one (the server agrees).
+    out.push(selfCredential() === 'none' ? 'my_pin_set' : 'my_pin');
   }
   return out;
 }
@@ -9418,7 +9422,7 @@ function paintAccountChoices() {
   if (!choices.includes(accountChoice)) accountChoice = '';
   sel.replaceChildren(
     el('option', { value: '', text: t('acct.change_choose') }),
-    ...choices.map((c) => el('option', { value: c, text: t(`acct.opt_${c}`) })));
+    ...choices.map((c) => el('option', { value: c, text: t(c === 'my_pin_set' ? 'acct.opt_pin_set' : `acct.opt_${c}`) })));
   sel.value = accountChoice;
 }
 
@@ -9428,22 +9432,22 @@ function openAccountForm(choice, { focus = true } = {}) {
   if (dom['acct-change']) dom['acct-change'].value = accountChoice;
   const pinForm = dom['sec-pin-form'];
   const pwHost = dom['acct-password-host'];
-  const pinModes = ['pin_change', 'pin_set', 'pin_remove', 'my_pin'];
+  const pinModes = ['pin_change', 'pin_set', 'pin_remove', 'my_pin', 'my_pin_set'];
   pinForm.hidden = !pinModes.includes(accountChoice);
   pwHost.hidden = !accountChoice.startsWith('pw_');
   pwHost.replaceChildren();
   setSecError('');
   dom['sec-current'].value = dom['sec-new'].value = dom['sec-confirm'].value = '';
   if (pinModes.includes(accountChoice)) {
-    const needCurrent = accountChoice !== 'pin_set';
+    const needCurrent = accountChoice !== 'pin_set' && accountChoice !== 'my_pin_set';
     const needNew = accountChoice !== 'pin_remove';
     dom['sec-current-wrap'].hidden = !needCurrent;
     dom['sec-new'].closest('form').hidden = !needNew;
     dom['sec-confirm'].closest('form').hidden = !needNew;
     dom['sec-remove'].hidden = accountChoice !== 'pin_remove';
     dom['sec-save'].hidden = accountChoice === 'pin_remove';
-    setI18nText(dom['sec-new-label'], accountChoice === 'pin_set' ? 'security.create_pin' : 'security.new_pin');
-    setI18nText(dom['sec-save'], accountChoice === 'pin_set' ? 'security.set_pin' : 'security.change_pin');
+    setI18nText(dom['sec-new-label'], needCurrent ? 'security.new_pin' : 'security.create_pin');
+    setI18nText(dom['sec-save'], needCurrent ? 'security.change_pin' : 'security.set_pin');
     if (focus) setTimeout(() => (needCurrent ? dom['sec-current'] : dom['sec-new']).focus(), 40);
   } else if (accountChoice.startsWith('pw_')) {
     const a = state.auth;
@@ -9499,16 +9503,18 @@ async function saveSecurity() {
   const np = dom['sec-new'].value;
   const cf = dom['sec-confirm'].value;
   const minPin = state.auth.minPin || 4;
-  if (accountChoice !== 'pin_set' && !cur) { setSecError(t('security.need_current_any')); dom['sec-current'].focus(); return; }
+  if (accountChoice !== 'pin_set' && accountChoice !== 'my_pin_set' && !cur) { setSecError(t('security.need_current_any')); dom['sec-current'].focus(); return; }
   if (np.length < minPin) { setSecError(t('security.too_short', { count: minPin })); return; }
   if (np !== cf) { setSecError(t('security.mismatch')); return; }
   dom['sec-save'].disabled = true;
   try {
-    if (accountChoice === 'my_pin') {
-      // 3.8: a Member changes their own PIN; the current one confirms it.
+    if (accountChoice === 'my_pin' || accountChoice === 'my_pin_set') {
+      // A profile changes its own PIN (the current credential confirms it), or sets its first.
       await appApi('/api/auth/pin', { method: 'POST', body: { current: cur, new: np } });
       openAccountForm('', { focus: false });
       toast(t('acct.my_pin_saved'));
+      await refreshAuthQuiet();      // its tile now asks for a PIN: the choices and status follow
+      renderSecurityStrings();
       return;
     }
     await api.setupPin(np, cur);

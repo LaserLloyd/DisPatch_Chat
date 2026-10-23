@@ -899,7 +899,7 @@
   },
   "nim": {
     "title": "Bildfreier Modus",
-    "hint": "alle Bilder ausblenden – Chatbilder, Avatare und Reaktionen. Es wird nichts heruntergeladen. Einmal aktiviert, lässt es sich nur mit der PIN abschalten.",
+    "hint": "alle Bilder ausblenden – Chatbilder, Avatare und Reaktionen. Es wird nichts heruntergeladen. Einmal aktiviert, bleibt es auf einem Gerät ohne Anmeldung an, bis sich jemand anmeldet.",
     "hint_locked": "Bilder sind ausgeblendet. Melde dich an, um das zu ändern.",
     "hint_nopin": "alle Bilder ausblenden – Chatbilder, Avatare und Reaktionen. Es wird nichts heruntergeladen. Lege eine PIN fest, damit das nicht abgeschaltet werden kann.",
     "lock_label": "Bildfreier Modus",
@@ -2110,6 +2110,7 @@
     "status_admin": "Du meldest dich mit deinem Passwort an.",
     "status_admin_nopw": "Du hast noch kein Passwort.",
     "status_member": "Du meldest dich mit deiner PIN an.",
+    "status_no_pin": "Du hast keine PIN: Jeder an diesem Gerät kann dieses Profil öffnen. Lege unten eine fest, wenn du willst.",
     "status_remembered": "Dieses Gerät bleibt angemeldet.",
     "my_pin_saved": "Deine PIN wurde geändert.",
     "device_title": "Dieses Gerät"

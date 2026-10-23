@@ -41,8 +41,8 @@ export const PINNABLE = [
     titleEn: 'No-Image Mode',
     enabled: () => nimEnabled(),
     toggle: (on) => setNim(on),
-    blocked: (decoy) =>
-      nimEnabled() && !canDisableNim(decoy)
+    blocked: (locked) =>
+      nimEnabled() && !canDisableNim(locked)
         ? 'nim.hint_locked'
         : null,
   },
@@ -153,7 +153,10 @@ export function visiblePins() {
  *  handful of buttons, and the alternative is keeping stale DOM in step with a
  *  tier change, which is exactly the bug class this is meant to avoid.
  */
-export function renderPinnedRail(container, { decoy = false, t = null, onChange = null } = {}) {
+export function renderPinnedRail(container, { locked = false, decoy = false, t = null, onChange = null } = {}) {
+  // `locked`: no one is signed in on this device (the No-Image Mode ratchet holds).
+  // `decoy` is the 3.x name of the same flag, still accepted from older callers.
+  locked = !!(locked || decoy);
   if (!container) return;
   container.querySelectorAll('.pin-btn').forEach((el) => el.remove());
   const anchor = container.querySelector('#manage-bots');   // pins sit before Settings
@@ -164,7 +167,7 @@ export function renderPinnedRail(container, { decoy = false, t = null, onChange 
     btn.append(railIcon(entry.icon));
     const label = t ? t(entry.titleKey) : entry.titleEn;
     const on = !!entry.enabled();
-    const blockedKey = entry.blocked ? entry.blocked(decoy) : null;
+    const blockedKey = entry.blocked ? entry.blocked(locked) : null;
     btn.setAttribute('role', 'switch');
     btn.setAttribute('aria-checked', on ? 'true' : 'false');
     btn.setAttribute('aria-label', label);
@@ -184,7 +187,7 @@ export function renderPinnedRail(container, { decoy = false, t = null, onChange 
         // not actually in until the next reload.
         const needsReload = await entry.toggle(next);
         if (needsReload) { location.reload(); return; }
-        renderPinnedRail(container, { decoy, t, onChange });
+        renderPinnedRail(container, { locked, t, onChange });
         // The rail is rebuilt wholesale, so a CSS transition has nothing to
         // run between; mark the fresh button so the state change still reads
         // as a change rather than a silent swap.

@@ -914,7 +914,7 @@
   },
   "nim": {
     "title": "Mode sans images",
-    "hint": "masquer toutes les images : photos du chat, avatars et réactions. Rien n’est téléchargé. Une fois activé, il faut le code PIN pour le désactiver.",
+    "hint": "masquer toutes les images : photos du chat, avatars et réactions. Rien n’est téléchargé. Une fois activé, il reste actif sur un appareil où personne n’est connecté, jusqu’à ce que quelqu’un se connecte.",
     "hint_locked": "les images sont masquées. Connecte-toi pour le désactiver.",
     "hint_nopin": "masquer toutes les images : photos du chat, avatars et réactions. Rien n’est téléchargé. Définissez un code PIN pour empêcher sa désactivation.",
     "lock_label": "Mode sans images",
@@ -2135,6 +2135,7 @@
     "status_admin": "Tu te connectes avec ton mot de passe.",
     "status_admin_nopw": "Tu n’as pas encore de mot de passe.",
     "status_member": "Tu te connectes avec ton PIN.",
+    "status_no_pin": "Tu n’as pas de PIN : toute personne qui utilise cet appareil peut ouvrir ce profil. Définis-en un ci-dessous si tu veux.",
     "status_remembered": "Cet appareil reste connecté.",
     "my_pin_saved": "Ton PIN a été changé.",
     "device_title": "Cet appareil"
