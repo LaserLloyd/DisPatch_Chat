@@ -226,12 +226,12 @@ def test_jobs_submit_list_cancel(route_client, fake_svc, tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Gates: Safe Mode (decoy) 403 everywhere; disabled → 404; feature flag
+# Gates: signed out 401/403 everywhere; disabled → 404; feature flag
 # --------------------------------------------------------------------------- #
 
 @pytest.mark.parametrize("method,path", HARNESS_ROUTES)
-def test_safe_mode_gets_403_everywhere(route_client, fake_svc, method, path):
-    auth.set_pin("1234")            # a PIN exists, no session → Safe Mode
+def test_signed_out_is_refused_everywhere(route_client, fake_svc, method, path):
+    auth.set_pin("1234")            # a PIN exists, no session → signed out
     r = route_client.request(method, path, json={} if method == "POST" else None)
     assert r.status_code in (401, 403), (path, r.status_code, r.text)
     assert fake_svc["calls"] == [] and fake_svc["runner"].calls == []

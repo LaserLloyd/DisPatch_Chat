@@ -1,4 +1,4 @@
-"""Security-gate regression tests: the Safe-Mode (decoy) middleware matrix,
+"""Security-gate regression tests: the signed-out middleware matrix,
 media redaction, the loopback/api_token split on the inbound endpoints, and
 the fail-closed handling of a corrupt security.yaml.
 
@@ -79,15 +79,15 @@ def _set_api_token(token: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Decoy 403 matrix (PIN set, no session)
+# Signed-out 401/403 matrix (PIN set, no session)
 # --------------------------------------------------------------------------- #
 
-DECOY_BLOCKED = [
+SIGNED_OUT_BLOCKED = [
     ("GET", "/api/media?path=/etc/hosts"),
     # GET /api/files moved to the INBOUND set 2026-08-14 (same migration as
     # the avatar routes below): agents need the list to map an upload to its
     # blob on disk. Browser-403 and remote-401 are pinned in
-    # test_inbound_thread_mgmt.py; downloads stay decoy-blocked here.
+    # test_inbound_thread_mgmt.py; downloads stay blocked for a signed-out caller here.
     ("GET", "/api/files/some-id/download"),
     ("GET", "/api/files/some-id/raw"),
     ("GET", "/api/export"),
@@ -125,7 +125,7 @@ DECOY_BLOCKED = [
     ("PUT", "/api/plugins/livetools"),
     ("GET", "/static/avatars/nova.png"),          # non-safe bot's avatar
     # Apps (docs/design/2026-09-25-apps.md). An unknown app id is not on the
-    # machine surface, so a sessionless caller is plain Safe Mode; a known,
+    # machine surface, so a sessionless caller is plainly signed out; a known,
     # non-safe app's STATIC page is never a machine surface either.
     ("GET", "/api/apps"),
     ("GET", "/api/apps/x/y"),
@@ -142,10 +142,10 @@ DECOY_BLOCKED = [
 ]
 
 
-@pytest.mark.parametrize("method,path", DECOY_BLOCKED)
+@pytest.mark.parametrize("method,path", SIGNED_OUT_BLOCKED)
 def test_signed_out_blocked_matrix(gate_env, method, path):
     client = gate_env()
-    auth.set_pin("1234")                 # PIN set, never unlocked -> decoy
+    auth.set_pin("1234")                 # PIN set, never signed in -> signed out
     r = client.request(method, path)
     assert r.status_code in (401, 403), f"{method} {path} -> {r.status_code}"
 
@@ -158,11 +158,6 @@ def test_unlocked_session_reaches_gated_paths(gate_env):
     assert client.get("/api/bots/all").status_code == 200
     assert client.get("/api/export").status_code == 200
     assert client.get("/api/threads", params={"bot_id": "main"}).status_code == 200
-
-
-# --------------------------------------------------------------------------- #
-# Media redaction for decoy views
-# --------------------------------------------------------------------------- #
 
 
 # --------------------------------------------------------------------------- #
@@ -276,7 +271,7 @@ def test_security_yaml_written_0600(gate_env):
     "/static/avatars/backup-20260708/nova.png",          # nested under the live dir
     "/static/avatars/backup-20260708/alpha.svg",         # nested + safe basename
 ])
-def test_decoy_avatar_backup_paths_all_403(gate_env, path):
+def test_signed_out_avatar_backup_paths_all_403(gate_env, path):
     """Stale avatars.backup-<date>/ copies under /static/ used to serve every
     non-safe bot's face to a sessionless client, because the gate matched only
     the literal /static/avatars/ prefix. The rule is structural now: anything
@@ -287,8 +282,8 @@ def test_decoy_avatar_backup_paths_all_403(gate_env, path):
     assert client.get(path).status_code in (401, 403), path
 
 
-def test_decoy_live_safe_avatar_still_serves(gate_env):
-    """The tightening must not cost Safe Mode the pictures it may render."""
+def test_signed_out_live_avatar_still_serves(gate_env):
+    """The tightening must not cost a signed-out device the pictures it may render."""
     client = gate_env()
     auth.set_pin("1234")
     assert client.get("/static/avatars/alpha.svg").status_code != 403
@@ -313,7 +308,7 @@ def test_api_docs_routes_do_not_exist(gate_env, path):
     disabled in this deployment — for locked AND unlocked alike."""
     client = gate_env()
     auth.set_pin("1234")
-    assert client.get(path).status_code == 404          # Safe Mode: not there
+    assert client.get(path).status_code == 404          # signed out: not there
     assert client.post("/api/auth/unlock", json={"pin": "1234"}).status_code == 200
     assert client.get(path).status_code == 404          # full session: still not
 
@@ -327,7 +322,7 @@ BROWSER = {"Sec-Fetch-Site": "same-origin", "Origin": "http://testserver"}
 
 
 def test_locked_browser_on_loopback_cannot_inject(gate_env):
-    """The idle auto-lock drops THIS box's own tab to Safe Mode. The inbound
+    """The idle auto-lock signs THIS box's own tab out. The inbound
     write endpoints' loopback exemption is for MACHINES — a sessionless browser
     must not be able to post content (or `:react:` markers) into any thread."""
     tab = gate_env(client_addr=("127.0.0.1", 51000))
@@ -355,7 +350,7 @@ def test_locked_browser_on_loopback_cannot_post_thread_message(gate_env):
 
 
 def test_unlocked_browser_may_still_use_inbound_writes(gate_env):
-    """A full session (family member driving the app) is not a decoy — the
+    """A signed-in session (a person driving the app) is not signed out — the
     browser re-check must not lock out legitimate session-carrying tabs."""
     client = gate_env(client_addr=("127.0.0.1", 51002))
     auth.set_pin("1234")
@@ -443,7 +438,7 @@ def test_avatar_routes_refuse_a_remote_caller_with_no_token(gate_env, method, pa
 def test_avatar_routes_refuse_a_locked_browser_on_loopback(gate_env, method, path):
     """The hazard the inbound exemption creates, closed.
 
-    The idle auto-lock drops THIS box's own tab to Safe Mode, and that tab is
+    The idle auto-lock signs THIS box's own tab out, and that tab is
     on loopback — so the exemption that lets an agent through would have let
     the locked tab through with it, and any page able to reach 127.0.0.1.
     Browsers stamp Sec-Fetch-*; agents and curl do not.
@@ -517,11 +512,6 @@ def test_history_full_res_refuses_a_locked_browser_even_for_a_safe_bot(gate_env)
 
 
 # --------------------------------------------------------------------------- #
-# Safe-Mode turn budget: retry costs the same as send
-# --------------------------------------------------------------------------- #
-
-
-# --------------------------------------------------------------------------- #
 # Daily budgets are per DEVICE, not per proxy
 # --------------------------------------------------------------------------- #
 
@@ -562,7 +552,7 @@ def test_quota_ip_still_splits_the_household_behind_local_serve(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Apps: a locked BROWSER gets the decoy on a real app's API at both prefixes
+# Apps: a signed-out BROWSER is refused on a real app's API at both prefixes
 # (a sessionless non-browser caller is a machine there — 401 remote, allowed
 # on loopback — which apps/jobboard/tests/test_jobboard_api.py pins).
 # --------------------------------------------------------------------------- #
@@ -571,10 +561,10 @@ def test_quota_ip_still_splits_the_household_behind_local_serve(monkeypatch):
     ("GET", "/api/jobs"), ("POST", "/api/jobs/find"), ("GET", "/api/jobs/months"),
     ("GET", "/api/apps/jobboard"), ("POST", "/api/apps/jobboard/abc/vote"),
 ])
-def test_locked_browser_gets_decoy_on_app_api(gate_env, method, path):
+def test_signed_out_browser_is_refused_on_app_api(gate_env, method, path):
     client = gate_env(("127.0.0.1", 50000))
     auth.set_pin("1234")
     r = client.request(method, path, headers={"origin": "http://127.0.0.1:8765"},
                        **({"json": {}} if method == "POST" else {}))
     assert r.status_code in (401, 403), (method, path, r.status_code)
-    assert r.json().get("decoy") is True or r.json()["error"]["code"] == "signin_required"
+    assert r.json()["error"]["code"] == "signin_required"

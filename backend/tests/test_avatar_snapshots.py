@@ -2,8 +2,8 @@
 
 The point of the feature is visual variety in the thread list when the avatar
 rotates. The point of THESE tests is the two things that make it safe to ship:
-it must never duplicate storage per thread, and it must never leak a non-safe
-bot's picture to a Safe-Mode session.
+it must never duplicate storage per thread, and it must never leak a bot's
+picture to a signed-out session.
 """
 from __future__ import annotations
 
@@ -271,11 +271,11 @@ def test_a_thread_with_no_snapshot_404s_rather_than_serving_todays_face(snap_env
     assert client.get(f"/api/threads/{t['id']}/avatar").status_code == 404
 
 
-def test_safe_mode_cannot_fetch_a_non_safe_bots_snapshot(snap_env):
+def test_signed_out_cannot_fetch_a_bots_snapshot(snap_env):
     """The gate that makes hash-keyed URLs unsafe, asserted.
 
     Snapshots are content-addressed, so the id reveals nothing about which bot
-    owns the picture. Serving BY THREAD means the existing decoy rule applies:
+    owns the picture. Serving BY THREAD means the existing thread rule applies:
     if you may not see the thread, you may not see its avatar.
     """
     client = snap_env
@@ -283,16 +283,15 @@ def test_safe_mode_cannot_fetch_a_non_safe_bots_snapshot(snap_env):
     _bot_with_avatar(non_safe, safe=False, data=b"PRIVATE-" + uuid.uuid4().hex.encode())
 
     thread = client.post("/api/threads", json={"bot_id": non_safe}).json()
-    assert client.get(thread["avatar_url"]).status_code == 200   # unlocked: fine
+    assert client.get(thread["avatar_url"]).status_code == 200   # signed in: fine
 
-    # Now put the session into Safe Mode the way the gate suite does: a PIN is
-    # set and never unlocked, which is what decoy MEANS
-    # (pinSet and not authenticated). My first attempt posted to endpoints that
-    # do not exist, so the client stayed unlocked and the assertion "passed"
-    # against a session that was never gated — a green test proving nothing.
+    # Now sign the session out the way the gate suite does: a PIN is set and
+    # never signed in (pinSet and not authenticated). My first attempt posted
+    # to endpoints that do not exist, so the client stayed signed in and the
+    # assertion "passed" against a session that was never gated — a green test proving nothing.
     auth.set_pin("1234")
     r = client.get(thread["avatar_url"])
-    assert r.status_code in (401, 403), f"a non-safe bot's avatar leaked to Safe Mode: {r.status_code}"
+    assert r.status_code in (401, 403), f"a bot's avatar leaked to a signed-out session: {r.status_code}"
 
 
 # --------------------------------------------------------------------------- #

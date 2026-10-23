@@ -272,7 +272,7 @@ def test_corrupt_trusted_file_fails_closed_to_pin(env):
     assert client.get("/api/auth/status").json()["authenticated"] is True
 
 
-def test_decoy_status_reveals_offer_but_not_device_count(env):
+def test_signed_out_status_reveals_offer_but_not_device_count(env):
     client = env()
     auth.set_pin(PIN)
     _enable()

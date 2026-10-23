@@ -3,7 +3,7 @@
 Contract: docs/design/2026-09-25-tools-plugins.md. Most of this file is
 security assertions — a static tool serves bytes off the host's disk, and a
 refresh runs a process — so the interesting cases are the refusals: traversal,
-symlink escape, dotfiles, secret-shaped names, Safe-Mode callers, a UI that
+symlink escape, dotfiles, secret-shaped names, signed-out callers, a UI that
 tries to introduce or change a refresh argv.
 
 Same hermetic style as the rest of tests/: throwaway data dir, nothing touches
@@ -107,7 +107,7 @@ def _unlocked(make_client):
     return c
 
 
-def _decoy(make_client):
+def _signed_out(make_client):
     auth.set_pin("1234")
     return make_client()
 
@@ -201,7 +201,7 @@ def test_validation_refuses_data_dir_via_symlink(tools_env, tmp_path):
 def test_hand_edited_safe_tool_at_data_dir_serves_nothing(tools_env, monkeypatch):
     """tools.yaml is read with check_fs=False, so validation alone does not
     stop a hand edit. A `safe: true` tool rooted at the data dir would hand
-    files/, media/ and tools.yaml to a cookieless Safe-Mode device — the
+    files/, media/ and tools.yaml to a cookieless signed-out device — the
     resolver refuses it at serve time too."""
     make_client, site = tools_env
     data = config.DATA_DIR
@@ -215,18 +215,18 @@ def test_hand_edited_safe_tool_at_data_dir_serves_nothing(tools_env, monkeypatch
     for rel in ("index.html", "files/family.txt", "tools.yaml"):
         with pytest.raises(tools.ToolNotFound):
             tools.resolve_static(t, rel)
-    # And through HTTP, as Safe Mode, with the manifest written by hand...
+    # And through HTTP, signed out, with the manifest written by hand...
     _manifest(f"tools:\n  - id: leak\n    title: L\n    kind: static\n"
               f"    root: {data}\n    safe: true\n")
     # The data-dir rule is a shape rule, so even the check_fs=False read refuses
     # the file (fail closed: no tools until it is fixed)...
     assert tools.load_tools() == []
-    c = _decoy(make_client)
+    c = _signed_out(make_client)
     for rel in ("", "files/family.txt", "tools.yaml"):
         r = c.get(f"/tools/leak/{rel}")
         assert r.status_code in (401, 403, 404), (rel, r.status_code)
         assert "private" not in r.text and "tools:" not in r.text
-    # ...and if a loosened loader did hand the tool through, the Safe-Mode
+    # ...and if a loosened loader did hand the tool through, the signed-out
     # route still serves nothing (the resolver is the last line).
     monkeypatch.setattr(tools, "load_tools", lambda: [t])
     for rel in ("", "files/family.txt", "tools.yaml"):
@@ -463,10 +463,10 @@ def test_pin_ticket_only_for_framed_loads(tools_env):
     assert c.head(r.headers["location"]).status_code == 200
 
 
-def test_pin_decoy_cannot_reach_nonsafe_tool(tools_env):
+def test_signed_out_cannot_reach_a_tool(tools_env):
     make_client, site = tools_env
     _manifest(_bench(site))
-    c = _decoy(make_client)
+    c = _signed_out(make_client)
     for p in ("/tools/bench/", "/tools/bench/css/s.css", "/tools/nope/",
               "/api/tools/bench/status"):
         r = c.get(p)
@@ -475,7 +475,7 @@ def test_pin_decoy_cannot_reach_nonsafe_tool(tools_env):
 
 
 # --------------------------------------------------------------------------- #
-# GET /api/tools + Safe Mode
+# GET /api/tools, signed in and signed out
 # --------------------------------------------------------------------------- #
 
 def test_api_tools_operator_view(tools_env):
@@ -924,12 +924,12 @@ def test_jobboard_builtin_row_is_refused(tools_env):
 
 
 def test_jobs_stay_signed_out_blocked(tools_env):
-    """The Safe-Mode matrix did not change: /api/jobs is still barred for a
-    locked browser, and the builtin never lists for Safe Mode."""
+    """The signed-out matrix did not change: /api/jobs is still barred for a
+    signed-out browser, and the builtin never lists for it."""
     make_client, site = tools_env
     assert main._signed_out_blocked("GET", "/api/jobs") is True
     assert main._signed_out_blocked("GET", "/api/jobs/months") is True
-    c = _decoy(make_client)
+    c = _signed_out(make_client)
     r = c.get("/api/tools")
     # 4.0: a signed-out browser is nobody (401); either way it lists no Job Board
     assert r.status_code == 401 or "jobboard" not in [t["id"] for t in r.json()["tools"]]
@@ -1163,10 +1163,10 @@ def test_api_harness_row_addresses(tools_env, monkeypatch):
     assert h["open_remote_url"] == "https://host.tailnet.example:8453"
 
 
-def test_builtin_open_url_never_reaches_safe_mode(tools_env, monkeypatch):
+def test_builtin_open_url_never_reaches_a_signed_out_caller(tools_env, monkeypatch):
     make_client, _site = tools_env
     _sf_on(monkeypatch)
-    c = _decoy(make_client)
+    c = _signed_out(make_client)
     body = c.get("/api/tools").text
     assert "198.51.100.7" not in body and "open_url" not in body
     assert c.get("/api/tools/studioforge-panel/status").status_code in (401, 403)
