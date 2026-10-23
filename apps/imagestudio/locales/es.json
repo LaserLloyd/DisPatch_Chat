@@ -11,7 +11,7 @@
     ]
   },
   "title": "Estudio de imágenes",
-  "locked": "Desbloquea para acceso completo",
+  "locked": "Este perfil no puede usar Image Studio. Pídeselo a un administrador.",
   "loading": "Cargando…",
   "nim.hidden": "Las imágenes están ocultas en el modo sin imágenes.",
   "prompt.label": "Prompt",

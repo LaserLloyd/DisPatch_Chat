@@ -64,7 +64,7 @@
   "detail.first_seen": "First seen",
   "detail.source": "Source",
   "detail.offline": "DisPatch injoignable — vérifiez la connexion.",
-  "detail.locked": "Déverrouillez pour voir cette offre.",
+  "detail.locked": "Connecte-toi avec un profil autorisé à voir cette offre.",
   "seniority.junior": "Junior",
   "seniority.senior": "Senior",
   "seniority.staff": "Staff",
@@ -111,5 +111,5 @@
   "tags.remove": "Retirer l’étiquette {tag}",
   "archive.button": "Archiver",
   "archive.done": "Archivée",
-  "locked": "Déverrouillez DisPatch pour voir le tableau des offres."
+  "locked": "Ce profil ne peut pas ouvrir le Job Board. Demande à un admin."
 }

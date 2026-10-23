@@ -63,7 +63,7 @@
   "detail.first_seen": "First seen",
   "detail.source": "Source",
   "detail.offline": "DisPatch nicht erreichbar — Verbindung prüfen.",
-  "detail.locked": "Zum Anzeigen entsperren.",
+  "detail.locked": "Melde dich bei einem Profil an, das diesen Job sehen darf.",
   "seniority.junior": "Junior",
   "seniority.senior": "Senior",
   "seniority.staff": "Staff",
@@ -110,5 +110,5 @@
   "tags.remove": "Tag {tag} entfernen",
   "archive.button": "Archivieren",
   "archive.done": "Archiviert",
-  "locked": "Entsperre DisPatch, um das Job-Board zu sehen."
+  "locked": "Dieses Profil kann das Job-Board nicht öffnen. Frag einen Admin."
 }

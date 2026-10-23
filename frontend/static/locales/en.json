@@ -253,7 +253,6 @@
     "hint": "Tap a picture to change it. Reorder with ▲/▼ (or drag).",
     "language": "Language",
     "minimal_avatars": "Minimal avatars",
-    "change_photo": "Change photo",
     "change_photo_short": "Change photo",
     "react_title": "Let this bot fire reaction images",
     "pool_title": "Give this bot an avatar pool — each new chat draws its own one-shot face",

@@ -62,7 +62,7 @@
   "detail.first_seen": "First seen",
   "detail.source": "Source",
   "detail.offline": "无法连接 DisPatch，请检查网络。",
-  "detail.locked": "解锁后才能查看此职位。",
+  "detail.locked": "请登录有权查看此职位的个人资料。",
   "seniority.junior": "Junior",
   "seniority.senior": "Senior",
   "seniority.staff": "Staff",
@@ -109,5 +109,5 @@
   "tags.remove": "移除标签 {tag}",
   "archive.button": "归档",
   "archive.done": "已归档",
-  "locked": "解锁 DisPatch 以查看职位板。"
+  "locked": "此个人资料无法打开 Job Board。请联系管理员。"
 }

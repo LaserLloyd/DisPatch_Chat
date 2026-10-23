@@ -10,7 +10,7 @@
     ]
   },
   "title": "Bildstudio",
-  "locked": "Zum vollen Zugriff entsperren",
+  "locked": "Dieses Profil kann das Image Studio nicht nutzen. Frag einen Admin.",
   "loading": "Wird geladen…",
   "nim.hidden": "Im Bildlos-Modus werden keine Bilder angezeigt.",
   "prompt.label": "Prompt",
