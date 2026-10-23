@@ -2313,5 +2313,21 @@
   },
   "media": {
     "expired": "Bild abgelaufen"
+  },
+  "picture": {
+    "title": "Profilbild",
+    "note": "Dein Bild ist für alle sichtbar, die dieses DisPatch nutzen, auch auf dem Anmeldebildschirm.",
+    "upload": "Bild hochladen…",
+    "change": "Bild ändern…",
+    "remove": "Bild entfernen",
+    "uploading": "Wird hochgeladen…",
+    "saved": "Profilbild aktualisiert.",
+    "removed": "Profilbild entfernt.",
+    "formats": "PNG, JPEG, WebP oder GIF, bis 5 MB. Es wird quadratisch zugeschnitten.",
+    "err_type": "Nutze ein Bild als PNG, JPEG, WebP oder GIF.",
+    "err_size": "Das Bild ist zu groß (höchstens 5 MB).",
+    "err_generic": "Das Bild konnte nicht gespeichert werden: {error}",
+    "shared_admin_only": "Das ist das gemeinsame Standardprofil. Nur ein Admin ändert sein Bild.",
+    "save_first": "Speichere zuerst das Profil und füge dann ein Bild hinzu."
   }
 }

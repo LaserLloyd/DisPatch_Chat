@@ -77,6 +77,8 @@ WRITERS: tuple[dict[str, Any], ...] = (
      "kind": "avatar_snapshot", "covered": True, "note": "only snapshots no thread references"},
     {"writer": "reactions.pool_publish / avatar_pool top-up (image CLI)", "writes": "reactions/moods-<bot>/<mood>/*, avatar-pool/<bot>/ready/*",
      "kind": None, "covered": False, "why": "the unfired shelf and ready pool are in use by definition"},
+    {"writer": "profile_avatars.set_avatar (people_api)", "writes": "profile-avatars/<profile>-<hash>.webp",
+     "kind": None, "covered": False, "why": "a profile's current picture, deleted with the profile; find_orphans never scans this folder"},
     {"writer": "reactions.add / starter pack", "writes": "reactions/pack/*, reactions/builtin/*",
      "kind": None, "covered": False, "why": "the household reaction library, not generated output"},
     {"writer": "main avatar upload / profiles_service avatar / firstrun", "writes": "avatars/*",

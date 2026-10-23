@@ -2313,5 +2313,21 @@
   },
   "media": {
     "expired": "image expired"
+  },
+  "picture": {
+    "title": "Profile picture",
+    "note": "Your picture is visible to everyone who uses this DisPatch, including on the sign-in screen.",
+    "upload": "Upload picture…",
+    "change": "Change picture…",
+    "remove": "Remove picture",
+    "uploading": "Uploading…",
+    "saved": "Profile picture updated.",
+    "removed": "Profile picture removed.",
+    "formats": "PNG, JPEG, WebP or GIF, up to 5 MB. It is cropped to a square.",
+    "err_type": "Use a PNG, JPEG, WebP or GIF picture.",
+    "err_size": "That picture is too large (5 MB at most).",
+    "err_generic": "Could not save the picture: {error}",
+    "shared_admin_only": "This is the shared default profile. Only an Admin changes its picture.",
+    "save_first": "Save the profile first, then add a picture."
   }
 }

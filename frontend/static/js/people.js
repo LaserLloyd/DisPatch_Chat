@@ -28,6 +28,8 @@ import { api as realApi } from './api.js?v=36';
 import { w5 as realW5 } from './w5-api.js?v=2';
 import { t, has, relTime, fullTimestamp } from './i18n.js?v=5';
 import { el } from './util.js?v=21';
+import { nimEnabled } from './nim.js?v=6';
+import { pictureRow, isUploadedPicture } from './profile-picture.js?v=1';
 import { disclosureText } from './host-notice.js?v=3';
 import { ACTIVITY_COLUMNS, activityRows, activityTotals, avatarSpec } from './profiles.js?v=3';
 import {
@@ -134,7 +136,9 @@ export function patchBody(person, form) {
   if (!name) errors.name = 'required';
   else if (name !== person.name) patch.name = name;
   const avatar = String(form.avatar || '').trim();
-  if (avatar !== (person.avatar || '')) patch.avatar = avatar;
+  // An uploaded picture is changed by its own buttons: the emoji box (empty for one) never clears it.
+  const uploaded = isUploadedPicture(person.avatar);
+  if (uploaded ? avatar !== '' : avatar !== (person.avatar || '')) patch.avatar = avatar;
   const sm = String(form.sessionMinutes || '').trim();
   const before = Number.isInteger(person.session_timeout) ? Math.round(person.session_timeout / 60) : null;
   if (sm !== '') {
@@ -157,7 +161,7 @@ const formError = (errors) => {
 };
 
 export function avatarNode(profile, cls = 'people-avatar') {
-  const spec = avatarSpec(profile);
+  const spec = avatarSpec(profile, { noImages: nimEnabled() });
   if (spec.kind === 'img') {
     return el('img', { class: cls, src: spec.src, alt: '', width: '32', height: '32', draggable: 'false' });
   }
@@ -472,6 +476,15 @@ function editorPanel(ctx, person) {
       field(t('people.name'), name),
       field(t('people.type_label'), role), roleHint,
       field(t('people.avatar'), avatar, t('people.avatar_hint')),
+      creating
+        ? el('p', { class: 'people-field-hint', text: t('picture.save_first') })
+        : el('div', { class: 'sec-field people-field people-picture' }, [
+          el('span', { class: 'people-field-label', text: t('picture.title') }),
+          pictureRow({
+            profile: person, base: `/api/people/${encodeURIComponent(person.id)}/avatar`, toast: ctx.toast,
+            onChanged: async (p) => { person.avatar = p.avatar; await ctx.refreshRows(); },
+          }),
+        ]),
       pinField,
       pwField,
       noCred,

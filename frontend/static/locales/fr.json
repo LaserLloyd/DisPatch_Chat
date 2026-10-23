@@ -2338,5 +2338,21 @@
   },
   "media": {
     "expired": "image expirée"
+  },
+  "picture": {
+    "title": "Photo de profil",
+    "note": "Votre photo est visible par toutes les personnes qui utilisent ce DisPatch, y compris sur l'écran de connexion.",
+    "upload": "Téléverser une photo…",
+    "change": "Changer la photo…",
+    "remove": "Supprimer la photo",
+    "uploading": "Téléversement…",
+    "saved": "Photo de profil mise à jour.",
+    "removed": "Photo de profil supprimée.",
+    "formats": "PNG, JPEG, WebP ou GIF, 5 Mo maximum. Elle est recadrée en carré.",
+    "err_type": "Utilisez une image PNG, JPEG, WebP ou GIF.",
+    "err_size": "Cette image est trop volumineuse (5 Mo maximum).",
+    "err_generic": "Impossible d'enregistrer la photo : {error}",
+    "shared_admin_only": "C'est le profil par défaut partagé. Seul un administrateur change sa photo.",
+    "save_first": "Enregistrez d'abord le profil, puis ajoutez une photo."
   }
 }

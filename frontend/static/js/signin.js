@@ -12,6 +12,7 @@
 
 import { t } from './i18n.js?v=5';
 import { el } from './util.js?v=21';
+import { nimEnabled } from './nim.js?v=6';
 import {
   avatarSpec, createCountdown, credentialModes, credentialOptions, formatCountdown, sortTiles,
 } from './profiles.js?v=3';
@@ -19,7 +20,7 @@ import {
 const roleLabel = (role) => t(`role.${role}`);
 
 function avatar(profile, cls) {
-  const spec = avatarSpec(profile);
+  const spec = avatarSpec(profile, { noImages: nimEnabled() });
   if (spec.kind === 'img') {
     return el('img', { class: cls, src: spec.src, alt: '', width: '48', height: '48', draggable: 'false' });
   }
@@ -299,7 +300,7 @@ export function chipLabel(profile, role) {
 
 export function paintChip(btn, profile, role) {
   if (!btn) return;
-  const spec = avatarSpec(profile || { name: roleLabel(role) });
+  const spec = avatarSpec(profile || { name: roleLabel(role) }, { noImages: nimEnabled() });
   btn.replaceChildren(spec.kind === 'img'
     ? el('img', { class: 'profile-chip-img', src: spec.src, alt: '', draggable: 'false' })
     : el('span', { class: 'profile-chip-text', 'aria-hidden': 'true', text: spec.text }));

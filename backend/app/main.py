@@ -103,6 +103,7 @@ from . import (
     pool_guard,
     practice_bridge,
     problem,
+    profile_avatars,
     push,
     quick_actions,
     quicksetup,
@@ -828,6 +829,8 @@ def _upload_ceiling(path: str) -> int | None:
         return UPLOAD_MAX_VIDEO + _MULTIPART_SLACK
     if path == "/api/files":
         return FILE_UPLOAD_MAX + _MULTIPART_SLACK
+    if path == "/api/me/avatar" or re.match(r"^/api/people/[^/]+/avatar$", path):
+        return profile_avatars.MAX_BYTES + _MULTIPART_SLACK
     if re.match(r"^/api/bots/[^/]+/avatar$", path):
         return UPLOAD_MAX_IMAGE + _MULTIPART_SLACK
     # Same shape as the bot avatar upload — a full image plus an optional

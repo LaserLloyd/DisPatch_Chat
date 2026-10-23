@@ -15,6 +15,7 @@
 import { el } from './util.js?v=21';
 import { renderMyBots } from './my-bots.js?v=1';
 import { renderAccountReset } from './account-reset.js?v=1';
+import { renderProfilePicture } from './profile-picture.js?v=1';
 import { renderPeoplePerms } from './people-perms.js?v=2';
 
 /** The sections, in nav order. `group`: you (this person / device), household
@@ -40,7 +41,7 @@ export const SECTION_IDS = SECTIONS.map((s) => s.id);
  *  only (account-reset.js: Account; people-perms.js: People; my-bots.js: the You -> My
  *  bots section). */
 export const SECTION_HOOKS = Object.freeze({
-  account: [renderAccountReset],
+  account: [renderAccountReset, renderProfilePicture],
   people: [renderPeoplePerms],
   mybots: [renderMyBots],
 });

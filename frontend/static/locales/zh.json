@@ -2285,5 +2285,21 @@
   },
   "media": {
     "expired": "图片已过期"
+  },
+  "picture": {
+    "title": "头像",
+    "note": "你的头像对所有使用此 DisPatch 的人可见，包括登录界面。",
+    "upload": "上传头像…",
+    "change": "更换头像…",
+    "remove": "移除头像",
+    "uploading": "正在上传…",
+    "saved": "头像已更新。",
+    "removed": "头像已移除。",
+    "formats": "PNG、JPEG、WebP 或 GIF，最大 5 MB。会裁剪为正方形。",
+    "err_type": "请使用 PNG、JPEG、WebP 或 GIF 图片。",
+    "err_size": "图片太大（最大 5 MB）。",
+    "err_generic": "无法保存头像：{error}",
+    "shared_admin_only": "这是共享的默认个人资料，只有管理员可以更改其头像。",
+    "save_first": "请先保存个人资料，再添加头像。"
   }
 }
