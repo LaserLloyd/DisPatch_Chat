@@ -35,7 +35,6 @@ mobile-thread.png
 settings-theme.png
 
 # Safe Mode with an empty roster: no threads, no names, no message text.
-live-locked-1280.png
 # 2.3.0 (2026-10-14), captured on a fresh scratch install (Atlas + the two
 # seeded chats, no real roster, no address or path in frame):
 welcome.png
@@ -68,4 +67,4 @@ readme/tasks.png
 # (Alex/Sam/Mia, Nova/Scout letter avatars, the shipped Atlas avatar, invented chatter, a
 # localhost connection address only) and opened one by one: welcome, ai-models,
 # quick-actions, plugins-tab, bot-manager, desktop-*, mobile-*, settings-theme and
-# readme/{people-profiles,settings}. voice-screen.png and live-locked-1280.png are 3.x captures.
+# readme/{people-profiles,settings}. voice-screen.png is still a 3.x capture.
