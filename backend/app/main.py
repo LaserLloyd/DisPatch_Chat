@@ -80,6 +80,7 @@ from . import (
     credentials,
     dashboard_routes,
     database,
+    ext_profile_hooks,
     extensions,
     firstrun,
     gateway_router,
@@ -9002,6 +9003,14 @@ async def put_bot_order(request: Request, payload: UpdateBotOrderIn):
             value = getattr(item, field, None)
             if value is not None:
                 await asyncio.to_thread(_check_bot_field, field, item.id, value.strip())
+        voice = (item.voice or "").strip() if item.voice is not None else ""
+        if voice:
+            # 4.0 per-profile clones: a household character speaks only household voices, a
+            # personal one also its owner's own clones (the same rule the bot editors apply).
+            known = config.resolve_bot(item.id)
+            owner = known.owner_profile if known is not None and characters.is_personal(known) else None
+            if not ext_profile_hooks.voice_allowed(voice, owner):
+                raise HTTPException(422, "That voice is not available to you.")
     bots = config.save_bot_order(_complete_bot_order(payload.bots))
     data = [b.to_dict() for b in bots]
     await manager.broadcast({"type": "bots", "bots": data})

@@ -534,6 +534,27 @@ def test_validators_decide_voice_and_voice_rp(ext_env):
     assert all("voice" not in b and "voice_rp" not in b for b in pub)
 
 
+def test_the_bot_order_save_refuses_a_personal_clone_on_a_household_character(ext_env, monkeypatch):
+    """4.0 per-profile clones: PUT /api/bots/order applies the same voice rule as the bot editors
+    (ext_profile_hooks.voice_allowed): a household character speaks household voices only."""
+    from app import ext_profile_hooks
+    c, _ = ext_env
+    install()
+    monkeypatch.setattr(extensions, "field_validator",
+                        lambda name: (lambda v: None) if name == "voice" else None)
+    owners = {"clone-of-x": "profile-x", "stock-host": "household"}
+    ext_profile_hooks.register_voice_access(
+        "voice", lambda voice, bot_owner: owners.get(voice) in ("household", bot_owner))
+    try:
+        r = _order(c, voice="clone-of-x")
+        assert r.status_code == 422 and "not available" in r.text, r.text
+        allb = {b["id"]: b for b in c.get("/api/bots/all").json()["bots"]}
+        assert allb["main"].get("voice") != "clone-of-x"
+        assert _order(c, voice="stock-host").status_code == 200
+    finally:
+        ext_profile_hooks.reset_for_tests()
+
+
 def test_without_the_extension_only_empty_or_unchanged_values_save(ext_env):
     c, _ = ext_env
     cfg = config.CONFIG_PATH.read_text() if config.CONFIG_PATH.exists() else None
