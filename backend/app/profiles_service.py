@@ -71,6 +71,7 @@ from . import (
     ext_profile_hooks,
     firstrun,
     ownership,
+    profile_avatars,
 )
 from .contracts.permissions import (
     ROLE_DEFAULTS,
@@ -1000,6 +1001,7 @@ def delete_profile(profile_id: str, confirm_token: str) -> dict[str, int]:
         if lock_target_profile_id() == profile_id:
             set_lock_target(None)
         accounts.delete_profile(profile_id)
+        profile_avatars.remove_files(profile_id)
         return deleted
 
 

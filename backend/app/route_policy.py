@@ -334,6 +334,11 @@ _r(("PUT",), "/api/people/{profile_id}/backends", _R(P.MANAGE_USERS, note="which
 _r(("GET",), "/api/people/{profile_id}/delete/preview", _R(P.MANAGE_USERS, note="counts only"))
 _r(("POST",), "/api/people/{profile_id}/delete", _R(P.MANAGE_USERS, note="deletes the profile and its content after a confirm token"))
 
+# ---- WP-AVATAR: profile pictures (app/people_api.py)
+_r(("POST", "DELETE"), "/api/me/avatar", _R(P.USE_CHAT, note="the caller's OWN profile picture; the shared default profile's is an Admin's (lock_target_fence)"))
+_r(("POST", "DELETE"), "/api/people/{profile_id}/avatar", _R(P.MANAGE_USERS, note="an Admin sets or removes a profile's picture; same rank and lock-target rules as PATCH"))
+_r("GET", "/api/profile-avatars/{name}", public("profile pictures are visible to everyone who uses this DisPatch, the sign-in screen included, by design; the name is a strict pattern with the content hash"))
+
 # ---- WP-AIB: AI build (app/bot_builder_api.py): POST /api/me/characters/draft
 _r("POST", "/api/me/characters/draft", _R(P.CREATE_CHARACTERS,
    note="AI build: a draft bot from a description; nothing is saved or logged"))
@@ -481,6 +486,8 @@ OWNER_SCOPED: dict[str, str] = {
     "/api/people/{profile_id}/backends": _NONE_ADMIN,
     "/api/people/{profile_id}/delete": _NONE_ADMIN,
     "/api/people/{profile_id}/delete/preview": _NONE_ADMIN,
+    "/api/people/{profile_id}/avatar": _NONE_ADMIN,
+    "/api/profile-avatars/{name}": "none: a public profile picture file (pictures are visible to all users by design)",
     # Unparameterised routes that read or write conversations: listed so routes.json says so.
     "/api/threads": "thread",
     "/api/unread": "thread",

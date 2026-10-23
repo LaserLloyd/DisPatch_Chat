@@ -2338,5 +2338,21 @@
   },
   "media": {
     "expired": "imagen caducada"
+  },
+  "picture": {
+    "title": "Foto de perfil",
+    "note": "Tu foto es visible para todas las personas que usan este DisPatch, también en la pantalla de inicio de sesión.",
+    "upload": "Subir foto…",
+    "change": "Cambiar foto…",
+    "remove": "Quitar foto",
+    "uploading": "Subiendo…",
+    "saved": "Foto de perfil actualizada.",
+    "removed": "Foto de perfil quitada.",
+    "formats": "PNG, JPEG, WebP o GIF, de hasta 5 MB. Se recorta en un cuadrado.",
+    "err_type": "Usa una imagen PNG, JPEG, WebP o GIF.",
+    "err_size": "La imagen es demasiado grande (5 MB como máximo).",
+    "err_generic": "No se pudo guardar la foto: {error}",
+    "shared_admin_only": "Este es el perfil predeterminado compartido. Solo un administrador cambia su foto.",
+    "save_first": "Guarda primero el perfil y luego añade una foto."
   }
 }

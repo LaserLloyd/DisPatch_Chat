@@ -4996,3 +4996,18 @@ body.tools-sheet-open::after {
    character's Details, the backups checkbox) read at the card's size, not the body's. */
 #botmanager .settings-pane :is(.sys-backups-host p.muted, .sys-backups-host .bkp-check, .chr-drawer .chr-panel > p.muted) { font-size: 13px; line-height: 1.45; }
 #botmanager .settings-pane .sys-backups-host > p.muted { margin: 4px 2px 8px; }
+
+/* ---- Profile picture (WP-AVATAR): Settings -> Account and the People editor ---- */
+.pp-row { display: flex; flex-direction: column; gap: 8px; }
+.pp-main { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.pp-preview { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: none; background: var(--bg-hover); }
+.pp-preview--text { display: grid; place-items: center; font-size: 24px; font-weight: 700; color: var(--text-primary); }
+.pp-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.pp-actions .ui-btn { min-height: 44px; min-width: 44px; }
+.pp-actions .ui-btn[hidden] { display: none; }
+.pp-file[hidden] { display: none; }
+.pp-note { margin: 0; font-size: 13px; line-height: 1.45; color: var(--text-primary); }
+.pp-hint { margin: 0; font-size: 12px; }
+.pp-status { min-height: 1.2em; font-size: 13px; }
+.pp-status.pp-bad { color: var(--error-text); }
+.people-field-label { font-weight: 600; font-size: 13px; }

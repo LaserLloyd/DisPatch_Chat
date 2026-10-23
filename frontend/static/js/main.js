@@ -113,6 +113,7 @@ import { createTasksUi } from './tasks.js?v=2';
 import { initMyBots, copyMenuItem } from './my-bots.js?v=1';
 import { initBotEditor } from './bot-editor.js?v=1';
 import { initAccountReset } from './account-reset.js?v=1';
+import { initProfilePicture } from './profile-picture.js?v=1';
 import { initPeoplePerms } from './people-perms.js?v=2';
 import { mountAgentsSettings } from './agents.js?v=3';
 import { pushRow } from './push.js?v=3';
@@ -9499,7 +9500,7 @@ function paintAccountWho() {
   const host = dom['acct-who'];
   if (!host) return;
   const prof = state.auth && state.auth.profile;
-  const spec = avatarSpec(prof || { name: t(`role.${state.role || 'admin'}`) });
+  const spec = avatarSpec(prof || { name: t(`role.${state.role || 'admin'}`) }, { noImages: nimEnabled() });
   host.replaceChildren(
     spec.kind === 'img'
       ? el('img', { class: 'acct-avatar', src: spec.src, alt: '', draggable: 'false' })
@@ -10477,8 +10478,12 @@ async function init() {
     }
   }, 60_000);
   // 4.0 chat-first profiles: the new modules get the shell's helpers once (no-ops for now).
-  const profileDeps = { t, toast, confirm: (msg, o) => uiConfirm(msg, o), api, state };
-  for (const init of [initMyBots, initBotEditor, initAccountReset, initPeoplePerms]) {
+  const profileDeps = {
+    t, toast, confirm: (msg, o) => uiConfirm(msg, o), api, state,
+    // A new profile picture: learn it from the server, then repaint the chip and the Account card.
+    onProfileChanged: async () => { await refreshAuthQuiet(); paintAccountWho(); },
+  };
+  for (const init of [initMyBots, initBotEditor, initAccountReset, initPeoplePerms, initProfilePicture]) {
     try { init(profileDeps); } catch (e) { console.warn('profiles module init failed', e); }
   }
   await refreshAuthAndBoot();

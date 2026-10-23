@@ -17,16 +17,17 @@ of admin actions".
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import secrets
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import accounts, auth, config, credentials, policy
+from . import accounts, auth, config, credentials, policy, profile_avatars
 from .contracts import errors
 from .contracts.permissions import (
     LOCK_TARGET_FENCE,
@@ -628,6 +629,14 @@ def clean_permissions(role: Role | str, items: Any, field_name: str, *,
 RoleIn = Literal["admin", "user", "basic", "member", "restricted"]
 
 
+def _check_text_avatar(v: str) -> str:
+    """A picture can only be set by the upload route; this field takes an emoji or a few
+    characters (at most 8, no slash or angle bracket), or empty."""
+    if not profile_avatars.valid_text_avatar(v):
+        raise ValueError("avatar must be an emoji or up to 8 characters; upload a picture instead")
+    return v
+
+
 class PersonIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=40)
@@ -635,6 +644,12 @@ class PersonIn(BaseModel):
     pin: str | None = Field(default=None, max_length=128)
     password: str | None = Field(default=None, max_length=256)
     avatar: str = Field(default="", max_length=120)
+
+    @field_validator("avatar")
+    @classmethod
+    def _avatar_text(cls, v: str) -> str:
+        return _check_text_avatar(v)
+
     grants: list[str] | None = None
     denies: list[str] | None = None
     session_timeout: int | None = Field(default=None, ge=60, le=30 * 86400)
@@ -646,6 +661,16 @@ class PersonPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=40)
     role: RoleIn | None = None
     avatar: str | None = Field(default=None, max_length=120)
+
+    @field_validator("avatar")
+    @classmethod
+    def _avatar_text(cls, v: str | None) -> str | None:
+        # The stored URL may come back unchanged (a form sending the whole row); the handler
+        # refuses any path that is not the profile's current one.
+        if v is None or (profile_avatars.NAME_RE.match(v[len(profile_avatars.URL_PREFIX):]) and profile_avatars.is_path_value(v)):
+            return v
+        return _check_text_avatar(v)
+
     grants: list[str] | None = None
     denies: list[str] | None = None
     session_timeout: int | None = Field(default=None, ge=60, le=30 * 86400)
@@ -801,6 +826,12 @@ async def people_patch(request: Request, profile_id: str, payload: PersonPatch):
     assert prof is not None
     caller = _caller(request)
     fields = payload.model_dump(exclude_unset=True)
+    if "avatar" in fields and fields["avatar"] is None:
+        fields.pop("avatar")
+    if "avatar" in fields and fields["avatar"] == prof.avatar:
+        fields.pop("avatar")            # a form that sends the whole row back changes nothing
+    if "avatar" in fields and profile_avatars.is_path_value(fields["avatar"]):
+        return _problem(422, "avatar_upload_only", "A picture is set by uploading it, not by naming a path.")
     own = prof.id == caller.profile_id
     lock_target = policy.is_lock_target(prof)
     if "role" in fields:
@@ -841,6 +872,8 @@ async def people_patch(request: Request, profile_id: str, payload: PersonPatch):
         return _account_error(e)
     if "disabled" in fields:
         auth.revoke_profile(profile_id)
+    if "avatar" in fields:
+        profile_avatars.drop_replaced(prof.avatar, updated.avatar)
     _audit(request, "profile_updated", profile_id, ",".join(sorted(fields)))
     return _person_out(updated)
 
@@ -961,3 +994,105 @@ async def people_activity(request: Request, profile_id: str | None = None, days:
 @router.get("/api/people/audit", dependencies=[_VIEW])
 async def people_audit(request: Request):
     return {"entries": accounts.recent_activity(None, category="audit", limit=200)}
+
+
+# --------------------------------------------------------------------------- #
+# Profile pictures (uploads). Visible to everyone who uses this DisPatch, the
+# sign-in screen included, by design (Settings says so at upload time).
+# --------------------------------------------------------------------------- #
+
+_AVATAR_PROBLEMS = {"avatar_invalid": 422, "avatar_too_large": 413, "profile_not_found": 404}
+
+
+def _avatar_fence(request: Request, prof: accounts.Profile) -> JSONResponse | None:
+    """The shared default profile's picture is changed by an Admin only (as its name)."""
+    if policy.is_lock_target(prof) and not _caller(request).is_admin:
+        return _problem(403, "lock_target_fence",
+                        "Only an Admin changes the shared default profile's name or picture.")
+    return None
+
+
+async def _avatar_upload(request: Request, prof: accounts.Profile, file: UploadFile, kind: str) -> JSONResponse:
+    fence = _avatar_fence(request, prof)
+    if fence is not None:
+        return fence
+    raw = await file.read(profile_avatars.MAX_BYTES + 1)
+    try:
+        updated = await asyncio.to_thread(profile_avatars.set_avatar, prof.id, raw)
+    except profile_avatars.AvatarError as e:
+        return _problem(e.status, e.code, str(e))
+    except accounts.AccountError as e:
+        return _account_error(e)
+    _audit(request, kind, prof.id, "")
+    return JSONResponse(_person_out(updated))
+
+
+async def _avatar_remove(request: Request, prof: accounts.Profile, kind: str) -> JSONResponse:
+    fence = _avatar_fence(request, prof)
+    if fence is not None:
+        return fence
+    try:
+        updated = await asyncio.to_thread(profile_avatars.clear_avatar, prof.id)
+    except profile_avatars.AvatarError as e:
+        return _problem(e.status, e.code, str(e))
+    _audit(request, kind, prof.id, "")
+    return JSONResponse(_person_out(updated))
+
+
+def _me(request: Request) -> tuple[accounts.Profile | None, JSONResponse | None]:
+    prof = accounts.get_profile(_caller(request).profile_id)
+    if prof is None:
+        return None, _problem(409, "profile_required", "Sign in to a profile first.")
+    return prof, None
+
+
+@router.post("/api/me/avatar")
+async def me_avatar_set(request: Request, file: UploadFile = File(...)):
+    """Your own profile picture (PNG, JPEG, WebP or GIF, 5 MB at most; stored as a 256 px WebP)."""
+    prof, err = _me(request)
+    if err is not None:
+        return err
+    assert prof is not None
+    return await _avatar_upload(request, prof, file, "profile_avatar_set")
+
+
+@router.delete("/api/me/avatar")
+async def me_avatar_clear(request: Request):
+    prof, err = _me(request)
+    if err is not None:
+        return err
+    assert prof is not None
+    return await _avatar_remove(request, prof, "profile_avatar_removed")
+
+
+@router.post("/api/people/{profile_id}/avatar", dependencies=[_MANAGE])
+async def people_avatar_set(request: Request, profile_id: str, file: UploadFile = File(...)):
+    prof, err = _target(request, profile_id)
+    if err is not None:
+        return err
+    assert prof is not None
+    return await _avatar_upload(request, prof, file, "profile_avatar_set")
+
+
+@router.delete("/api/people/{profile_id}/avatar", dependencies=[_MANAGE])
+async def people_avatar_clear(request: Request, profile_id: str):
+    prof, err = _target(request, profile_id)
+    if err is not None:
+        return err
+    assert prof is not None
+    return await _avatar_remove(request, prof, "profile_avatar_removed")
+
+
+@router.get("/api/profile-avatars/{name}")
+async def profile_avatar_file(name: str):
+    """A profile picture, for anyone (the sign-in screen shows them). The name is
+    unguessable-by-listing (it carries the content hash), content-addressed, so it is cached
+    for a year; a changed picture is a new name."""
+    path = profile_avatars.file_for_name(name)
+    if path is None:
+        raise HTTPException(404, "No such picture")
+    return FileResponse(path, media_type="image/webp", headers={
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": "inline",
+    })

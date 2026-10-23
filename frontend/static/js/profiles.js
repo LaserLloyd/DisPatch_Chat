@@ -96,11 +96,14 @@ export function sortTiles(profiles) {
 
 /** How to draw a profile's picture. `avatar` is server data: an image is only
  *  accepted as a same-origin path ("/..."), a short string is drawn as a glyph
- *  (an emoji), anything else falls back to the name's first letter. */
-export function avatarSpec(profile) {
+ *  (an emoji), anything else falls back to the name's first letter. With `noImages`
+ *  (No-Image Mode) a path falls back to the initial too. */
+export function avatarSpec(profile, { noImages = false } = {}) {
   const a = profile && typeof profile.avatar === 'string' ? profile.avatar.trim() : '';
-  if (/^\/(?![/\\])[^\s"'<>]*$/.test(a)) return { kind: 'img', src: a };
-  if (a && [...a].length <= 4) return { kind: 'glyph', text: a };
+  // No-Image Mode: a picture is never requested; the name's initial stands in for it.
+  const isPath = /^\/(?![/\\])[^\s"'<>]*$/.test(a);
+  if (isPath && !noImages) return { kind: 'img', src: a };
+  if (a && !isPath && [...a].length <= 4) return { kind: 'glyph', text: a };
   const name = (profile && profile.name ? String(profile.name).trim() : '') || '?';
   return { kind: 'initial', text: [...name][0].toUpperCase() };
 }

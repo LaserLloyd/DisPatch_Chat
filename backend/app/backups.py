@@ -69,11 +69,11 @@ DATA_FILES = (
     "gateway-mirror.json", "media-origins.json", "voice.yaml", "voice-acks.yaml", "advisor.db",
     "RECOVERY-CODE.txt",
 )
-DATA_DIRS = ("avatars", "reactions/pack", "voices")
+DATA_DIRS = ("avatars", "profile-avatars", "reactions/pack", "voices")
 MEDIA_DIRS = ("media", "files")
 #: top-level names a restore may write; anything else in an archive is refused.
 ALLOWED_TOP = frozenset({"chats.db", "MANIFEST.json", "secrets.json", *DATA_FILES,
-                         "avatars", "reactions", "voices", "media", "files"})
+                         "avatars", "profile-avatars", "reactions", "voices", "media", "files"})
 
 
 def make_private(path: Path, *, directory: bool = False) -> None:

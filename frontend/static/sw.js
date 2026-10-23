@@ -401,7 +401,7 @@ const SHELL = [
   '/static/js/settings-nav.js',
   // 4.0 chat-first profiles (Foundation scaffolding): My bots, the bot editor, Reset to
   // default and People permissions, statically imported by main.js and settings-nav.js.
-  '/static/js/my-bots.js', '/static/js/bot-editor.js', '/static/js/account-reset.js',
+  '/static/js/my-bots.js', '/static/js/bot-editor.js', '/static/js/account-reset.js', '/static/js/profile-picture.js',
   '/static/js/people-perms.js',
   // Drop files on a chat: Insert into chat / Upload to File Server (main.js).
   '/static/js/chatdrop.js',
