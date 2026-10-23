@@ -11,7 +11,6 @@ from agents_world import sibling
 
 from app import config, database, main
 
-
 BOT = "pal"
 
 
@@ -247,3 +246,25 @@ def test_the_lifespan_opens_the_database_of_the_current_data_dir(tmp_path, monke
     with TestClient(main.app):
         assert main.db.path == d / "chats.db"
     assert not (tmp_path / "elsewhere").exists()
+
+
+def test_retired_snapshots_and_reaction_images_answer_410(two):
+    world, owner, u, admin_id, uma_id, a_ids, u_ids = two
+    tid = a_ids[5]
+
+    async def pin():
+        await world.db.set_thread_avatar(tid, "0123abcd.png", explicit=True)
+    owner.portal.call(pin)
+    assert owner.get(f"/api/threads/{tid}/avatar").status_code == 404      # lost, not retired
+    con = sqlite3.connect(world.tmp / "chats.db")
+    con.execute("INSERT INTO media_expired (name, expired_at, kind) VALUES "
+                "('avatar-snapshots/0123abcd.png', '2026-01-01', 'avatar_snapshot')")
+    con.commit()
+    con.close()
+    r = owner.get(f"/api/threads/{tid}/avatar")
+    assert r.status_code == 410 and r.headers.get("X-Image-Expired") == "1"
+    assert u.get(f"/api/threads/{tid}/avatar").status_code == 404           # not hers: no hint
+    from types import SimpleNamespace
+    assert main._reaction_rel_names(SimpleNamespace(file="spent/happy/x1.png")) == [
+        "reactions/spent/happy/x1.png"]
+    assert main._reaction_rel_names(SimpleNamespace(file="../../etc/passwd")) == []

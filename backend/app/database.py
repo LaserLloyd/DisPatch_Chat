@@ -628,12 +628,29 @@ def scale_index_drift(con: sqlite3.Connection) -> list[tuple[str, str, str, str]
     for table, name, ddl in SCALE_INDEXES:
         if table not in tables:
             continue
+        if not _index_columns_present(con, table, ddl):
+            # A table of another (older or hand-made) shape: the index waits until its
+            # columns exist (Database.connect adds them, then builds it).
+            continue
         have = _master_sql(con, "index", name)
         if have is None:
             out.append((table, name, ddl, "missing"))
         elif norm_sql(have) != norm_sql(ddl):
             out.append((table, name, ddl, "stale"))
     return out
+
+
+_SQL_WORDS = {"create", "index", "unique", "if", "not", "exists", "on", "where", "and", "or",
+              "is", "null", "desc", "asc", "collate", "nocase"}
+
+
+def _index_columns_present(con: sqlite3.Connection, table: str, ddl: str) -> bool:
+    """Does ``table`` have every column the index DDL names (key and WHERE)?"""
+    body = ddl.split(" ON ", 1)[1] if " ON " in ddl else ddl
+    body = body.split("(", 1)[1] if "(" in body else body
+    words = {w.lower() for w in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", body)} - _SQL_WORDS
+    cols = {r[1].lower() for r in con.execute(f"PRAGMA table_info({table})")}
+    return words <= cols
 
 
 def missing_scale_indexes(con: sqlite3.Connection) -> list[tuple[str, str, str]]:

@@ -71,7 +71,7 @@ Backup: before the first applied step, ``<data>/backups/<version>-<UTC stamp>/``
 consistent copy of chats.db (the SQLite backup API, WAL-safe), config.yaml, security.yaml,
 trusted-devices.yaml, push-subscriptions.json, the Image Studio ledger
 (apps-data/imagestudio/images.jsonl) and prompt files (prompts*.json), quick-actions.yaml and
-voice-acks.yaml. The newest five are kept. ``--restore <dir>`` puts
+voice-acks.yaml. The newest three are kept (``KEEP_BACKUPS``). ``--restore <dir>`` puts
 them back.
 """
 
@@ -96,7 +96,8 @@ from .contracts.permissions import Role
 log = logging.getLogger("local-chat.migrate")
 
 TARGET_VERSION = "4.0.0"
-KEEP_BACKUPS = 5
+#: Pre-migration copies kept (the maintenance task trims to the same number nightly).
+KEEP_BACKUPS = 3
 #: ``<version>-YYYYMMDD-HHMMSS``; the container entrypoint writes the same shape with the
 #: previous image version in front (``3.0.0-b1-...``, ``dev-...``), kept in one list here.
 _BACKUP_DIR_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+-]*-\d{8}-\d{6}$")
@@ -723,6 +724,7 @@ def apply_scale() -> None:
     """Apply 011_scale (``run`` took the backup). Every part is idempotent, so an interrupted
     run simply runs again on the next start."""
     import time
+
     from . import database
     dbp = _db_file()
     accounts.refuse_live_db_under_pytest(dbp)

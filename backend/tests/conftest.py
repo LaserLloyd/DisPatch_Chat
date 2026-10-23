@@ -25,7 +25,6 @@ os.environ.setdefault("DISPATCH_SECRET_STORE", "file")
 from app import config as config_module
 from app import openclaw
 
-
 # --------------------------------------------------------------------------- #
 # No test ever opens the real install's database (fail closed, whole session).
 #

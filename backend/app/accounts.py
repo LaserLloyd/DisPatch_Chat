@@ -188,6 +188,10 @@ def new_id() -> str:
 #: see :func:`refuse_live_db_under_pytest`.
 LIVE_DATA_DIR = Path.home() / ".local" / "share" / "local-chat"
 IMPORT_DB_PATH = Path(config.DATA_DIR) / "chats.db"
+#: The import-time path was chosen explicitly (``DISPATCH_DATA_DIR`` / ``LOCAL_CHAT_DATA_DIR``
+#: exported, e.g. a scratch directory as a backstop): then it is not the install's default and
+#: is allowed - only the real data directory stays refused.
+IMPORT_DB_EXPLICIT = bool(os.environ.get("DISPATCH_DATA_DIR") or os.environ.get("LOCAL_CHAT_DATA_DIR"))
 
 
 def _resolved(p: Path | str) -> Path:
@@ -204,7 +208,7 @@ def is_live_db_path(path: Path | str) -> bool:
         r = _resolved(root)
         if p == r or r in p.parents:
             return True
-    return p == _resolved(IMPORT_DB_PATH)
+    return not IMPORT_DB_EXPLICIT and p == _resolved(IMPORT_DB_PATH)
 
 
 def refuse_live_db_under_pytest(path: Path | str) -> None:
@@ -755,11 +759,13 @@ def usage_add(subject: str, kind: str, amount: int) -> int:
 
 
 def prune(keep_days: int = 35) -> None:
-    cutoff = (datetime.now() - timedelta(days=keep_days)).strftime("%Y-%m-%d")
-    cutoff_ts = (datetime.now(UTC) - timedelta(days=90)).isoformat(timespec="seconds")
-    with _lock, connect() as con:
-        con.execute("DELETE FROM usage_daily WHERE day < ?", (cutoff,))
-        con.execute("DELETE FROM activity WHERE ts < ?", (cutoff_ts,))
+    """Kept for its caller (``auth.purge_expired``); deletes nothing any more.
+
+    It used to delete ``usage_daily`` older than 35 days and EVERY ``activity`` row older than
+    90 days - audit rows included, against the 400-day audit rule. Since 4.0 the daily
+    maintenance task owns those deletes (``maintenance.py``: activity 90 days, audit 400,
+    usage_daily 45, each an Admin setting), so two writers can no longer disagree."""
+    del keep_days
 
 
 # --------------------------------------------------------------------------- #

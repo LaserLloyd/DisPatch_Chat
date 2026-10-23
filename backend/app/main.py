@@ -79,6 +79,7 @@ from . import (
     connections,
     credentials,
     dashboard_routes,
+    database,
     extensions,
     firstrun,
     gateway_router,
@@ -112,7 +113,6 @@ from . import (
 from .config import AVATAR_DIR, FILES_DIR, FRONTEND_DIR, MEDIA_DIR, SETTINGS
 from .contracts import errors
 from .contracts.permissions import MACHINE_DEFAULT_SCOPES, MachineScope, Permission, Role
-from . import database
 from .database import Database, local_date, new_id, now_iso
 from .models import (
     MESSAGE_MAX_CHARS,
@@ -9557,6 +9557,9 @@ async def bot_avatar_history_image(request: Request, bot_id: str, snapshot_id: s
     full_path = avatar_snapshots.path_for_full(snapshot_id) if full else None
     path = full_path or avatar_snapshots.path_for(snapshot_id)
     if not path:
+        gone = await _expired_snapshot_response(snapshot_id)
+        if gone is not None:
+            return gone
         raise HTTPException(404, "No such avatar snapshot")
     if full and full_path is None:
         # Serving the FACE because this snapshot has no full half — not
@@ -9665,6 +9668,9 @@ async def get_thread_avatar(request: Request, thread_id: str, full: bool = False
         # per thread, so the store's state reaches the journal and /api/health
         # instead of only the eye of whoever happens to open that chat.
         if thread.avatar_snapshot:
+            gone = await _expired_snapshot_response(thread.avatar_snapshot)
+            if gone is not None:
+                return gone                       # retired on purpose, not lost
             _note_missing_snapshot(thread_id, thread.avatar_snapshot)
         raise HTTPException(404, "No avatar snapshot for this thread")
     if full and full_path is None:
@@ -10546,6 +10552,33 @@ async def file_wipe(request: Request, payload: dict = Body(...)):
 # --------------------------------------------------------------------------- #
 
 
+def _reaction_rel_names(r) -> list[str]:
+    """Where a reaction's image lives, as a data-folder-relative name (``reactions/spent/
+    <mood>/<file>``, ``reactions/moods-<bot>/<mood>/<file>``): the key the image-retention rule
+    writes to ``media_expired``. Empty when the stored reference is not a valid one."""
+    try:
+        rel = reactions._check_file(r.file)
+    except Exception:
+        return []
+    parts = rel.split("/")
+    try:
+        if parts[0].startswith(reactions._MOODS_PREFIX):
+            base = Path(config.DATA_DIR) / "reactions" / parts[0]
+        else:
+            base = reactions._root_dir(parts[0])
+        full = (base / "/".join(parts[1:])).resolve()
+        return [full.relative_to(Path(config.DATA_DIR).resolve()).as_posix()]
+    except Exception:
+        return []
+
+
+async def _expired_snapshot_response(snapshot_id: str) -> Response | None:
+    """410 for a thread-avatar snapshot the retention rule retired (``avatar-snapshots/<id>``)."""
+    if not snapshot_id or "/" in snapshot_id or ".." in snapshot_id:
+        return None
+    return _expired_media_response(await db.media_expired_name([f"avatar-snapshots/{snapshot_id}"]))
+
+
 def _raise_for_reaction_error(e: reactions.ReactionError) -> None:
     raise HTTPException(e.status, e.message)
 
@@ -10983,6 +11016,9 @@ async def reaction_image(rid: str, request: Request):
     try:
         path = reactions.image_path(r)
     except reactions.ReactionError as e:
+        gone = _expired_media_response(await db.media_expired_name(_reaction_rel_names(r)))
+        if gone is not None:
+            return gone
         _raise_for_reaction_error(e)
     # Blobs are content-addressed by a uuid suffix, so a reaction's image URL
     # only changes when the reaction does — BUT hand-edited registries (e.g. a

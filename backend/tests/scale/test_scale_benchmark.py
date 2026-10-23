@@ -31,7 +31,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 import scale_data
 
 pytestmark = pytest.mark.scale
@@ -233,7 +232,7 @@ def test_scale_budgets(monkeypatch):
     t_all = time.monotonic()
     gen, meta = _dataset(print)
     run = _fresh_copy(gen)
-    db = _point_at(monkeypatch, run)
+    _point_at(monkeypatch, run)
     pids: list[str] = meta["profile_ids"]
     long_threads: dict[str, list[str]] = meta["long_threads"]
     tm = Timings()
