@@ -16,7 +16,7 @@ away for good when you press **Finish**. Every step is an API call, so a script 
 `GET /api/wizard` answers `{needed, claimed}` to anyone and the full checklist to someone who may manage settings.
 `POST /api/wizard/step/{voice|family}` with `{"status": "skipped"}` records a skipped optional step. (The route keeps its 3.x name `family`; the screen is called People.)
 
-Locked out later (lost the first Admin's password and PIN)? `python -m app owner reset` or a `RESET_LOGIN` file puts the install back at this
+Locked out later (lost the first Admin's password and PIN)? `python -m app admin reset` or a `RESET_LOGIN` file puts the install back at this
 step with a new setup token, keeping chats and profiles: [accounts.md](accounts.md).
 
 ## Network exposure, plainly

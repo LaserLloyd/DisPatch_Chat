@@ -12,10 +12,10 @@ file is called from one place only (`backend/app/main.py`, `_lifespan_startup`; 
 
 ```text
 python -m app [--data-dir DIR] users list [--json]
-python -m app [--data-dir DIR] users add <name> [--profile basic|user|admin|owner] [--password-stdin | --password-env VAR]
+python -m app [--data-dir DIR] users add <name> [--profile basic|user|admin|main-admin] [--password-stdin | --password-env VAR]
 python -m app [--data-dir DIR] users passwd <name> [--kind pin|password] [--password-stdin | --password-env VAR]
 python -m app [--data-dir DIR] users delete <name> [--yes]
-python -m app [--data-dir DIR] owner reset [--yes]
+python -m app [--data-dir DIR] admin reset [--yes]
 python -m app [--data-dir DIR] token show | rotate
 ```
 
@@ -65,15 +65,15 @@ role (Basic), so a new sign-in gets nothing it was not asked for.
 - `users list` prints name, role, what each profile signs in with, and whether it is disabled. `--json` prints the
   profile records the People screen gets. A password or PIN hash never appears.
 - `users add <name>` creates a profile. **Without `--profile` it is Basic**, the lowest role. A new Admin or User gets its own
-  Atlas, like a profile made in the app. `--profile owner` works only on an install with no first Admin (there is exactly one;
-  the command tells you to use `users passwd` or `owner reset` otherwise). Names are 1 to 40 characters and unique ignoring case.
+  Atlas, like a profile made in the app. `--profile main-admin` works only on an install with no first Admin (there is exactly one;
+  the command tells you to use `users passwd` or `admin reset` otherwise). Names are 1 to 40 characters and unique ignoring case.
 - `users passwd <name>` sets a new credential and **signs the profile out everywhere** (its sessions and remembered
   devices). Admins have no PIN and Users/Basic profiles have no password; asking for the wrong one is refused.
 - `users delete <name>` removes a profile **and everything it owns**: its chats, its own bots, pictures, files and cloned voices.
   The command names the counts and asks first on a terminal (it needs `--yes` in a script). **The first Admin cannot be
-  deleted**: every install keeps exactly one. To lock that Admin out and start its sign-in again use `owner reset`.
+  deleted**: every install keeps exactly one. To lock that Admin out and start its sign-in again use `admin reset` (the 3.x `owner reset` still works).
 
-### owner reset
+### admin reset
 
 For when the first Admin's password **and** PIN are both lost. It:
 
@@ -103,7 +103,7 @@ working immediately. These are the same operations as Settings, Security, API ke
 The command line and the server are separate processes sharing `chats.db` (WAL) and the files beside it. The server
 re-checks a small revision counter in the database about once a second (`REV_RECHECK_SECONDS`), reloads its profile
 cache when another process changed it, and re-reads `security.yaml`, `trusted-devices.yaml` and `SETUP-TOKEN.txt` when
-their files change. So a `users passwd`, `users delete` or `owner reset` takes effect on a running DisPatch within about a
+their files change. So a `users passwd`, `users delete` or `admin reset` takes effect on a running DisPatch within about a
 second: the old sessions of that profile stop working, with no restart. (The one exception is the recovery file, which is
 read only while the server *starts*.)
 
@@ -114,7 +114,7 @@ DisPatch. While it starts, the server reads the file, **deletes it first**, and 
 
 | First line | Effect |
 | --- | --- |
-| *(empty file)* | the same as `owner reset`: owner credentials cleared, new setup token logged and written to `SETUP-TOKEN.txt` |
+| *(empty file)* | the same as `admin reset`: the main Admin's credentials cleared, new setup token logged and written to `SETUP-TOKEN.txt` |
 | `Olive` | the same, but only if `Olive` is the first Admin's name (any case); otherwise nothing is reset |
 | `Olive:new-password` | `Olive`'s password is set to everything after the first colon (so it may contain colons and spaces; trailing whitespace from an editor is dropped). Creates the first Admin when there is none. Its sessions end. |
 
@@ -181,7 +181,7 @@ for the next start. If both `RESET_LOGIN` and `RESET_LOGIN.txt` exist, the first
 
 ## What is reset, what is kept
 
-| | `users passwd` | `users delete` | `owner reset`, empty file, variable | `Olive:pw` file |
+| | `users passwd` | `users delete` | `admin reset`, empty file, variable | `Olive:pw` file |
 | --- | --- | --- | --- | --- |
 | That profile's credential | replaced | profile removed | first Admin's password, PIN, recovery code cleared | first Admin's password replaced |
 | That profile's sessions, remembered devices | ended | ended | the first Admin's ended | the first Admin's ended |

@@ -2,7 +2,7 @@
 
 Two doors, both closed to the network on purpose:
 
-* ``python -m app owner reset`` / ``python -m app users passwd <owner>`` (``app/cli.py``) run in
+* ``python -m app admin reset`` / ``python -m app users passwd <owner>`` (``app/cli.py``) run in
   a terminal on the host, or inside the container with ``docker compose exec app ...``.
 * A **sentinel file** or an **environment variable**, read exactly once while the server starts
   (:func:`apply_startup_reset`, called from the lifespan and from nowhere else). No request

@@ -7,18 +7,18 @@ change within about a second (profile cache revision, ``app/accounts.py``) and s
 profile out.
 
     python -m app users list
-    python -m app users add <name> [--profile basic|user|admin|owner] [--password-stdin | --password-env VAR]
+    python -m app users add <name> [--profile basic|user|admin|main-admin] [--password-stdin | --password-env VAR]
     python -m app users passwd <name> [--kind pin|password] [--password-stdin | --password-env VAR]
     python -m app users delete <name> [--yes]
-    python -m app owner reset [--yes]
+    python -m app admin reset [--yes]
     python -m app token show | rotate
 
 A secret is NEVER a command-line argument (it would sit in the shell history and ``ps``). It comes
 from ``--password-stdin`` (one line), ``--password-env VAR``, or a hidden prompt on a terminal.
 "Password" here means the credential of the profile's role: a PIN for User and Basic
 profiles, a password for Admins (``--kind pin`` sets the protected first Admin's PIN instead:
-the install PIN). The 3.x role words ``restricted`` / ``member``
-are still accepted for ``basic`` / ``user``.
+the install PIN). The 3.x words still work as hidden aliases: ``restricted`` / ``member`` for
+``basic`` / ``user``, ``owner`` for ``main-admin`` and ``owner reset`` for ``admin reset``.
 
 ``--data-dir`` (before or after the verb) picks another data directory; otherwise
 ``DISPATCH_DATA_DIR`` (legacy ``LOCAL_CHAT_DATA_DIR``) or ``~/.local/share/local-chat``, the same
@@ -40,16 +40,18 @@ from pathlib import Path
 from . import accounts, auth, config, credentials, recovery
 from .contracts.permissions import Role, normalise_role
 
-#: Lowest first. ``users add`` without ``--profile`` gets ``basic``. ``owner`` = the protected
-#: first Admin (only when there is none); ``restricted`` / ``member`` are the 3.x words for
-#: ``basic`` / ``user``, still accepted.
-ROLE_CHOICES = ("basic", "user", "admin", "owner", "restricted", "member")
+#: Lowest first. ``users add`` without ``--profile`` gets ``basic``. ``main-admin`` = the protected
+#: first Admin (only when there is none); ``owner`` (its 3.x word) and ``restricted`` / ``member``
+#: (the 3.x words for ``basic`` / ``user``) are still accepted, but not offered in the help.
+ROLE_CHOICES = ("basic", "user", "admin", "main-admin", "owner", "restricted", "member")
+SHOWN_ROLES = "{basic,user,admin,main-admin}"
+MAIN_ADMIN_WORDS = ("main-admin", "owner")
 DEFAULT_ROLE = "basic"
 
 
 def _label(p: accounts.Profile) -> str:
-    """How the command line names a profile's standing: ``owner`` for the protected Admin."""
-    return "owner" if p.protected else p.role.value
+    """How the command line names a profile's standing: ``main-admin`` for the protected Admin."""
+    return "main-admin" if p.protected else p.role.value
 
 
 class CliError(Exception):
@@ -164,7 +166,8 @@ def cmd_users_list(args: argparse.Namespace) -> int:
         print(json.dumps([p.public() for p in profiles], indent=2))
         return 0
     if not profiles:
-        print("No profiles yet. Create the owner in the setup wizard, or: python -m app users add <name> --profile owner")
+        print("No profiles yet. Create the main Admin in the setup wizard, or: "
+              "python -m app users add <name> --profile main-admin")
         return 0
     rows = [("NAME", "ROLE", "SIGN-IN", "STATE", "CREATED")]
     for p in profiles:
@@ -177,13 +180,13 @@ def cmd_users_list(args: argparse.Namespace) -> int:
 
 def cmd_users_add(args: argparse.Namespace) -> int:
     word = args.profile
-    protected = word == "owner"
-    role = normalise_role(word)
+    protected = word in MAIN_ADMIN_WORDS
+    role = normalise_role("owner" if protected else word)
     name = args.name
     if protected and accounts.has_owner():
         owner = accounts.get_owner()
-        raise CliError(f"This install already has an owner ({owner.name!r}). To get back into it: "
-                       f"python -m app users passwd {owner.name!r}   or   python -m app owner reset")
+        raise CliError(f"This install already has a main Admin ({owner.name!r}). To get back into it: "
+                       f"python -m app users passwd {owner.name!r}   or   python -m app admin reset")
     if role is Role.ADMIN and not protected:
         owner = accounts.get_owner()
         if not (owner and owner.has_password):
@@ -250,8 +253,8 @@ def cmd_users_passwd(args: argparse.Namespace) -> int:
 def cmd_users_delete(args: argparse.Namespace) -> int:
     prof = _find(args.name)
     if prof.protected:
-        raise CliError("The owner cannot be deleted (every install keeps exactly one). To lock the "
-                       "owner out and start the owner's sign-in again: python -m app owner reset")
+        raise CliError("The main Admin cannot be deleted (every install keeps exactly one). To start "
+                       "the main Admin's sign-in again: python -m app admin reset")
     # 4.0: deleting a profile deletes its content first (chats, own bots, pictures, cloned
     # voices) through the same service the People API uses, so nothing is left without an owner.
     from . import profiles_service
@@ -272,29 +275,29 @@ def cmd_users_delete(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
-# owner / token
+# admin (the main Admin's lock-out recovery) / token
 # --------------------------------------------------------------------------- #
 
 
 def cmd_owner_reset(args: argparse.Namespace) -> int:
     owner = accounts.get_owner()
-    who = f"the owner {owner.name!r}" if owner else "the install (there is no owner yet)"
+    who = f"the main Admin {owner.name!r}" if owner else "the install (there is no main Admin yet)"
     _confirm(f"Clear the password and PIN of {who} and open setup again? Chats and other profiles are kept.", args)
     res = recovery.reset_owner(via="command line")
-    print(f"Cleared the sign-in of {res.owner_name!r}." if res.owner_name else "No owner existed; setup is open.")
-    print("The install is unclaimed again: it is closed to the network until the owner sets a new password.")
+    print(f"Cleared the sign-in of {res.owner_name!r}." if res.owner_name else "No main Admin existed; setup is open.")
+    print("The install is unclaimed again: it is closed to the network until the main Admin sets a new password.")
     print("  - On THIS computer open the app (http://localhost:8765 by default) and finish the setup wizard.")
     print("  - From another device, or from a browser talking to a container, the wizard asks for:")
     print(f"        SETUP TOKEN: {res.setup_token}")
-    print(f"    (also kept in {auth.SETUP_TOKEN_PATH}; it is deleted once the owner exists.)")
-    print("Other profiles keep their PINs but cannot sign in until the owner is back.")
+    print(f"    (also kept in {auth.SETUP_TOKEN_PATH}; it is deleted once the main Admin exists.)")
+    print("Other profiles keep their PINs but cannot sign in until the main Admin is back.")
     return 0
 
 
 def _writable_security() -> auth.SecurityConfig:
     cfg = auth.load()
     if cfg.pin_hash == auth._LOCKDOWN_HASH:
-        raise CliError(f"{auth.SECURITY_PATH} exists but cannot be read; fix it, or run: python -m app owner reset")
+        raise CliError(f"{auth.SECURITY_PATH} exists but cannot be read; fix it, or run: python -m app admin reset")
     return cfg
 
 
@@ -344,7 +347,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="DisPatch accounts and lock-out recovery. Run on the machine DisPatch lives on "
                     "(in Docker: docker compose exec app python -m app ...).")
     ap.add_argument("--data-dir", metavar="DIR", dest="data_dir", default=None, help=help_dir)
-    top = ap.add_subparsers(dest="noun", required=True, metavar="{users,owner,token}")
+    top = ap.add_subparsers(dest="noun", required=True, metavar="{users,admin,token}")
 
     users = top.add_parser("users", help="list, add, change or delete profiles")
     uv = users.add_subparsers(dest="verb", required=True)
@@ -354,9 +357,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = uv.add_parser("add", parents=[common], allow_abbrev=False, help="add a profile (the lowest role unless --profile says otherwise)")
     p.add_argument("name")
-    p.add_argument("--profile", choices=ROLE_CHOICES, default=DEFAULT_ROLE,
-                   help="role of the new profile: basic (default), user, admin, or owner (the protected first "
-                        "Admin, only when there is none); the 3.x words restricted/member still work")
+    p.add_argument("--profile", choices=ROLE_CHOICES, default=DEFAULT_ROLE, metavar=SHOWN_ROLES,
+                   help="role of the new profile: basic (default), user, admin, or main-admin (the protected "
+                        "first Admin, only when there is none)")
     _secret_flags(p)
     p.set_defaults(fn=cmd_users_add)
 
@@ -367,15 +370,18 @@ def build_parser() -> argparse.ArgumentParser:
     _secret_flags(p)
     p.set_defaults(fn=cmd_users_passwd)
 
-    p = uv.add_parser("delete", parents=[common], help="delete a profile (never the owner)")
+    p = uv.add_parser("delete", parents=[common], help="delete a profile (never the main Admin)")
     p.add_argument("name")
     p.add_argument("--yes", action="store_true", help="do not ask")
     p.set_defaults(fn=cmd_users_delete)
 
-    owner = top.add_parser("owner", help="owner lock-out recovery")
-    ov = owner.add_subparsers(dest="verb", required=True)
+    # `owner` is the 3.x noun, kept as a hidden alias (old docs and scripts say `owner reset`):
+    # main() rewrites it to `admin` before parsing (an argparse SUPPRESS'd sub-command still
+    # shows in the help).
+    ov = top.add_parser("admin", help="the main Admin's lock-out recovery").add_subparsers(
+        dest="verb", required=True)
     p = ov.add_parser("reset", parents=[common],
-                      help="clear the owner's password and PIN, open setup again, print a new setup token")
+                      help="clear the main Admin's password and PIN, open setup again, print a new setup token")
     p.add_argument("--yes", action="store_true", help="do not ask")
     p.set_defaults(fn=cmd_owner_reset)
 
@@ -388,9 +394,25 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _legacy_nouns(argv: list[str]) -> list[str]:
+    """``owner`` (the 3.x noun) -> ``admin``: the first word that is not ``--data-dir DIR``."""
+    out, i = list(argv), 0
+    while i < len(out):
+        if out[i] == "--data-dir":
+            i += 2
+            continue
+        if out[i].startswith("--data-dir="):
+            i += 1
+            continue
+        if out[i] == "owner":
+            out[i] = "admin"
+        break
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args, extras = parser.parse_known_args(argv)
+    args, extras = parser.parse_known_args(_legacy_nouns(sys.argv[1:] if argv is None else argv))
     if extras:
         # argparse would echo the stray words back, and a stray word may be somebody's PIN
         # (`--password 1234`). Say how many, not what.

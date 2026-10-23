@@ -315,7 +315,7 @@ Docker Desktop (path A): run the commands inside the container, from PowerShell:
 ```powershell
 docker compose exec app python -m app users list
 docker compose exec app python -m app users passwd Olive            # prompts; nothing is echoed
-docker compose exec app python -m app owner reset --yes             # prints a SETUP TOKEN
+docker compose exec app python -m app admin reset --yes             # prints a SETUP TOKEN
 docker compose exec app sh -c ': > /data/RESET_LOGIN'               # no command line? this + restart does the same
 docker compose restart app
 ```

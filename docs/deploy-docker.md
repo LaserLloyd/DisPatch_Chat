@@ -507,7 +507,7 @@ docker compose exec app python -m app users list
 docker compose exec app python -m app users passwd Olive                 # prompts on your terminal
 printf '%s\n' "$NEWPW" | docker compose exec -T app python -m app users add Noor --profile user --password-stdin
 docker compose exec app python -m app users delete Noor --yes
-docker compose exec app python -m app owner reset --yes                  # lost both the password and the PIN
+docker compose exec app python -m app admin reset --yes                  # lost both the password and the PIN
 docker compose exec app python -m app token rotate                       # the machine API key
 ```
 

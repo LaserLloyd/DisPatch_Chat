@@ -394,10 +394,10 @@ meant. A folder without a `chats.db` is refused, never created.
 
 ```text
 users list                                  # names, roles, what each signs in with (never a secret)
-users add <name> [--profile basic|user|admin|owner]   # restricted/member still accepted
+users add <name> [--profile basic|user|admin|main-admin]   # 3.x words owner/restricted/member still accepted
 users passwd <name> [--kind pin|password]   # signs that profile out everywhere
-users delete <name> [--yes]                 # never the first Admin ("owner")
-owner reset [--yes]                         # lost the first Admin's password AND PIN: opens setup again
+users delete <name> [--yes]                 # never the main Admin
+admin reset [--yes]                         # lost the first Admin's password AND PIN: opens setup again
 token show | token rotate                   # the machine API key (X-API-Key) for agents and crons
 ```
 
@@ -416,7 +416,7 @@ uv run python -m app users list
 uv run python -m app users passwd Olive                     # prompts, twice, nothing is echoed
 printf '%s\n' "$NEWPW" | uv run python -m app users add Noor --profile user --password-stdin
 uv run python -m app users delete Noor --yes
-uv run python -m app owner reset --yes                      # prints a SETUP TOKEN and opens setup
+uv run python -m app admin reset --yes                      # prints a SETUP TOKEN and opens setup
 systemctl --user restart dispatch                           # only needed after a RESET_LOGIN file (below)
 ```
 
@@ -427,7 +427,7 @@ cd DisPatch_Chat\backend
 uv run python -m app users list
 uv run python -m app users passwd Olive
 uv run python -m app users add Noor --profile user          # prompts for the PIN
-uv run python -m app owner reset --yes
+uv run python -m app admin reset --yes
 ```
 
 **Docker Compose** (service `app`; for the stack use the same line with
@@ -437,7 +437,7 @@ uv run python -m app owner reset --yes
 docker compose exec app python -m app users list
 docker compose exec app python -m app users passwd Olive                   # prompts on your terminal
 printf '%s\n' "$NEWPW" | docker compose exec -T app python -m app users passwd Olive --password-stdin
-docker compose exec app python -m app owner reset --yes                    # prints a SETUP TOKEN
+docker compose exec app python -m app admin reset --yes                    # prints a SETUP TOKEN
 ```
 
 In PowerShell pipe the same way: `$env:NEWPW | docker compose exec -T app python -m app users passwd Olive --password-stdin`.
@@ -476,7 +476,7 @@ opens setup (the environment is no place for a password), and the value is remem
 value to run it again. Remove it afterwards.
 
 **What is reset and what is kept.** Reset: the owner's password, PIN, recovery code, sessions and remembered
-devices (`owner reset`, an empty file, the variable); one profile's PIN or password and sessions (`users
+devices (`admin reset`, an empty file, the variable); one profile's PIN or password and sessions (`users
 passwd`). Kept, always: every chat, every other profile and its PIN, the character roster, settings,
 connections, backups, and the owner's profile row itself (its id, name, picture and history). While the owner
 is unset the install is closed to the network and other profiles cannot sign in until the owner is back.
@@ -613,7 +613,7 @@ Chat-first profiles. The full list is in the [changelog](CHANGELOG.md#400--2026-
 ## What's new in 3.1
 
 - **Accounts from the command line, and a way back in.** `python -m app users list | add | passwd | delete`,
-  `owner reset` and `token show | rotate` work on the data directory, locally or with
+  `admin reset` and `token show | rotate` work on the data directory, locally or with
   `docker compose exec app ...`; a `RESET_LOGIN` file or `DISPATCH_RESET_OWNER` is read once at start for
   someone who only has the files. A running server follows a command-line change within a second. See
   [Accounts and lockout recovery](#accounts-and-lockout-recovery).

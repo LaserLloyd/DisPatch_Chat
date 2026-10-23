@@ -50,7 +50,7 @@ log = logging.getLogger("local-chat.auth")
 SECURITY_PATH = DATA_DIR / "security.yaml"
 RECOVERY_PATH = DATA_DIR / "RECOVERY-CODE.txt"
 TRUSTED_PATH = DATA_DIR / "trusted-devices.yaml"
-#: A setup token written by ``python -m app owner reset`` (see :func:`setup_token`).
+#: A setup token written by ``python -m app admin reset`` (see :func:`setup_token`).
 SETUP_TOKEN_PATH = DATA_DIR / "SETUP-TOKEN.txt"
 
 # Cost factor for the PIN KDF. 200,000 is the shipped floor and the only value
@@ -1204,7 +1204,7 @@ def _is_claimed() -> bool:
 
 
 def _file_setup_token() -> str | None:
-    """The token ``python -m app owner reset`` left in ``SETUP-TOKEN.txt``, or None.
+    """The token ``python -m app admin reset`` left in ``SETUP-TOKEN.txt``, or None.
 
     The file is the offline equivalent of the log line: whoever can write the data directory
     can already do anything, and nothing on the network can create it. A symlink or an odd

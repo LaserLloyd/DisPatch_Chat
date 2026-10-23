@@ -121,7 +121,7 @@ P="docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.en
 $P exec dispatch python -m app users list
 $P exec dispatch python -m app users passwd Olive                        # prompts on your terminal
 printf '%s\n' "$NEWPW" | $P exec -T dispatch python -m app users add Noor --profile user --password-stdin
-$P exec dispatch python -m app owner reset --yes                         # prints a SETUP TOKEN; setup opens again
+$P exec dispatch python -m app admin reset --yes                         # prints a SETUP TOKEN; setup opens again
 $P run --rm --no-deps dispatch python -m app users list                  # container stopped or crash-looping
 ```
 

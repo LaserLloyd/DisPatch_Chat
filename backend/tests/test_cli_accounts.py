@@ -110,7 +110,8 @@ def test_list_shows_roles_and_never_a_hash(data, run):
     accounts.create_profile("Kit", "restricted")
     code, out, _ = run("users", "list")
     assert code == 0
-    assert "Olive" in out and "owner" in out and "password" in out
+    assert "Olive" in out and "main-admin" in out and "password" in out
+    assert "owner" not in out.lower()                         # 4.0 has no Owner role word
     assert "Kit" in out and "basic" in out
     assert "argon2" not in out and "pbkdf2" not in out
     code, out, _ = run("users", "list", "--json")
@@ -207,7 +208,7 @@ def test_add_owner_only_when_there_is_none(data, run):
     assert code == 0, err
     assert accounts.get_owner().name == "Olive" and accounts.get_owner().has_password
     code, _, err = run("users", "add", "Other", "--profile", "owner", "--password-stdin", stdin="owner-pass2\n")
-    assert code == 1 and "already has an owner" in err and "owner reset" in err
+    assert code == 1 and "already has a main Admin" in err and "admin reset" in err
     assert len([p for p in accounts.list_profiles() if p.protected]) == 1
 
 
@@ -353,7 +354,7 @@ def test_delete_asks_on_a_terminal(data, run, monkeypatch):
 def test_the_owner_cannot_be_deleted(data, run):
     make_owner()
     code, _, err = run("users", "delete", "Olive", "--yes")
-    assert code == 1 and "cannot be deleted" in err and "owner reset" in err
+    assert code == 1 and "cannot be deleted" in err and "admin reset" in err
     assert accounts.get_owner() is not None
 
 
@@ -374,7 +375,7 @@ def test_owner_reset_clears_the_signin_keeps_the_rest_and_prints_a_token(data, r
     tok = auth.issue_session(profile_id=owner.id)
     from app import policy
     assert policy.claimed()
-    code, out, err = run("owner", "reset", "--yes")
+    code, out, err = run("admin", "reset", "--yes")
     assert code == 0, err
     after = accounts.get_owner()
     assert after.id == owner.id and after.name == "Olive"          # the row (and its history) stays
@@ -400,7 +401,26 @@ def test_owner_reset_needs_yes_without_a_terminal_and_changes_nothing(data, run)
 def test_owner_reset_on_an_install_with_no_owner_just_opens_setup(data, run):
     code, out, err = run("owner", "reset", "--yes")
     assert code == 0, err
-    assert "no owner existed" in out.lower() and "SETUP TOKEN:" in out
+    assert "no main admin existed" in out.lower() and "SETUP TOKEN:" in out
+
+
+def test_the_cli_says_main_admin_and_keeps_the_3x_owner_words_as_hidden_aliases(data, run):
+    code, out, _ = run("--help")
+    assert code == 0 and "admin" in out and "owner" not in out.lower()
+    code, out, _ = run("users", "add", "--help")
+    assert code == 0 and "main-admin" in out and "owner" not in out.lower()
+    # `--profile main-admin` makes the protected first Admin; the 3.x word `owner` still does.
+    code, _, err = run("users", "add", "Olive", "--profile", "main-admin", "--password-stdin", stdin="owner-pass1\n")
+    assert code == 0, err
+    assert accounts.get_owner().name == "Olive"
+    code, _, err = run("users", "add", "Other", "--profile", "owner", "--password-stdin", stdin="owner-pass2\n")
+    assert code == 1 and "already has a main Admin" in err
+    # `owner reset` (3.x scripts and docs) still runs the same recovery as `admin reset`.
+    code, out, err = run("owner", "reset", "--yes")
+    assert code == 0, err
+    assert "SETUP TOKEN:" in out and not accounts.get_owner().has_password
+    code, out, err = run("--data-dir", str(data), "owner", "reset", "--yes")
+    assert code == 0 and "SETUP TOKEN:" in out, err
 
 
 def test_owner_reset_is_repeatable_and_replaces_the_token(data, run):

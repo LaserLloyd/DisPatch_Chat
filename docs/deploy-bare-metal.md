@@ -297,7 +297,7 @@ From the clone, as the user the service runs as:
 cd ~/dispatch/backend
 uv run python -m app users list
 uv run python -m app users passwd Olive
-uv run python -m app owner reset --yes
+uv run python -m app admin reset --yes
 ```
 
 Without a command line: `: > ~/.local/share/local-chat/RESET_LOGIN` (or `printf 'Olive:%s\n' "$NEWPW" > ...` to set a password),
