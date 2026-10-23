@@ -16,10 +16,10 @@
 <table>
   <tr>
     <td width="50%"><img src="docs/screenshots/readme/chat.png" alt="DisPatch Chat on the Glacier theme: a conversation with Atlas, the default bot with its shipped avatar, planning dinners for the week"><br><sub><b>Chat.</b> Atlas, the default bot, with its shipped avatar, in the Glacier theme.</sub></td>
-    <td width="50%"><img src="docs/screenshots/readme/settings.png" alt="DisPatch Settings, All settings tab: searchable settings in categories with a Basic and Advanced switch"><br><sub><b>Settings.</b> Every setting in one searchable place, with Basic and Advanced views.</sub></td>
+    <td width="50%"><img src="docs/screenshots/readme/settings.png" alt="DisPatch Settings search: typing &quot;lock&quot; lists matching settings across sections"><br><sub><b>Settings.</b> One search box finds a setting in any section.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/readme/people-profiles.png" alt="DisPatch Settings, People and Profiles tab: profiles with their roles"><br><sub><b>People &amp; Profiles.</b> Profiles, roles and permissions in one place.</sub></td>
+    <td width="50%"><img src="docs/screenshots/readme/people-profiles.png" alt="DisPatch Settings, People &amp; Access: profiles with their roles"><br><sub><b>People &amp; Access.</b> Profiles, roles and permissions in one place.</sub></td>
     <td width="50%"><img src="docs/screenshots/readme/tasks.png" alt="DisPatch Tasks page with state, agent, person and date filters and the Assign task button"><br><sub><b>Tasks.</b> Hand work to an agent and follow it here (empty on a fresh install).</sub></td>
   </tr>
 </table>
@@ -49,7 +49,7 @@ no account, no cloud, no telemetry.
   own bots, an Admin hands a Basic profile just the household bots it needs, and
   every new profile gets its own Atlas. **DisPatch** is the shared no-PIN profile
   that locked and unsigned devices land on. There are no daily limits or budgets.
-- **Ten themes**, eight languages, and a phone-installable PWA with push pings.
+- **Thirteen themes**, eight languages, and a phone-installable PWA with push pings.
 - **Pictures in chat** from an image API (MiniMax, OpenAI, xAI Grok or any
   OpenAI-compatible images endpoint) or your own image server, and reaction images.
   **Image Studio** (an app in the rail) makes pictures on
@@ -489,11 +489,11 @@ Full reference: [docs/accounts.md](docs/accounts.md).
   <tr>
     <td width="50%">
       <img src="docs/screenshots/welcome.png"
-           alt="The first screen of a new install: two chats, Meet Atlas and How DisPatch works, ready to open." />
+           alt="The first screen of a new install: three chats, Meet Atlas, How DisPatch works and Set up add-ons, ready to open." />
     </td>
     <td width="50%">
       <img src="docs/screenshots/ai-models.png"
-           alt="Settings on the AI models tab: choose a provider, paste a key, test it, and connect Atlas." />
+           alt="Settings → AI &amp; Connections: a connection card with Test and Edit, the default connection, the one-provider quick setup and image generation." />
     </td>
   </tr>
   <tr>
@@ -507,7 +507,7 @@ Full reference: [docs/accounts.md](docs/accounts.md).
     </td>
     <td width="50%">
       <img src="docs/screenshots/plugins-tab.png"
-           alt="Settings on the Plugins tab: add-ons, apps and tools, and the built-in lookups." />
+           alt="Settings → Plugins &amp; Apps: the add-ons list with the voice add-on's install command, apps and tools, and the built-in lookups." />
     </td>
   </tr>
   <tr>
@@ -530,36 +530,36 @@ Full reference: [docs/accounts.md](docs/accounts.md).
 ### The rest of the app
 
 A demo install with three fictional assistants — the same app on a desktop and
-on a phone, in a few of the ten themes.
+on a phone, in a few of the thirteen themes.
 
 <table>
   <tr>
     <td width="50%">
       <img src="docs/screenshots/desktop-glacier.png"
-           alt="DisPatch Chat on a desktop browser in the default Glacier theme: a rail of three letter-block bot avatars on the left, the planner bot's thread list, and an open thread where it answers with a day-trip plan as a bulleted list and a sortable comparison table." />
+           alt="DisPatch Chat on a desktop browser in the default Glacier theme: a rail with the Atlas picture and two letter-block bot avatars on the left, the planner bot's thread list, and an open thread where it answers with a week of dinners as a bulleted list and a shopping list." />
     </td>
     <td width="50%">
       <img src="docs/screenshots/desktop-midnight-gold.png"
-           alt="The same app in the Midnight Gold theme, showing a reply with a console code block that has a language label, a wrap toggle and a copy button." />
+           alt="The same dinner-plan chat in the Midnight Gold theme, warm gold on black." />
     </td>
   </tr>
   <tr>
-    <td align="center"><em>Glacier (default) — markdown and sortable tables</em></td>
-    <td align="center"><em>Midnight Gold — code blocks</em></td>
+    <td align="center"><em>Glacier (default) — markdown lists</em></td>
+    <td align="center"><em>Midnight Gold — the same chat in warm gold on black</em></td>
   </tr>
   <tr>
     <td width="50%">
       <img src="docs/screenshots/desktop-checklist.png"
-           alt="A reply in the Forest theme containing an interactive checklist table: four household chores with a checkbox per row and sortable Task, Who and When columns." />
+           alt="A reply in the Glacier theme containing an interactive checklist table: four household chores with a checkbox per row and sortable Task, Who and When columns." />
     </td>
     <td width="50%">
       <img src="docs/screenshots/settings-theme.png"
-           alt="Settings on the Theme tab: a grid of live miniature previews for the six core themes, a More themes row with four more, and a check mark on the active one." />
+           alt="Settings → Appearance: a grid of live miniature previews for the nine core themes, a More themes row with four more, and a check mark on the active one." />
     </td>
   </tr>
   <tr>
     <td align="center"><em>Checklist tables — ticks sync to every device</em></td>
-    <td align="center"><em>Settings → Appearance — ten skins, live previews</em></td>
+    <td align="center"><em>Settings → Appearance — thirteen skins, live previews</em></td>
   </tr>
 </table>
 
@@ -575,7 +575,7 @@ on a phone, in a few of the ten themes.
     </td>
     <td width="33%">
       <img src="docs/screenshots/bot-manager.png"
-           alt="The Settings dialog on the Bots tab, listing four bots with drag handles, React and Pool toggles and a Change photo button." />
+           alt="Settings → Characters: Atlas, Job Board (hidden), Nova and Scout with drag handles, Details and a ⋯ menu." />
     </td>
   </tr>
   <tr>
@@ -770,9 +770,9 @@ install's PIN and history is in [docs/security.md](docs/security.md#upgrading-to
 **Interface**
 - Eight languages — English, العربية, Deutsch, Español, Français, 日本語,
   Português, 中文 — including full right-to-left layout
-- Ten built-in themes — Glacier (default), Midnight Gold, Forest, Paper,
-  Daylight, Classic Purple, Electric Yellow, Night Red and two LaserLloyd
-  skins — picked per device from Settings → Appearance, each
+- Thirteen built-in themes — Glacier (default), Midnight Gold, Forest, Paper,
+  Daylight, Slate, High Contrast, High Contrast Light, Classic Purple, Electric
+  Yellow, Night Red and two LaserLloyd skins — picked per device from Settings → Appearance, each
   with a live preview. A theme is one fixed skin; there is no separate
   light/dark switch
 - Keyboard-navigable, screen-reader labelled, WCAG AA contrast in every theme

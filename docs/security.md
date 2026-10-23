@@ -50,9 +50,9 @@ household can walk up to.
   bots and see that profile's chats, over plain http on a LAN as readily as over a tailnet. It cannot run agents or
   clone voices. Set `lock_target: profile_list` if that is too open for the network, and keep the app off the
   internet unless it is behind TLS and your own authentication.
-- **There are no budgets.** Anyone who can use a bot can spend the connection behind it, and the GPU rig behind an
-  image or voice add-on. Point shared bots at flat-rate or capped accounts, and give a profile a metered connection
-  only on purpose.
+- **There are no per-profile budgets.** Anyone who can use a bot can spend the connection behind it, and the GPU rig
+  behind an image or voice add-on (agents keep their own per-agent dollar limits, see [agents.md](agents.md)). Point
+  shared bots at flat-rate or capped accounts, and give a profile a metered connection only on purpose.
 - **Chat pictures are protected by an unguessable address, not by a per-owner check.** `/media/<uuid>` names are
   random, but any profile (or the shared one) that has an address can fetch it, and a deleted picture stays fetchable
   by anyone who kept the address until the last message that uses it is gone.

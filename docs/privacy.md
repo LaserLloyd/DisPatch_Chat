@@ -61,7 +61,7 @@ remember that you are responsible for what an agent does with the tools you gave
   days, 0 = keep) deletes the database transcript, the prompt, the result text and that
   folder for finished tasks, and keeps the task row. OpenClaw keeps its own transcripts in the
   agent's home; DisPatch does not manage those.
-- A **daily spend ledger** (per agent and per person) behind the budgets. Figures are the
+- A **daily spend ledger** (per agent and per person) behind the per-agent budgets. Figures are the
   backend's own client-side estimates, never billing data.
 - **Credentials**: the Claude API key and MCP secrets are write-only. They live in the OS
   keyring when one is usable, otherwise in a file readable only by you (owner-only permissions;

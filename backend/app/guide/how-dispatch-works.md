@@ -12,7 +12,7 @@ Every conversation partner is a bot, and every bot has a backend that decides wh
 
 A **direct API** bot talks to a model API itself: any OpenAI-compatible service, the Anthropic API, or a model server on your own network such as LM Studio, Ollama or StudioForge. It streams replies, can use lookups, and can fall back to a second model if the first fails. Atlas is one of these. An **agent** bot hands the turn to an agent runtime on the same machine, such as an OpenClaw gateway or a command-line agent, and can use tools, files and long jobs. An **app** bot belongs to an app package. The older `api:` block still works and is shown as a legacy direct API bot, without lookups.
 
-![The Bots tab](/static/guide/bots-tab.png)
+![Settings → Characters](/static/guide/bots-tab.png)
 
 Turn it on: Settings → Characters lists every bot. Add one, rename it, or remove it there (the ⋯ menu); removing a bot keeps its threads.
 
@@ -27,7 +27,7 @@ Atlas works the moment he has a model behind him.
 
 The key is kept in your computer's keyring when one is available, otherwise in a file only the DisPatch user can read (mode 0600). It is not encrypted, and it is never shown again or sent back to the browser. If you would rather keep it out of both, name an environment variable and DisPatch reads the key from there. A connection belongs to the whole household: every profile's bots can use it, and only an Admin ever sees it. Details per provider are in [llm-providers.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/llm-providers.md).
 
-![Settings, AI models](/static/guide/ai-models.png)
+![Settings → AI & Connections](/static/guide/ai-models.png)
 
 Turn it on: Settings → AI & Connections, add a connection and Test it; then pick it in Atlas's Details (or another direct API bot's).
 
@@ -89,7 +89,7 @@ Turn it on: install the add-on, restart, then open Settings → Voice, switch it
 
 The Tools popup holds pages and small apps you add yourself: a static folder, a web address, or an app package with its own backend, page and bot. They are listed in `tools.yaml` and in the `apps/<id>/` folder of your install. Settings → Plugins & Apps shows all of it in one place: installed add-ons with an on/off switch, your apps and tools, and the built-in lookups. An add-on can also add a tab of its own to Settings.
 
-![Plugins tab](/static/guide/plugins-tab.png)
+![Settings → Plugins & Apps](/static/guide/plugins-tab.png)
 
 Turn it on: Settings → Plugins & Apps; see [apps.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/apps.md) and [extensions.md](https://github.com/LaserLloyd/DisPatch_Chat/blob/main/docs/extensions.md) to write your own.
 
