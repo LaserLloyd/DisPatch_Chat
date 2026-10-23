@@ -2017,7 +2017,10 @@
     "export": "导出",
     "erase": "清除",
     "erase_confirm": "清除 {name} 及其关联的所有内容？此操作无法撤销。",
-    "erased": "个人资料已清除。"
+    "erased": "个人资料已清除。",
+    "tier_recent": "近期",
+    "tier_daily": "每日",
+    "tier_weekly": "每周"
   },
   "host_notice": {
     "title": "保存在主机电脑上",
@@ -2229,7 +2232,7 @@
     "trash": "回收站",
     "stray": "旧的 .bak 文件",
     "stray_hint": "仅列出，不会自动删除。",
-    "other": "其他",
+    "rest": "其他",
     "free": "可用磁盘空间",
     "last_run": "上次清理：{when}（{duration}）",
     "next_run": "下次清理：{when}",

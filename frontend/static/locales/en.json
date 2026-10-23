@@ -2045,7 +2045,10 @@
     "export": "Export",
     "erase": "Erase",
     "erase_confirm": "Erase {name} and everything attached to the profile? This cannot be undone.",
-    "erased": "Profile erased."
+    "erased": "Profile erased.",
+    "tier_recent": "Recent",
+    "tier_daily": "Daily",
+    "tier_weekly": "Weekly"
   },
   "host_notice": {
     "title": "Stored on the host computer",
@@ -2257,7 +2260,7 @@
     "trash": "Trash",
     "stray": "Old .bak files",
     "stray_hint": "Listed only. Nothing here is deleted automatically.",
-    "other": "Other",
+    "rest": "Other",
     "free": "Free disk space",
     "last_run": "Last clean-up: {when} ({duration})",
     "next_run": "Next clean-up: {when}",

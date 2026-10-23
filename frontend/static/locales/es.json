@@ -2070,7 +2070,10 @@
     "export": "Exportar",
     "erase": "Borrar",
     "erase_confirm": "¿Borrar {name} y todo lo asociado al perfil? No se puede deshacer.",
-    "erased": "Perfil borrado."
+    "erased": "Perfil borrado.",
+    "tier_recent": "Reciente",
+    "tier_daily": "Diaria",
+    "tier_weekly": "Semanal"
   },
   "host_notice": {
     "title": "Guardado en el ordenador anfitrión",
@@ -2282,7 +2285,7 @@
     "trash": "Papelera",
     "stray": "Archivos .bak antiguos",
     "stray_hint": "Solo se muestran. Aquí no se borra nada automáticamente.",
-    "other": "Otros",
+    "rest": "Otros",
     "free": "Espacio libre en disco",
     "last_run": "Última limpieza: {when} ({duration})",
     "next_run": "Próxima limpieza: {when}",

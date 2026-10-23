@@ -2017,7 +2017,10 @@
     "export": "書き出し",
     "erase": "消去",
     "erase_confirm": "{name} と、そのプロファイルに紐づくすべてを消去しますか？ 元に戻せません。",
-    "erased": "プロファイルを消去しました。"
+    "erased": "プロファイルを消去しました。",
+    "tier_recent": "最新",
+    "tier_daily": "日次",
+    "tier_weekly": "週次"
   },
   "host_notice": {
     "title": "ホストコンピューターに保存されます",
@@ -2229,7 +2232,7 @@
     "trash": "ゴミ箱",
     "stray": "古い .bak ファイル",
     "stray_hint": "一覧表示のみです。ここにあるものは自動では削除されません。",
-    "other": "その他",
+    "rest": "その他",
     "free": "ディスクの空き容量",
     "last_run": "前回のクリーンアップ: {when}（{duration}）",
     "next_run": "次回のクリーンアップ: {when}",

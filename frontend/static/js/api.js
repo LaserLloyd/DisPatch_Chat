@@ -265,15 +265,32 @@ export const api = {
   deleteBot: (id) => j(`/api/bots/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   saveOrder: (bots) => j('/api/bots/order', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ bots }) }),
 
-  threads: (botId) => j(`/api/threads?bot_id=${encodeURIComponent(botId)}`),
+  // One page of a character's threads: {threads, next_cursor}. `cursor` continues a page,
+  // `archived` asks for the Archived view, `limit` defaults server-side (50, pinned first on page one).
+  threads: (botId, { cursor = null, archived = false, limit = null } = {}) => j(
+    `/api/threads?bot_id=${encodeURIComponent(botId)}${limit ? `&limit=${Number(limit)}` : ''}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}${archived ? '&archived=1' : ''}`),
   // One thread's row (title, avatar_snapshot, bot_id). Used when a thread is
   // opened from outside its bot's list (an app pane handing a thread over).
   thread: (tid) => j(`/api/threads/${encodeURIComponent(tid)}`),
   createThread: (botId) => j('/api/threads', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ bot_id: botId }) }),
-  messages: (tid, beforeId) => j(`/api/threads/${encodeURIComponent(tid)}/messages?limit=200${beforeId ? `&before_id=${encodeURIComponent(beforeId)}` : ''}`),
+  // The newest `limit` (100) messages, oldest first; `beforeId` pages further back (keyset).
+  messages: (tid, beforeId, limit = 100) => j(`/api/threads/${encodeURIComponent(tid)}/messages?limit=${Number(limit) || 100}${beforeId ? `&before=${encodeURIComponent(beforeId)}` : ''}`),
   rename: (tid, title) => j(`/api/threads/${encodeURIComponent(tid)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ title }) }),
   pin: (tid, pinned) => j(`/api/threads/${encodeURIComponent(tid)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ pinned }) }),
   archive: (tid) => j(`/api/threads/${encodeURIComponent(tid)}`, { method: 'DELETE' }),
+  // Archived view -> "Move back".
+  unarchive: (tid) => j(`/api/threads/${encodeURIComponent(tid)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ archived: false }) }),
+  // Scale round (Admin): the nightly clean-up, its storage report and the image-retention setting.
+  maintenanceStatus: () => j('/api/maintenance/status'),
+  maintenanceStorage: () => j('/api/maintenance/storage'),
+  maintenanceStorageRefresh: () => j('/api/maintenance/storage/refresh', { method: 'POST' }),
+  maintenanceRun: () => j('/api/maintenance/run', { method: 'POST', headers: JSON_HEADERS, body: '{}' }),
+  retention: () => j('/api/maintenance/retention'),
+  setRetention: (values) => j('/api/maintenance/retention', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify(values) }),
+  imagePreview: (months) => j(`/api/maintenance/images/preview?mode=months&months=${Number(months)}`),
+  // "Archive my chats older than N months": the caller's own value; `months` asks how many chats a value would archive.
+  myArchive: (months = null) => j(`/api/me/archive${months ? `?months=${Number(months)}` : ''}`),
+  setMyArchive: (months) => j('/api/me/archive', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ months }) }),
   remove: (tid) => j(`/api/threads/${encodeURIComponent(tid)}?hard=true`, { method: 'DELETE' }),
   // Per-thread model/thinking override (the header model chip). `prefs` is
   // MERGED server-side (db.update_thread_prefs) — a null value removes that

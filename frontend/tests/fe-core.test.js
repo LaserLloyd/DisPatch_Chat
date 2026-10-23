@@ -58,7 +58,7 @@ test('the wizard tells the app when the first Admin exists', () => {
 
 test('the rail draws Mine and Household groups from visibleBots()', () => {
   assert.match(MAIN, /const g = railGroups\(state\.bots\);\s+return \[\.\.\.g\.mine, \.\.\.g\.household\];/);
-  assert.match(MAIN, /const grouped = hasMine && hasHousehold;/);
+  assert.match(MAIN, /const showGroups = hasHousehold && \(hasMine \|\| offerMake\);/);
   assert.match(MAIN, /draggable: canAdmin\(\) \? 'true' : 'false'/);
 });
 

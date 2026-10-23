@@ -2070,7 +2070,10 @@
     "export": "Exportar",
     "erase": "Apagar",
     "erase_confirm": "Apagar {name} e tudo o que está associado ao perfil? Não é possível anular.",
-    "erased": "Perfil apagado."
+    "erased": "Perfil apagado.",
+    "tier_recent": "Recente",
+    "tier_daily": "Diária",
+    "tier_weekly": "Semanal"
   },
   "host_notice": {
     "title": "Guardado no computador anfitrião",
@@ -2282,7 +2285,7 @@
     "trash": "Reciclagem",
     "stray": "Ficheiros .bak antigos",
     "stray_hint": "Apenas listados. Nada aqui é eliminado automaticamente.",
-    "other": "Outros",
+    "rest": "Outros",
     "free": "Espaço livre em disco",
     "last_run": "Última limpeza: {when} ({duration})",
     "next_run": "Próxima limpeza: {when}",

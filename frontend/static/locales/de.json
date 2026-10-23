@@ -2045,7 +2045,10 @@
     "export": "Exportieren",
     "erase": "Löschen",
     "erase_confirm": "{name} und alles, was zum Profil gehört, löschen? Das lässt sich nicht rückgängig machen.",
-    "erased": "Profil gelöscht."
+    "erased": "Profil gelöscht.",
+    "tier_recent": "Aktuell",
+    "tier_daily": "Täglich",
+    "tier_weekly": "Wöchentlich"
   },
   "host_notice": {
     "title": "Auf dem Host-Computer gespeichert",
@@ -2257,7 +2260,7 @@
     "trash": "Papierkorb",
     "stray": "Alte .bak-Dateien",
     "stray_hint": "Nur aufgelistet. Hier wird nichts automatisch gelöscht.",
-    "other": "Sonstiges",
+    "rest": "Sonstiges",
     "free": "Freier Speicherplatz",
     "last_run": "Letzte Bereinigung: {when} ({duration})",
     "next_run": "Nächste Bereinigung: {when}",

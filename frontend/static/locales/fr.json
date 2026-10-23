@@ -2070,7 +2070,10 @@
     "export": "Exporter",
     "erase": "Effacer",
     "erase_confirm": "Effacer {name} et tout ce qui est rattaché au profil ? Cette action est irréversible.",
-    "erased": "Profil effacé."
+    "erased": "Profil effacé.",
+    "tier_recent": "Récente",
+    "tier_daily": "Quotidienne",
+    "tier_weekly": "Hebdomadaire"
   },
   "host_notice": {
     "title": "Enregistré sur l’ordinateur hôte",
@@ -2282,7 +2285,7 @@
     "trash": "Corbeille",
     "stray": "Anciens fichiers .bak",
     "stray_hint": "Simple liste. Rien n’est supprimé automatiquement.",
-    "other": "Autre",
+    "rest": "Autre",
     "free": "Espace disque libre",
     "last_run": "Dernier nettoyage : {when} ({duration})",
     "next_run": "Prochain nettoyage : {when}",

@@ -37,6 +37,9 @@ export function actionsFor(b) {
 
 const KIND_KEYS = { archive: 'bkp.kind_archive', snapshot: 'bkp.kind_snapshot', premigration: 'bkp.kind_premigration' };
 export const kindLabel = (kind) => t(KIND_KEYS[kind] || KIND_KEYS.snapshot);
+// 4.0 scale: a rotating snapshot is kept as a recent, a daily or a weekly one.
+const TIER_KEYS = { recent: 'bkp.tier_recent', daily: 'bkp.tier_daily', weekly: 'bkp.tier_weekly' };
+export const tierLabel = (b) => (b && b.kind === 'snapshot' && TIER_KEYS[b.tier] ? t(TIER_KEYS[b.tier]) : '');
 
 // ------------------------------------------------------------------ DOM
 
@@ -128,6 +131,7 @@ export function mountBackups(host, deps = {}) {
       el('span', { class: 'dev-row-text' }, [
         el('strong', { text: b.name }), ' ',
         el('span', { class: 'ui-badge', text: kindLabel(b.kind) }), ' ',
+        tierLabel(b) ? el('span', { class: 'ui-badge ui-badge--info bkp-tier', text: tierLabel(b) }) : null, ' ',
         el('span', { class: 'dev-row-hint', text: `${fileSize(b.size)} · ${fullTimestamp(b.created)}${b.encrypted ? ` · ${t('bkp.encrypted')}` : ''}` }),
       ]),
       ...buttons,
