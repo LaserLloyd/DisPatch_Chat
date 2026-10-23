@@ -182,6 +182,20 @@ def test_unsigned_is_the_default_profile_or_nobody():
     assert policy.unsigned() is None
 
 
+def test_an_unsigned_device_is_never_an_admin_and_never_skips_a_pin():
+    """Read-time guard behind the two writers' refusals: a default profile that is an Admin or
+    carries a PIN/password (whatever wrote that row) gives an unsigned device the sign-in screen."""
+    pg = accounts.create_profile("Playground", Role.USER)
+    _lock("default_profile", pg.id)
+    assert policy.unsigned() is not None
+    accounts.update_profile(pg.id, role=Role.ADMIN)          # not through profiles_service: no fence
+    assert policy.unsigned() is None
+    accounts.update_profile(pg.id, role=Role.USER)
+    assert policy.unsigned() is not None
+    auth.set_profile_pin(pg.id, "2468")
+    assert policy.unsigned() is None
+
+
 def test_the_lock_target_fence_applies_to_the_default_profile_only():
     pg = accounts.create_profile("Playground", Role.USER, grants=["dispatch_agents"])
     other = accounts.create_profile("Uma", Role.USER, grants=["dispatch_agents"])

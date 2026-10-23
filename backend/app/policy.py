@@ -282,6 +282,10 @@ def unsigned(cfg: auth.SecurityConfig | None = None) -> Principal | None:
         # A PIN an Admin set on the default profile afterwards is honoured: unsigned devices
         # get the sign-in screen instead of opening it without the PIN.
         return None
+    if prof.role is Role.ADMIN:
+        # Both writers refuse this pairing (auth.check_lock_target, profiles_service.change_role);
+        # should any other path produce it, no unsigned device is ever an Admin.
+        return None
     return profile_principal(prof, via="default")
 
 

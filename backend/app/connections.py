@@ -543,7 +543,10 @@ def create(*, type: str, name: str = "", base_url: str = "", api_key: str = "",
         if get(cid) is not None:
             raise ConnectionError_("connection_exists", f"A connection with the id {cid!r} already exists.", 409)
     else:
-        cid = new_id(ct.id if not name else name)
+        # The id is built from the TYPE, never from the name: a non-Admin sees connection ids
+        # (/api/me/backends, a personal bot's backend) and an Admin's name may carry an address
+        # or an account, which neutral_labels() keeps from them.
+        cid = new_id(ct.id)
     ref = ""
     key = (api_key or "").strip()
     env_name = (api_key_env or "").strip()

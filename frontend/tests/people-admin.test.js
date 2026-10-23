@@ -93,6 +93,16 @@ test('household value: only a User may have "all"; a Basic profile is always a l
 test('the default profile can be a User or a Basic profile that is not disabled, never an Admin', () => {
   const rows = [{ id: 'a', role: 'admin' }, { id: 'u', role: 'user' }, { id: 'd', role: 'basic', disabled: true }, { id: 'b', role: 'basic' }];
   assert.deepEqual(PP.defaultCandidates(rows).map((p) => p.id), ['u', 'b']);
+  // a profile with a PIN or password is never offered (the server refuses it: it would open without one)
+  const pinned = [...rows, { id: 'p', name: 'Uma', role: 'user', has_pin: true }, { id: 'w', name: 'Al', role: 'admin', has_password: true },
+    { id: 'q', name: 'Bea', role: 'basic', has_password: true }, { id: 'c', name: 'Cur', role: 'user', has_pin: true, lock_target: true }];
+  assert.deepEqual(PP.defaultCandidates(pinned).map((p) => p.id), ['u', 'b', 'c'], 'the current default stays listed, PIN or not');
+  assert.deepEqual(PP.pinnedOut(pinned).map((p) => p.name), ['Uma', 'Bea']);
+  // the server's refusal comes back once per PATCH key: shown as one sentence
+  const sentence = 'A profile with a PIN or password cannot be the default profile.';
+  assert.equal(PP.lockRefusalText({ errors: { 'people.lock_target': sentence, 'people.default_profile': sentence } }), sentence);
+  assert.equal(PP.lockRefusalText({ errors: { a: 'One.', b: 'Two.' } }), 'One. Two.');
+  assert.equal(PP.lockRefusalText(new Error('422: plain')), 'plain');
   assert.deepEqual(PP.lockState([{ id: 'u' }, { id: 'b', lock_target: true }]), { target: 'default_profile', profileId: 'b' });
   assert.deepEqual(PP.lockState([{ id: 'u' }]), { target: 'profile_list', profileId: '' });
 });
@@ -580,7 +590,9 @@ test('When locked, show: the default profile or the profile list; an Admin is ne
   const g = pane.querySelector('#people-lock');
   assert.ok(g, 'the group is mounted by renderPeoplePerms');
   assert.match(g.textContent, /When locked, show/);
-  assert.deepEqual([...g.querySelectorAll('select option')].map((o) => o.textContent), ['Riley', 'Sam']);
+  // Riley has a PIN (the fixture default): not offered, and the note says why; Sam has none
+  assert.deepEqual([...g.querySelectorAll('select option')].map((o) => o.textContent), ['Sam']);
+  assert.match(g.querySelector('.pe-lock-pin-hint').textContent, /Riley/);
   assert.equal(g.querySelector('input[value="profile_list"]').checked, true);
   const sel = g.querySelector('select');
   sel.value = 'b1';
@@ -593,8 +605,10 @@ test('When locked, show: the default profile or the profile list; an Admin is ne
 });
 
 test('When locked, show: switching to the default profile asks first and says what is switched off', { skip: dom.skip }, async () => {
-  const { pane, rec } = await mount({ routes: { 'PATCH /api/settings': () => [200, { ok: true }] } });
+  const p = PEOPLE(); p.profiles[2].has_pin = false;     // a PIN-less Riley may be the default
+  const { pane, rec } = await mount({ people: p, routes: { 'PATCH /api/settings': () => [200, { ok: true }] } });
   const g = pane.querySelector('#people-lock');
+  assert.equal(g.querySelector('.pe-lock-pin-hint'), null, 'nobody is left out');
   const sel = g.querySelector('select');
   sel.value = 'u1';
   sel.dispatchEvent(new window.Event('change'));

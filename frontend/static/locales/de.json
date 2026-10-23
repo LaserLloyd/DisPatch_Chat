@@ -1772,6 +1772,7 @@
     "lock_saved": "Sperrbildschirm aktualisiert.",
     "lock_default_none": "Das Standardprofil",
     "lock_none": "Lege zuerst ein Nutzer- oder Basis-Profil an: Ein Admin kann nicht das Standardprofil sein.",
+    "lock_pin_hint": "Profile mit PIN oder Passwort stehen nicht zur Wahl ({names}): Das gemeinsame Startprofil öffnet sich ohne Anmeldung.",
     "lock_default_pick": "Standardprofil",
     "tally_files": "Dateiserver-Dateien",
     "disclosure_activity": "Ein Admin sieht eine Übersicht darüber, was in diesem Profil passiert (wie viel, nicht was). Chats gehören nur diesem Profil: Andere Profile, auch Admins, können sie in der App nicht öffnen."

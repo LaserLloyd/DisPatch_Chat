@@ -505,3 +505,21 @@ def test_advisor_embeddings_use_the_key_of_the_connection_for_the_same_server(tm
     assert advisor._embed_config({"base_url": "http://192.0.2.5:1234/v1", "model": "e",
                                   "api_key": "inline-123456"}).api_key == "inline-123456"
     assert advisor._embed_config({"base_url": "http://192.0.2.7:1234/v1", "model": "e"}).api_key == ""
+
+
+def test_a_connection_id_never_carries_the_admins_name(tmp_path, monkeypatch):
+    """Non-Admins see connection ids (``/api/me/backends``, a personal bot's backend), so an id is
+    built from the type only: an Admin's name may hold an address or an account."""
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    c = connections.create(type="openai_compatible", name="Rig box (203.0.113.7:1234)",
+                           base_url="http://203.0.113.7:1234/v1")
+    assert c.id == "openai_compatible" and c.name == "Rig box (203.0.113.7:1234)"
+    again = connections.create(type="openai_compatible", name="Rig box (203.0.113.7:1234) B",
+                               base_url="http://203.0.113.7:1235/v1")
+    assert again.id == "openai_compatible-2"
+    for cid in (c.id, again.id):
+        assert "10" not in cid and "rig" not in cid
+    # an explicit id is still the Admin's choice
+    mine = connections.create(type="openai_compatible", name="Mine", conn_id="house-box",
+                              base_url="http://127.0.0.1:9/v1")
+    assert mine.id == "house-box"

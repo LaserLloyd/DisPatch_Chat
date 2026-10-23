@@ -1797,6 +1797,7 @@
     "lock_saved": "Ecrã de bloqueio atualizado.",
     "lock_default_none": "O perfil predefinido",
     "lock_none": "Adiciona primeiro um perfil de utilizador ou básico: um administrador não pode ser o perfil predefinido.",
+    "lock_pin_hint": "Os perfis com PIN ou palavra-passe não aparecem ({names}): o perfil partilhado abre sem nenhum.",
     "lock_default_pick": "Perfil predefinido",
     "tally_files": "ficheiros do Servidor de ficheiros",
     "disclosure_activity": "Um administrador pode ver um resumo do que acontece neste perfil (quanto, não o quê). Os chats são privados deste perfil: outros perfis, administradores incluídos, não podem abri-los no app."

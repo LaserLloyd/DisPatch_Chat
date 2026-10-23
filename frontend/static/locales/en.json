@@ -1772,6 +1772,7 @@
     "lock_saved": "Lock screen updated.",
     "lock_default_none": "The default profile",
     "lock_none": "Add a User or Basic profile first: an Admin can't be the default profile.",
+    "lock_pin_hint": "Profiles with a PIN or password aren't listed ({names}): the shared landing opens without one.",
     "lock_default_pick": "Default profile",
     "tally_files": "File Server files",
     "disclosure_activity": "An Admin can see a summary of what happens in this profile (how much, not what). Chats are private to this profile: other profiles, Admins included, cannot open them in the app."

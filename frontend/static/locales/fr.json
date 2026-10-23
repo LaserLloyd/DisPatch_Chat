@@ -1797,6 +1797,7 @@
     "lock_saved": "Écran de verrouillage mis à jour.",
     "lock_default_none": "Le profil par défaut",
     "lock_none": "Ajoute d’abord un profil Utilisateur ou Basique : un admin ne peut pas être le profil par défaut.",
+    "lock_pin_hint": "Les profils avec un code PIN ou un mot de passe ne sont pas proposés ({names}) : le profil partagé s’ouvre sans.",
     "lock_default_pick": "Profil par défaut",
     "tally_files": "fichiers du File Server",
     "disclosure_activity": "Un admin peut voir un résumé de ce qui se passe dans ce profil (combien, pas quoi). Les chats sont privés à ce profil : les autres profils, admins compris, ne peuvent pas les ouvrir dans l'app."

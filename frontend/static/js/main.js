@@ -66,11 +66,11 @@ import { setOnLocked as w5SetOnLocked, failure as w5Failure, w5 as schemaApi, er
 import {
   SECTIONS, SECTION_IDS, RESERVED_TAB_IDS, resolveSettingsTarget, buildSearchIndex, mountSettingsSearch, createRevealer,
   runSectionHooks,
-} from './settings-nav.js?v=2';
+} from './settings-nav.js?v=3';
 import { mountConnections } from './connections.js?v=3';
 import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=4';
 import { mountBackups } from './backup.js?v=3';
-import { characterPanel, isHidden, removeCharacter } from './characters.js?v=3';
+import { characterPanel, isHidden, removeCharacter } from './characters.js?v=4';
 import { maybeStartWizard } from './wizard.js?v=4';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
@@ -104,7 +104,7 @@ import { normalizeRole, isAdminRole, signInMode, wsErrorKind, avatarSpec, railGr
 import {
   renderSignIn, renderSetup, setupPage, renderPasswordForm, paintChip, chipLabel, attachChipMenu,
 } from './signin.js?v=4';
-import { mountPeopleSettings } from './people.js?v=4';
+import { mountPeopleSettings } from './people.js?v=5';
 // 3.0 agents: the Tasks page, Assign task / @agent, inline task cards (tasks.js, task_card.js,
 // approval_card.js) and Settings -> Agents (agents.js). The server decides who may do what.
 import { createTasksUi } from './tasks.js?v=2';
@@ -113,7 +113,7 @@ import { createTasksUi } from './tasks.js?v=2';
 import { initMyBots, copyMenuItem } from './my-bots.js?v=1';
 import { initBotEditor } from './bot-editor.js?v=1';
 import { initAccountReset } from './account-reset.js?v=1';
-import { initPeoplePerms } from './people-perms.js?v=1';
+import { initPeoplePerms } from './people-perms.js?v=2';
 import { mountAgentsSettings } from './agents.js?v=3';
 import { pushRow } from './push.js?v=3';
 import { imageJobMessageEl } from './imagejobs.js?v=6';

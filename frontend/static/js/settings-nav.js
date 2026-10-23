@@ -15,7 +15,7 @@
 import { el } from './util.js?v=21';
 import { renderMyBots } from './my-bots.js?v=1';
 import { renderAccountReset } from './account-reset.js?v=1';
-import { renderPeoplePerms } from './people-perms.js?v=1';
+import { renderPeoplePerms } from './people-perms.js?v=2';
 
 /** The sections, in nav order. `group`: you (this person / device), household
  *  (Admins), addons (tabs an add-on adds; none built in). `perm` is

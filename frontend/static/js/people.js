@@ -33,7 +33,7 @@ import { ACTIVITY_COLUMNS, activityRows, activityTotals, avatarSpec } from './pr
 import {
   askDialog, countsTally, permTables, permissionsPanel, householdPanel, backendsPanel,
   profileCalls, errorText,
-} from './people-perms.js?v=1';
+} from './people-perms.js?v=2';
 
 let seq = 0;          // a newer mount supersedes a slower, older one
 let uid = 0;

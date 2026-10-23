@@ -392,8 +392,31 @@ export function backendsPanel(person, ctx) {
 // ------------------------------------------------------------------ DOM: when locked, show
 
 /** Profiles that can be the default one: an Admin opens without a credential there, so no. */
+/** Who may be the default profile: the server's rule (auth.check_lock_target) mirrored. An Admin
+ *  never (it would open on every device); a profile with a PIN or password never (it would open
+ *  without it); a disabled profile never. */
 export const defaultCandidates = (profiles) =>
-  (profiles || []).filter((p) => p.role !== 'admin' && !p.disabled);
+  (profiles || []).filter((p) => p.role !== 'admin' && !p.disabled && (p.lock_target || !(p.has_pin || p.has_password)));
+
+/** The non-Admin profiles the picker leaves out because they carry a PIN or password. The current
+ *  default stays listed whatever it carries (an Admin may give it a PIN afterwards; unsigned devices
+ *  then see the sign-in screen until it is cleared), so the picker shows the state as it is. */
+export const pinnedOut = (profiles) =>
+  (profiles || []).filter((p) => p.role !== 'admin' && !p.disabled && !p.lock_target && (p.has_pin || p.has_password));
+
+/** A settings refusal as one line: the same sentence comes back under every key of the PATCH
+ *  (``people.lock_target`` and ``people.default_profile``), so keys are dropped and duplicates folded. */
+export function lockRefusalText(e) {
+  if (e && e.errors && typeof e.errors === 'object') {
+    const seen = [];
+    for (const v of Object.values(e.errors)) {
+      const sentence = String(v || '').trim();
+      if (sentence && !seen.includes(sentence)) seen.push(sentence);
+    }
+    if (seen.length) return seen.join(' ');
+  }
+  return errorText(e);
+}
 
 /** Where the lock screen goes now, from the profile rows (`lock_target` marks the default). */
 export function lockState(profiles) {
@@ -457,7 +480,7 @@ export function lockTargetGroup(deps) {
       paintFence();
       if (deps.onChanged) deps.onChanged();
     } catch (e) {
-      err.textContent = errorText(e);
+      err.textContent = lockRefusalText(e);
       err.hidden = false;
       repaint(prev.target, prev.pid);
     }
@@ -480,6 +503,8 @@ export function lockTargetGroup(deps) {
       radio('profile_list', t('lock.target_list'), null),
     ]),
     cands.length ? null : el('p', { class: 'dev-row-hint', text: t('people.lock_none') }),
+    pinnedOut(profiles).length ? el('p', { class: 'dev-row-hint pe-lock-pin-hint', role: 'note',
+      text: t('people.lock_pin_hint', { names: pinnedOut(profiles).map((p) => p.name).join(', ') }) }) : null,
     fence, err,
   ]);
   paintFence();
