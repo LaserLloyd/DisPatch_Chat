@@ -228,6 +228,9 @@ test('connections list: reachable with no models is a warning, Used by shows nam
   assert.equal(C.usedByText(['a', 'b'], (id) => names[id]), 'Used by Ann, Bob');
   assert.equal(C.usedByText(['a', 'b', 'c', 'd', 'e', 'f', 'g'], (id) => names[id], 5), 'Used by Ann, Bob, c, d, e and 2 more');
   assert.equal(C.usedByText([], (id) => id), EN.cxn.unused);
+  // Other profiles' personal bots are a count, never names or ids.
+  assert.equal(C.usedByText(['a'], (id) => names[id], 5, 3), 'Used by Ann, personal bots: 3');
+  assert.equal(C.usedByText([], (id) => id, 5, 2), 'Used by personal bots: 2');
   assert.equal(C.nameSaysType({ name: 'OpenAI-compatible server (api.example/v1)', type_label: 'OpenAI-compatible server' }), true);
   assert.equal(C.nameSaysType({ name: 'Rig', type_label: 'StudioForge' }), false);
 });

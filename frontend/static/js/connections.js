@@ -42,9 +42,12 @@ export function describeTest(r) {
 /** The stored last_test of a connection, in the same shape. */
 export const describeStored = (c) => describeTest(c.last_test && Object.keys(c.last_test).length ? c.last_test : null);
 
-/** "Used by" as names, at most `max`, then "+N more". `nameOf(id)` maps a character id. */
-export function usedByText(ids, nameOf = (id) => id, max = 5) {
+/** "Used by" as names, at most `max`, then "+N more". `nameOf(id)` maps a character id
+ *  (household characters); `personal` is how many personal bots of other profiles use it
+ *  (a count: their names are not the Admin's to read). */
+export function usedByText(ids, nameOf = (id) => id, max = 5, personal = 0) {
   const list = (ids || []).map((id) => nameOf(id) || id);
+  if (personal > 0) list.push(t('cxn.personal_bots', { count: personal }));
   if (!list.length) return t('cxn.unused');
   const shown = list.slice(0, max).join(', ');
   return list.length > max
@@ -183,7 +186,7 @@ export async function mountConnections(pane, deps = {}) {
       try { await api.deleteConnection(c.id); toast(t('cxn.deleted')); deps.onChanged && deps.onChanged(); load(); }
       catch (e) { toast(errorText(e), true); }
     });
-    const users = usedByText(c.in_use_by, deps.botName);
+    const users = usedByText(c.in_use_by, deps.botName, 5, Number(c.in_use_personal || 0));
     return el('div', { class: 'dev-row cxn-card', dataset: { connection: c.id } }, [
       el('span', { class: 'dev-row-text' }, [
         el('strong', { text: c.name }), ' ', nameSaysType(c) ? null : el('span', { class: 'ui-badge', text: c.type_label }),

@@ -370,6 +370,26 @@ def test_the_connections_a_profiles_own_bots_may_use(team):
     assert team["Eve"].put(f"/api/people/{max_id}/backends", json={"extra": 1}).status_code == 422
 
 
+def test_the_connections_page_names_household_users_and_only_counts_personal_bots(team):
+    """The Admin's Connections card says who uses a connection: household characters by name,
+    other profiles' personal bots only as a number (never their names or opaque ids)."""
+    from app import config, connections
+    c = connections.create(type="openai", name="Shared", api_key="sk-probe-c-0123456789",  # scrub-ok: test fixture
+                           default_model="m-c")
+    config.upsert_bot(config.Bot(id="house_one", name="House One",
+                                 advisor={"providers": [{"connection": c.id, "model": "m-c"}]}))
+    mine = _bot(team["Max"], "Secret Name", connection=c.id, model="m-c")
+    row = team["Olive"].get(f"/api/connections/{c.id}").json()
+    assert row["in_use_by"] == ["house_one"] and row["in_use_personal"] == 1
+    listed = {x["id"]: x for x in team["Olive"].get("/api/connections").json()["connections"]}[c.id]
+    assert listed["in_use_by"] == ["house_one"] and listed["in_use_personal"] == 1
+    text = json.dumps(listed)
+    assert mine["id"] not in text and "Secret Name" not in text
+    gone = team["Olive"].delete(f"/api/connections/{c.id}")
+    assert gone.status_code == 409
+    assert "House One" in gone.text and "1 personal bot" in gone.text and mine["id"] not in gone.text
+
+
 # ---- What the owner's bot editor may read (INT-2 lead decision) -------------------------- #
 
 def test_a_user_reads_the_presets_and_only_its_allowed_backends(team):

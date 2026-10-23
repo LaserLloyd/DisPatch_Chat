@@ -1841,6 +1841,7 @@
     "already_added": "已添加",
     "check_key_url": "请检查密钥或地址",
     "used_by_more": "{names} 及另外 {count} 个在使用",
+    "personal_bots": "个人机器人：{count}",
     "agents_hint": "智能体程序及其限制和密钥"
   },
   "chars": {

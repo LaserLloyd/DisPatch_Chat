@@ -131,7 +131,7 @@ def test_a_connection_in_use_cannot_be_deleted(tmp_path, monkeypatch):
         "providers": [{"provider": "lmstudio", "model": "m", "connection": c.id}]}))
     with pytest.raises(ConnectionError_) as e:
         connections.delete(c.id)
-    assert e.value.code == "connection_in_use" and "scribe" in str(e.value)
+    assert e.value.code == "connection_in_use" and "Scribe" in str(e.value)  # by name
     config.remove_bot("scribe") if len(config.load_bots()) > 1 else None
     config.update_bot("scribe", lambda b: __import__("dataclasses").replace(
         b, advisor={"providers": [{"provider": "lmstudio", "model": "m"}]}))

@@ -262,7 +262,7 @@ class Connection:
             return "env"
         return "none"
 
-    def public(self, in_use_by: list[str] | None = None) -> dict:
+    def public(self, in_use_by: list[str] | None = None, in_use_personal: int = 0) -> dict:
         kind = self.credential_kind()
         return {
             "id": self.id, "name": self.name, "type": self.type, "type_label": self.ctype.label,
@@ -273,7 +273,7 @@ class Connection:
             "default_model": self.default_model, "models": list(self.models),
             "models_checked_at": self.models_checked_at, "last_test": dict(self.last_test),
             "created": self.created, "updated": self.updated,
-            "in_use_by": list(in_use_by or []),
+            "in_use_by": list(in_use_by or []), "in_use_personal": int(in_use_personal),
         }
 
 
@@ -619,11 +619,13 @@ def delete(conn_id: str) -> None:
     c = get(conn_id)
     if c is None:
         raise ConnectionError_("connection_not_found", "Unknown connection", 404)
-    users = used_by(conn_id)
-    if users:
+    household, personal = usage(conn_id)
+    if household or personal:
+        names = {b.id: b.name or b.id for b in config.load_bots()}
+        who = [names.get(i, i) for i in household] + ([f"{personal} personal bot(s)"] if personal else [])
         raise ConnectionError_(
             "connection_in_use",
-            f"{c.name} is used by {', '.join(users)}. Point those characters at another connection first.", 409)
+            f"{c.name} is used by {', '.join(who)}. Point those characters at another connection first.", 409)
     if c.credential_ref.startswith("secret:"):
         secret_store.delete(c.credential_ref[7:])
     with _lock, connect() as con:
@@ -642,15 +644,28 @@ def blocks_of(entry: dict) -> list[dict]:
     return out
 
 
-def used_by(conn_id: str) -> list[str]:
-    """Ids of the characters whose provider entries refer to ``conn_id``."""
-    users = []
+def _users(conn_id: str) -> list:
+    out = []
     for b in config.load_bots():
         entries = ([b.api] if b.api else []) + [
             p for p in (b.advisor or {}).get("providers") or [] if isinstance(p, dict)]
         if any(str(e.get("connection") or "") == conn_id for e in entries):
-            users.append(b.id)
-    return users
+            out.append(b)
+    return out
+
+
+def used_by(conn_id: str) -> list[str]:
+    """Ids of the characters whose provider entries refer to ``conn_id``."""
+    return [b.id for b in _users(conn_id)]
+
+
+def usage(conn_id: str) -> tuple[list[str], int]:
+    """What the Admin's Connections page may say about who uses ``conn_id``: the ids of the
+    household characters (the page names them), and only a COUNT of personal bots (they
+    belong to other profiles; their names and ids are not the Admin's to read)."""
+    users = _users(conn_id)
+    return ([b.id for b in users if b.scope != "personal"],
+            sum(1 for b in users if b.scope == "personal"))
 
 
 # --------------------------------------------------------------------------- #

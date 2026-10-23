@@ -1893,6 +1893,7 @@
     "already_added": "Déjà ajouté",
     "check_key_url": "vérifie la clé ou l’adresse",
     "used_by_more": "Utilisée par {names} et {count} autres",
+    "personal_bots": "bots personnels : {count}",
     "agents_hint": "Programmes d’agents, leurs limites et leurs secrets"
   },
   "chars": {

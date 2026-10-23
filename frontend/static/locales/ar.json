@@ -1976,6 +1976,7 @@
     "already_added": "أُضيف مسبقًا",
     "check_key_url": "تحقّق من المفتاح أو العنوان",
     "used_by_more": "يستخدمه {names} و{count} آخرون",
+    "personal_bots": "البوتات الشخصية: {count}",
     "agents_hint": "برامج الوكلاء وحدودها وأسرارها"
   },
   "chars": {

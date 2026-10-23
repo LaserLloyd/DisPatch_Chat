@@ -83,7 +83,8 @@ def _err(e: connections.ConnectionError_):
 
 
 def _public(c: connections.Connection) -> dict:
-    return c.public(connections.used_by(c.id))
+    household, personal = connections.usage(c.id)
+    return c.public(household, personal)
 
 
 @router.get("/api/connections", dependencies=[_MANAGE])

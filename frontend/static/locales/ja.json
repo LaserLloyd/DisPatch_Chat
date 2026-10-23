@@ -1841,6 +1841,7 @@
     "already_added": "追加済み",
     "check_key_url": "キーまたはアドレスを確認してください",
     "used_by_more": "{names} ほか {count} 件で使用中",
+    "personal_bots": "個人のボット {count}",
     "agents_hint": "エージェントプログラム、その上限とシークレット"
   },
   "chars": {

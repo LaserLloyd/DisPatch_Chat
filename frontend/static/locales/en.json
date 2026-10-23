@@ -1868,6 +1868,7 @@
     "already_added": "Already added",
     "check_key_url": "check the key or the address",
     "used_by_more": "Used by {names} and {count} more",
+    "personal_bots": "personal bots: {count}",
     "agents_hint": "Agent programs, their limits and secrets"
   },
   "chars": {

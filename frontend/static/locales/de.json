@@ -1868,6 +1868,7 @@
     "already_added": "Schon hinzugefügt",
     "check_key_url": "Schlüssel oder Adresse prüfen",
     "used_by_more": "Genutzt von {names} und {count} weiteren",
+    "personal_bots": "persönliche Bots: {count}",
     "agents_hint": "Agentenprogramme, ihre Limits und Geheimnisse"
   },
   "chars": {
