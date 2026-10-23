@@ -4838,7 +4838,7 @@ function paintSettingsSummaries() {
     put('appearance', [(theme && theme.name) || slug, language && language.native].filter(Boolean).join(' · '));
   } catch { /* summaries are decoration */ }
   const prof = state.auth && state.auth.profile;
-  const roleName = t(`role.${state.role || 'owner'}`);
+  const roleName = t(`role.${state.role || 'admin'}`);
   put('account', prof && prof.name && prof.name !== roleName ? `${prof.name} · ${roleName}` : roleName);
   if (canAdmin()) put('characters', t('settings.sum_characters', { count: (bmBots || []).length }));
 }
@@ -8667,6 +8667,9 @@ function renderPins() {
     dom['theme-toggle'].classList.toggle('hidden', !isPinned('theme'));
   }
   renderPinnedRail(document.getElementById('gear-row'), {
+    // A device nobody signed in on (the shared landing included) may not turn No-Image Mode
+    // off from the rail either: the same ratchet as the Settings row.
+    decoy: nimLocked(),
     t,
     onChange: (id) => {
       // A pinned toggle changes the same device setting the Settings pane
@@ -9349,6 +9352,12 @@ function setSecError(m) { dom['sec-error'].textContent = m || ''; dom['sec-error
 
 /** Is this the protected first Admin (whose PIN is the install PIN), or an install nobody has claimed yet? */
 const ownerAccountView = () => !state.auth.claimed || state.auth.protected;
+/** Does the signed-in profile have a PIN of its own? (Its sign-in tile says what it asks for.) */
+function selfHasPin() {
+  const a = state.auth;
+  const me = a.profile && (a.profiles || []).find((p) => p.id === a.profile.id);
+  return !!(me && /pin/.test(String(me.credential || '')));
+}
 
 // Every string in the sign-in card that depends on server state, split out of
 // activateSecurityPane() so a language switch repaints it without re-running the
@@ -9439,7 +9448,9 @@ function openAccountForm(choice, { focus = true } = {}) {
     const a = state.auth;
     const form = renderPasswordForm({
       mode: accountChoice === 'pw_set' ? 'first' : 'change',
-      needsPin: accountChoice === 'pw_set' && state.role === 'owner' && a.pinSet,
+      // The first password is confirmed with the PIN this Admin signs in with: the install PIN
+      // for the main Admin, its own PIN for another Admin (the server asks for the same).
+      needsPin: accountChoice === 'pw_set' && (ownerAccountView() ? a.pinSet : selfHasPin()),
       idPrefix: accountChoice === 'pw_set' ? 'sec-pwfirst' : 'sec-pwchange',
       onSubmit: async (v) => {
         await api.changePassword(v);
@@ -9470,14 +9481,14 @@ function paintAccountWho() {
   const host = dom['acct-who'];
   if (!host) return;
   const prof = state.auth && state.auth.profile;
-  const spec = avatarSpec(prof || { name: t(`role.${state.role || 'owner'}`) });
+  const spec = avatarSpec(prof || { name: t(`role.${state.role || 'admin'}`) });
   host.replaceChildren(
     spec.kind === 'img'
       ? el('img', { class: 'acct-avatar', src: spec.src, alt: '', draggable: 'false' })
       : el('span', { class: 'acct-avatar acct-avatar-text', 'aria-hidden': 'true', text: spec.text }),
     el('span', { class: 'acct-who-text' }, [
-      el('strong', { class: 'acct-name', text: (prof && prof.name) || t(`role.${state.role || 'owner'}`) }),
-      el('span', { class: `people-role people-role-${state.role || 'owner'}`, text: t(`role.${state.role || 'owner'}`) }),
+      el('strong', { class: 'acct-name', text: (prof && prof.name) || t(`role.${state.role || 'admin'}`) }),
+      el('span', { class: `people-role people-role-${state.role || 'admin'}`, text: t(`role.${state.role || 'admin'}`) }),
     ]),
   );
 }

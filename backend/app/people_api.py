@@ -438,10 +438,12 @@ class PasswordIn(BaseModel):
 
 @router.post("/api/auth/password", dependencies=[_SETTINGS])
 async def auth_password(request: Request, payload: PasswordIn):
-    """Set or change YOUR password (Owner or Admin).
+    """Set or change YOUR password (any Admin).
 
-    The first password of a PIN-only owner (the migration leaves it unset) is
-    confirmed with the install PIN; after that, with the current password."""
+    The first password is confirmed with the PIN the Admin signs in with: the install PIN for
+    the main Admin (a 3.x migration leaves a PIN-only one), the Admin's own PIN for any other
+    Admin (an Admin with no credential at all needs none); after that, with the current
+    password."""
     pr = _caller(request)
     prof = pr.profile
     if prof is None:
@@ -455,9 +457,14 @@ async def auth_password(request: Request, payload: PasswordIn):
         return blocked
     if prof.has_password:
         ok = bool(payload.current) and auth.verify_profile_secret(prof, "password", payload.current)
-    else:
+    elif prof.protected:
         cfg = auth.load()
         ok = (not cfg.pin_set) or (bool(payload.current_pin) and auth.verify_pin(payload.current_pin))
+    elif prof.has_pin:
+        # Another Admin's own PIN, never the install PIN (which is the main Admin's).
+        ok = bool(payload.current_pin) and auth.verify_profile_secret(prof, "pin", payload.current_pin)
+    else:
+        ok = True      # no credential to confirm: the signed-in session is all there is
     if not ok:
         return _failed(request, pkey, prof.name)
     _succeeded(request, pkey)

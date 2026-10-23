@@ -669,3 +669,24 @@ def test_password_change_keeps_a_remembered_device_remembered(world, owner):
     assert world.login(plain, name="Ada", password="admin-pass2").status_code == 200
     r = plain.post("/api/auth/password", json={"current": "admin-pass2", "new": "admin-pass3"})
     assert r.status_code == 200 and r.json()["remembered"] is False
+
+
+def test_another_admins_first_password_is_confirmed_with_its_own_pin_not_the_install_pin(world, owner):
+    """An Admin without a password sets its first one with the PIN it signs in with. For the
+    main Admin that is the install PIN; for any other Admin it is its own PIN (it may not know
+    the main Admin's), and an Admin with no credential at all needs none."""
+    r = owner.post("/api/people", json={"name": "Ada", "role": "admin", "pin": "5151"})
+    assert r.status_code == 201, r.text          # PINs and passwords are optional for every role
+    c = world.client()
+    assert world.login(c, name="Ada", pin="5151").status_code == 200
+    bad = c.post("/api/auth/password", json={"current_pin": "2468", "new": "ada-pass-123"})
+    assert bad.status_code == 401, bad.text                     # the install PIN is not Ada's
+    ok = c.post("/api/auth/password", json={"current_pin": "5151", "new": "ada-pass-123"})
+    assert ok.status_code == 200, ok.text
+    assert accounts.get_by_name("Ada").has_password
+    # The main Admin still confirms with the install PIN.
+    accounts.update_profile(accounts.get_owner().id, password_hash=None)
+    main = world.client()
+    assert world.login(main, name="Olive", pin="2468").status_code == 200
+    assert main.post("/api/auth/password", json={"current_pin": "5151", "new": "olive-pass-9"}).status_code == 401
+    assert main.post("/api/auth/password", json={"current_pin": "2468", "new": "olive-pass-9"}).status_code == 200
