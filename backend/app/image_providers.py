@@ -734,13 +734,17 @@ def _civitai_reason(wf: dict) -> str:
     """Plain words for a failed / expired / canceled workflow."""
     status = str(wf.get("status") or "").lower()
     bits: list[str] = []
+    blocked = False
     for obj in [wf, *[s for s in (wf.get("steps") or []) if isinstance(s, dict)]]:
+        # A present blockedReason is the moderation verdict whatever its value says
+        # ("sexual-minor", a code...); a free-text reason that mentions a block counts too.
+        blocked = blocked or bool(obj.get("blockedReason"))
         for k in ("reason", "blockedReason", "error", "detail", "message"):
             v = obj.get(k)
             if v:
                 bits.append(str(v))
     text = "; ".join(dict.fromkeys(bits))
-    if "block" in text.lower():
+    if blocked or "block" in text.lower():
         return "Civitai refused this prompt (its moderation)"
     if status == "expired":
         return "Civitai gave up on the picture (expired)"
@@ -757,10 +761,12 @@ def _civitai_images(wf: dict) -> list[dict]:
     rows = [i for i in imgs if isinstance(i, dict)] if isinstance(imgs, list) else []
     if not rows:
         raise image_jobs.ImageJobError("Civitai returned no picture")
-    for i in rows:
-        if i.get("blockedReason"):
-            raise image_jobs.ImageJobError("Civitai refused this prompt (its moderation)")
-    return rows
+    # Civitai moderates per picture: one blocked picture in a batch of four must not
+    # throw away the three the Buzz already paid for. Only an all-blocked batch is a refusal.
+    kept = [i for i in rows if not i.get("blockedReason")]
+    if not kept:
+        raise image_jobs.ImageJobError("Civitai refused this prompt (its moderation)")
+    return kept
 
 
 async def _civitai_post(client: httpx.AsyncClient, url: str, body: dict,

@@ -189,6 +189,25 @@ async def test_image_level_block():
         await ip.generate_batch(res(), spec())
 
 
+async def test_workflow_level_blocked_reason_is_moderation_whatever_it_says():
+    # The real verdict arrives as a blockedReason KEY; its value is a code, not the word "blocked".
+    Fake(router(lambda r: httpx.Response(200, json=wf("failed", blockedReason="sexual-minor"))))
+    with pytest.raises(image_jobs.ImageJobError, match="refused this prompt"):
+        await ip.generate_batch(res(), spec())
+
+
+async def test_one_blocked_picture_keeps_the_rest_of_the_batch():
+    # Buzz was spent on all four; one moderated picture must not throw away the other three.
+    doc = wf()
+    imgs = doc["steps"][0]["output"]["images"]
+    imgs.append({"available": True, "url": "https://blob.civitai.com/b.png"})
+    imgs.append({"available": False, "blockedReason": "nsfw"})
+    f = Fake(router(lambda r: httpx.Response(200, json=doc)))
+    blobs = await ip.generate_batch(res(), spec(), n=3)
+    assert len(blobs) == 2
+    assert [r.url.path for r in f.of("GET") if r.url.host == "blob.civitai.com"] == ["/a.png", "/b.png"]
+
+
 # 6 ---------------------------------------------------------------- http errors
 async def test_http_errors():
     Fake(router(lambda r: httpx.Response(

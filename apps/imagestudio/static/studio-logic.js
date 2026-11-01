@@ -122,6 +122,14 @@ export function estimateKey(form) {
   return JSON.stringify([form.provider, String(form.model || '').trim(), form.ratio || '1:1', form.n, prompt]);
 }
 
+/** The model name a result tile shows: the provider's friendly name for a model id when it
+ *  has one (Civitai's AIRs read as "Juggernaut XL (Ragnarok)"), else the id as stored. */
+export function modelLabel(r, providers = []) {
+  const p = (providers || []).find((x) => x && x.id === r.provider);
+  const names = (p && p.model_names) || {};
+  return (r.model && names[r.model]) || r.model || '';
+}
+
 /** The note shown for a metered provider. */
 export function isMetered(provider) {
   return !!(provider && provider.price_note);

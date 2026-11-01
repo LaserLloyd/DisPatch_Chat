@@ -20,8 +20,8 @@ import {
   PROMPT_MAX, isGenerateShortcut, shortcutLabel, promptStatus, canGenerate, clampCount,
   buildRequest, cropRect, defaultCropPos, galleryItems, isMetered,
   SORTS, normalizeSort, sortRows, canStartAnother, SHORTCUT_DEBOUNCE_MS,
-  DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata, DELETE_SCOPE_LABELS, estimateKey,
-} from './studio-logic.js?v=6';
+  DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata, DELETE_SCOPE_LABELS, estimateKey, modelLabel,
+} from './studio-logic.js?v=7';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
 export const API = '/api/apps/imagestudio';
@@ -134,7 +134,12 @@ function scheduleEstimate() {
       const body = buildRequest(form, caps());
       const r = await api(`${API}/estimate`, { method: 'POST', body });
       text = t(r.n === 1 ? 'cost.estimate_one' : 'cost.estimate_other', { buzz: r.buzz, n: r.n });
-    } catch { text = t('cost.estimate_failed'); }
+    } catch (e) {
+      // The server's own sentence when it gave one (a refused prompt, a model that is not a
+      // checkpoint, Civitai's "not enough Buzz"): the same words Generate would answer with.
+      const detail = e && e.body && typeof e.body.detail === 'string' ? e.body.detail : '';
+      text = detail || t('cost.estimate_failed');
+    }
     if (seq !== S.estSeq) return;
     S.estText = text; R.est.textContent = text; R.est.hidden = false;
   }, 600);
@@ -246,7 +251,7 @@ async function openChatPicker() {
 // ---------------------------------------------------------------- results
 
 function tileMeta(r) {
-  const bits = [r.model, r.ratio];
+  const bits = [modelLabel(r, (S.info && S.info.providers) || []), r.ratio];
   if (r.seed != null) bits.push(t('tile.seed', { n: r.seed }));
   if (r.reference) bits.push(t('tile.ref_used'));
   return bits.filter(Boolean).join(' · ');

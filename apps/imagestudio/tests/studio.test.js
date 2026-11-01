@@ -695,7 +695,7 @@ test('civitai: model names label the datalist, seed shown, optimizer/reference h
 
 test('civitai: the estimate line follows one debounced call per change and a failure never blocks Generate', { skip: dom.skip }, async () => {
   let fail = false;
-  const env = await page({ state: CSTATE, extra: { 'POST /api/apps/imagestudio/estimate': () => (fail ? [502, { detail: 'x' }] : [200, { buzz: 14, n: 1 }]) } });
+  const env = await page({ state: CSTATE, extra: { 'POST /api/apps/imagestudio/estimate': () => (fail === 'detail' ? [422, { detail: 'Paste a Civitai checkpoint link or AIR' }] : fail ? [502, {}] : [200, { buzz: 14, n: 1 }]) } });
   const { doc, win } = env;
   const est = () => env.calls.filter((c) => c.key === 'POST /api/apps/imagestudio/estimate').length;
   const prompt = doc.getElementById('st-prompt');
@@ -708,6 +708,10 @@ test('civitai: the estimate line follows one debounced call per change and a fai
   assert.equal(est(), 1, 'same form, no new call');
   fail = true; type('a fox again'); await sleep(750); await flush();
   assert.equal(doc.querySelector('.st-estimate').textContent, EN['cost.estimate_failed']);
+  assert.equal(doc.getElementById('st-generate').disabled, false);
+  // A refusal with a sentence (a bad model, a refused prompt) shows the server's own words.
+  fail = 'detail'; type('a fox once more'); await sleep(750); await flush();
+  assert.equal(doc.querySelector('.st-estimate').textContent, 'Paste a Civitai checkpoint link or AIR');
   assert.equal(doc.getElementById('st-generate').disabled, false);
 });
 

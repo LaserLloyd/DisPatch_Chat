@@ -149,6 +149,15 @@ test('sendMetadata carries the prompt, model, seed and the optimizer flag into t
   assert.ok(!('optimizer' in sendMetadata({ ...r, optimizer: false })));
 });
 
+test('modelLabel: the provider\'s friendly name for a known model id, else the id', async () => {
+  const { modelLabel } = await import('../static/studio-logic.js');
+  const providers = [{ id: 'civitai', model_names: { 'urn:air:sdxl:checkpoint:civitai:1@2': 'Juggernaut XL' } }, { id: 'minimax' }];
+  assert.equal(modelLabel({ provider: 'civitai', model: 'urn:air:sdxl:checkpoint:civitai:1@2' }, providers), 'Juggernaut XL');
+  assert.equal(modelLabel({ provider: 'civitai', model: 'urn:air:sdxl:checkpoint:civitai:9@9' }, providers), 'urn:air:sdxl:checkpoint:civitai:9@9');
+  assert.equal(modelLabel({ provider: 'minimax', model: 'image-01' }, providers), 'image-01');
+  assert.equal(modelLabel({ provider: 'minimax' }, undefined), '');
+});
+
 test('estimateKey: blank without a prompt or provider, stable for the same form, new when anything changes', async () => {
   const { estimateKey } = await import('../static/studio-logic.js');
   const f = { prompt: ' a fox ', provider: 'civitai', model: 'm', ratio: '1:1', n: 2 };
