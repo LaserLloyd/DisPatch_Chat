@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { blankNonCode } from './_source-scan.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -37,7 +37,7 @@ const KEY = /^[a-z][a-z0-9]*(?:\.[a-z0-9_]+)+$/;
 const used = new Map(); // key -> where
 const prefixes = []; // template-literal prefixes
 for (const { f, text } of sources) {
-  const name = f.split('/').pop();
+  const name = basename(f); // not split('/'): Windows paths use backslashes
   if (name === 'settings_schema.js') continue; // server setting ids, not label keys
   // every quoted literal that is shaped like a key in a real namespace (resolves map values)
   for (const m of text.matchAll(/(['"`])([a-z][a-z0-9]*(?:\.[a-z0-9_]+)+)\1/g)) {
