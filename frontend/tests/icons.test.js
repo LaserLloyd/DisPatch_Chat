@@ -94,14 +94,14 @@ test('the CSP allows same-origin images and no third-party icon host', () => {
 });
 
 // A home-screen icon is captured at install time and re-read only when its URL changes,
-// so the app-icon URLs carry a ?v= that moves with the artwork (2 = the 4.0 "D" mark).
+// so the app-icon URLs carry a ?v= that moves with the artwork (2 = the 4.0 "D" mark; 3 = re-pushed after installed apps kept the pufferfish).
 test('the install icons are versioned and precached; the manifest id never moves', () => {
   const wm = JSON.parse(read('manifest.webmanifest'));
   assert.equal(wm.id, '/?source=pwa');
-  for (const icon of wm.icons) assert.match(icon.src, /^\/static\/[\w.-]+\?v=2$/, icon.src);
+  for (const icon of wm.icons) assert.match(icon.src, /^\/static\/[\w.-]+\?v=3$/, icon.src);
   const html = read('index.html');
-  assert.match(html, /<link rel="apple-touch-icon" href="\/static\/apple-touch-icon\.png\?v=2" \/>/);
-  assert.match(html, /<link rel="icon" href="\/static\/favicon\.svg\?v=2" \/>/);
+  assert.match(html, /<link rel="apple-touch-icon" href="\/static\/apple-touch-icon\.png\?v=3" \/>/);
+  assert.match(html, /<link rel="icon" href="\/static\/favicon\.svg\?v=3" \/>/);
   const sw = read('sw.js');
   for (const f of ['favicon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png']) {
     assert.ok(sw.includes(`'/static/${f}'`), `sw.js SHELL lacks ${f}`);

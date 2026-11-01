@@ -139,12 +139,12 @@
       if (m) m.setAttribute('content', lang);
     })();
   </script>
-  <link rel="icon" href="/static/favicon.svg?v=2" />
+  <link rel="icon" href="/static/favicon.svg?v=3" />
   <link rel="manifest" href="/static/manifest.webmanifest" />
   <!-- iOS "Add to Home Screen": a full-bleed 180 px square (iOS rounds it itself).
        ?v= on every icon URL (and in the manifest): a home-screen icon is captured at
        install time and only re-read when its URL changes - bump them with the artwork. -->
-  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=2" />
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=3" />
   <!-- The runtime and its fallback dictionary are on the critical path: main.js
        awaits i18nInit() before the first render, so fetching them only when the
        import graph resolves would add a serial round-trip behind the boot veil.
