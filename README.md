@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/hero.svg" alt="DisPatch Chat: a self-hosted chat app for your household and your AI. MIT-licensed, one process, one SQLite file, no cloud." width="100%" />
+<img src="docs/assets/hero.svg" alt="DisPatch Chat: a self-hosted chat app for your household and your AI. MIT-0 licensed, one process, one SQLite file, no cloud." width="100%" />
 
 **Your own AI, in a chat app the whole family can use.**
 
@@ -918,7 +918,7 @@ install's PIN and history is in [docs/security.md](docs/security.md#upgrading-to
 - **Local viewer, image jobs, checklist tables, calmer message rows**, and
   machine notices that collapse to one muted line.
 - **Removed:** the coding-terminal pane. The
-  licence is **MIT** (it was AGPL-3.0 before 2026-08-30).
+  licence is **MIT-0** (MIT from 2026-08-30, MIT-0 from the 4.3.0 release; it was AGPL-3.0 before).
 
 ## Why there are roles
 
@@ -1117,10 +1117,11 @@ Translation contributions are very welcome and are the easiest way to help.
 
 ## License
 
-Copyright (c) 2026 Laser Lloyd. <!-- scrub-ok: the copyright holder is named on purpose — MIT is meaningless without an attributable notice, and this line mirrors LICENSE. -->
+Copyright 2026 Laser Lloyd. <!-- scrub-ok: the copyright holder is named on purpose — this line mirrors the notice in LICENSE. -->
 
-[MIT](LICENSE). You can run, modify, share and sell this freely — keep the
-copyright notice and the licence text with it, and it comes with no warranty.
+MIT No Attribution ([MIT-0](LICENSE)). You don't need to credit this project — but if you do, a link back is appreciated.
+You can run, modify, share and sell it freely, with no notice to keep, and it comes with no warranty.
+Earlier releases were MIT.
 
 The vendored third-party libraries in `frontend/static/vendor/` keep their own
 licences (MIT, BSD-3-Clause, Apache-2.0/MPL-2.0) — inventory and full licence

@@ -2,7 +2,7 @@
 //
 // This is not decoration. Every family device on :8765 uses this program over
 // the network and never sees the repository, so the app itself is the only
-// place that can tell them what they are running and where its source is. MIT
+// place that can tell them what they are running and where its source is. MIT-0
 // does not oblige the offer — it is made because a user of a program should be
 // able to find out what it is. It lives in a settings pane every profile can
 // open, including Basic, so it reaches every user and not just the operator.
@@ -59,7 +59,7 @@ export function aboutRow(t) {
   licence.className = 'about-line muted';
   licence.setAttribute('data-i18n', 'about.license');
   licence.textContent = t ? t('about.license')
-                         : 'Free software under the MIT licence.';
+                         : 'Free software under the MIT No Attribution licence (MIT-0).';
 
   const link = document.createElement('a');
   link.className = 'about-source';

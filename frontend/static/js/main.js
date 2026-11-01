@@ -44,7 +44,7 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=25';
 import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=5';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=25';
+} from './ext-sdk.js?v=26';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
 import {
   maybeShowSignInNotice, armSignInNotice, paintDisclosure, showLandingBanner, landingText, maybeShowPasswordCard,
@@ -58,8 +58,8 @@ import { renderStorageCard, renderRetentionCard } from './storage-card.js?v=2';
 import { renderOidcCard, linkButtonFor as oidcLinkButtonFor, defaultRequest as oidcRequest } from './oidc-settings.js?v=2';
 import { installExpiredImages } from './media-expired.js?v=1';
 import { activeLayout, applyLayout, moveItem, saveLayout, wireRailDrag, openArrangeDialog } from './railmenu.js?v=5';
-import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=22';
-import { mountPluginsSettings } from './plugins.js?v=23';
+import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=23';
+import { mountPluginsSettings } from './plugins.js?v=24';
 import { addBotRow } from './bots-edit.js?v=8';
 // 3.0 (W5): connections, the schema-driven settings page, character details + starter packs, the
 // first-run wizard. Their REST calls live in w5-api.js (api.js is imported at one ?v= by too many
@@ -102,7 +102,7 @@ import {
 // same closeAllOverlays route). main.js only decides WHEN it may open: host paths
 // are an Admin surface, so refuse() is a live callback ("not an Admin") rather than a boolean.
 import { openViewer, installViewerHandlers, closeViewer, viewerOpen } from './viewer.js?v=11';
-import { aboutRow } from './about.js?v=26';
+import { aboutRow } from './about.js?v=27';
 // Profiles (Admin / User / Basic): pure decisions (profiles.js), the sign-in /
 // setup DOM (signin.js) and Settings -> People (people.js).
 import { newChatAllowed, pickNewChatTarget, latestByBot, currentCharacter, reusableEmptyThread, readLastCharacter, rememberCharacter } from './newchat.js?v=4';

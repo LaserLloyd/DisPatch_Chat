@@ -1,6 +1,6 @@
 # Third-party notices
 
-DisPatch Chat is MIT-licensed (see `LICENSE`).
+DisPatch Chat is licensed MIT No Attribution (MIT-0, see `LICENSE`).
 
 The vendored frontend libraries are inventoried, with their licence texts, in
 [frontend/static/vendor/README.md](frontend/static/vendor/README.md). The
@@ -26,7 +26,7 @@ DisPatch's own overlay for it is `frontend/overlays/dispatch-extra.css`.
 **Default avatar.** The Atlas avatar in `backend/app/default_avatars/` was
 generated with MiniMax image-01. MiniMax's terms leave rights in the output
 with the user while MiniMax keeps a service licence, and AI-generated images
-may not be copyrightable. It is distributed with DisPatch under the MIT
+may not be copyrightable. It is distributed with DisPatch under the MIT-0
 licence; see that folder's `README.md`. The Animal Friends pictures in
 `backend/app/starter_packs/pictures/` (24 PNGs) were generated the same way,
 with MiniMax image-01, under the same terms.

@@ -8,4 +8,4 @@ directory's `avatars/` folder. An existing file is never overwritten.
 Provenance: generated with MiniMax image-01 (AI-generated; MiniMax's terms
 leave output rights with the user while MiniMax keeps a service licence;
 AI-generated images may not be copyrightable). The face crop and the thumbnail
-were made with the author's tooling. Distributed under the repo's MIT licence.
+were made with the author's tooling. Distributed under the repo's MIT-0 licence.

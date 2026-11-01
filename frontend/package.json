@@ -1,6 +1,6 @@
 {
   "private": true,
-  "license": "MIT",
+  "license": "MIT-0",
   "type": "module",
   "//": "Not a build step - DisPatch ships vanilla ES modules with no bundler, and that is deliberate. This file exists so `node --test frontend/tests/` can import those same modules directly instead of a copy: without it node resolves .js as CommonJS and the import fails. The node suites' devDependency is jsdom, which several suites need to exercise the DOM half of the app; without it those tests SKIP, and a skipped security test is not a passing one - see CI_REQUIRE_DOM below. The shipped app still installs nothing.",
   "scripts": {

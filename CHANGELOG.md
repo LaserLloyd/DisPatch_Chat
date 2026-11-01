@@ -14,6 +14,10 @@ backends, outside sign-in (OpenID Connect), and the old Settings roster removed.
 backend/app/guide/whats-new-4.3.0.md. **Upgrade notes** are at the end of this entry; two of them change what a
 second Admin or an unattended agent can do.
 
+### Licence
+
+- **Relicensed to MIT No Attribution (MIT-0).** You can use, copy, change and ship DisPatch with no conditions; no copyright notice has to be kept. You don't need to credit this project — but if you do, a link back is appreciated. `LICENSE`, `backend/pyproject.toml` (`MIT-0` + trove classifier), `frontend/package.json`, the Docker image label, the README, the About row and its eight locale strings, and the built-in tool panels' manifests say so. Earlier releases were MIT. The vendored libraries, the Windows installer's bundled uv licences and the DisPatch Voice add-on keep their own licences.
+
 ### Security
 
 - **Host allow-list against DNS rebinding.** A request whose `Host` names neither this computer (loopback,

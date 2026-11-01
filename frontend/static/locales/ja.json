@@ -889,7 +889,7 @@
   "about": {
     "title": "このアプリについて",
     "version": "DisPatch Chat {version}",
-    "license": "MIT ライセンスのもとで公開されているフリーソフトウェアです。",
+    "license": "MIT No Attribution（MIT-0）ライセンスのもとで公開されているフリーソフトウェアです。",
     "source": "ソースコード"
   },
   "dash": {

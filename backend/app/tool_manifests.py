@@ -211,7 +211,7 @@ def _extension_manifest(e: extensions.Extension) -> dict:
         "kind": "extension", "description": (e.detail or "")[:400] if e.state != "ok" else "",
         "entry": f"dispatch.extensions:{e.id}", "permission": "use_voice" if e.id == "voice" else "use_tools",
         "api_version": int(e.api[0]) if e.api and e.api[0] else 1,
-        "network": [], "license": "MIT", "settings": [],
+        "network": [], "license": "MIT-0", "settings": [],
         "publisher": "", "permissions_requested": req, "min_app_version": None,
     }
 
@@ -227,7 +227,7 @@ def _app_manifest(m: apps_loader.Manifest) -> dict:
     return {
         "id": m.id, "name": m.title[:80], "version": _semver(__version__) if m.source == "repo" else "0.0.0",
         "kind": "app", "description": "", "entry": f"apps/{m.id}/backend.py", "permission": m.permission,
-        "api_version": 1, "network": [], "license": "MIT",
+        "api_version": 1, "network": [], "license": "MIT-0",
         "settings": fragment, "publisher": "DisPatch" if m.source == "repo" else "",
         "permissions_requested": req, "min_app_version": None,
     }
@@ -244,14 +244,14 @@ def _tool_row_manifest(t: tools.Tool) -> dict | None:
     if t.kind == "static":
         return {"id": _slug(t.id), "name": (t.title or t.id)[:80], "version": "0.0.0", "kind": "static",
                 "description": "", "entry": t.entry, "permission": "use_tools",
-                "api_version": 1, "network": [], "license": "MIT", "settings": [], "publisher": "",
+                "api_version": 1, "network": [], "license": "MIT-0", "settings": [], "publisher": "",
                 "permissions_requested": ["ui"], "min_app_version": None}
     if t.kind == "url":
         from urllib.parse import urlparse
         host = urlparse(t.url or "").hostname or ""
         return {"id": _slug(t.id), "name": (t.title or t.id)[:80], "version": "0.0.0", "kind": "url",
                 "description": "", "entry": t.url, "permission": "use_tools",
-                "api_version": 1, "network": [host] if host else [], "license": "MIT", "settings": [],
+                "api_version": 1, "network": [host] if host else [], "license": "MIT-0", "settings": [],
                 "publisher": "", "permissions_requested": [f"network:{host}"] if host else [],
                 "min_app_version": None}
     return None

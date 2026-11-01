@@ -905,7 +905,7 @@
   "about": {
     "title": "About",
     "version": "DisPatch Chat {version}",
-    "license": "Free software under the MIT licence.",
+    "license": "Free software under the MIT No Attribution licence (MIT-0).",
     "source": "Source code"
   },
   "dash": {
