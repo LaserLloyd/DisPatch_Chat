@@ -175,7 +175,7 @@ def test_i8_a_personal_id_in_household_bots():
 
 
 def test_every_invariant_has_a_test_and_a_statement():
-    assert set(invariants.INVARIANTS) == {f"I{i}" for i in range(1, 13)}
+    assert set(invariants.INVARIANTS) == {f"I{i}" for i in range(1, 14)}
 
 
 def test_the_report_carries_ids_and_counts_only():
@@ -270,7 +270,7 @@ def test_the_route_answers_an_admin_and_a_machine_with_the_scope_only(hh):
     assert r.status_code == 200, r.text
     body = r.json()
     assert set(body) >= {"ok", "count", "by_invariant", "invariants", "violations", "sync_pending"}
-    assert set(body["by_invariant"]) == {f"I{i}" for i in range(1, 13)}
+    assert set(body["by_invariant"]) == {f"I{i}" for i in range(1, 14)}
     assert hh.uma.get("/api/health/invariants").status_code == 403
     assert hh.machine.get("/api/health/invariants").status_code == 200       # default scopes: all of them
     cfg = auth.load()

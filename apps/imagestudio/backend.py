@@ -52,7 +52,8 @@ pictures only.
 
 COST
 ----
-One accepted request is one provider call. Nothing here retries, warms up or
+One accepted request is one provider call (Civitai: one submit, polled to completion under a
+single deadline; ``/estimate`` is a free dry-run price in Buzz and makes no picture). Nothing here retries, warms up or
 runs on a schedule; a second Generate while one is running is refused (409).
 """
 from __future__ import annotations
@@ -74,7 +75,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app import image_guard, image_jobs, image_providers
+from app import image_access, image_guard, image_jobs, image_providers
 
 log = logging.getLogger("local-chat.app.imagestudio")
 
@@ -89,7 +90,16 @@ MODEL_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}\Z")
 MEDIA_URL_RE = re.compile(r"\A/media/([A-Za-z0-9][A-Za-z0-9._-]{0,127})\Z")
 _MEDIA_IN_TEXT = re.compile(r"/media/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(?:png|jpe?g|webp|gif)", re.IGNORECASE)
 IMAGE_ID_RE = re.compile(r"\A[0-9a-f]{32}\Z")
-KNOWN_MODELS = {"minimax": ["image-01", "image-01-live"]}
+#: Civitai's default checkpoints (a datalist, not a lock: any SDXL checkpoint link or AIR works).
+CIVITAI_MODEL_NAMES = {
+    "urn:air:sdxl:checkpoint:civitai:133005@1759168": "Juggernaut XL (Ragnarok)",
+    "urn:air:sdxl:checkpoint:civitai:139562@789646": "RealVisXL V5.0",
+    "urn:air:sdxl:checkpoint:civitai:257749@290640": "Pony Diffusion V6 XL",
+    "urn:air:sdxl:checkpoint:civitai:827184@2883731": "WAI-illustrious-SDXL v17",
+}
+KNOWN_MODELS = {"minimax": ["image-01", "image-01-live"], "civitai": list(CIVITAI_MODEL_NAMES)}
+NOT_ALLOWED = ("Your profile type can't use {label}. Ask an Admin "
+               "(Settings → AI & Connections → Image generation).")
 
 #: Guards the ledger file (append in _store, rewrite in clear); never held across a provider call.
 _lock = threading.Lock()
@@ -242,10 +252,11 @@ def _cfg_for(preset_id: str, model: str = "") -> dict:
     the same host, via ``resolve``'s shared-key rule). The key stays inside
     ``resolve``."""
     stored = image_providers.load_config()
-    if image_providers.provider_id(stored) == preset_id:
+    preset = image_providers.PRESET_BY_ID[preset_id]
+    if image_providers.provider_id(stored) == preset_id and not preset.studio_only:
         cfg = dict(stored)
     else:
-        preset = image_providers.PRESET_BY_ID[preset_id]
+        # A studio-only preset never reads image.yaml (its key is its own).
         cfg = {"provider": preset_id, "api_key_env": preset.key_env}
     if model:
         cfg["model"] = model
@@ -254,14 +265,17 @@ def _cfg_for(preset_id: str, model: str = "") -> dict:
 
 def _resolved(preset_id: str, model: str = "") -> image_providers.Resolved | None:
     try:
-        return image_providers.resolve(_cfg_for(preset_id, model))
+        return image_providers.resolve(_cfg_for(preset_id, model), studio=True)
     except image_jobs.ImageJobError:
         return None
 
 
-def _provider_rows() -> tuple[list[dict], str]:
+def _provider_rows(principal=None) -> tuple[list[dict], str]:
+    """The providers ``principal`` may use (the access matrix), and the default among them."""
     rows: list[dict] = []
     for preset in image_providers.PRESETS:
+        if principal is not None and not image_access.allows(principal, preset.access):
+            continue
         res = _resolved(preset.id)
         row: dict[str, Any] = {
             "id": preset.id, "label": preset.label, "shape": preset.shape,
@@ -269,10 +283,13 @@ def _provider_rows() -> tuple[list[dict], str]:
             "model": res.model if res else preset.model,
             "models": KNOWN_MODELS.get(preset.id, []),
         }
+        if preset.shape == "civitai":
+            row["estimate"] = True
+            row["model_names"] = dict(CIVITAI_MODEL_NAMES)
         row["supports"] = (image_providers.supports(res) if res else
                            {"reference": preset.shape == "minimax",
                             "optimizer": preset.shape == "minimax",
-                            "seed": preset.shape == "minimax",
+                            "seed": preset.shape in ("minimax", "civitai"),
                             "max_n": image_providers.MAX_BATCH.get(preset.shape, 1)})
         rows.append(row)
     stored = image_providers.provider_id(image_providers.load_config())
@@ -421,6 +438,60 @@ def _rewrite_ledger(rows: list[dict]) -> None:
     os.replace(tmp, _ledger())
 
 
+def _check_prompt(raw: str) -> str:
+    """The trimmed prompt, or an HTTPException: empty / too long / a hard-line refusal.
+    Runs before any provider or key lookup so a refusal never reaches a metered API
+    (adult-only; no sexual imagery of real people), with the chat path's own message."""
+    prompt = raw.strip()
+    if not prompt:
+        raise HTTPException(422, "Write a prompt first")
+    if len(prompt) > PROMPT_MAX:
+        raise HTTPException(
+            422, f"The prompt is {len(prompt)} characters; the limit is {PROMPT_MAX}")
+    try:
+        image_guard.check_prompt(prompt)
+    except image_guard.ImageGuardError as e:
+        raise HTTPException(422, e.message) from None
+    return prompt
+
+
+async def _pick(body, request: Request) -> tuple[str, image_providers.Resolved, str]:
+    """Provider, access check, model and key for a Generate / Estimate request:
+    ``(provider id, resolved call, ratio)`` or an HTTPException."""
+    from app import policy
+    principal = policy.of(request).principal
+    providers, default = _provider_rows(principal)
+    pid = (body.provider or default).strip().lower()
+    if not pid:
+        if not providers:
+            raise HTTPException(403, "Your profile type can't use the image generators here. Ask an Admin.")
+        raise HTTPException(
+            409, "No image provider has an API key yet (Settings → AI & Connections → Image generation)")
+    preset = image_providers.PRESET_BY_ID.get(pid)
+    if preset is None:
+        raise HTTPException(422, "Unknown image provider")
+    if not image_access.allows(principal, preset.access):
+        raise HTTPException(403, NOT_ALLOWED.format(label=preset.label))
+    model = body.model.strip()
+    if preset.shape == "civitai":
+        try:
+            model = await image_providers.civitai_model(model or preset.model)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+    elif model and not MODEL_RE.match(model):
+        raise HTTPException(422, "That model name is not valid")
+    ratio = body.ratio.strip()
+    if ratio and not image_jobs._RATIO_RE.match(ratio):
+        # ImageSpec would raise ValueError later -- a 500, not a 422.
+        raise HTTPException(422, "The aspect ratio must look like 16:9")
+    res = _resolved(pid, model)
+    if res is None:
+        raise HTTPException(
+            409, "That provider has no API key yet (Settings → AI & Connections → Image generation)")
+    return pid, res, ratio
+
+
+
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
@@ -434,7 +505,7 @@ def build(ctx):
     @router.get("/state", dependencies=op)
     async def state(request: Request):
         from app import policy
-        providers, default = _provider_rows()
+        providers, default = _provider_rows(policy.of(request).principal)
         rows = _mine(await asyncio.to_thread(_read_ledger), request)
         days: dict[str, int] = {}
         for r in rows:
@@ -442,6 +513,9 @@ def build(ctx):
         recent_days = [{"day": d, "count": c} for d, c in sorted(days.items(), reverse=True)[:7]]
         return {
             "providers": providers, "default": default,
+            # True only when the who-may-make-pictures matrix removed every provider
+            # (not when keys are merely missing).
+            "blocked": not providers,
             "ratios": list(image_providers.MINIMAX_RATIOS),
             "prompt_max": PROMPT_MAX,
             "today": _today(), "today_count": days.get(_today(), 0),
@@ -466,37 +540,8 @@ def build(ctx):
 
     @router.post("/generate", dependencies=op)
     async def generate(body: GenerateIn, request: Request):
-        prompt = body.prompt.strip()
-        if not prompt:
-            raise HTTPException(422, "Write a prompt first")
-        if len(prompt) > PROMPT_MAX:
-            raise HTTPException(
-                422, f"The prompt is {len(prompt)} characters; the limit is {PROMPT_MAX}")
-        # Hard lines (adult-only; no sexual imagery of real people). Checked
-        # before any provider or key lookup so a refusal never reaches a
-        # metered API and is the same message the chat path gives.
-        try:
-            image_guard.check_prompt(prompt)
-        except image_guard.ImageGuardError as e:
-            raise HTTPException(422, e.message) from None
-        _providers, default = _provider_rows()
-        pid = (body.provider or default).strip().lower()
-        if not pid:
-            raise HTTPException(
-                409, "No image provider has an API key yet (Settings → AI & Connections → Image generation)")
-        if pid not in image_providers.PRESET_BY_ID:
-            raise HTTPException(422, "Unknown image provider")
-        model = body.model.strip()
-        if model and not MODEL_RE.match(model):
-            raise HTTPException(422, "That model name is not valid")
-        ratio = body.ratio.strip()
-        if ratio and not image_jobs._RATIO_RE.match(ratio):
-            # ImageSpec would raise ValueError below -- a 500, not a 422.
-            raise HTTPException(422, "The aspect ratio must look like 16:9")
-        res = _resolved(pid, model)
-        if res is None:
-            raise HTTPException(
-                409, "That provider has no API key yet (Settings → AI & Connections → Image generation)")
+        prompt = _check_prompt(body.prompt)
+        pid, res, ratio = await _pick(body, request)
         caps = image_providers.supports(res)
         n = min(body.n, caps["max_n"])
         wants_ref = bool(body.reference)
@@ -524,6 +569,22 @@ def build(ctx):
         finally:
             _free_slot(owner)
         return {"images": [_public_row(r) for r in rows], "asked": n}
+
+    @router.post("/estimate", dependencies=op)
+    async def estimate(body: GenerateIn, request: Request):
+        """Civitai's own Buzz price for a Generate body. Information only: no slot, no
+        ledger row, no file; the same guard and access checks as /generate."""
+        prompt = _check_prompt(body.prompt)
+        pid, res, ratio = await _pick(body, request)
+        if res.preset.shape != "civitai":
+            raise HTTPException(422, "No estimate for this provider")
+        n = min(body.n, image_providers.supports(res)["max_n"])
+        spec = image_jobs.ImageSpec(prompt=prompt, ratio=ratio, backend="api")
+        try:
+            buzz = await image_providers.estimate_civitai(res, spec, n=n)
+        except image_jobs.ImageJobError as e:
+            raise HTTPException(502, e.message) from None
+        return {"buzz": buzz, "n": n}
 
     @router.post("/clear", dependencies=op)
     async def clear(body: ClearIn, request: Request):

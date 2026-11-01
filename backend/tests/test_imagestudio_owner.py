@@ -124,6 +124,9 @@ def test_basic_needs_use_images_and_then_sees_only_its_own(studio):
     assert bea.get(BASE + "/state").status_code == 403
     assert bea.post(f"{BASE}/generate", json={"prompt": "x", "ratio": "1:1"}).status_code == 403
     accounts.update_profile(bea_id, grants=["use_images"])
+    # The Civitai round's matrix: a Basic profile also needs "standard generators" switched on.
+    from app import image_access, settings_store
+    settings_store.set_many({image_access.setting_key("standard", "basic"): True})
     uma, _ = studio["Uma"]
     _make(uma, "SENT-UMA-B")
     r = bea.get(BASE + "/state")

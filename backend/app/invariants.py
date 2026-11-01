@@ -1,4 +1,4 @@
-"""The data invariants: I1-I8 of the 4.2 ownership model (PLAN-v2 section 7), I9-I12 from 4.3.
+"""The data invariants: I1-I8 of the 4.2 ownership model (PLAN-v2 section 7), I9-I12 from 4.3, I13 (Civitai).
 
 One owner per bot, live templates, no profile sharing a bot or a chat with another. The rules
 are enforced where bots and copies are made; this module is the second line: it reads the
@@ -25,6 +25,7 @@ I10    (4.3) every enabled agent schedule names a live owner profile and an agen
 I11    (4.3) every OIDC link names a live profile; the protected Admin keeps a local credential
 I12    (4.3) the default profile (when the lock lands on one) exists, is enabled, is not an Admin
        and has no PIN or password
+I13    (Civitai) the default image provider is never a studio-only generator
 =====  =========================================================================================
 
 ``check()`` is the whole thing; :func:`run_at_start` logs and audits what it finds (the server
@@ -55,6 +56,7 @@ INVARIANTS: dict[str, str] = {
     "I10": "every enabled schedule names a live owner profile and an agent it may use",
     "I11": "every sign-in link names a live profile; the protected Admin keeps a local credential",
     "I12": "the default profile is enabled, not an Admin, and has no PIN or password",
+    "I13": "the default image provider is never a studio-only generator",
 }
 
 
@@ -413,15 +415,28 @@ def _i12(w: World) -> list[Violation]:
 # ---- 4.3 Fable I12 end
 
 
-_CHECKS = (_i1, _i2, _i3, _i4, _i5, _i6, _i7, _i8, _i9, _i10, _i11, _i12)
+# ---- Civitai I13 begin
+def _i13(w: World) -> list[Violation]:
+    """image.yaml (hand-edited or restored) names a studio-only provider (Civitai) as the
+    default picture maker. The save routes refuse it; chat pictures must never reach it."""
+    from . import image_providers
+    pid = image_providers.provider_id(image_providers.load_config())
+    preset = image_providers.PRESET_BY_ID.get(pid)
+    if preset is not None and preset.studio_only:
+        return [Violation("I13", "image.yaml", "the default picture maker names a studio-only provider")]
+    return []
+# ---- Civitai I13 end
+
+
+_CHECKS = (_i1, _i2, _i3, _i4, _i5, _i6, _i7, _i8, _i9, _i10, _i11, _i12, _i13)
 
 
 def check(world: World | None = None, *, sync_pending: bool = False) -> list[Violation]:
-    """Every violation of I1-I12 in ``world`` (default: the live data), in invariant order."""
+    """Every violation of I1-I13 in ``world`` (default: the live data), in invariant order."""
     w = world if world is not None else snapshot(sync_pending=sync_pending)
     out: list[Violation] = []
     for fn in _CHECKS:
-        if fn in (_i9, _i10, _i11, _i12):
+        if fn in (_i9, _i10, _i11, _i12, _i13):
             # 4.3 checks read stores of their own; one that cannot be read reports nothing
             # rather than hiding I1-I8 (the check never raises into its caller).
             try:
@@ -451,7 +466,7 @@ def run_at_start(*, sync_pending: bool = False) -> list[Violation]:
         log.warning("the invariant check itself failed (ignored)", exc_info=True)
         return []
     if not vs:
-        log.info("invariants: I1-I12 hold")
+        log.info("invariants: I1-I13 hold")
         return vs
     for v in vs[:20]:
         log.warning("invariant %s violated: %s - %s", v.code, v.subject, v.detail)

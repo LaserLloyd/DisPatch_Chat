@@ -90,6 +90,7 @@ from . import (
     gateway_ws,
     harness,
     harness_sessions,
+    image_access,
     image_jobs,
     image_providers,
     invariants,
@@ -2684,6 +2685,26 @@ async def _thread_owner_can(thread_id: str, permission: Permission | str) -> boo
     return False
 
 
+#: The refusal when a profile type is not allowed the standard image generators.
+IMAGE_NOT_ALLOWED = "this profile type may not use the image generators (ask an Admin)"
+
+
+async def _thread_owner_may_generate(thread_id: str, generator: str) -> bool:
+    """May the OWNER of ``thread_id`` use image ``generator`` ("standard" / "civitai") under
+    the Settings matrix? (NULL owner = the protected Admin; an open install: yes; an unknown
+    thread or owner: no.)"""
+    if not policy.claimed():
+        return True
+    with contextlib.suppress(Exception):
+        exists, owner = await db.thread_owner_lookup(thread_id)
+        if not exists:
+            return False
+        pid = ownership.effective_owner(owner)
+        prof = accounts.get_profile(pid) if pid else None
+        return image_access.allows_profile(prof, generator)
+    return False
+
+
 async def _prepare_persist(
     thread_id: str, role: str, content: str,
     media_url: str | None, metadata: dict | None, created_at: str | None,
@@ -3810,6 +3831,8 @@ async def _pic_specs_from_markers(content: str, bot_id: str | None,
             backend = _choose_image_backend(bot.image_workflow)
             if not backend:
                 raise ValueError("no image generator is set up for this bot")
+            if backend == "api" and not await _thread_owner_may_generate(thread_id, "standard"):
+                raise ValueError(IMAGE_NOT_ALLOWED)
             spec = image_jobs.ImageSpec(
                 prompt=full_prompt, caption=display_caption,
                 workflow=bot.image_workflow, ratio=bot.image_ratio,
@@ -8846,7 +8869,7 @@ async def llm_test(request: Request, payload: dict = Body(...)):
 
 def _image_provider_state() -> dict:
     return {"config": image_providers.public_config(),
-            "presets": [p.public() for p in image_providers.PRESETS],
+            "presets": [p.public() for p in image_providers.DEFAULT_PRESETS],
             "clawforge": _clawforge_configured(),
             "enabled": _image_jobs_configured(),
             "flag_off": not _image_jobs_flag_allows(),
@@ -8897,6 +8920,8 @@ async def llm_image_test(request: Request, payload: dict = Body(...)):
     Metered on most providers: it is one picture, made only when the operator
     presses Test. The picture comes back inline (a data: URL the panel shows)
     and is not stored anywhere."""
+    if not image_access.allows(policy.of(request).principal, "standard"):
+        return JSONResponse({"detail": IMAGE_NOT_ALLOWED}, status_code=403)
     try:
         cfg = image_providers.merge_submission(payload)
         refused = _image_key_rules_refusal(request, payload, cfg)
@@ -11338,6 +11363,8 @@ async def image_job_create(request: Request, payload: ImageJobIn):
         backend = _choose_image_backend(workflow)
         if not backend:
             raise HTTPException(503, "No image generator is set up for this bot")
+        if backend == "api" and not await _thread_owner_may_generate(canonical, "standard"):
+            raise HTTPException(403, IMAGE_NOT_ALLOWED)
         spec = image_jobs.ImageSpec(
             # A request that names no workflow gets the bot's own default, if
             # it has one — the same rule the inline marker path uses, since a
