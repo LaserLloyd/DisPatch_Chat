@@ -111,5 +111,10 @@
   "pending.retry": "Retry",
   "pending.dismiss": "Dismiss",
   "pending.cap": "{n} pictures are already being made; wait for one to finish",
-  "details.optimizer": "optimizer on"
+  "details.optimizer": "optimizer on",
+  "model.civitai_placeholder": "Paste a Civitai checkpoint link or AIR",
+  "cost.estimate_one": "About {buzz} Buzz for {n} picture (Civitai's estimate)",
+  "cost.estimate_other": "About {buzz} Buzz for {n} pictures (Civitai's estimate)",
+  "cost.estimate_failed": "Civitai could not estimate the cost",
+  "provider.not_allowed": "Your profile type can't use the image generators here. Ask an Admin."
 }

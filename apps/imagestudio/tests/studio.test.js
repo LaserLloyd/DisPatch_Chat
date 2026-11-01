@@ -679,3 +679,42 @@ test('Fable: "no bots" points to Settings → Characters', () => {
   assert.match(EN['avatar.no_bots'], /Settings → Characters/);
   assert.doesNotMatch(EN['avatar.no_bots'], /My bots/);
 });
+
+const AIR = 'urn:air:sdxl:checkpoint:civitai:133005@1759168';
+const CIVITAI = { id: 'civitai', label: 'Civitai', shape: 'civitai', configured: true, model: AIR, models: [AIR], model_names: { [AIR]: 'Juggernaut XL' }, price_note: 'Billed in Buzz.', estimate: true, supports: { reference: false, optimizer: false, seed: true, max_n: 4 } };
+const CSTATE = { ...STATE, providers: [PROVIDERS[0], CIVITAI], default: 'civitai' };
+
+test('civitai: model names label the datalist, seed shown, optimizer/reference hidden, count max 4', { skip: dom.skip }, async () => {
+  const env = await page({ state: CSTATE });
+  const { doc } = env;
+  assert.equal(doc.querySelector('#st-models option, datalist option').getAttribute('label'), 'Juggernaut XL');
+  assert.equal(doc.getElementById('st-count').max, '4');
+  assert.equal(doc.getElementById('st-seed').closest('[hidden]'), null);
+  assert.equal(doc.getElementById('st-model').placeholder, EN['model.civitai_placeholder']);
+});
+
+test('civitai: the estimate line follows one debounced call per change and a failure never blocks Generate', { skip: dom.skip }, async () => {
+  let fail = false;
+  const env = await page({ state: CSTATE, extra: { 'POST /api/apps/imagestudio/estimate': () => (fail ? [502, { detail: 'x' }] : [200, { buzz: 14, n: 1 }]) } });
+  const { doc, win } = env;
+  const est = () => env.calls.filter((c) => c.key === 'POST /api/apps/imagestudio/estimate').length;
+  const prompt = doc.getElementById('st-prompt');
+  const type = (v) => { prompt.value = v; prompt.dispatchEvent(new win.Event('input', { bubbles: true })); };
+  type('a'); type('a f'); type('a fox');
+  await sleep(750); await flush();
+  assert.equal(est(), 1, 'typing bursts collapse to one call');
+  assert.match(doc.querySelector('.st-estimate').textContent, /About 14 Buzz for 1 picture/);
+  type('a fox'); await sleep(700);
+  assert.equal(est(), 1, 'same form, no new call');
+  fail = true; type('a fox again'); await sleep(750); await flush();
+  assert.equal(doc.querySelector('.st-estimate').textContent, EN['cost.estimate_failed']);
+  assert.equal(doc.getElementById('st-generate').disabled, false);
+});
+
+test('blocked state shows the not-allowed text and no setup button', { skip: dom.skip }, async () => {
+  const env = await page({ state: { ...STATE, providers: [], default: null, blocked: true, can_configure: true } });
+  const none = env.doc.querySelector('.st-none');
+  assert.equal(none.hidden, false);
+  assert.match(none.textContent, /can't use the image generators/);
+  assert.equal(none.querySelector('button').hidden, true);
+});

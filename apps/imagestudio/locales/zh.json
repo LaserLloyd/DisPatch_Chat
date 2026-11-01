@@ -110,5 +110,10 @@
   "pending.retry": "重试",
   "pending.dismiss": "忽略",
   "pending.cap": "已有 {n} 张图片正在生成；请等其中一张完成",
-  "details.optimizer": "已开启优化"
+  "details.optimizer": "已开启优化",
+  "model.civitai_placeholder": "粘贴 Civitai 检查点链接或 AIR",
+  "cost.estimate_one": "{n} 张图片约需 {buzz} Buzz(Civitai 的估算)",
+  "cost.estimate_other": "{n} 张图片约需 {buzz} Buzz(Civitai 的估算)",
+  "cost.estimate_failed": "Civitai 无法估算费用",
+  "provider.not_allowed": "你的个人资料类型不能在这里使用图像生成器。请联系管理员。"
 }

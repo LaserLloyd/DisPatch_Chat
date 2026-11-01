@@ -148,3 +148,12 @@ test('sendMetadata carries the prompt, model, seed and the optimizer flag into t
   assert.deepEqual(sendMetadata(r), { source: 'image-studio', image_id: 'i1', prompt: 'a fox', model: 'minimax · image-01', seed: 7, optimizer: true });
   assert.ok(!('optimizer' in sendMetadata({ ...r, optimizer: false })));
 });
+
+test('estimateKey: blank without a prompt or provider, stable for the same form, new when anything changes', async () => {
+  const { estimateKey } = await import('../static/studio-logic.js');
+  const f = { prompt: ' a fox ', provider: 'civitai', model: 'm', ratio: '1:1', n: 2 };
+  assert.equal(estimateKey({ ...f, prompt: '  ' }), '');
+  assert.equal(estimateKey({ ...f, provider: '' }), '');
+  assert.equal(estimateKey(f), estimateKey({ ...f, prompt: 'a fox' }));
+  for (const ch of [{ n: 3 }, { ratio: '16:9' }, { model: 'x' }, { prompt: 'b' }]) assert.notEqual(estimateKey({ ...f, ...ch }), estimateKey(f));
+});

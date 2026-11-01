@@ -114,6 +114,14 @@ export function galleryInfo(r, source = 'Image Studio', optimizerNote = 'optimiz
   return info;
 }
 
+/** What an estimate depends on: same key = same answer, so no new call. Blank when
+ *  there is nothing to estimate yet (no prompt, no provider). */
+export function estimateKey(form) {
+  const prompt = String(form.prompt || '').trim();
+  if (!prompt || !form.provider) return '';
+  return JSON.stringify([form.provider, String(form.model || '').trim(), form.ratio || '1:1', form.n, prompt]);
+}
+
 /** The note shown for a metered provider. */
 export function isMetered(provider) {
   return !!(provider && provider.price_note);

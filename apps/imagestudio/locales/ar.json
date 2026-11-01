@@ -115,5 +115,10 @@
   "pending.retry": "إعادة المحاولة",
   "pending.dismiss": "إغلاق",
   "pending.cap": "هناك {n} صور قيد الإنشاء بالفعل؛ انتظر حتى تنتهي إحداها",
-  "details.optimizer": "المحسّن مفعّل"
+  "details.optimizer": "المحسّن مفعّل",
+  "model.civitai_placeholder": "الصق رابط نقطة تفتيش Civitai أو AIR",
+  "cost.estimate_one": "نحو {buzz} Buzz لـ {n} صورة (تقدير Civitai)",
+  "cost.estimate_other": "نحو {buzz} Buzz لـ {n} صور (تقدير Civitai)",
+  "cost.estimate_failed": "تعذّر على Civitai تقدير التكلفة",
+  "provider.not_allowed": "نوع ملفك الشخصي لا يستطيع استخدام مولّدات الصور هنا. اطلب من مسؤول."
 }

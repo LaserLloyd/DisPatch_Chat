@@ -110,5 +110,10 @@
   "pending.retry": "再試行",
   "pending.dismiss": "閉じる",
   "pending.cap": "すでに {n} 枚を作成中です。1枚終わるまでお待ちください",
-  "details.optimizer": "最適化オン"
+  "details.optimizer": "最適化オン",
+  "model.civitai_placeholder": "Civitai のチェックポイントのリンクまたは AIR を貼り付け",
+  "cost.estimate_one": "{n} 枚で約 {buzz} Buzz(Civitai の見積もり)",
+  "cost.estimate_other": "{n} 枚で約 {buzz} Buzz(Civitai の見積もり)",
+  "cost.estimate_failed": "Civitai が費用を見積もれませんでした",
+  "provider.not_allowed": "このプロフィールの種類では、ここの画像生成を使えません。管理者に相談してください。"
 }

@@ -1,4 +1,4 @@
-"""Image generation through a standard API: OpenAI-shape and MiniMax.
+"""Image generation through a standard API: OpenAI-shape, MiniMax and Civitai.
 
 WHY THIS EXISTS
 ---------------
@@ -24,6 +24,14 @@ WIRE SHAPES
                    prompt, aspect_ratio, response_format: "base64", n: 1}`` →
                    ``data.image_base64[0]`` (or ``data.image_urls[0]``), with
                    ``base_resp.status_code`` 0 on success.
+``civitai``        ASYNC. ``POST {base}/v2/consumer/workflows?wait=55`` with
+                   one ``imageGen`` step, then ``GET .../workflows/{id}?wait=30``
+                   until a terminal status; the pictures are signed blob URLs in
+                   ``steps[0].output.images[]``. Billed in Buzz. Civitai is
+                   STUDIO-ONLY: it is never the saved default provider, so
+                   ``[[pic:]]``, ``/api/image-jobs``, the provider Test and
+                   Quick setup can never reach it (``DEFAULT_PRESETS``,
+                   ``resolve(studio=False)``).
 
 CONFIGURATION
 -------------
@@ -53,12 +61,12 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import yaml
 
-from . import config, image_jobs, llm_api
+from . import config, image_jobs, llm_api, secret_store
 
 log = logging.getLogger("local-chat.image_providers")
 
@@ -96,13 +104,18 @@ class ImagePreset:
     editable_base_url: bool = False
     key_required: bool = True
     price_note: str = ""
+    #: Which access-matrix column governs this preset: "standard" | "civitai".
+    access: str = "standard"
+    #: Usable from Image Studio only -- never the saved default provider.
+    studio_only: bool = False
 
     def public(self) -> dict:
         return {"id": self.id, "label": self.label, "shape": self.shape,
                 "base_url": self.base_url, "model": self.model,
                 "key_env": self.key_env, "docs": self.docs,
                 "editable_base_url": self.editable_base_url,
-                "key_required": self.key_required, "price_note": self.price_note}
+                "key_required": self.key_required, "price_note": self.price_note,
+                "access": self.access, "studio_only": self.studio_only}
 
 
 PRESETS: tuple[ImagePreset, ...] = (
@@ -127,8 +140,46 @@ PRESETS: tuple[ImagePreset, ...] = (
         # No price note: a custom host is often a free local server, and Image
         # Studio reads any note as "this provider is metered".
         price_note=""),
+    ImagePreset(
+        id="civitai", label="Civitai", shape="civitai",
+        base_url="https://orchestration.civitai.com",
+        model="urn:air:sdxl:checkpoint:civitai:133005@1759168",   # Juggernaut XL
+        key_env="CIVITAI_API_KEY", docs="https://civitai.com/user/account",
+        price_note="Billed in Buzz; the estimate below is Civitai's own.",
+        access="civitai", studio_only=True),
 )
 PRESET_BY_ID = {p.id: p for p in PRESETS}
+#: What may be the SAVED default provider (the ``[[pic:]]`` path). Studio-only
+#: presets are not here, so they are unrepresentable as a default.
+DEFAULT_PRESETS: tuple[ImagePreset, ...] = tuple(p for p in PRESETS if not p.studio_only)
+_DEFAULT_IDS = frozenset(p.id for p in DEFAULT_PRESETS)
+
+#: Setting that holds the Civitai key (write-only secret; env CIVITAI_API_KEY wins).
+CIVITAI_KEY_REF = "setting.connections.image_civitai_key"
+
+# Civitai wire constants (see _civitai_batch).
+CIVITAI_SUBMIT_WAIT_S = 55
+CIVITAI_POLL_WAIT_S = 30
+CIVITAI_DEADLINE_S = 170
+CIVITAI_MIN_POLL_GAP_S = 2.0
+CIVITAI_MAX_N = 4
+CIVITAI_STEPS = 25
+CIVITAI_CFG = 7
+CIVITAI_NEGATIVE = "worst quality, low quality, blurry"
+#: The recipe page says "model"; the OpenAPI schema says "checkpointModel".
+#: ONE constant so a live probe (scripts/civitai_smoke.py) can flip it.
+CIVITAI_MODEL_FIELD = "model"
+CIVITAI_SIZES: tuple[tuple[int, int], ...] = (
+    (1024, 1024), (1152, 896), (896, 1152), (1216, 832), (832, 1216),
+    (1344, 768), (768, 1344), (1536, 640), (640, 1536))
+_AIR_RE = re.compile(r"urn:air:sdxl:checkpoint:civitai:\d+@\d+")
+_CIVITAI_HOSTS = frozenset({"civitai.com", "www.civitai.com",
+                            "civitai.red", "www.civitai.red"})
+CIVITAI_SITE_API = "https://civitai.com/api/v1"
+
+#: Test seams for the polling loop.
+_sleep = asyncio.sleep
+_monotonic = time.monotonic
 
 #: MiniMax image-01's documented aspect ratios.
 MINIMAX_RATIOS = ("1:1", "16:9", "4:3", "3:2", "2:3", "3:4", "9:16", "21:9")
@@ -185,7 +236,7 @@ def provider_id(cfg: dict | None = None) -> str:
 
 def api_selected(cfg: dict | None = None) -> bool:
     """Is the default provider one of the API presets?"""
-    return provider_id(cfg) in PRESET_BY_ID
+    return provider_id(cfg) in _DEFAULT_IDS
 
 
 def choose_backend(workflow: str, *, clawforge: bool,
@@ -197,7 +248,7 @@ def choose_backend(workflow: str, *, clawforge: bool,
     image.yaml) is the MCP server if configured -- the pre-2.3.7 behaviour.
     """
     pid = provider_id(cfg)
-    if pid in PRESET_BY_ID:
+    if pid in _DEFAULT_IDS:
         return CLAWFORGE if (workflow and clawforge) else "api"
     if pid == NONE:
         return CLAWFORGE if (workflow and clawforge) else ""
@@ -257,14 +308,33 @@ def shared_chat_key(base_url: str) -> str:
     return ""
 
 
-def resolve(cfg: dict | None = None) -> Resolved:
+def resolve(cfg: dict | None = None, *, studio: bool = False) -> Resolved:
     """Turn a config dict into everything a call needs, or raise ImageJobError
-    with a sentence the operator (or the chat bubble) can act on."""
+    with a sentence the operator (or the chat bubble) can act on.
+
+    ``studio=True`` is Image Studio only; it is the one caller allowed to
+    resolve a studio-only preset (Civitai)."""
     cfg = load_config() if cfg is None else cfg
     pid = provider_id(cfg)
     preset = PRESET_BY_ID.get(pid)
     if preset is None:
         raise image_jobs.ImageJobError("no image API provider is selected")
+    if preset.studio_only and not studio:
+        raise image_jobs.ImageJobError(
+            f"{preset.label} is used from Image Studio only")
+    if preset.access == "civitai":
+        # Own key, own host: never image.yaml's api_key, never a chat key, and
+        # no base_url override (the key goes to Civitai and nowhere else).
+        key, source = os.environ.get(preset.key_env, "").strip(), "env"
+        if not key:
+            with contextlib.suppress(Exception):
+                key, source = (secret_store.get(CIVITAI_KEY_REF) or "").strip(), "stored"
+        if not key:
+            raise image_jobs.ImageJobError(
+                "Civitai needs an API key (Settings → AI & Connections → Image generation)")
+        model = (cfg.get("model") or preset.model).strip() or preset.model
+        return Resolved(preset=preset, base_url=preset.base_url, model=model,
+                        api_key=key, key_source=source)
     try:
         base = llm_api.normalize_base_url(cfg.get("base_url") or preset.base_url)
     except llm_api.ApiError as e:
@@ -307,7 +377,10 @@ def merge_submission(payload: dict, stored: dict | None = None) -> dict:
     one (it never comes back out to the form) unless the provider changed."""
     stored = load_config() if stored is None else stored
     pid = str(payload.get("provider") or "").strip().lower()
-    if pid not in PRESET_BY_ID and pid not in (AUTO, NONE, CLAWFORGE):
+    if PRESET_BY_ID.get(pid) is not None and PRESET_BY_ID[pid].studio_only:
+        raise ValueError("Civitai is used from Image Studio only; it cannot be "
+                         "the default picture maker")
+    if pid not in _DEFAULT_IDS and pid not in (AUTO, NONE, CLAWFORGE):
         raise ValueError(f"unknown image provider {pid!r}")
     same = provider_id(stored) == pid
     cfg = {"provider": pid,
@@ -320,7 +393,7 @@ def merge_submission(payload: dict, stored: dict | None = None) -> dict:
         raise ValueError("api_key_env must be the name of a credential variable "
                          "such as MINIMAX_API_KEY (ending in _KEY, _TOKEN, "
                          "_SECRET, _PASSWORD or _CREDENTIALS)")
-    if pid not in PRESET_BY_ID:
+    if pid not in _DEFAULT_IDS:
         cfg.update(base_url="", model="", api_key="", api_key_env="")
     return cfg
 
@@ -417,6 +490,8 @@ def _error_from_status(r: httpx.Response, label: str) -> image_jobs.ImageJobErro
             msg = err
         if not msg and isinstance(body, dict):
             msg = str((body.get("base_resp") or {}).get("status_msg") or "")
+        if not msg and isinstance(body, dict):      # problem+json (Civitai)
+            msg = str(body.get("detail") or body.get("title") or "")
     if r.status_code in (401, 403):
         return image_jobs.ImageJobError(
             f"{label} rejected the API key (HTTP {r.status_code})")
@@ -441,7 +516,8 @@ async def _download(client: httpx.AsyncClient, url: str) -> bytes:
     async with client.stream("GET", url) as resp:
         if resp.status_code >= 400:
             raise image_jobs.ImageJobError(
-                f"could not download the picture (HTTP {resp.status_code})")
+                f"could not download the picture (HTTP {resp.status_code})",
+                code="blob_gone" if resp.status_code in (403, 404, 410) else "")
         async for chunk in resp.aiter_bytes():
             total += len(chunk)
             if total > image_jobs.FETCH_MAX_BYTES:
@@ -467,7 +543,7 @@ async def generate(res: Resolved, spec: image_jobs.ImageSpec) -> bytes:
 #: The most pictures one request may ask for, by wire shape. MiniMax documents
 #: 1-9; OpenAI-shape hosts differ per model, so the Studio keeps to a modest 4
 #: (and 1 for dall-e-3, which refuses more).
-MAX_BATCH = {"minimax": 9, "openai-images": 4}
+MAX_BATCH = {"minimax": 9, "openai-images": 4, "civitai": CIVITAI_MAX_N}
 
 
 def max_batch(res: Resolved) -> int:
@@ -479,7 +555,8 @@ def max_batch(res: Resolved) -> int:
 def supports(res: Resolved) -> dict:
     """What a provider can do beyond a prompt, for UIs that hide the rest."""
     mm = res.preset.shape == "minimax"
-    return {"reference": mm, "optimizer": mm, "seed": mm, "max_n": max_batch(res)}
+    return {"reference": mm, "optimizer": mm,
+            "seed": mm or res.preset.shape == "civitai", "max_n": max_batch(res)}
 
 
 async def generate_batch(res: Resolved, spec: image_jobs.ImageSpec, *, n: int = 1,
@@ -490,7 +567,8 @@ async def generate_batch(res: Resolved, spec: image_jobs.ImageSpec, *, n: int = 
     The same client and error mapping as :func:`generate` (which is the n=1
     case). ``seed``, ``optimizer`` and ``reference`` (a ``data:image/...``
     URL: MiniMax's ``subject_reference`` character mode) apply to the
-    ``minimax`` shape only and are ignored elsewhere. Raises ImageJobError.
+    ``minimax`` shape only and are ignored elsewhere (``seed`` also applies to
+    ``civitai``). Raises ImageJobError.
     """
     label = res.preset.label
     n = max(1, min(int(n), max_batch(res)))
@@ -500,7 +578,10 @@ async def generate_batch(res: Resolved, spec: image_jobs.ImageSpec, *, n: int = 
     blobs: list[bytes] = []
     async with _client() as client:
         try:
-            if res.preset.shape == "minimax":
+            if res.preset.shape == "civitai":
+                blobs = await _civitai_batch(client, res, spec, n, seed)
+                items = []
+            elif res.preset.shape == "minimax":
                 body: dict[str, Any] = {
                     "model": res.model, "prompt": spec.prompt[:MINIMAX_PROMPT_MAX],
                     "aspect_ratio": minimax_ratio(spec.ratio or "1:1"),
@@ -599,6 +680,250 @@ def _minimax_items(payload: Any, label: str) -> list[bytes | str]:
         raise image_jobs.ImageJobError(f"{label} returned no picture (it may have "
                                        "blocked the prompt)")
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Civitai (async workflow; studio-only)
+# --------------------------------------------------------------------------- #
+
+
+def civitai_size(ratio: str) -> tuple[int, int]:
+    """The recipe size whose shape is nearest the requested ``a:b`` ratio."""
+    want = 1.0
+    try:
+        a, b = (int(x) for x in (ratio or "1:1").split(":", 1))
+        want = a / b
+    except (ValueError, ZeroDivisionError):
+        pass
+    return min(CIVITAI_SIZES, key=lambda wh: abs(wh[0] / wh[1] - want))
+
+
+def civitai_body(res: Resolved, spec: image_jobs.ImageSpec, n: int,
+                 seed: int | None, *, external_id: str | None) -> dict:
+    """The SubmitWorkflow body. ``external_id`` is Civitai's idempotency key;
+    the estimate passes None (an estimate's id would make the real submit
+    return the dry run)."""
+    ratio = spec.ratio
+    if not ratio and spec.width and spec.height:
+        ratio = f"{spec.width}:{spec.height}"
+    w, h = civitai_size(ratio or "1:1")
+    inp: dict[str, Any] = {
+        "engine": "sdcpp", "ecosystem": "sdxl", "operation": "createImage",
+        CIVITAI_MODEL_FIELD: res.model, "prompt": spec.prompt,
+        "negativePrompt": CIVITAI_NEGATIVE, "width": w, "height": h,
+        "cfgScale": CIVITAI_CFG, "steps": CIVITAI_STEPS,
+        "quantity": max(1, min(int(n), CIVITAI_MAX_N))}
+    if seed is not None:
+        inp["seed"] = int(seed)
+    body: dict[str, Any] = {"steps": [{"$type": "imageGen", "input": inp}],
+                            "allowMatureContent": True}
+    if external_id:
+        body["externalId"] = external_id
+    return body
+
+
+def _civitai_headers(res: Resolved) -> dict:
+    return {"Content-Type": "application/json",
+            "Authorization": f"Bearer {res.api_key}"}
+
+
+def _civitai_reason(wf: dict) -> str:
+    """Plain words for a failed / expired / canceled workflow."""
+    status = str(wf.get("status") or "").lower()
+    bits: list[str] = []
+    for obj in [wf, *[s for s in (wf.get("steps") or []) if isinstance(s, dict)]]:
+        for k in ("reason", "blockedReason", "error", "detail", "message"):
+            v = obj.get(k)
+            if v:
+                bits.append(str(v))
+    text = "; ".join(dict.fromkeys(bits))
+    if "block" in text.lower():
+        return "Civitai refused this prompt (its moderation)"
+    if status == "expired":
+        return "Civitai gave up on the picture (expired)"
+    if status == "canceled":
+        return "Civitai cancelled the picture (the account may be out of Buzz)"
+    return "Civitai could not make the picture" + (f": {text[:200]}" if text else "")
+
+
+def _civitai_images(wf: dict) -> list[dict]:
+    steps = wf.get("steps")
+    step = steps[0] if isinstance(steps, list) and steps and isinstance(steps[0], dict) else {}
+    out = step.get("output")
+    imgs = out.get("images") if isinstance(out, dict) else None
+    rows = [i for i in imgs if isinstance(i, dict)] if isinstance(imgs, list) else []
+    if not rows:
+        raise image_jobs.ImageJobError("Civitai returned no picture")
+    for i in rows:
+        if i.get("blockedReason"):
+            raise image_jobs.ImageJobError("Civitai refused this prompt (its moderation)")
+    return rows
+
+
+async def _civitai_post(client: httpx.AsyncClient, url: str, body: dict,
+                        headers: dict, label: str) -> httpx.Response:
+    """POST; one re-POST of the SAME body (same externalId, so no second
+    charge) on a transport error."""
+    for attempt in (0, 1):
+        try:
+            return await client.post(url, json=body, headers=headers)
+        except httpx.TransportError:
+            if attempt:
+                raise image_jobs.ImageJobError(
+                    f"{label} could not be reached") from None
+    raise AssertionError("unreachable")
+
+
+async def _civitai_batch(client: httpx.AsyncClient, res: Resolved,
+                         spec: image_jobs.ImageSpec, n: int,
+                         seed: int | None) -> list[bytes]:
+    label = res.preset.label
+    headers = _civitai_headers(res)
+    base = res.base_url
+    body = civitai_body(res, spec, n, seed, external_id="dp-" + uuid.uuid4().hex)
+    started = _monotonic()
+    r = await _civitai_post(
+        client, f"{base}/v2/consumer/workflows?wait={CIVITAI_SUBMIT_WAIT_S}",
+        body, headers, label)
+    if r.status_code >= 400:
+        raise _error_from_status(r, label)
+    wf = r.json()
+    if not isinstance(wf, dict):
+        raise image_jobs.ImageJobError(f"{label} sent a reply that is not JSON")
+    wid = str(wf.get("id") or wf.get("workflowId") or "")
+    wf_url = f"{base}/v2/consumer/workflows/{wid}"
+    last_req = _monotonic()
+    terminal = ("succeeded", "failed", "expired", "canceled")
+    while str(wf.get("status") or "").lower() not in terminal:
+        if not wid:
+            raise image_jobs.ImageJobError(f"{label} returned no picture")
+        gap = CIVITAI_MIN_POLL_GAP_S - (_monotonic() - last_req)
+        await _sleep(max(0.0, gap))
+        if _monotonic() - started >= CIVITAI_DEADLINE_S:
+            with contextlib.suppress(Exception):
+                await client.put(wf_url, json={"status": "canceled"}, headers=headers)
+            raise image_jobs.ImageJobError(
+                f"{label} took too long; the request was cancelled")
+        last_req = _monotonic()
+        try:
+            g = await client.get(f"{wf_url}?wait={CIVITAI_POLL_WAIT_S}", headers=headers)
+        except httpx.TransportError:
+            continue                       # the deadline still bounds the loop
+        if g.status_code >= 400:
+            raise _error_from_status(g, label)
+        wf = g.json()
+        if not isinstance(wf, dict):
+            raise image_jobs.ImageJobError(f"{label} sent a reply that is not JSON")
+    if str(wf.get("status")).lower() != "succeeded":
+        raise image_jobs.ImageJobError(_civitai_reason(wf))
+    rows = _civitai_images(wf)
+    blobs: list[bytes] = []
+    refreshed: list[dict] | None = None
+    for idx, row in enumerate(rows):
+        url = str(row.get("url") or "")
+        if not row.get("available", True) or not url:
+            raise image_jobs.ImageJobError("Civitai did not provide the picture")
+        for attempt in (0, 1):
+            if urlparse(url).scheme != "https":
+                raise image_jobs.ImageJobError("the provider named a non-https image URL")
+            try:
+                blobs.append(await _download(client, url))
+                break
+            except image_jobs.ImageJobError as e:
+                if e.code != "blob_gone" or attempt:
+                    if e.code == "blob_gone":
+                        raise image_jobs.ImageJobError(
+                            "Civitai's picture link expired") from None
+                    raise
+                if refreshed is None:
+                    g = await client.get(wf_url, headers=headers)
+                    if g.status_code >= 400:
+                        raise image_jobs.ImageJobError(
+                            "Civitai's picture link expired") from None
+                    refreshed = _civitai_images(g.json())
+                url = str((refreshed[idx] if idx < len(refreshed) else {}).get("url") or "")
+                if not url:
+                    raise image_jobs.ImageJobError(
+                        "Civitai's picture link expired") from None
+    return blobs
+
+
+async def estimate_civitai(res: Resolved, spec: image_jobs.ImageSpec, *,
+                           n: int = 1) -> int:
+    """Civitai's own Buzz estimate (``whatif``). Never sends ``externalId``,
+    never polls, downloads or stores. Raises ImageJobError."""
+    label = res.preset.label
+    body = civitai_body(res, spec, n, None, external_id=None)
+    try:
+        async with _client() as client:
+            r = await client.post(f"{res.base_url}/v2/consumer/workflows?whatif=true",
+                                  json=body, headers=_civitai_headers(res))
+            if r.status_code >= 400:
+                raise _error_from_status(r, label)
+            doc = r.json()
+    except image_jobs.ImageJobError:
+        raise
+    except httpx.TimeoutException:
+        raise image_jobs.ImageJobError(f"{label} took too long to answer") from None
+    except httpx.HTTPError as e:
+        raise image_jobs.ImageJobError(
+            f"{label} could not be reached ({type(e).__name__})") from None
+    except ValueError:
+        raise image_jobs.ImageJobError(f"{label} sent a reply that is not JSON") from None
+    cost = doc.get("cost") if isinstance(doc, dict) else None
+    total = cost.get("total") if isinstance(cost, dict) else None
+    if isinstance(total, bool) or not isinstance(total, (int, float)):
+        raise image_jobs.ImageJobError(f"{label} gave no price estimate")
+    return int(round(total))
+
+
+_CIVITAI_ASK = "Paste a Civitai checkpoint link or AIR (urn:air:sdxl:checkpoint:…)"
+
+
+async def civitai_model(text: str) -> str:
+    """An SDXL checkpoint AIR from an AIR, a version id, or a civitai.com /
+    civitai.red model link. May call Civitai's public site API (no key).
+    Raises ValueError."""
+    t = (text or "").strip()
+    if _AIR_RE.fullmatch(t):
+        return t
+    version = ""
+    model_id = ""
+    if re.fullmatch(r"\d{1,10}", t):
+        version = t
+    else:
+        u = urlparse(t)
+        m = re.fullmatch(r"/models/(\d{1,10})(?:/[^/]*)?/?", u.path or "")
+        if u.scheme not in ("http", "https") or (u.hostname or "").lower() not in _CIVITAI_HOSTS or not m:
+            raise ValueError(_CIVITAI_ASK)
+        model_id = m.group(1)
+        v = (parse_qs(u.query).get("modelVersionId") or [""])[0]
+        if v:
+            if not re.fullmatch(r"\d{1,10}", v):
+                raise ValueError(_CIVITAI_ASK)
+            version = v
+    try:
+        async with _client(30.0) as client:
+            if not version:
+                r = await client.get(f"{CIVITAI_SITE_API}/models/{model_id}")
+                if r.status_code >= 400:
+                    raise ValueError(_CIVITAI_ASK)
+                vers = r.json().get("modelVersions")
+                vid = vers[0].get("id") if isinstance(vers, list) and vers else None
+                if not isinstance(vid, int):
+                    raise ValueError(_CIVITAI_ASK)
+                version = str(vid)
+            r = await client.get(f"{CIVITAI_SITE_API}/model-versions/{version}")
+            if r.status_code >= 400:
+                raise ValueError(_CIVITAI_ASK)
+            air = str((r.json() or {}).get("air") or "")
+    except httpx.HTTPError:
+        raise ValueError("Could not reach Civitai to look that model up") from None
+    except (AttributeError, KeyError, IndexError, TypeError):
+        raise ValueError(_CIVITAI_ASK) from None
+    if not _AIR_RE.fullmatch(air):
+        raise ValueError(_CIVITAI_ASK)
+    return air
 
 
 # --------------------------------------------------------------------------- #

@@ -112,5 +112,10 @@
   "pending.retry": "Réessayer",
   "pending.dismiss": "Ignorer",
   "pending.cap": "{n} images sont déjà en cours de création ; attendez qu'une se termine",
-  "details.optimizer": "optimiseur activé"
+  "details.optimizer": "optimiseur activé",
+  "model.civitai_placeholder": "Collez un lien de checkpoint Civitai ou un AIR",
+  "cost.estimate_one": "Environ {buzz} Buzz pour {n} image (estimation de Civitai)",
+  "cost.estimate_other": "Environ {buzz} Buzz pour {n} images (estimation de Civitai)",
+  "cost.estimate_failed": "Civitai n'a pas pu estimer le coût",
+  "provider.not_allowed": "Votre type de profil ne peut pas utiliser les générateurs d'images ici. Demandez à un administrateur."
 }

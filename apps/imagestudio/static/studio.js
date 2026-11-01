@@ -20,8 +20,8 @@ import {
   PROMPT_MAX, isGenerateShortcut, shortcutLabel, promptStatus, canGenerate, clampCount,
   buildRequest, cropRect, defaultCropPos, galleryItems, isMetered,
   SORTS, normalizeSort, sortRows, canStartAnother, SHORTCUT_DEBOUNCE_MS,
-  DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata, DELETE_SCOPE_LABELS,
-} from './studio-logic.js?v=5';
+  DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata, DELETE_SCOPE_LABELS, estimateKey,
+} from './studio-logic.js?v=6';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
 export const API = '/api/apps/imagestudio';
@@ -37,6 +37,9 @@ const S = {
   status: '',
   statusError: false,
   nim: false,
+  estKey: '',            // the form state the shown estimate is for
+  estText: '',           // the estimate line (empty = none yet)
+  estSeq: 0,
   sort: 'newest',        // the grid's order (SORTS), remembered per device; newest first when none saved
 };
 const R = {};            // DOM refs
@@ -105,8 +108,36 @@ function refreshForm() {
   R.go.setAttribute('aria-busy', S.busy ? 'true' : 'false');
   R.cost.hidden = !isMetered(p);
   if (p && isMetered(p)) R.cost.textContent = t('cost.note', { provider: p.label, note: p.price_note });
-  R.model.placeholder = p ? p.model : '';
-  R.models.replaceChildren(...((p && p.models) || []).map((m) => el('option', { value: m })));
+  const names = (p && p.model_names) || {};
+  R.model.placeholder = p && p.shape === 'civitai' ? t('model.civitai_placeholder') : (p ? p.model : '');
+  R.models.replaceChildren(...((p && p.models) || []).map((m) => el('option', names[m] ? { value: m, label: names[m] } : { value: m })));
+  R.est.hidden = !(p && p.estimate) || !S.estText;
+  R.est.textContent = S.estText;
+  scheduleEstimate();
+}
+
+// Civitai's own price for the form as it stands. Information only: it never blocks Generate.
+let estTimer = null;
+function scheduleEstimate() {
+  const p = provider();
+  if (!p || !p.estimate || !p.configured) { S.estKey = ''; S.estText = ''; clearTimeout(estTimer); return; }
+  const form = formState();
+  const key = estimateKey(form);
+  if (key === S.estKey) return;
+  S.estKey = key; S.estText = ''; R.est.hidden = true;
+  clearTimeout(estTimer);
+  if (!key) return;
+  const seq = ++S.estSeq;
+  estTimer = setTimeout(async () => {
+    let text;
+    try {
+      const body = buildRequest(form, caps());
+      const r = await api(`${API}/estimate`, { method: 'POST', body });
+      text = t(r.n === 1 ? 'cost.estimate_one' : 'cost.estimate_other', { buzz: r.buzz, n: r.n });
+    } catch { text = t('cost.estimate_failed'); }
+    if (seq !== S.estSeq) return;
+    S.estText = text; R.est.textContent = text; R.est.hidden = false;
+  }, 600);
 }
 
 /** Ask the shell to open Settings on `target` ('section#anchor'). The shell checks
@@ -128,8 +159,9 @@ function renderProviders() {
   })));
   if (def) R.provider.value = def;
   R.none.hidden = !!def;
-  R.setup.hidden = !S.info.can_configure;
-  R.ask.hidden = !!S.info.can_configure;
+  R.noneText.textContent = t(S.info.blocked ? 'provider.not_allowed' : 'provider.none');
+  R.setup.hidden = !!S.info.blocked || !S.info.can_configure;
+  R.ask.hidden = !!S.info.blocked || !!S.info.can_configure;
   R.form.hidden = !def;
 }
 
@@ -631,6 +663,7 @@ function build(root) {
   ]);
   R.go = el('button', { type: 'button', class: 'st-btn st-primary st-go', id: 'st-generate', text: t('generate') });
   R.cost = el('p', { class: 'st-cost', hidden: '' });
+  R.est = el('p', { class: 'st-cost st-estimate', role: 'status', hidden: '' });
   R.status = el('p', { class: 'st-status', role: 'status', 'aria-live': 'polite' });
   R.today = el('span', { class: 'st-today' });
   // No provider yet: say so, and (for a profile that may change it) open the
@@ -638,15 +671,15 @@ function build(root) {
   R.setup = el('button', { type: 'button', class: 'st-btn st-primary', hidden: '', text: t('provider.setup') });
   R.setup.addEventListener('click', () => openShellSettings('connections#images'));
   R.ask = el('p', { class: 'st-muted', hidden: '', text: t('provider.ask_owner') });
+  R.noneText = el('p', { text: t('provider.none') });
   R.none = el('div', { class: 'st-none', hidden: '' }, [
-    el('p', { text: t('provider.none') }),
-    R.setup, R.ask,
+    R.noneText, R.setup, R.ask,
   ]);
   R.form = el('div', { class: 'st-form' }, [
     field(t('prompt.label'), R.prompt, R.counter), R.recentWrap,
     el('div', { class: 'st-two' }, [field(t('provider.label'), R.provider), field(t('model.label'), R.model, R.models)]),
     el('div', { class: 'st-two' }, [field(t('ratio.label'), R.ratio), field(t('count.label'), R.count)]),
-    R.optimizerRow, R.seedRow, R.refBox, R.go, R.cost,
+    R.optimizerRow, R.seedRow, R.refBox, R.go, R.cost, R.est,
   ]);
   R.sort = el('select', { id: 'st-sort', class: 'st-sort' }, SORTS.map((v) => el('option', { value: v, text: t(SORT_LABELS[v]) })));
   R.sort.value = S.sort;
@@ -680,7 +713,9 @@ function build(root) {
     generate();
   });
   R.provider.addEventListener('change', refreshForm);
-  R.count.addEventListener('change', () => { R.count.value = String(clampCount(R.count.value, caps().max_n)); });
+  R.count.addEventListener('change', () => { R.count.value = String(clampCount(R.count.value, caps().max_n)); scheduleEstimate(); });
+  R.model.addEventListener('input', scheduleEstimate);
+  R.ratio.addEventListener('change', scheduleEstimate);
   R.go.addEventListener('click', (ev) => {
     // The second click of a double-click is not a second job (every Generate is metered).
     if (ev && ev.detail > 1) return;
