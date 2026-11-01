@@ -142,6 +142,8 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`household_bots_invalid`](#household_bots_invalid) | 422 | household_bots must be "all" or a list of character ids. |
 | [`household_invalid`](#household_invalid) | 422 | household_bots must be a list of bot ids. |
 | [`image_dimensions_too_large`](#image_dimensions_too_large) | 400 | Image dimensions too large (max 64 megapixels) |
+| [`image_estimate_unavailable`](#image_estimate_unavailable) | 422 | No estimate for this provider |
+| [`image_generator_not_allowed`](#image_generator_not_allowed) | 403 | Your profile type can't use the image generators here. Ask the Owner. |
 | [`image_minor_sexual`](#image_minor_sexual) | 422 | That picture can't be made: images show adults only, and nothing sexual can involve anyone under 18. Rewrite the request with adult characters. |
 | [`image_real_person_sexual`](#image_real_person_sexual) | 422 | That picture can't be made: sexual images of real, identifiable people aren't allowed. Remove the real person's name or likeness, or describe an original character instead. |
 | [`image_request_failed`](#image_request_failed) | 500 | Could not start the image request |
@@ -1315,6 +1317,22 @@ HTTP **422** - household_bots must be a list of bot ids.
 HTTP **400** - Image dimensions too large (max 64 megapixels)
 
 **Fix:** Check the request and resend it.
+
+## image_estimate_unavailable
+
+<a id="image_estimate_unavailable"></a>
+
+HTTP **422** - No estimate for this provider
+
+**Fix:** Only Civitai gives a cost estimate; generate without one.
+
+## image_generator_not_allowed
+
+<a id="image_generator_not_allowed"></a>
+
+HTTP **403** - Your profile type can't use the image generators here. Ask the Owner.
+
+**Fix:** The Owner can allow this profile type in Settings → AI & Connections → Images.
 
 ## image_minor_sexual
 

@@ -28,7 +28,7 @@ entries:
 
   - id: image-api
     name: Image generation (API)
-    summary: Pictures in chat ([[pic:…]]) from MiniMax image-01, OpenAI, xAI Grok or any OpenAI-compatible images endpoint. Billed per picture.
+    summary: Pictures in chat ([[pic:…]]) from MiniMax image-01, OpenAI, xAI Grok or any OpenAI-compatible images endpoint; Civitai in Image Studio (billed in Buzz). Billed per picture.
     connects: "Settings → AI & Connections → Image generation."
     probe: image_api
     guide: true

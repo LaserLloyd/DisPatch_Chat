@@ -7,6 +7,10 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Image Studio can make pictures with Civitai (billed in Buzz) using SDXL checkpoints (Juggernaut XL default, RealVisXL, Pony, WAI-Illustrious; any SDXL checkpoint link or AIR works). The Generate line shows Civitai's cost estimate before you submit.
+- Who may make pictures: new Settings switches choose which profile types may use the standard API generators and Civitai (Owner, Admin, User, Basic). The Owner's own access does not depend on the switches.
+- Invariant I13: the default image provider can never be a studio-only generator; `/api/health/invariants` reports it.
+
 ## [4.3.0] - 2026-11-01
 
 The 37 open GitHub issues from the 3.0 review, a host tier for the main Admin, agent schedules and two new agent

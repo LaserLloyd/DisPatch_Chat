@@ -5381,6 +5381,43 @@
         "summary": "Clear"
       }
     },
+    "/api/apps/imagestudio/estimate": {
+      "post": {
+        "description": "Civitai's own Buzz price for a Generate body. Information only: no slot, no\nledger row, no file; the same guard and access checks as /generate.",
+        "operationId": "estimate_api_apps_imagestudio_estimate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Estimate"
+      }
+    },
     "/api/apps/imagestudio/generate": {
       "post": {
         "operationId": "generate_api_apps_imagestudio_generate_post",

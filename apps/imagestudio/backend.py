@@ -464,7 +464,7 @@ async def _pick(body, request: Request) -> tuple[str, image_providers.Resolved, 
     pid = (body.provider or default).strip().lower()
     if not pid:
         if not providers:
-            raise HTTPException(403, "Your profile type can't use the image generators here. Ask an Admin.")
+            raise HTTPException(403, "Your profile type can't use the image generators here. Ask the Owner.")
         raise HTTPException(
             409, "No image provider has an API key yet (Settings → AI & Connections → Image generation)")
     preset = image_providers.PRESET_BY_ID.get(pid)

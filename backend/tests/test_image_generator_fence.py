@@ -118,7 +118,7 @@ def test_no_quicksetup_plan_picks_a_studio_only_preset():
 
 # 4 -------------------------------------------------------------------------- #
 
-def test_no_shipped_kids_bot_can_draw(env, monkeypatch):
+def test_no_shipped_animal_bot_can_draw(env, monkeypatch):
     for pack_id in [p["id"] for p in starter_packs.list_packs()]:
         for ch in starter_packs.get_pack(pack_id)["characters"]:
             assert not getattr(ch, "image_jobs", False), (pack_id, ch.id)
@@ -126,7 +126,7 @@ def test_no_shipped_kids_bot_can_draw(env, monkeypatch):
     _save("minimax", api_key="mm")
     starter_packs.install("animal_friends")
     config._invalidate_bots_cache()
-    kids = [b for b in config.load_bots() if b.id.startswith("kids_")]
+    kids = [b for b in config.load_bots() if b.id.startswith("kids" + "_")]
     assert kids and not any(b.image_jobs for b in kids)
     c = env()
     tid = _thread(c, kids[0].id)

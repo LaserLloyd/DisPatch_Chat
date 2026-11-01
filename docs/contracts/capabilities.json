@@ -1566,6 +1566,7 @@
     "POST /api/advisor/digest",
     "POST /api/agents/schedules",
     "POST /api/apps/imagestudio/clear",
+    "POST /api/apps/imagestudio/estimate",
     "POST /api/apps/imagestudio/generate",
     "POST /api/apps/jobboard",
     "POST /api/apps/jobboard/find",

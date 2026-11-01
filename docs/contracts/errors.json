@@ -1245,6 +1245,26 @@
       "status": 400
     },
     {
+      "code": "image_estimate_unavailable",
+      "docs": "image_estimate_unavailable",
+      "fix": "Only Civitai gives a cost estimate; generate without one.",
+      "message": "No estimate for this provider",
+      "patterns": [
+        "No estimate for this provider"
+      ],
+      "status": 422
+    },
+    {
+      "code": "image_generator_not_allowed",
+      "docs": "image_generator_not_allowed",
+      "fix": "The Owner can allow this profile type in Settings → AI & Connections → Images.",
+      "message": "Your profile type can't use the image generators here. Ask the Owner.",
+      "patterns": [
+        "Your profile type can't use the image generators here. Ask the Owner."
+      ],
+      "status": 403
+    },
+    {
       "code": "image_minor_sexual",
       "docs": "image_minor_sexual",
       "fix": "Describe adult characters only. This rule cannot be switched off.",

@@ -3229,6 +3229,28 @@
    "docs": "host_not_allowed",
    "patterns": [],
    "seeded": false
+  },
+  {
+   "code": "image_generator_not_allowed",
+   "status": 403,
+   "message": "Your profile type can't use the image generators here. Ask the Owner.",
+   "fix": "The Owner can allow this profile type in Settings → AI & Connections → Images.",
+   "docs": "image_generator_not_allowed",
+   "patterns": [
+    "Your profile type can't use the image generators here. Ask the Owner."
+   ],
+   "seeded": true
+  },
+  {
+   "code": "image_estimate_unavailable",
+   "status": 422,
+   "message": "No estimate for this provider",
+   "fix": "Only Civitai gives a cost estimate; generate without one.",
+   "docs": "image_estimate_unavailable",
+   "patterns": [
+    "No estimate for this provider"
+   ],
+   "seeded": true
   }
  ]
 }

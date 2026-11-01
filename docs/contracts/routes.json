@@ -344,6 +344,18 @@
     },
     {
       "method": "POST",
+      "path": "/api/apps/imagestudio/estimate",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+        "permission": "use_images"
+      }
+    },
+    {
+      "method": "POST",
       "path": "/api/apps/imagestudio/generate",
       "requirement": {
         "machine": [
