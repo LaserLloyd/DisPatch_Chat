@@ -16,18 +16,15 @@
 // phone costs one round trip each, not a revalidation each. The service
 // worker never caches /ext/.
 //
-// Locked devices mount too (2.3.4: voice on the bots a locked device can see;
-// `locked: true` tells the add-on to show only what such a device may use).
-// Crossing the lock boundary unmounts every extension (everything it
-// registered on the shell is disposed, its strings dropped) and mounts it
-// again for the new tier. A failed import, handshake or mount — in any order relative to the
+// `mount(shell, { locked })` is part of EXT_API 1. In 4.0 `isLocked()` is
+// always false (there is no locked tier), so `locked` is always false too; the
+// tier switch below (unmount everything, its strings dropped, then mount again)
+// is kept for the contract and never fires. A failed import, handshake or mount — in any order relative to the
 // add-on taking its Settings pane — leaves the shell exactly as it was and
 // the Voice tab showing why (js/voice-absent.js).
 //
 // Pure module: createLoader() takes every effect as a dependency, so
 // tests/extensions.test.js drives it with a fake fetch and a fake import.
-
-export const STATES = Object.freeze(['idle', 'loading', 'mounted', 'incompatible', 'failed']);
 
 /**
  * deps:
@@ -38,7 +35,7 @@ export const STATES = Object.freeze(['idle', 'loading', 'mounted', 'incompatible
  *   mergeBundle(id, b), removeBundle(id)       (js/i18n.js)
  *   lang()                   → the active language code
  *   features()               → /api/auth/status.features (or {})
- *   isLocked()               → Safe Mode?
+ *   isLocked()               → always false in 4.0 (kept for EXT_API 1)
  *   shellFor(id)             → the frozen per-extension shell
  *   disposeExtension(id)     → tear down what that extension registered
  *   emitLocale(lang)         → after bundles were re-merged
@@ -116,10 +113,9 @@ export function createLoader(deps) {
 
   /** Read /api/extensions and mount every `ok` extension not mounted yet.
    *  `force` reads even when the status count says 0 (the Voice tab and
-   *  "Check again" need the failed/incompatible/disabled states). Since 2.3.4
-   *  a locked device mounts too (the server sends it the locked rows) and the
-   *  add-on is told so (`mount(shell, { locked: true })`); a mount made for
-   *  the other tier is unmounted first. */
+   *  "Check again" need the failed/incompatible/disabled states). A mount made
+   *  for the other tier is unmounted first (`isLocked()` is always false in
+   *  4.0, so this never happens; kept for EXT_API 1). */
   async function refresh({ force = false } = {}) {
     const myTier = tierNow();
     if (tier !== null && tier !== myTier) {
@@ -278,7 +274,7 @@ export const ADDIN_TAB_ID = /^[a-z][a-z0-9-]{1,30}$/;
  *   beforePane the pane element new panes are inserted before (#spane-plugins)
  *   reserved   Set of ids that are not available (the core tabs)
  *   t          i18n lookup (a spec's `titleKey`)
- *   isLocked() is this a Safe-Mode session (an admin tab starts hidden)
+ *   isLocked() always false in 4.0 (kept for EXT_API 1; an admin tab would start hidden)
  *   onAdd(id, { public }) / onRemove(id)   main.js keeps its tab lists in step
  *   onTab(id)  a tab button was clicked
  */
@@ -308,15 +304,25 @@ export function createAddinTabs({ doc, tablist, beforeTab, beforePane, reserved 
 
     const isPublic = spec.public === true;
     const title = spec.titleKey ? t(String(spec.titleKey)) : String(spec.title == null ? id : spec.title);
+    // No glyph given: the ThemeForge puzzle icon (drawn through the injected doc).
+    const puzzleIcon = () => {
+      const NS = 'http://www.w3.org/2000/svg';
+      const svg = doc.createElementNS(NS, 'svg');
+      for (const [k, v] of [['viewBox', '0 0 24 24'], ['fill', 'none'], ['aria-hidden', 'true'], ['width', '17'], ['height', '17'], ['class', 'rail-icon']]) svg.setAttribute(k, v);
+      const use = doc.createElementNS(NS, 'use');
+      use.setAttribute('href', '/static/ui-theme/icons.svg#puzzle');
+      svg.append(use);
+      return svg;
+    };
     const labelAttrs = { class: 'stab-label', text: title };
     if (spec.titleKey) labelAttrs['data-i18n'] = String(spec.titleKey);
-    const glyph = typeof spec.glyph === 'string' && spec.glyph ? spec.glyph.slice(0, 4) : '🧩';
+    const glyph = typeof spec.glyph === 'string' && spec.glyph ? spec.glyph.slice(0, 4) : '';   // none given: the puzzle icon
     const button = mk('button', {
       class: 'settings-tab' + (isPublic ? '' : ' admin-only') + (!isPublic && isLocked() ? ' hidden' : ''),
       id: `stab-${id}`, role: 'tab', 'data-tab': id, 'aria-selected': 'false',
       'aria-controls': `spane-${id}`, tabindex: '-1', 'data-addin': owner || '',
     }, [
-      mk('span', { class: 'stab-glyph', 'aria-hidden': 'true', text: glyph }),
+      mk('span', glyph ? { class: 'stab-glyph', 'aria-hidden': 'true', text: glyph } : { class: 'stab-glyph', 'aria-hidden': 'true' }, glyph ? [] : [puzzleIcon()]),
       mk('span', labelAttrs),
     ]);
     const root = mk('div', { class: 'ext-pane', id: `ext-pane-${id}` });

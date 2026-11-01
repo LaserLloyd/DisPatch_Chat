@@ -52,7 +52,7 @@ async function page({ jobs = JOBS, routes: extra = {} } = {}) {
   env.win.localStorage.setItem('dispatch-lang', 'en');
   Object.defineProperty(env.win, 'parent', { configurable: true, get: () => parentWin });
   const parentWin = { postMessage: (m, o) => posted.push([m, o]) };
-  const sdk = await import('/static/js/app-sdk.js?v=3');
+  const sdk = await import('/static/js/app-sdk.js?v=7');
   sdk._resetForTest();
   return { ...env, posted, parentWin, sdk };
 }
@@ -205,8 +205,8 @@ test('the list is not blanked while a later refresh runs', { skip: dom.skip }, a
   assert.equal(env.root.querySelector('.jobs-toolbar__busy').hidden, true);
 });
 
-test('Safe Mode: the decoy 403 shows a locked note, never an empty board', { skip: dom.skip }, async () => {
-  const env = await page({ routes: { 'GET /api/apps/jobboard': () => [403, { detail: 'Unlock for full access', decoy: true }] } });
+test('a 403 shows a locked note, never an empty board', { skip: dom.skip }, async () => {
+  const env = await page({ routes: { 'GET /api/apps/jobboard': () => [403, { detail: 'Permission denied' }] } });
   await env.sdk.ready('en');
   const mod = await freshBoard();
   const root = env.win.document.getElementById('jb-root');

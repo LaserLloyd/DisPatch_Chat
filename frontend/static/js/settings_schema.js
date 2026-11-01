@@ -19,17 +19,13 @@
 // Pure functions first (buildModel, matches, parseInput, buildPatch, durations and sizes, which
 // rows go in which slot) so the tests drive them without a DOM. Nothing runs at import time.
 
-import { w5 as realApi, errorText } from './w5-api.js?v=1';
-import { t, lang } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
+import { w5 as realApi, errorText } from './w5-api.js?v=3';
+import { t, lang } from './i18n.js?v=5';
+import { el } from './util.js?v=23';
 
 // ------------------------------------------------------------------ pure
 
 /** Group ids in the order the server sends them (the brief's order). */
-export function groupOrder(schema) {
-  return (schema.groups || []).map((g) => g.id);
-}
-
 /** schema + values -> [{ id, label, description, sections: [{ name, rows: [row] }] }].
  *  A row is { def, value, source, env, restartPending, isDefault, secretSet, warning }. */
 export function buildModel(schema, values) {
@@ -194,8 +190,11 @@ export function presetValues(def) {
 
 // ------------------------------------------------------------------ which rows go where
 
-/** Keys drawn by a section's own controls, never as a schema row (they stay searchable). */
-export const BESPOKE_KEYS = new Set(['people.machine_loopback_trust', 'tools.livetools_enabled']);
+/** Keys drawn by a section's own controls, never as a schema row (they stay searchable).
+ *  people.lock_target / people.default_profile: the "When locked, show" picker
+ *  (people-perms.js lockTargetGroup) sets both together, so no slot draws them a second time. */
+export const BESPOKE_KEYS = new Set(['people.machine_loopback_trust', 'tools.livetools_enabled',
+  'people.lock_target', 'people.default_profile']);
 
 /** `ui_section` 'people#signin-rules' -> ['people', 'signin-rules']; falls back to the group. */
 export function uiTarget(def) {
@@ -292,10 +291,26 @@ function measureControl(row, common, commit) {
   return wrap;
 }
 
+/** 4.3 host tier (backend settings_api.HOST_SETTING_KEYS): a program DisPatch runs or a host file
+ *  it reads or writes. Only the protected Admin (or an open install) may change these; a second
+ *  Admin gets 403 host_owner_only, so the row is drawn locked with an "Owner only" badge. */
+export const HOST_KEYS = new Set([
+  'tools.openclaw_bin', 'connections.image_cli', 'connections.gpu_cli', 'tools.harness_unit',
+  'system.log_file', 'tools.mail_data_dir', 'tools.practice_pin_file', 'tools.practice_url', 'tools.mail_remote_url',
+  'people.host_check', 'people.allowed_hosts',
+  'people.machine_loopback_trust',   // who reaches DisPatch without a key (4.3 Fable)
+]);
+/** Is this row's control locked for this session? `env` = an environment variable sets it. */
+export function rowLocked(row, ctx) {
+  const { def } = row;
+  return row.source === 'env' || (def.owner_only && !ctx.owner) || hostLocked(def, ctx);
+}
+const hostLocked = (def, ctx) => HOST_KEYS.has(def.key) && !ctx.host;
+
 function controlFor(row, ctx) {
   const { def } = row;
   const id = `st-${def.key.replace(/[^a-z0-9]+/gi, '-')}`;
-  const locked = row.source === 'env' || (def.owner_only && !ctx.owner);
+  const locked = rowLocked(row, ctx);
   const common = { id, 'aria-describedby': `${id}-desc` };
   if (locked) common.disabled = '';
   let input;
@@ -340,6 +355,61 @@ function controlFor(row, ctx) {
   return input;
 }
 
+// ---- 4.3 Fable: the Host guard's card (Settings > System > Network, under "Unknown addresses")
+
+/** GET /api/system/host-check (the Owner's): the mode, the addresses DisPatch always answers to,
+ *  and the unknown ones seen since it started. `api.hostCheck` when the caller passes one. */
+async function fetchHostCheck(api) {
+  if (api && typeof api.hostCheck === 'function') return api.hostCheck();
+  const r = await fetch('/api/system/host-check', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+  if (!r.ok) throw new Error(String(r.status));
+  return r.json();
+}
+
+/** The card itself. `onAllow(name)` adds an unknown address to the allowed list. */
+export function hostCheckCard(report, onAllow) {
+  const card = el('div', { class: 'schema-host-check ui-setting__desc', role: 'group', 'aria-label': t('hostcheck.title') });
+  // Spacing: .schema-host-check in app.css (a .ui-setting's row spacing without being one).
+  if (!report) {
+    card.append(el('p', { class: 'muted', role: 'status', text: t('hostcheck.unavailable') }));
+    return card;
+  }
+  card.append(
+    el('p', { class: 'schema-host-check__mode', text: report.mode === 'enforce' ? t('hostcheck.mode_enforce') : t('hostcheck.mode_log') }),
+    el('p', { class: 'schema-host-check__known' }, [
+      el('strong', { text: t('hostcheck.title') }), document.createTextNode(': '),
+      el('span', { text: (report.answers_to || []).join(', ') }),
+    ]),
+    el('p', { class: 'schema-host-check__hint muted', text: t('hostcheck.hint') }),
+    el('h5', { class: 'schema-host-check__head', text: t('hostcheck.unknown_title') }),
+  );
+  const seen = report.unexpected || [];
+  if (!seen.length) {
+    card.append(el('p', { class: 'muted', text: t('hostcheck.unknown_none') }));
+    return card;
+  }
+  const list = el('ul', { class: 'schema-host-check__list' });
+  for (const u of seen) {
+    const name = String(u.name || '');
+    let when = '';
+    try { when = new Date(Number(u.last_seen) * 1000).toLocaleString(); } catch { /* keep it blank */ }
+    const item = el('li', { class: 'schema-host-check__item' }, [
+      el('code', { text: name || t('hostcheck.no_name') }), document.createTextNode(' '),
+      el('span', { class: 'muted', text: t('hostcheck.seen', { count: u.count, when }) }),
+    ]);
+    if (name && typeof onAllow === 'function') {
+      const label = t('hostcheck.allow_label', { name });
+      const btn = el('button', { type: 'button', class: 'ui-btn ui-btn--ghost ui-btn--sm', text: t('hostcheck.allow'),
+        title: label, 'aria-label': label });
+      btn.addEventListener('click', () => { btn.disabled = true; onAllow(name); });
+      item.append(document.createTextNode(' '), btn);
+    }
+    list.append(item);
+  }
+  card.append(list);
+  return card;
+}
+
 function rowNode(row, ctx) {
   const { def } = row;
   const id = `st-${def.key.replace(/[^a-z0-9]+/gi, '-')}`;
@@ -350,7 +420,11 @@ function rowNode(row, ctx) {
   if (def.default !== null && def.default !== undefined && def.type !== 'secret') {
     attrs['data-default'] = Array.isArray(def.default) ? def.default.join(', ') : String(def.default);
   }
-  const reset = el('button', { type: 'button', class: 'ui-btn ui-btn--ghost ui-btn--sm ui-setting__reset', hidden: '' });
+  // Our own words, so UIComponents.setting() leaves them be: its default name "Reset <name> to
+  // default" did not contain the visible "Reset to default" (axe label-content-name-mismatch).
+  // The name starts with the visible words and then says which setting.
+  const reset = el('button', { type: 'button', class: 'ui-btn ui-btn--ghost ui-btn--sm ui-setting__reset', hidden: '',
+    text: t('schema.reset'), 'aria-label': `${t('schema.reset')}: ${labelOf(def)}` });
   const err = el('p', { class: 'ui-error schema-error', id: `${id}-err`, role: 'alert', hidden: '' });
   const tags = [];
   if (row.restartPending) tags.push(el('span', { class: 'ui-badge schema-restart', text: t('schema.restart_pending') }));
@@ -360,7 +434,8 @@ function rowNode(row, ctx) {
       el('div', { class: 'ui-setting__label' }, [
         el('label', { for: id, text: labelOf(def) }),
         el('span', { class: 'ui-badge ui-badge--info ui-setting__env', title: row.env ? t('schema.env_title', { name: row.env }) : '' }),
-        def.owner_only && !ctx.owner ? el('span', { class: 'ui-badge schema-owner-only', text: t('schema.owner_only') }) : null,
+        def.owner_only && !ctx.owner ? el('span', { class: 'ui-badge schema-owner-only', text: t('schema.owner_only') })
+          : (hostLocked(def, ctx) ? el('span', { class: 'ui-badge schema-owner-only', text: t('settings.owner_only_badge') }) : null),
         ...tags,
       ]),
       el('p', { class: 'ui-setting__desc', id: `${id}-desc`, text: def.description }),
@@ -402,9 +477,12 @@ export async function mountSchemaRows(host, opts = {}) {
   if (!defs.length) return null;
 
   const ctx = {
-    // Host-control (owner_only) settings need admin_system: the Owner and Admins. A profile merely
+    // Host-control (owner_only) settings need admin_system, which every Admin holds. A profile merely
     // granted manage_settings is refused by the server; the page just doesn't offer it.
-    owner: opts.role === 'owner' || opts.role === 'admin' || opts.role == null,
+    owner: opts.role === 'admin' || opts.role == null,
+    // 4.3 host tier: HOST_KEYS are the protected Admin's alone (`protected` from /api/auth/status,
+    // true on an open install). Not said = not offered; the server refuses either way.
+    host: !!opts.protected,
     async commit(row, value, control) {
       if (value === undefined) return;
       const k = row.def.key;
@@ -437,6 +515,7 @@ export async function mountSchemaRows(host, opts = {}) {
     wire(node, row, control, resetBtn, errNode) {
       const k = row.def.key;
       void errNode;
+      if (rowLocked(row, ctx)) return;      // a locked row offers no Reset either (env, Admin-only, host tier)
       const doReset = async () => {
         try {
           await api.patchSettings({}, [k]);
@@ -492,9 +571,34 @@ export async function mountSchemaRows(host, opts = {}) {
       for (const def of list) box.append(rowNode(rowOf(def, values), ctx));
       host.append(box);
     }
+    await drawHostCheck();
     const ui = typeof window !== 'undefined' && window.UIComponents;
     if (ui && ui.init) ui.init(host);
     paintRestart();
+  }
+
+  /** 4.3 Fable: under the "Unknown addresses" row, the Owner's card (host tier: nobody else is
+   *  sent the report, so nobody else fetches it). */
+  async function drawHostCheck() {
+    const modeRow = host.querySelector('[data-key="people.host_check"]');
+    if (!modeRow || !ctx.host) return;
+    let report = null;
+    try { report = await fetchHostCheck(api); } catch { report = null; }
+    if (mine !== host._schemaSeq) return;
+    const allow = async (name) => {
+      const v = ((values && values.values) || {})['people.allowed_hosts'];
+      const now = Array.isArray(v && v.value) ? v.value : [];
+      try {
+        await api.patchSettings({ 'people.allowed_hosts': [...now.filter((x) => x !== name), name] }, []);
+        cache = Promise.all([Promise.resolve(schema), api.settings()]);
+        [schema, values] = await cache;
+        await draw();
+        toast(t('hostcheck.allowed_toast', { name }));
+      } catch (e) { toast(errorText(e), true); }
+    };
+    const old = host.querySelector('.schema-host-check');
+    if (old) old.remove();
+    modeRow.after(hostCheckCard(report, allow));
   }
 
   await draw();
@@ -526,7 +630,7 @@ export async function applyDeviceDefaults({ api = realApi, win = typeof window =
       } else if (what === 'avatar_style' && value === 'minimal') {
         win.document.documentElement.setAttribute('data-avatar-style', 'minimal'); done.push(what);
       } else if (what === 'language') {
-        const i18n = await import('./i18n.js?v=4');
+        const i18n = await import('./i18n.js?v=5');
         if (value !== i18n.lang()) { await i18n.setLocale(value); drop('dispatch-lang'); done.push(what); }
       }
     } catch { /* a default must never break the page */ }

@@ -15,24 +15,27 @@ nothing below is switched on.
 
 | Concept | What it is |
 |---|---|
-| **Agent** | a configured worker: a *backend*, a model, instructions, a tool allow-list, MCP servers, a workspace policy, an approval policy and a budget. An Owner or Admin defines it (Settings → AI & Connections → Agents) and *publishes* it to the profiles that may use it. |
+| **Agent** | a configured worker: a *backend*, a model, instructions, a tool allow-list, MCP servers, a workspace policy, an approval policy and a budget. An Admin defines it (Settings → AI & Connections → Agents) and *publishes* it to the profiles that may use it. |
 | **Task** | one dispatched job: a live timeline (what the agent said and did, subagents nested), approvals, artifacts, an **estimated** cost, and one state — `queued`, `running`, `awaiting_approval`, `succeeded`, `failed`, `cancelled`. |
-| **Backend** | what actually runs it. Two ship: **OpenClaw** (the gateway or CLI on this machine) and **Claude Agent** (the Anthropic agent SDK, one supervised process per task). Both speak one interface (`AgentBackend`, [agents/backends.md](agents/backends.md)). |
+| **Backend** | what actually runs it. **OpenClaw** (the gateway or CLI on this machine) and **Claude Agent** (the Anthropic agent SDK, one supervised process per task) are the main two. Since 4.3 there are also **command-line programs** the Owner chooses (`cli`) and **Claude Managed Agents** (`managed`, off by default and not verified against the live service). All of them speak one interface (`AgentBackend`, [agents/backends.md](agents/backends.md)). |
 | **Approval** | the agent stops and asks before a tool that changes things. You allow it once, allow it for the rest of the task (never for a destructive tool), or deny it. |
 
 The three permissions (see [security.md](security.md)):
 
-| Permission | Lets you | Owner | Admin | Member | Restricted |
-|---|---|---|---|---|---|
-| `manage_agents` | define agents, store the Claude key, set budgets and retention | yes | yes | no | **never** |
-| `dispatch_agents` | assign tasks to the agents published to you, watch, steer, stop | yes | yes | only if granted | **never** |
-| `approve_agent_actions` | answer approval cards; Send a held hand-off | yes | yes | only if granted | **never** |
+| Permission | Lets you | Admin | User | Basic |
+|---|---|---|---|---|
+| `manage_agents` | define agents, store the Claude key, set per-agent budgets, default limits and retention, see and pause everyone's schedules | yes | **never** | **never** |
+| `dispatch_agents` | assign tasks to the agents published to you, watch, steer, stop | yes | off, an Admin may switch it on | off, an Admin may switch it on |
+| `approve_agent_actions` | answer approval cards; Send a held hand-off | yes | off, an Admin may switch it on | off, an Admin may switch it on |
 
-A **Restricted** profile can never see, start or receive output from an agent or a task: every
-route answers 403 (listing included), the WebSocket frames are never sent to it, and a grant
-cannot give it the permission. A **Member** can use only agents an admin has published to
-them; an agent that was not published answers "not found", exactly like one that does not
-exist. An Owner or Admin sees every task; everyone else sees their own.
+**Agent bots can run commands on this computer, including reading anyone's chats**, so these two
+permissions are off for Users and Basic profiles until an Admin switches them on (the screen says
+so plainly), and they are never effective on the profile an unsigned device lands on (the
+shared DisPatch profile). Without `dispatch_agents` every route answers 403 (listing included)
+and the WebSocket frames are never sent. A profile that has it can use only agents an Admin has
+published to it; an agent that was not published answers "not found", exactly like one that does
+not exist. **A task is its dispatcher's own: everyone, Admins included, sees only their own tasks**
+(an Admin keeps the aggregate spend and the audit log).
 
 ## Using it
 
@@ -41,48 +44,66 @@ exist. An Owner or Admin sees every task; everyone else sees their own.
   dialog, filled in; **nothing runs until you press Assign**. The dialog says where the prompt
   goes (a Claude Agent task sends what it reads and writes to Anthropic's API; an OpenClaw task
   stays on this machine) and that it will ask before changing anything.
-- A task starts only from a chat with a character that Members and above alone can see: the
-  prompt, approval requests and the result are written into that chat, so a chat a Restricted
-  profile can read is refused (`task_thread_not_allowed`). From the Tasks page there is no chat.
+- A task starts from one of your own chats: the prompt, approval requests and the result are
+  written into that chat, so you can only start one from a chat you own and a character you may use
+  (anything else is a 404). From the Tasks page there is no chat.
 - The task's **card** appears in the chat and on the **Tasks** page (the 📋 button in the left
   rail, with a dot while an approval waits for you). It shows the timeline, tool calls that fold
   open, approval cards inline, artifacts, the cost labelled *estimate*, and the controls:
   **Stop** (resumable), **Resume**, a **steer** box while it works and a **follow-up** box when
   it is idle, and **End task** (for good).
-- The Tasks page filters by state, agent, person (Owner/Admin) and date.
+- The Tasks page filters by state, agent and date.
 - You are told when a task needs approval, finishes or fails: a Web Push ping with no content
   (see [privacy.md](privacy.md)), a collapsed notice line in the originating chat, and a
   badge on the rail.
 
-## Setting it up (Owner / Admin)
+## Setting it up (Admin)
 
 **Settings → AI & Connections → Agents.**
 
 1. **Backends** shows what can run here and what each can and cannot do. *OpenClaw* needs
    OpenClaw installed on this machine. *Claude Agent* needs the optional extra
    (`uv sync --extra agents-claude`) and credentials: an **Anthropic Console API key**, or
-   **Amazon Bedrock**, **Google Cloud** or **Microsoft Foundry** credentials already set up on
-   this machine. The key is write-only: it is stored in the OS keyring when one is usable (otherwise a 0600 file under the
+   **Amazon Bedrock**, **Google Cloud** or **Microsoft Foundry** credentials set in the
+   server's environment (the picker greys out a route this computer cannot use and lists the
+   variables it needs; see [agents/backends.md](agents/backends.md#provider-routes); these
+   routes are not verified against the real clouds). The key is write-only: it is stored in the OS keyring when one is usable (otherwise a 0600 file under the
    data directory) and never shown, logged or put in a support bundle. There is deliberately no
    "sign in with a subscription" option.
 2. **Agents → New agent.** Name, backend, model, instructions, the tools it may use (one per
    line; a shell, file writes and anything that sends, posts, deletes or creates always asks),
    MCP servers, working folder, approval mode, limits, and who it is published to. *Add
    StudioForge (read-only key)* adds the StudioForge MCP server with the read-only key's secret
-   name; an admin-scope key needs the Owner.
-3. **Limits and history.** Per-person daily dollars, turns, minutes and tokens; how long
+   name; an admin-scope key needs `admin_system` (an Admin).
+3. **Limits and history.** Each agent's own dollars, turns, minutes and tokens; the
+   **Default limits for tasks** every agent without its own gets (below); how long
    transcripts are kept (default **30 days**); how many tasks run at once; the
    `agents.unified_dispatch` switch (below).
 4. **Secrets.** The names MCP servers need (`MCP_…`, `STUDIOFORGE_…`) and whether each is set.
 
-What only the **Owner** may grant an agent, because each is code execution on this machine in
-effect or hands out a stored secret: trusting a repository's own settings (its hooks will run),
-a local-program MCP server, a server marked admin-scope, a stored secret sent to an address that
-is not on this machine, and pre-approved tools for an agent that never asks.
+What only the **Owner** (the first, protected Admin) may grant an agent, because each is code
+execution on this machine in effect or hands out a stored secret (4.3; before, any Admin could):
+
+- shell and file tools in its tool list: `Bash`, `BashOutput`, `KillShell`, `Edit`, `MultiEdit`,
+  `Write`, `NotebookEdit`, and wildcard entries such as `*` that cover them;
+- taking any tool out of "Also ask before these tools" (for a new agent: anything narrower than
+  the shipped list), or an interactive agent that asks before nothing;
+- **Shell commands that may run without asking** (`bash_allow`): each new entry;
+- a local-program MCP server, or a server marked admin-scope;
+- pre-approved tools for an agent that never asks (`unattended_allow`);
+- trusting a repository's own settings (its hooks will run);
+- a stored secret sent to a server that is not `localhost`, `127.0.0.1` or `::1` (`foo.localhost`
+  counts as remote);
+- a repository folder for a task (`repo_path` on `POST /api/tasks`);
+- the list of **Command-line programs** agents may run.
+
+Other Admins see these controls disabled with "Only the Owner (the main Admin) can ...".
+Grants are compared one by one against the saved agent, so an Admin can still rename or
+describe an agent the Owner approved, or narrow it, without the Owner.
 
 An agent is read afresh at every run: editing its tools, limits or approval policy applies to the
 next follow-up or resume of tasks it already has, and unpublishing, switching off or deleting it
-stops a Member from continuing them (they can still read the history; Stop always works).
+stops a profile from continuing them (they can still read the history; Stop always works).
 
 ### Safety rules that are enforced, not advised
 
@@ -93,10 +114,21 @@ stops a Member from continuing them (they can still read the history; Stop alway
 - **Permission modes** are `default` (approval cards), `dontAsk` (unattended) and `plan`
   (investigate only). `bypassPermissions` and `auto` cannot be expressed.
 - **Destructive tools always ask**, every time, and the card offers only "once".
+- **The workspace is the boundary for files (4.3).** Every tool call of a Claude Agent passes a
+  policy check, in all three modes: a file or folder outside the task's working folder
+  (symlinks and `..` resolved, `~` refused) is denied with a reason the agent sees.
+- **Shell commands** (4.3): a Bash command runs without a card only when, as a whole single
+  command, it starts with one of the agent's **Shell commands that may run without asking**.
+  Anything else asks (interactive) or is refused (unattended and plan). An empty list means
+  every Bash call asks, and an unattended agent cannot run Bash at all. Choose prefixes
+  narrowly: `git status`, not `git `.
+- **Unanswered approvals time out** (4.3): after the approval timeout (default 30 minutes)
+  the answer is No, the request is recorded `expired`, and the task's chat says so. The task
+  goes on without the tool.
 - **Quarantine.** An agent that reads untrusted content (web pages, email, uploads — a web tool
   counts) cannot also hold a shell or write tools; split it into a reader and an actor.
 - **Budgets** are a hard stop plus a notification: per task (dollars, turns, minutes, tokens)
-  and per agent and per person per day. Costs are client-side estimates and are labelled so;
+  and per agent per day (there are no per-person limits). Costs are client-side estimates and are labelled so;
   never bill from them.
 - **Audit.** Every finished task records who, which agent, approvals allowed and denied, the
   estimated cost, the duration and the outcome (Settings → People & Access → Activity & audit); every approval and
@@ -110,9 +142,10 @@ stops a Member from continuing them (they can still read the history; Stop alway
 |---|---|---|
 | OpenClaw | the prompt and file paths | the local OpenClaw gateway (loopback) or CLI; whatever model provider the OpenClaw agent is configured with then sees it |
 | Claude Agent | prompts, tool results, files the agent reads | Anthropic's API (or the Bedrock / Google Cloud / Foundry account you chose); the working folder and the transcript stay on this machine |
+| Command-line program | whatever that program sends; DisPatch gives it the prompt on stdin | wherever the program talks to (the Claude command-line program: Anthropic's API) |
+| Claude Managed Agents | prompts, tool results and the session history | Anthropic's platform, stored there until the session is deleted; not eligible for zero-data-retention |
 
-Claude **Managed Agents** (hosted sessions, stored by Anthropic until deleted, not eligible for
-zero-data-retention) are **not built**; they are milestone M2 and would be opt-in. Details:
+Claude **Managed Agents** are off unless an Admin switches `agents.managed.enabled` on. Details:
 [privacy.md](privacy.md).
 
 ## OpenClaw: the same-host requirement
@@ -154,7 +187,7 @@ overrides the setting either way):
 - an OpenClaw character's chat turn runs as a hidden *chat task* whose id is the thread id (so
   the OpenClaw session key is the same one the old path used) — same lock, typing indicator,
   delivery funnel and error frames, with limits, a record and the protocol probe;
-- a `[[handoff:<agent>|brief]]` card also becomes a task in `queued`, held until the owner
+- a `[[handoff:<agent>|brief]]` card also becomes a task in `queued`, held until the chat's owner
   presses Send (the card's button, or Send on the Tasks page — same UX, same
   `approve_agent_actions` permission); Send runs the advisor's own pipeline (the brief,
   the saved note, the report) as a visible task, and Dismiss cancels it.
@@ -177,20 +210,127 @@ All routes are declared in `backend/app/route_policy.py` and listed in
 | Route | Permission |
 |---|---|
 | `GET/POST /api/agents`, `PATCH/DELETE /api/agents/{id}` | `manage_agents` |
-| `GET /api/agents/backends`, `…/settings`, `…/usage`, `…/profile-budgets`, `POST …/retention/purge` | `manage_agents` |
+| `GET /api/agents/backends`, `…/settings`, `…/usage`, `POST …/retention/purge` | `manage_agents` |
 | `GET/PUT/DELETE /api/agents/credentials/claude`, `GET/PUT/DELETE /api/agents/secrets/{name}` | `manage_agents` (write-only secrets) |
+| `GET /api/agents/claude/routes` | `manage_agents` (which Claude routes this computer can use and what each is missing) |
+| `GET/PUT /api/agents/cli-presets` | the Owner only (host tier) |
+| `GET/POST /api/agents/schedules`, `PATCH/DELETE /api/agents/schedules/{id}` | `dispatch_agents` (your own; `?scope=all` with `manage_agents`) |
 | `GET /api/agents/available` | `dispatch_agents` (only agents published to you) |
 | `POST/GET /api/tasks`, `GET /api/tasks/{id}`, `…/events?after_seq=`, `POST …/send`, `…/interrupt`, `…/resume`, `…/cancel` | `dispatch_agents` |
 | `POST /api/approvals/{request_id}` (`allow` / `deny`, scope `once` / `task`), `POST /api/tasks/{id}/release`, `…/dismiss` | `approve_agent_actions` |
 
 WebSocket frames (server to client only): `task.event` (one normalized event with a task
 summary), `task.approval` (pending / allow / deny / expired) and `task.update`. They go only to
-sockets whose profile may see the task, never to a Restricted socket; a client that sees a gap in
+sockets whose profile may see the task (its dispatcher's); a client that sees a gap in
 `event.seq` refetches `…/events?after_seq=`.
 
 For the support bundle, `agents_store.redacted_summary()` returns counts and configuration shape
 only — never a prompt, instruction, event, path or secret name. W5's `/api/support-bundle`
 embeds it under `agents`.
+
+## Default limits and approvals (4.3)
+
+An agent task with no limit of its own gets these, set in Settings → AI & Connections →
+Agents → **Default limits for tasks** (`PUT /api/agents/settings`):
+
+| Setting | Default | Range | Applies to |
+|---|---|---|---|
+| `agents.default_max_usd` (Most money per task) | $2.00 | 0.01-1000 | tasks on backends that report money |
+| `agents.default_max_turns` (Most turns per task) | 60 | 1-1000 | every task |
+| `agents.default_max_usd_per_day` (Most money per day) | $10.00 | 0.01-1000 | all tasks of one agent together, backends that report money |
+| `agents.approval_timeout_s` (Approval timeout) | 1800 s | 60-86400 | every approval request |
+
+- **Tasks only.** They apply to runs started from `POST /api/tasks`, a schedule, or the
+  command-line and managed backends. Chat turns with Bits and the other agent bots (also with
+  `agents.unified_dispatch` on), and the advisor's hand-off and research runs, are never cut
+  off by them.
+- **Money limits only where there is money.** The Claude Agent and Managed Agents report an
+  estimated cost; OpenClaw reports tokens, so an OpenClaw task gets the turn limit only. A
+  command-line program counts as reporting money only when it is the Claude command-line
+  program.
+- The limits a run was held to are recorded in the task row's spec, and the empty budget
+  boxes in the agent editor show the default they will use.
+- **Daily caps are reserved.** A starting task sets aside its per-task cap (or what is left
+  today) from its agent's daily cap, so two tasks that start together cannot both spend the
+  same money; the second waits in the queue. Reservations (table `agent_reservations`) are
+  settled however a task ends and swept at startup.
+- **A task waiting for an approval gives its slot back**, so other tasks can start. When the
+  answer comes and every slot is taken, the task waits for a free one. At most
+  2 × `agents.max_concurrent` tasks may wait for an approval at once; the next one that would
+  wait is denied with a notice. Task cards say "Waiting for your OK (n min left)".
+- Two answers to one approval request cannot both win: the second gets 404
+  `approval_not_found`, and the audit row keeps the first decision.
+- The start-up log prints the effective defaults (`agent limits: tasks default to ...`), and
+  the support bundle carries open reservations, waiting approvals and the limits.
+
+## Schedules
+
+Tasks → **Schedules** runs an agent again and again (4.3). A schedule belongs to the profile
+that made it and runs as that profile.
+
+- **Rules:** every N minutes (15 or more), every day at a time, or every week on a day at a
+  time, read in the schedule's time zone (IANA name, default UTC). In the API:
+  `{"every_minutes": n}`, `{"daily_at": "HH:MM"}`,
+  `{"weekly_day_at": {"day": "mon", "at": "HH:MM"}}`. At most 20 schedules per profile.
+- **Where it posts:** optionally one of the owner's own chats, on a character the owner may
+  use. The task card and the result go there.
+- **Firing:** every 30 seconds DisPatch starts the schedules that are due, at most
+  `agents.max_concurrent` new tasks per tick. Each run checks again that the owner still
+  exists, is enabled and may assign tasks, that the agent still exists and is still
+  published to the owner, that the chat still exists and is still the owner's, and that the
+  previous run has finished. A schedule that cannot run is skipped or switched off and shows
+  why; the owner gets one chat line and a push ping (kind `schedule`; tapping it opens
+  Tasks) the first time a reason appears.
+- **Missed runs** while DisPatch was down are not replayed: one catch-up run, then the
+  normal rhythm.
+- **Daylight saving:** a daily time inside a spring-forward gap (02:30 on the change day)
+  runs at the shifted time (03:30), once; a time that happens twice in the autumn runs the
+  first time, once.
+- Admins with `manage_agents` see every schedule (**Show everyone's schedules**,
+  `?scope=all`) but not another profile's prompt or chat, and may only pause or delete
+  someone else's schedule.
+- Invariant **I10** checks that every enabled schedule names a live owner and an agent that
+  owner may use.
+
+## Command-line programs (the Owner only)
+
+The `cli` backend runs a program on this computer, so only the Owner chooses which ones:
+Settings → AI & Connections → Agents → **Command-line programs**
+(`PUT /api/agents/cli-presets`):
+
+```json
+{"presets": [{"id": "my-agent", "label": "My agent", "kind": "generic",
+              "executable": "/usr/local/bin/my-agent", "args": ["--json"],
+              "env_secrets": {"MY_AGENT_KEY": "MCP_MY_AGENT_KEY"},
+              "resume_args": ["--resume", "{session_id}"]}]}
+```
+
+- An agent with backend `cli` names a program by its short name
+  (`backend_options.preset`) and nothing else: a command, argument list or executable in the
+  agent definition is refused.
+- The program must print Claude `stream-json` lines. It runs in the task's working folder
+  with a minimal environment, the prompt on stdin, in its own process group (Stop and End
+  task end the whole group). `env_secrets` maps a variable name to the name of a stored
+  secret, never a value.
+- `kind: "claude"` builds the command line of the Claude command-line program
+  (`claude --bare -p --output-format stream-json ...`) from the agent's tool list and budget.
+  Tools that would need an approval are left out, because a program cannot ask. MCP servers
+  with secret headers are refused for command-line agents.
+
+## Claude Managed Agents (off by default, not verified against the live service)
+
+The `managed` backend runs a task as a session of an agent hosted by Anthropic.
+
+- Switch on `agents.managed.enabled`. The API key is the stored Anthropic key.
+- Create the remote agent and its environment in the Anthropic Console. The DisPatch agent
+  names them in `backend_options`: `agent_id` (Managed agent id), `environment_id`
+  (Environment id) and optionally `agent_version`. DisPatch never creates, archives or
+  deletes remote agents, environments or sessions.
+- One task is one session. A tool call the remote side holds for a decision becomes an
+  approval card when the tool is in the agent's tool list; otherwise it is denied. A dollar
+  cap on the task becomes the session's budget.
+- It has been tested only against recorded, made-up event streams. Check it with a real key
+  before you rely on it; the cost DisPatch reads from the session is taken to be in cents.
 
 ## Configuring characters (bots)
 
@@ -204,12 +344,11 @@ bots:
     emoji: "✨"
     avatar: assistant.png  # under frontend/static/avatars/
     order: 0
-    visible: true
-    audience: members      # all | members | restricted
 ```
 
-`audience` is enforced on the server: a character a Restricted profile may not see is invisible
-*and* unreachable to it, not merely hidden. An **advisor** character answers from a model API
+Who may use a character is decided on the server (household list, personal ownership and, for an
+agent-backed one, `dispatch_agents`; see [characters.md](characters.md)): a character a profile may
+not use is invisible *and* unreachable to it, not merely hidden. An **advisor** character answers from a model API
 and can hand work to agents through `[[research:…]]` and `[[handoff:…]]` markers, with a
 Send/Dismiss card for anything that does work — see [advisor.md](advisor.md).
 
@@ -237,10 +376,9 @@ needs no credential; from anywhere else it requires an API key. See
 Three things worth knowing before you write a script against this, because each
 one is a place where a naive caller silently does the wrong thing:
 
-- **`GET /api/bots` gives an on-box caller the real roster.** A browser tab with
-  no unlocked session still gets the Safe-Mode subset — that is the two-tier
-  gate, not a bug — but a script on the host sees every visible bot, so it is a
-  fine way to discover ids.
+- **`GET /api/bots` gives a machine caller the household roster** (plus the first Admin's
+  personal bots). A browser session gets only the bots its profile may use, so a script on the
+  host is the way to discover ids.
 - **Ids are matched case-insensitively**, both `bot_id` and `thread_id`, on
   every route: post, read back, rename, mark read, delete. The response carries
   the canonical id; store that one. This matters when the id reaches you
@@ -363,10 +501,11 @@ Rules worth knowing:
 - **Three requests per bot per minute.** A render occupies a GPU for tens of
   seconds; a refusal is a `429` and is final, not queued.
 - Same access rules as the rest of the machine surface: the API key (loopback
-  without one only while `machine_loopback_trust` is on), and a locked browser
-  tab gets a `403`.
+  without one only while `machine_loopback_trust` is on). The prompt passes the
+  image hard-line guard (adult-only depictions; no sexual imagery of real,
+  identifiable people).
 - The finished picture is an ordinary chat image. It opens in the lightbox,
-  it is hidden by Safe Mode, and No-Image Mode omits the row entirely — the
+  and No-Image Mode omits the row entirely — the
   job pipeline adds no exceptions to any of that.
 
 Host configuration for this is `DISPATCH_CLAWFORGE_URL` (the image server's
@@ -395,8 +534,8 @@ loopback, with or without a PIN — and nothing about their requests or the
 responses changed. New callers may use either prefix.
 
 Every route is **machine-callable** (no PIN-derived session needed from
-loopback, or remotely with the `api_token`). Safe-Mode browsers are blocked
-at both prefixes in `_decoy_blocked`, so a locked device never sees a row.
+loopback, or remotely with the `api_token`). A browser session needs the app's
+permission (`manage_agents`, so an Admin).
 
 The full lifecycle from one call:
 
@@ -485,9 +624,9 @@ or company (90-day window) returns `{duplicate: false, repost_of:
   route, reads and writes (`POST /api/jobs`, `score`, `find`, and the manage
   verbs `vote / applied / feedback / tags / archive / recompute`). The app's
   write routes all use `ctx.require_access` = operator OR machine.
-- **Unlocked browser session**: every route.
-- **Locked browser** (Safe Mode): 403 `{"decoy": true}` on every route and on
-  the `/apps/jobboard/` page, so a locked device never sees a row.
+- **Admin browser session**: every route.
+- **Any other profile**: 403 `permission_denied` on every route and on
+  the `/apps/jobboard/` page.
 - **Remote caller without the token**: 401.
 - **No-PIN install**: everything is open, as for the rest of DisPatch.
 - **Switched off** (`{id: jobboard, kind: app, enabled: false}` in
@@ -495,8 +634,8 @@ or company (90-day window) returns `{duplicate: false, repost_of:
 
 **WebSocket frames.** A new or changed job is broadcast as
 `app:jobboard:job_created` / `app:jobboard:job_updated` (they were
-`job_created` / `job_updated` before the move). Safe-Mode sockets never
-receive them.
+`job_created` / `job_updated` before the move). Only sockets of profiles
+that may see the app receive them.
 
 ## Pointing at a file on the host
 
@@ -518,8 +657,8 @@ The file is never copied. That has two consequences worth stating: the link
 breaks if you delete the file, and **only paths under the folders the operator
 configured for the local viewer open at all** — everything else answers "Not
 served by the local viewer", as do secrets, dotfiles and system paths whatever
-the configuration says. It is also an unlocked-tier affordance: a Safe-Mode
-device sees the path as plain text and nothing happens when it is tapped. See
+the configuration says. It is also an Admin affordance: any other profile
+sees the path as plain text and nothing happens when it is tapped. See
 [configuration.md](configuration.md) and [security.md](security.md).
 
 The four markers an agent can write in a message:
@@ -565,8 +704,7 @@ Rules:
 - The body is a standard markdown table — the same one that already renders
   elsewhere. The leading checkbox column is added automatically; do **not** add
   one yourself.
-- Checking requires an unlocked (full) session. Safe Mode shows the checkboxes
-  read-only.
+- Ticking a box edits the chat, so only the profile that owns the chat can do it.
 
 ## Writing your own adapter
 

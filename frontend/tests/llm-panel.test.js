@@ -43,7 +43,7 @@ async function setup({ quickOpen } = {}) {
     const [status, body] = h ? h(opts) : [404, { detail: 'Not Found' }];
     return { ok: status >= 200 && status < 300, status, statusText: String(status), headers: new win.Headers(), json: async () => body };
   };
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   const mod = await import(`../static/js/llm.js?t=${Math.random()}`);
   const rec = { tabs: [] };
@@ -77,10 +77,4 @@ test('the old entry point opens AI & Connections on the quick setup; the first-r
   const card = mod.firstRunCard(() => {});
   assert.equal(card.querySelectorAll('button').length, 1);
   assert.equal(mod.llmPanelOpen(), true);
-});
-
-test('slugForBot still derives a safe id from a name', dom, async () => {
-  const { mod } = await setup();
-  assert.equal(mod.slugForBot('Ada Lovelace!'), 'ada-lovelace');
-  assert.equal(mod.slugForBot('   '), 'assistant');
 });

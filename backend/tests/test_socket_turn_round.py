@@ -89,41 +89,42 @@ def wired(tmp_path, monkeypatch):
 # Safe Mode
 # --------------------------------------------------------------------------- #
 
-def test_streaming_frames_are_scoped_by_bot_exactly_like_a_message():
-    """The reason they were excluded was leakage, not the frame type.
+def _basic(bots=("alpha",)):
+    from app import policy
+    return policy.Principal(kind="profile", role="basic", profile_id="b1", name="B",
+                            permissions=frozenset({"use_chat", "dispatch_agents"}))
 
-    A locked device may watch a SAFE bot's reply arrive as it is typed, and
-    must learn nothing at all about any other bot — the same rule `message`
-    has always obeyed.
-    """
+
+def test_streaming_frames_are_scoped_by_owner_and_character_exactly_like_a_message():
+    """A streaming frame follows the same rules as `message`: only the thread owner's sockets,
+    and only for a character the owner may use."""
+    from app import ownership, policy
+    ownership.remember("t-stream", "b1")
     for kind in ("stream_start", "stream_chunk", "turn_status"):
-        assert kind in main._DECOY_FRAME_ALLOW
-        unsafe = {"type": kind, "thread_id": "t1", "bot_id": "main",
-                  "text": "secret", "phase": "tool:x", "message_id": "run:1"}
-        assert main.redact_for_decoy(unsafe) is None, (
-            f"{kind} for a non-safe bot must not reach a locked device")
-        safe = {**unsafe, "bot_id": "alpha"}
-        assert main.redact_for_decoy(safe) is not None
+        assert kind in main._BOT_SCOPED_FRAMES and kind in main._THREAD_FRAMES
+        frame = {"type": kind, "thread_id": "t-stream", "bot_id": "alpha",
+                 "text": "secret", "phase": "tool:x", "message_id": "run:1"}
+        other = policy.Principal(kind="profile", role="user", profile_id="u2", name="U",
+                                 permissions=frozenset({"use_chat"}))
+        assert main.scope_frame_for_principal(frame, other) is None, kind
+        assert main.scope_frame_for_principal(frame, None) is None, kind
 
 
 def test_an_unattributed_streaming_frame_fails_closed():
-    """Fail-closed is the direction: no bot means no delivery."""
+    """Fail-closed is the direction: no known owner means no delivery."""
+    from app import policy
     frame = {"type": "stream_chunk", "thread_id": "unknown-thread",
              "message_id": "run:1", "text": "hi"}
-    assert main.redact_for_decoy(frame) is None
+    assert main.scope_frame_for_principal(frame, policy.open_principal()) is None
 
 
-def test_a_delta_reaching_a_locked_device_carries_no_path_or_marker():
-    """The explicit Safe-Mode requirement, end to end through the redactor."""
+def test_a_delta_carries_no_path_or_marker():
+    """What the sanitizer hands the transport: no host path, no internal marker."""
     raw = "look [[media:/srv/pics/x.png|c]] :react:morning: at this"
     clean = main._sanitize_delta(raw)
-    frame = main.redact_for_decoy({"type": "stream_chunk", "thread_id": "t1",
-                                   "bot_id": "alpha", "message_id": "run:1",
-                                   "text": clean})
-    assert frame is not None
-    assert "/srv/pics" not in frame["text"]
-    assert ":react:" not in frame["text"]
-    assert "[[media:" not in frame["text"]
+    assert "/srv/pics" not in clean
+    assert ":react:" not in clean
+    assert "[[media:" not in clean
 
 
 # --------------------------------------------------------------------------- #
@@ -395,7 +396,7 @@ def test_abort_is_refused_in_safe_mode(app_client, monkeypatch):
     auth.set_pin("135790")
     app_client.cookies.clear()
     monkeypatch.setattr(main, "_gateway_client", _AbortClient(), raising=False)
-    assert app_client.post(f"/api/threads/{tid}/abort").status_code == 403
+    assert app_client.post(f"/api/threads/{tid}/abort").status_code in (401, 403)
 
 
 def test_abort_resolves_the_session_key_and_the_named_run(app_client, monkeypatch):
@@ -413,15 +414,14 @@ def test_abort_resolves_the_session_key_and_the_named_run(app_client, monkeypatc
 
 
 def test_abort_over_the_websocket_is_refused_in_safe_mode(app_client, monkeypatch):
-    tid = app_client.post("/api/threads", json={"bot_id": "alpha"}).json()["id"]
+    _tid = app_client.post("/api/threads", json={"bot_id": "alpha"}).json()["id"]
     auth.set_pin("246802")
     app_client.cookies.clear()
     monkeypatch.setattr(main, "_gateway_client", _AbortClient(), raising=False)
-    with app_client.websocket_connect("/ws") as ws:
-        assert ws.receive_json()["decoy"] is True
-        ws.send_json({"type": "abort", "thread_id": tid})
-        frame = ws.receive_json()
-    assert frame["type"] == "error" and "Unlock" in frame["message"]
+    # 4.0: a signed-out device is nobody: the socket is refused outright.
+    from starlette.websockets import WebSocketDisconnect
+    with pytest.raises(WebSocketDisconnect), app_client.websocket_connect("/ws") as ws:
+        ws.receive_json()
 
 
 def test_abort_without_a_gateway_says_so_rather_than_pretending(app_client,

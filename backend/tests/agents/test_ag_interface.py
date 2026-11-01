@@ -211,10 +211,14 @@ async def test_task_ids_are_validated(tmp_path):
     assert ei.value.code == ErrorCode.invalid_request
 
 
-def test_cli_adapter_is_an_m3_stub():
+def test_cli_adapter_runs_only_a_saved_preset():
+    # 4.3 (#13) built the M3 supervisor; without a saved preset nothing may start.
     import asyncio
-    with pytest.raises(NotImplementedError, match="M3"):
-        asyncio.run(GenericCliBackend().start_task(AgentSpec(backend="cli"), "x", TaskContext(data_dir=".")))
+
+    from app.agents.interface import AgentBackendError
+    with pytest.raises(AgentBackendError):
+        asyncio.run(GenericCliBackend(presets=list).start_task(AgentSpec(backend="cli"), "x",
+                                                               TaskContext(data_dir=".")))
 
 
 async def test_a_denied_tool_in_the_fake_is_a_failed_tool_result_not_a_crash(tmp_path):

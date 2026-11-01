@@ -10,17 +10,16 @@ assistant.
 
 ## The two-step version
 
-1. Unlock DisPatch, open **⚙ Settings → AI & Connections**. Choose which bot to
-   connect: Atlas (the default), any other direct-API bot, or a new one.
+1. Sign in as an Admin and open **⚙ Settings → AI & Connections**. Press **Add a
+   connection** (or **Set up everything with one provider**).
 2. Pick a provider, paste a key if it needs one (or enter a local server's
-   address), press **Test**, pick a model from the list it returns, press
-   **Connect**.
+   address), press **Test**, pick a model from the list it returns, and **Save**.
+3. In **Settings → Characters**, open the bot's **Details** (Atlas, or any other
+   direct-API bot) and choose that connection. A **Lookups** switch in the same
+   Details turns the bot's web, weather and other lookups on or off.
 
-That writes the provider, model and key into the chosen bot's `advisor:` block in
-`config.yaml`. The bot keeps its threads, history and PIN rules; connecting a
-bot a second time updates it and leaves its other settings alone. A **Lookups**
-switch next to the button turns the bot's web, weather and other lookups on or
-off.
+The bot keeps its threads and history; choosing another connection later updates
+its `advisor:` block in `config.yaml` and leaves its other settings alone.
 
 Since 2.3 this is the *direct-API* backend, the same one described in
 [advisor.md](advisor.md), so a connected bot streams, can use lookups and can
@@ -98,8 +97,8 @@ Two things to know:
 ## Where the API key is stored
 
 In **`config.yaml` in the data directory** (`~/.local/share/local-chat` by
-default, `/data` in the container images). A bot connected from the AI models
-tab holds it in its `advisor.providers` list (same fields, same rules); the
+default, `/data` in the container images). A bot connected from Settings → AI &
+Connections holds it in its `advisor.providers` list (same fields, same rules); the
 example below shows a legacy `api` block:
 
 ```yaml
@@ -108,8 +107,6 @@ example below shows a legacy `api` block:
   emoji: 🟢
   model_hint: gpt-4o-mini
   order: 2
-  visible: true
-  safe: false
   api:
     provider: openai
     base_url: https://api.openai.com/v1
@@ -128,7 +125,7 @@ can hold credentials. Be aware of what that does and does not buy you:
   with it.
 
 The key is never returned by any endpoint. The API reports `has_key: true` and
-nothing else, and `/api/bots` — which a Safe-Mode device can read — carries only
+nothing else, and `/api/bots` — which every signed-in profile can read — carries only
 the provider *id*, not the URL and not the credential.
 
 ### Keeping the key out of the file: `api_key_env`
@@ -154,15 +151,16 @@ both has said which one they trust, and it is not the one on disk.
 ## Access control
 
 The setup panel and all three routes behind it (`/api/llm/providers`,
-`/api/llm/test`, `/api/llm/connect`) are **full-session only** — a PIN-locked
-device never sees the 🔌 AI models tab and gets a 403 if it constructs the request by
-hand. Setting up a provider spends money and writes a credential; it belongs on
-the same side of the door as the dashboard and the harness pane.
+`/api/llm/test`, `/api/llm/connect`) are **Admin-only** (`manage_connections`) — another role never sees
+Settings → AI & Connections and gets a 403 if it constructs the request by hand. Setting up a
+provider spends money and writes a credential; it belongs on the same side of the door
+as the dashboard and the harness pane. The key is a household connection: every
+profile's bots may use it (an Admin can narrow which connections a profile's own bots
+may pick), and nobody but an Admin sees it.
 
-A newly connected bot is created with `safe: false`, so it does **not** appear
-on Safe-Mode devices until you flip that yourself in **Settings → Characters**.
-Decide deliberately: a safe bot is reachable by anyone holding a family tablet,
-and every message it sends costs you tokens.
+A newly connected household bot is available to Users by default and to a Basic profile
+only once an Admin adds it to that profile's household list (Settings → People).
+Decide deliberately: anyone who can use the bot spends your tokens.
 
 ## Configuration reference
 
@@ -204,12 +202,12 @@ creating a second one — leaving the key field blank keeps the stored key.
   server, an Anthropic refusal — each produces an error in the thread naming the
   cause. Nothing fails silently, and the thread never stays stuck "thinking".
 - **Cost is yours.** DisPatch does not meter, cap, or display spend. A cloud
-  provider connected to a bot that Safe-Mode devices can reach is a bill with no
+  provider connected to a bot that every profile can reach is a bill with no
   ceiling; the provider's own dashboard is where you set limits.
 
 ## Need streaming, fallbacks or a knowledge base?
 
-The AI models tab connects one provider. For a cloud-then-local fallback chain,
+Settings → AI & Connections connects one provider per bot. For a cloud-then-local fallback chain,
 notes the bot can search and handoffs to your agents, add more entries to the
 bot's `advisor:` block: [advisor.md](advisor.md).
 

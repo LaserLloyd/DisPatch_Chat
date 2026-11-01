@@ -122,7 +122,7 @@ def _unlock(client: TestClient, pin: str = "1234") -> None:
 def test_locked_session_refused(dash_env, method, path):
     client = dash_env()
     auth.set_pin("1234")                     # PIN set, never unlocked -> Safe Mode
-    assert client.request(method, path).status_code == 403
+    assert client.request(method, path).status_code in (401, 403)
 
 
 @pytest.mark.parametrize("method,path", DASH_ROUTES)
@@ -146,7 +146,7 @@ def test_expired_session_falls_back_to_refused(dash_env, method, path):
     client = dash_env()
     _unlock(client)
     auth.revoke_all()                        # idle timeout / restart equivalent
-    assert client.request(method, path).status_code == 403
+    assert client.request(method, path).status_code in (401, 403)
 
 
 @pytest.mark.parametrize("method,path", DASH_ROUTES)
@@ -299,10 +299,10 @@ def test_connections_report_counts_but_never_identity(dash_env, monkeypatch):
     no addresses, tokens or user agents may appear in it."""
     dash_env()
     monkeypatch.setattr(manager, "pin_set", lambda: False)
-    monkeypatch.setattr(manager, "is_session_live", None)
-    fake = {object(): {"decoy": True, "token": None},
-            object(): {"decoy": False, "token": None},
-            object(): {"decoy": False, "token": None}}
+    monkeypatch.setattr(manager, "is_session_live", lambda tok: tok != "dead")
+    fake = {object(): {"token": "dead", "principal": None},
+            object(): {"token": "live", "principal": None},
+            object(): {"token": "live", "principal": None}}
     monkeypatch.setattr(manager, "_conns", fake)
 
     conns = asyncio.run(dashboard._connections())
@@ -1242,6 +1242,8 @@ def test_the_log_path_prefers_the_documented_name(dash_env, tmp_path, monkeypatc
 
 def test_missing_log_file_explains_where_the_logs_are(dash_env, monkeypatch):
     dash_env()
+    from app import logbuffer  # 4.3 (#18): no in-memory ring either
+    monkeypatch.setattr(logbuffer, "_handler", None)
     monkeypatch.delenv("LOCAL_CHAT_LOG_FILE", raising=False)
     monkeypatch.delenv("DISPATCH_LOG_FILE", raising=False)
     body = asyncio.run(dashboard.tail_log(50))

@@ -52,7 +52,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from . import accounts, config
 from . import agents_store as store
@@ -85,10 +85,12 @@ from .agents.workspace import WorkspaceError, cleanup_workspace, existing_worksp
 log = get_agent_logger("service")
 
 #: What a person sees on the backend picker (branding rules: docs/agents/security.md s8).
-BACKEND_LABELS = {"openclaw": "OpenClaw", "claude_sdk": "Claude Agent", "fake": "Fake agent (tests)"}
+BACKEND_LABELS = {"openclaw": "OpenClaw", "claude_sdk": "Claude Agent", "cli": "Command-line agent",
+                  "managed": "Claude Managed Agents", "fake": "Fake agent (tests)"}
 
-#: Backends an agent definition may name. ``cli`` (M3) and Managed Agents (M2) are not built.
-KNOWN_BACKENDS = ("openclaw", "claude_sdk")
+#: Backends an agent definition may name. 4.3 (#13): ``cli`` runs a preset the protected Admin
+#: saved (``agents.cli.presets``); ``managed`` is off until ``agents.managed.enabled`` is set.
+KNOWN_BACKENDS = ("openclaw", "claude_sdk", "cli", "managed")
 
 #: Auth routes the Claude screen offers (RESEARCH.md F2/F2b, section 5 item 1). "google" is the
 #: UI word for the adapter's ``vertex`` route. There is deliberately no subscription login.
@@ -309,6 +311,12 @@ class TaskManager:
         self._live: set[str] = set()           # tasks handed to a backend and not yet finished
         self._launched: set[str] = set()       # every task this process has handed to a backend
         self._purger: asyncio.Task | None = None
+        # 4.3 (#11, #34): a task waiting for a person's answer gives its slot back (``_waiting``);
+        # an answer that arrives while every slot is taken is held until one frees (``_held``).
+        self._waiting: set[str] = set()
+        self._held: dict[str, list[tuple[str, str, str]]] = {}
+        self._appr_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._appr_timers: dict[str, asyncio.Task] = {}
 
     # -- lifecycle ----------------------------------------------------------- #
 
@@ -317,6 +325,8 @@ class TaskManager:
         self._wq = asyncio.Queue()
         self._writer = asyncio.create_task(self._writer_loop(), name="agents-writer")
         await self.restore()
+        await self.flush()
+        await asyncio.to_thread(self._boot_sweep)
         await self._kick()
         self._purger = asyncio.create_task(self.purge_loop(), name="agents-purge")
 
@@ -324,6 +334,21 @@ class TaskManager:
     def _ensure_schema() -> None:
         with store.connect():
             pass
+
+    def _boot_sweep(self) -> None:
+        """Nothing runs before the first kick: every reservation is stale, and a pending
+        approval whose task is over (or that waited past the timeout) is expired."""
+        released = store.release_reservations_except(set(self._live))
+        expired = store.expire_stale_approvals(self.approval_timeout_s())
+        lim = self.limit_defaults()
+        log.info("agent limits: tasks default to $%.2f and %d turns each, $%.2f per agent per day "
+                 "(money caps only on backends that report money; chat turns and handoffs exempt); "
+                 "approvals time out after %d s; at most %d tasks wait for approval at once",
+                 lim["max_usd"] or 0.0, lim["max_turns"] or 0, lim["max_usd_per_day"] or 0.0,
+                 int(self.approval_timeout_s()), 2 * self._slot_limit())
+        if released or expired:
+            log.info("agent limits at boot: released %d stale reservation(s), expired %d stale approval(s)",
+                     released, expired)
 
     async def shutdown(self) -> None:
         self._closing = True
@@ -339,8 +364,9 @@ class TaskManager:
         for b in list(self.backends.values()):
             with contextlib.suppress(Exception):
                 await b.aclose()
-        with contextlib.suppress(Exception):
-            await self.flush()
+        if self._writer is not None and not self._writer.done():     # a dead writer never drains
+            with contextlib.suppress(Exception):
+                await self.flush()
         if self._writer is not None:
             await _stop(self._writer)
             self._writer = None
@@ -403,10 +429,17 @@ class TaskManager:
         with contextlib.suppress(Exception):
             stored = bool(self.secrets.get(SECRET_ANTHROPIC_API_KEY)) and not env_set
         route = self.claude_route()
+        # 4.3 (#9): whether the chosen route can authenticate, by env NAME only (never a value).
+        from .agents.claude_sdk_adapter import check_route_env
+        if route == "api_key":
+            missing = [] if (env_set or stored) else [SECRET_ANTHROPIC_API_KEY]
+        else:
+            missing = check_route_env(CLAUDE_ROUTES[route], os.environ).missing
         return {"route": route, "routes": list(CLAUDE_ROUTES),
                 "api_key_set": env_set or stored,
                 "api_key_source": "environment" if env_set else ("stored" if stored else None),
-                "provider_env": CLAUDE_ROUTE_ENV.get(CLAUDE_ROUTES[route])}
+                "provider_env": CLAUDE_ROUTE_ENV.get(CLAUDE_ROUTES[route]),
+                "route_available": not missing, "route_missing": missing}
 
     def set_claude_key(self, key: str) -> None:
         self.secrets.set(SECRET_ANTHROPIC_API_KEY, key)
@@ -430,6 +463,12 @@ class TaskManager:
         if name == "claude_sdk":
             from .agents.claude_sdk_adapter import ClaudeAgentBackend
             return ClaudeAgentBackend(auth_route=CLAUDE_ROUTES[self.claude_route()])
+        if name == "cli":
+            from .agents.cli_adapter import GenericCliBackend
+            return GenericCliBackend()
+        if name == "managed":
+            from .agents.managed_adapter import ManagedAgentsBackend
+            return ManagedAgentsBackend()
         raise AgentBackendError(ErrorCode.not_supported, f"unknown agent backend {name!r}")
 
     def backend_problem(self, name: str) -> tuple[ErrorCode, str] | None:
@@ -445,13 +484,36 @@ class TaskManager:
                         "OpenClaw is not installed on this machine (it must run on the same host).")
             return None
         if name == "claude_sdk":
-            if importlib.util.find_spec("claude_agent_sdk") is None and "claude_sdk" not in self.backends:
-                return (ErrorCode.sdk_missing,
-                        "The Claude Agent needs the optional extra: install DisPatch with "
-                        "`uv sync --extra agents-claude`.")
+            # 4.3 (#12): the credentials first (the person can fix those in Settings), then the SDK.
             st = self.credential_status()
             if st["route"] == "api_key" and not st["api_key_set"]:
                 return (ErrorCode.auth_failed, "The Claude Agent needs an Anthropic API key (Settings, Agents).")
+            if not st["route_available"]:
+                from .agents.claude_sdk_adapter import check_route_env, route_missing_message
+                return (ErrorCode.auth_failed,
+                        route_missing_message(check_route_env(CLAUDE_ROUTES[st["route"]], os.environ)))
+            if importlib.util.find_spec("claude_agent_sdk") is None and "claude_sdk" not in self.backends:
+                from .connections import in_container
+                if in_container():
+                    return (ErrorCode.sdk_missing,
+                            "The Claude Agent is not in this image: rebuild it with "
+                            "`--build-arg AGENTS_CLAUDE=1`.")
+                return (ErrorCode.sdk_missing,
+                        "The Claude Agent needs the optional extra: install DisPatch with "
+                        "`uv sync --extra agents-claude`.")
+            return None
+        # ---- 4.3 A8: the two M3 backends (off/unconfigured by default)
+        if name == "cli":
+            if not store.get_setting("agents.cli.presets"):
+                return (ErrorCode.backend_unavailable,
+                        "No command-line preset is saved (the main Admin adds one in Settings, Agents).")
+            return None
+        if name == "managed":
+            if not store.get_setting("agents.managed.enabled"):
+                return (ErrorCode.not_supported, "Managed Agents are switched off (Settings, Agents).")
+            st = self.credential_status()
+            if not st["api_key_set"]:
+                return (ErrorCode.auth_failed, "Managed Agents need an Anthropic API key (Settings, Agents).")
             return None
         if name in self.backends:
             return None
@@ -494,32 +556,114 @@ class TaskManager:
 
     # -- budgets ------------------------------------------------------------------ #
 
-    def _day_remaining(self, spec: AgentSpec, agent_id: str, owner: str) -> tuple[float | None, str]:
+    @staticmethod
+    def _slot_limit() -> int:
+        return max(1, int(store.get_setting("agents.max_concurrent") or 4))
+
+    @staticmethod
+    def approval_timeout_s() -> float:
+        try:
+            v = float(store.get_setting("agents.approval_timeout_s") or 0)
+        except (TypeError, ValueError):
+            v = 0.0
+        return v if v > 0 else float(store.SETTING_DEFAULTS["agents.approval_timeout_s"])
+
+    @staticmethod
+    def limit_defaults() -> dict[str, Any]:
+        """The 4.3 default limits (#10), as set by an Admin. A missing or non-positive value
+        means "no default" for that dimension."""
+        def pos(key: str, cast: Callable[[Any], Any]) -> Any:
+            try:
+                v = cast(store.get_setting(key))
+            except (TypeError, ValueError):
+                return None
+            return v if v and v > 0 else None
+        return {"max_usd": pos("agents.default_max_usd", float),
+                "max_turns": pos("agents.default_max_turns", int),
+                "max_usd_per_day": pos("agents.default_max_usd_per_day", float)}
+
+    #: What a backend that cannot be built right now reports (static fallback; the live
+    #: capabilities win whenever the backend exists).
+    #: ``managed`` reads the session's ``list_cost`` (money); ``cli`` depends on the preset (see
+    #: ``GenericCliBackend.cost_reporting_for``), so without a spec it claims nothing.
+    _COST_REPORTING: ClassVar[dict[str, str]] = {"claude_sdk": "usd", "cli": "none", "managed": "usd", "openclaw": "tokens"}
+
+    def cost_reporting(self, backend: str, spec: AgentSpec | None = None) -> str:
+        """What ``backend`` reports for a run of ``spec``: "usd", "tokens" or "none". A backend
+        whose answer depends on the agent (the CLI backend: a Claude preset reports money, a
+        generic one only what its stream carries) answers per spec."""
+        b = self.backends.get(backend)
+        if spec is not None:
+            per = getattr(b, "cost_reporting_for", None) if b is not None else None
+            if per is None and backend == "cli":
+                from .agents.cli_adapter import cost_reporting_for as per
+            if per is not None:
+                with contextlib.suppress(Exception):
+                    return per(spec)
+                return "none"
+        if b is not None:
+            with contextlib.suppress(Exception):
+                return b.capabilities().cost_reporting
+        return self._COST_REPORTING.get(backend, "none")
+
+    def _with_defaults(self, spec: AgentSpec, kind: str) -> AgentSpec:
+        """Fill the gaps in an agent's budget with the Admin's defaults (#10).
+
+        Scope (PLAN v2, "live side effects"): only ``kind == "task"`` runs - a chat turn
+        (one long-lived task per thread) and the advisor's handoff/research runs are never
+        held to them, or Bits would stop after 60 turns. The money defaults apply only to a
+        backend that reports money (``cost_reporting == "usd"``); OpenClaw reports tokens."""
+        if kind != "task":
+            return spec
+        d = self.limit_defaults()
+        b = spec.budget
+        fill: dict[str, Any] = {}
+        if b.max_turns is None and d["max_turns"]:
+            fill["max_turns"] = d["max_turns"]
+        if self.cost_reporting(spec.backend, spec) == "usd":
+            if b.max_usd is None and d["max_usd"]:
+                fill["max_usd"] = d["max_usd"]
+            if b.max_usd_per_day is None and d["max_usd_per_day"]:
+                fill["max_usd_per_day"] = d["max_usd_per_day"]
+        if not fill:
+            return spec
+        return spec.model_copy(update={"budget": b.model_copy(update=fill)})
+
+    def _uses_reservations(self, spec: AgentSpec) -> bool:
+        return self.cost_reporting(spec.backend, spec) == "usd" and spec.budget.max_usd_per_day is not None
+
+    def _reserve(self, row: dict[str, Any], spec: AgentSpec, *, wait_ok: bool) -> str:
+        """Set this run's money aside from the agent's per-day cap (#11). Returns "ok",
+        "wait" (other tasks' reservations stand in the way: stay queued) or "exhausted"."""
+        if not self._uses_reservations(spec):
+            return "ok"
+        status, _amount = store.try_reserve(
+            row["task_id"], row["agent_id"], row["owner"], day_cap=float(spec.budget.max_usd_per_day or 0),
+            want=spec.budget.max_usd, base_usd=float(row.get("cost_usd") or 0.0), wait_ok=wait_ok)
+        return status
+
+    def _day_remaining(self, spec: AgentSpec, agent_id: str, owner: str,
+                       task_id: str | None = None) -> tuple[float | None, str]:
         rems: list[tuple[float, str]] = []
         if spec.budget.max_usd_per_day is not None:
-            rems.append((spec.budget.max_usd_per_day - store.spent_today("agent", agent_id), "agent"))
-        pb = store.profile_budget(owner) if owner else {}
-        if pb.get("usd_per_day"):
-            rems.append((float(pb["usd_per_day"]) - store.spent_today("profile", owner), "profile"))
+            held = store.reserved_by_others(agent_id, exclude=task_id) if task_id else 0.0
+            rems.append((spec.budget.max_usd_per_day - store.spent_today("agent", agent_id) - held, "agent"))
         if not rems:
             return None, ""
         return min(rems)
 
-    def effective_budget(self, spec: AgentSpec, agent_id: str, owner: str, task_usd: float) -> Budget:
-        """The budget one run is held to: the agent's own limits, tightened by the profile's,
-        with the per-day cap turned into what is LEFT today (+ what this task already spent,
-        because the tracker counts the task's lifetime total). Raises BudgetExhausted."""
+    def effective_budget(self, spec: AgentSpec, agent_id: str, owner: str, task_usd: float,
+                         task_id: str | None = None) -> Budget:
+        """The budget one run is held to: the agent's own limits, with the per-day cap turned
+        into what is LEFT today - minus what other tasks of the agent hold in reservations
+        (#11) - plus what this task already spent, because the tracker counts the task's
+        lifetime total. Raises BudgetExhausted."""
         b = spec.budget.model_dump()
-        rem, who = self._day_remaining(spec, agent_id, owner)
+        rem, _who = self._day_remaining(spec, agent_id, owner, task_id)
         if rem is not None:
             if rem <= 0:
-                raise BudgetExhausted("usd_per_day", "This agent's budget for today is used up."
-                                      if who == "agent" else "Your daily agent budget is used up.")
+                raise BudgetExhausted("usd_per_day", "This agent's budget for today is used up.")
             b["max_usd_per_day"] = round(rem + (task_usd or 0.0), 6)
-        pb = store.profile_budget(owner) if owner else {}
-        for key in ("max_turns", "max_wall_clock_s", "max_tokens"):
-            vals = [v for v in (b.get(key), pb.get(key)) if v]
-            b[key] = min(vals) if vals else None
         return Budget(**b)
 
     # -- dispatch ------------------------------------------------------------------ #
@@ -537,7 +681,7 @@ class TaskManager:
         problem = self.backend_problem(spec.backend)
         if problem is not None and hold is None:
             raise AgentBackendError(problem[0], problem[1])
-        self.effective_budget(spec, agent["id"], owner, 0.0)          # fail early (429)
+        self.effective_budget(self._with_defaults(spec, kind), agent["id"], owner, 0.0)   # fail early (429)
         fields: dict[str, Any] = {
             "agent_id": agent["id"], "agent_name": agent["name"], "backend": spec.backend, "owner": owner,
             "kind": kind, "state": "queued", "hold": hold, "spec_json": json.dumps(agent["spec"]),
@@ -555,9 +699,8 @@ class TaskManager:
         return store.get_task(row["task_id"]) or row
 
     async def _thread_postable(self, tid: str | None) -> bool:
-        """May the manager write a line about a task into this thread? Only into one that exists
-        and that a Restricted profile cannot read: what an agent was asked, and what it answered,
-        is not for them (the same rule the API applies when a task is attached to a thread)."""
+        """May the manager write a line about a task into this thread? Only into one that still
+        exists (the API made sure, when the task was attached, that it is the dispatcher's own)."""
         if not tid or self.hooks.deliver is None:
             return False
         if self.hooks.thread_info is None:
@@ -566,7 +709,7 @@ class TaskManager:
             info = await self.hooks.thread_info(tid)
         except Exception:
             return False
-        return bool(info) and not info.get("restricted_visible", True)
+        return bool(info)
 
     async def _post_assign_card(self, row: dict[str, Any]) -> None:
         """A line in the originating chat that carries the live task card."""
@@ -589,36 +732,56 @@ class TaskManager:
         except Exception:
             log.warning("could not post the task card for %s", row["task_id"], exc_info=True)
 
+    async def _kick_soon(self) -> None:
+        if not self._closing:
+            self._spawn(self._kick())
+
     async def _kick(self) -> None:
         """Start queued tasks while there are free slots."""
         if self._closing:
             return
         async with self._kick_lock:
-            limit = max(1, int(store.get_setting("agents.max_concurrent") or 4))
+            limit = self._slot_limit()
             await self.flush()                  # the queue below reads what the writer has stored
+            # First the answers held for tasks that waited for approval (they were here first).
+            for tid in list(self._held):
+                if len(self._live) >= limit:
+                    return
+                await self._deliver_held(tid)
             for row in store.queued_tasks():
                 if len(self._live) >= limit:
                     break
                 if row["task_id"] in self._launched:
                     continue
-                await self._start(self._rows.setdefault(row["task_id"], row))
+                row = self._rows.setdefault(row["task_id"], row)
+                try:
+                    spec = self._fresh_spec(row)
+                    verdict = await asyncio.to_thread(self._reserve, row, spec, wait_ok=True)
+                except Exception:
+                    verdict = "ok"              # _start reports the real problem through the pipeline
+                if verdict == "wait":
+                    continue                    # another task holds the money; it settles at its end
+                await self._start(row)
 
     def _fresh_spec(self, row: dict[str, Any]) -> AgentSpec:
         """The agent's definition as it is NOW (an edit to tools, approval policy, budget or
         instructions applies to the next run of an existing task), falling back to the snapshot
         stored with the task when the agent is gone or is a virtual OpenClaw seat."""
         spec = AgentSpec.model_validate_json(row["spec_json"])
-        if str(row["agent_id"]).startswith("openclaw:"):
+        kind = row.get("kind") or "task"
+        fresh = spec
+        if not str(row["agent_id"]).startswith("openclaw:"):
+            agent = store.get_agent(row["agent_id"])
+            if agent is not None:
+                with contextlib.suppress(Exception):
+                    cand = AgentSpec.model_validate(agent["spec"])
+                    if cand.backend == spec.backend:
+                        fresh = cand
+        if fresh is spec and kind != "task":
             return spec
-        agent = store.get_agent(row["agent_id"])
-        if agent is None:
-            return spec
-        try:
-            fresh = AgentSpec.model_validate(agent["spec"])
-        except Exception:
-            return spec
-        if fresh.backend != spec.backend:
-            return spec
+        # The defaults (#10) are applied to the agent's OWN budget each run and the result is
+        # recorded in the task row's spec, so the row shows the limits the run was held to.
+        fresh = self._with_defaults(fresh, kind)
         blob = fresh.model_dump_json()
         if blob != row["spec_json"]:
             row["spec_json"] = blob
@@ -632,7 +795,8 @@ class TaskManager:
         try:
             spec = self._fresh_spec(row)
             backend = self.backend_for(spec.backend)
-            budget = self.effective_budget(spec, row["agent_id"], row["owner"], row["cost_usd"] or 0.0)
+            budget = self.effective_budget(spec, row["agent_id"], row["owner"], row["cost_usd"] or 0.0,
+                                           task_id=tid)
             ctx = TaskContext(
                 data_dir=self.data_dir, task_id=tid, owner=row["owner"] or None,
                 origin_thread_id=row["origin_thread_id"],
@@ -729,7 +893,18 @@ class TaskManager:
                     "call_id": d.get("call_id"), "requested_at": store.now_iso()}
             self._enqueue(store.op_approval_add(appr))
             fields["state"] = "awaiting_approval"
-            after.append(lambda a=appr: self._announce_approval(row, a))
+            if not chat and tid not in self._waiting and len(self._waiting) >= 2 * self._slot_limit():
+                # Bound the memory held by waiting tasks (#11): the next one that would wait
+                # is denied at once, with a notice, and goes on.
+                after.append(lambda a=appr: self._refuse_wait(row, a))
+            else:
+                if not chat and tid in self._live:
+                    self._live.discard(tid)
+                    self._waiting.add(tid)
+                    # the freed slot is offered to queued work without holding up this pump
+                    after.append(self._kick_soon)
+                self._arm_approval_timer(appr["request_id"])
+                after.append(lambda a=appr: self._announce_approval(row, a))
         elif t == "cost_update":
             fields.update(self._charge(row, d))
         elif t == "error":
@@ -802,10 +977,8 @@ class TaskManager:
         await self.flush()
         checks: list[tuple[float, float]] = []
         if spec.budget.max_usd_per_day:
-            checks.append((spec.budget.max_usd_per_day, store.spent_today("agent", row["agent_id"])))
-        pb = store.profile_budget(row["owner"]) if row["owner"] else {}
-        if pb.get("usd_per_day"):
-            checks.append((float(pb["usd_per_day"]), store.spent_today("profile", row["owner"])))
+            checks.append((spec.budget.max_usd_per_day, store.spent_today("agent", row["agent_id"])
+                           + store.reserved_by_others(row["agent_id"], exclude=row["task_id"])))
         for limit, spent in checks:
             if spent > limit:
                 be.stop_for_budget(row["task_id"], BudgetVerdict("usd_per_day", limit, spent))
@@ -814,9 +987,15 @@ class TaskManager:
     async def _finish(self, row: dict[str, Any], d: dict[str, Any]) -> None:
         tid = row["task_id"]
         self._live.discard(tid)
+        self._waiting.discard(tid)
+        self._held.pop(tid, None)
+        # The money set aside for this run is settled: what it really spent is in the ledger.
+        self._enqueue(store.op_reservation_release(tid))
         # Whatever was still waiting on a person can no longer be answered.
         await self.flush()
         pend = store.list_approvals(tid, pending_only=True)
+        for a in pend:
+            self._cancel_approval_timer(a["request_id"])
         self._enqueue(store.op_approvals_expire(tid))
         for a in pend:
             if row["kind"] != "chat":
@@ -908,36 +1087,183 @@ class TaskManager:
 
     async def respond_approval(self, request_id: str, decision: str, scope: str, decided_by: str,
                                ) -> dict[str, Any]:
-        await self.flush()
-        appr = store.get_approval(request_id)
-        if appr is None or appr["decision"] is not None:
-            raise TaskError("approval_not_found", "That approval request is not pending any more.", 404)
-        row = self._row(appr["task_id"])
-        if row is None:
-            raise TaskError("approval_not_found", "That approval request is not pending any more.", 404)
-        if scope == "task" and "task" not in appr["scopes"]:
-            raise TaskError("approval_scope_not_allowed", "That approval can only be given for this one call.", 422)
-        be = self.backends.get(row["backend"])
-        if be is None:
-            raise TaskError("approval_not_found", "That approval request is not pending any more.", 404)
+        """A person's answer. Exactly one answer per request wins (#34): answers to one request
+        run one at a time (a per-request lock) and the decision is recorded with
+        ``UPDATE ... WHERE decision IS NULL``; the loser gets 404 ``approval_not_found``."""
+        gone = TaskError("approval_not_found", "That approval request is not pending any more.", 404)
         try:
-            await be.respond_approval(request_id, decision, scope)       # type: ignore[arg-type]
+            return await self._respond_approval_locked(request_id, decision, scope, decided_by, gone)
+        finally:
+            self._drop_appr_lock(request_id)
+
+    def _drop_appr_lock(self, request_id: str) -> None:
+        """Forget a request's lock once nobody holds or waits for it (an answer to an unknown id
+        must not grow the table for ever - 4.3 review)."""
+        lock = self._appr_locks.get(request_id)
+        if lock is not None and not lock.locked() and not getattr(lock, "_waiters", None):
+            self._appr_locks.pop(request_id, None)
+
+    async def _respond_approval_locked(self, request_id: str, decision: str, scope: str,
+                                       decided_by: str, gone: TaskError) -> dict[str, Any]:
+        async with self._appr_locks[request_id]:
+            await self.flush()
+            appr = store.get_approval(request_id)
+            if appr is None or appr["decision"] is not None:
+                raise gone
+            row = self._row(appr["task_id"])
+            if row is None:
+                raise gone
+            if scope == "task" and "task" not in appr["scopes"]:
+                raise TaskError("approval_scope_not_allowed", "That approval can only be given for this one call.", 422)
+            if self.backends.get(row["backend"]) is None:
+                raise gone
+            ok = await self._decide(row, appr, decision, scope, decided_by=decided_by, record=decision)
+            if not ok:
+                raise gone
+        done = {**appr, "decision": decision, "scope": scope, "decided_by": decided_by}
+        return public_approval({**done, "decided_at": store.now_iso()})
+
+    async def _decide(self, row: dict[str, Any], appr: dict[str, Any], decision: str, scope: str, *,
+                      decided_by: str | None, record: str, why: str | None = None) -> bool:
+        """Record ``record`` for a pending approval and hand ``decision`` to the backend. The
+        caller holds the request's lock. False when somebody else decided first (nothing is
+        changed) or the backend no longer knows the request (recorded as ``expired``)."""
+        rid = appr["request_id"]
+        claimed = await asyncio.to_thread(store.decide_approval, rid, record, scope, decided_by)
+        if not claimed:
+            return False
+        self._cancel_approval_timer(rid)
+        tid = row["task_id"]
+        took_slot = False
+        try:
+            if tid in self._waiting and tid not in self._held:
+                # Take the slot under the kick lock (4.3 Fable): ``_kick`` counts the free slots,
+                # then awaits the reservation before ``_start`` adds its task, so an answer
+                # slipping into that gap would run one task over ``max_concurrent``.
+                async with self._kick_lock:
+                    if len(self._live) < self._slot_limit():
+                        self._waiting.discard(tid)
+                        self._live.add(tid)
+                        took_slot = True
+            if tid in self._waiting:
+                # every slot is taken: the answer waits for one (#11); _kick delivers it
+                self._held.setdefault(tid, []).append((rid, decision, scope))
+            else:
+                be = self.backends.get(row["backend"])
+                if be is None:
+                    raise AgentBackendError(ErrorCode.invalid_request, "backend gone")
+                await be.respond_approval(rid, decision, scope)          # type: ignore[arg-type]
         except AgentBackendError as e:
-            if e.code == ErrorCode.invalid_request:
-                self._enqueue(store.op_approval_decide(request_id, "expired", None, None))
-                raise TaskError("approval_not_found", "That approval request is not pending any more.", 404) from e
-            raise
-        self._enqueue(store.op_approval_decide(request_id, decision, scope, decided_by))
+            if e.code != ErrorCode.invalid_request:
+                # A passing failure (4.3 review): the backend is still waiting for an answer, so
+                # recording "expired" would strand the task in awaiting_approval with its slot and
+                # no timer. Undo the claim instead: the request is pending again, the task gives
+                # the slot back, the timeout is re-armed, and the person may answer again.
+                await asyncio.to_thread(store.undo_approval_decision, rid)
+                if took_slot:
+                    self._live.discard(tid)
+                    self._waiting.add(tid)
+                self._arm_approval_timer(rid)
+                raise
+            # The backend already ended this request on its own: the decision WE just recorded
+            # becomes "expired" (never one somebody else recorded - that call returned False).
+            await asyncio.to_thread(store.set_approval_decision, rid, "expired")
+            return False
         key = "approvals_allowed" if decision == "allow" else "approvals_denied"
         row[key] = (row.get(key) or 0) + 1
-        self._enqueue(store.op_task(row["task_id"], **{key: row[key]}))
+        self._enqueue(store.op_task(tid, **{key: row[key]}))
+        detail = {"task": tid, "tool": appr["tool"], "decision": record, "scope": scope}
+        if why:
+            detail["why"] = why
         accounts.log_activity("agent_approval", profile_id=decided_by or None, subject=row["agent_name"],
-                              detail=json.dumps({"task": row["task_id"], "tool": appr["tool"],
-                                                 "decision": decision, "scope": scope}, separators=(",", ":")),
-                              category="audit")
-        done = {**appr, "decision": decision, "scope": scope, "decided_by": decided_by}
-        await ws_frames.publish(ws_frames.approval_frame(row, done, decision), row["owner"])
-        return public_approval({**done, "decided_at": store.now_iso()})
+                              detail=json.dumps(detail, separators=(",", ":")), category="audit")
+        done = {**appr, "decision": record, "scope": scope, "decided_by": decided_by}
+        if row["kind"] != "chat":
+            await ws_frames.publish(ws_frames.approval_frame(row, done, record), row["owner"])
+        return True
+
+    async def _deliver_held(self, tid: str) -> None:
+        """A slot is free: the task that waited takes it and gets the answers held for it."""
+        answers = self._held.pop(tid, [])
+        self._waiting.discard(tid)
+        row = self._rows.get(tid)
+        be = self.backends.get(row["backend"]) if row else None
+        if row is None or be is None:
+            return
+        self._live.add(tid)
+        for rid, decision, scope in answers:
+            try:
+                await be.respond_approval(rid, decision, scope)          # type: ignore[arg-type]
+            except AgentBackendError:
+                log.info("task %s: a held approval answer was no longer wanted", tid)
+
+    def _arm_approval_timer(self, request_id: str, after_s: float | None = None) -> None:
+        """Bound every approval wait (#11): unanswered after ``agents.approval_timeout_s`` it is
+        denied, recorded ``expired``, and a notice says so."""
+        if self._closing:
+            return
+        self._cancel_approval_timer(request_id)
+        delay = self.approval_timeout_s() if after_s is None else max(0.0, after_s)
+        self._appr_timers[request_id] = self._spawn(self._expire_after(request_id, delay))
+
+    def _cancel_approval_timer(self, request_id: str) -> None:
+        t = self._appr_timers.pop(request_id, None)
+        if t is not None and not t.done() and t is not asyncio.current_task():
+            t.cancel()
+
+    async def _expire_after(self, request_id: str, delay: float) -> None:
+        await asyncio.sleep(delay)
+        self._appr_timers.pop(request_id, None)
+        try:
+            async with self._appr_locks[request_id]:
+                await self.flush()
+                appr = store.get_approval(request_id)
+                if appr is None or appr["decision"] is not None:
+                    return
+                row = self._row(appr["task_id"])
+                if row is None:
+                    return
+                ok = await self._decide(row, appr, "deny", "once", decided_by=None, record="expired", why="timeout")
+        finally:
+            self._drop_appr_lock(request_id)
+        if ok:
+            mins = max(1, round(delay / 60)) if delay >= 60 else None
+            span = f"{mins} minute{'s' if mins != 1 else ''}" if mins else f"{delay:g} seconds"
+            await self._notice(row, f"Nobody answered **{row['agent_name']}**'s request to use "
+                                    f"`{appr['tool']}` within {span}, so it was denied. The task goes on.",
+                               "warn", f"task:{row['task_id']}:approval-expired:{request_id}")
+
+    async def _refuse_wait(self, row: dict[str, Any], appr: dict[str, Any]) -> None:
+        """Too many tasks already wait for approval (2 x agents.max_concurrent): deny this one."""
+        rid = appr["request_id"]
+        try:
+            async with self._appr_locks[rid]:
+                await self.flush()
+                ok = await self._decide(row, appr, "deny", "once", decided_by=None, record="deny",
+                                        why="too_many_waiting")
+        finally:
+            self._drop_appr_lock(rid)
+        if ok:
+            await self._notice(row, f"**{row['agent_name']}** asked to use `{appr['tool']}`, but too many "
+                                    "tasks are already waiting for an approval, so it was denied. "
+                                    "Answer the waiting ones first.",
+                               "warn", f"task:{row['task_id']}:approval-refused:{rid}")
+
+    async def _notice(self, row: dict[str, Any], text: str, level: str, sid: str) -> None:
+        """A notice line in the originating chat (no push: nothing needs an answer)."""
+        if self._closing or self.hooks.shutting_down() or row["kind"] == "chat":
+            return
+        tid = row.get("origin_thread_id")
+        if not await self._thread_postable(tid):
+            return
+        try:
+            await self.hooks.deliver(tid, text, metadata={"notice": {"level": level},
+                                                          "task_card": {"task_id": row["task_id"],
+                                                                        "agent_name": row["agent_name"],
+                                                                        "kind": "approval"}},
+                                     source_id=sid, provisional=False, dedup_recent_window=False)
+        except Exception:
+            log.warning("could not post a task notice for %s", row["task_id"], exc_info=True)
 
     def _backend_of(self, row: dict[str, Any]) -> BaseBackend:
         return self.backend_for(row["backend"])
@@ -960,7 +1286,10 @@ class TaskManager:
 
     def _refresh_budget(self, row: dict[str, Any], be: BaseBackend) -> None:
         spec = self._fresh_spec(row)
-        budget = self.effective_budget(spec, row["agent_id"], row["owner"], row["cost_usd"] or 0.0)
+        if self._reserve(row, spec, wait_ok=False) == "exhausted":
+            raise BudgetExhausted("usd_per_day", "This agent's budget for today is used up.")
+        budget = self.effective_budget(spec, row["agent_id"], row["owner"], row["cost_usd"] or 0.0,
+                                       task_id=row["task_id"])
         be.replace_spec(row["task_id"], spec.model_copy(update={"budget": budget}))
         be.update_budget(row["task_id"], budget, 0.0)
 
@@ -973,14 +1302,17 @@ class TaskManager:
         be = self._ensure_registered(row)
         tid = row["task_id"]
         active = be.is_active(tid)
-        if not active:
-            self._refresh_budget(row, be)
-            self._live.add(tid)
         try:
+            if not active:
+                # Inside the try (4.3 Fable): _refresh_budget reserves money first and can still
+                # raise after that; the reservation must not wait for the next boot sweep.
+                self._refresh_budget(row, be)
+                self._live.add(tid)
             await be.send(tid, message)
         except Exception:
             if not active:
                 self._live.discard(tid)          # the slot was reserved for a run that never started
+                store.release_reservation(tid)
             raise
         if not active:
             self._ensure_pump(tid)
@@ -989,12 +1321,13 @@ class TaskManager:
 
     async def resume(self, row: dict[str, Any], message: str | None = None) -> None:
         be = self._ensure_registered(row)
-        self._refresh_budget(row, be)
-        self._live.add(row["task_id"])
         try:
+            self._refresh_budget(row, be)        # reserves first, may raise after (see send)
+            self._live.add(row["task_id"])
             await be.resume(row["task_id"], message)
         except Exception:
             self._live.discard(row["task_id"])   # same: a failed resume must not hold a slot
+            store.release_reservation(row["task_id"])
             raise
         self._ensure_pump(row["task_id"])
 
@@ -1128,6 +1461,12 @@ class TaskManager:
                 states[t["state"]] = states.get(t["state"], 0) + 1
             backends[name] = {"in_memory": sum(states.values()), "states": states}
         out["backends"] = backends
+        # 4.3: a leak of slots, held answers or reservations shows here.
+        out["limits"] = {"defaults": self.limit_defaults(), "approval_timeout_s": self.approval_timeout_s(),
+                         "slots": self._slot_limit(), "tasks_running": len(self._live),
+                         "tasks_waiting_for_approval": len(self._waiting),
+                         "answers_held_for_a_slot": sum(len(v) for v in self._held.values()),
+                         "approval_timers": len(self._appr_timers)}
         return GLOBAL_REDACTOR.redact_obj(out)
 
     # -- unified dispatch: OpenClaw chat turns ----------------------------------------------------- #

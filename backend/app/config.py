@@ -17,6 +17,8 @@ Two layers of bot config:
 from __future__ import annotations
 
 import contextlib
+import copy
+import logging
 import os
 import tempfile
 import threading
@@ -24,6 +26,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import yaml
+
+log = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -42,7 +46,7 @@ FRONTEND_DIR = PROJECT_ROOT / "frontend" / "static"
 #
 # The URL does not change: /static/avatars/<file> is mounted from here
 # explicitly, ahead of the general /static mount. Nothing in the frontend, the
-# config schema or the Safe-Mode path checks had to move.
+# config schema or the path checks had to move.
 #
 # LEGACY: an install whose avatars are still in the old location keeps working.
 # Preferring the old path when it exists and the new one does not means an
@@ -503,8 +507,8 @@ class Settings:
     # (ui_port + ui_launcher_key under ~/.local/share/mailforge) exist —
     # an install with no MailForge never grows a stray tab. DISPATCH_MAIL=1
     # forces it on (the pane then reports "not running"), =0 disables +
-    # 404s the routes. Full-session only: unlocked-tier feature, never Safe
-    # Mode (see _require_mail).
+    # 404s the routes. Needs a signed-in profile with the mail
+    # permission (see _require_mail).
     mail_data_dir: Path = Path(env("MAIL_DATA_DIR",
                                    str(Path.home() / ".local" / "share" / "mailforge")))
     mail_enabled: bool = _mail_default(env("MAIL", "auto"), mail_data_dir)
@@ -535,30 +539,22 @@ class Bot:
     emoji: str = ""             # Fallback glyph if avatar missing
     model_hint: str = ""        # Human label for the model badge (runtime wins)
     order: int = 0
-    # Visibility is TWO independent flags (2.4.2), the Bots tab's "Show
-    # locked" and "Show unlocked" switches. Neither on = the bot shows nowhere
-    # but still exists (Bots tab, dimmed "Hidden"; its threads open by URL on
-    # an unlocked device). The old `visible` master switch is folded in: a
-    # config.yaml or client `visible: false` reads as "neither" (see
-    # fold_visible), and `visible` survives only as the derived property below.
-    #
-    # Show locked. Shown in Safe Mode (the no-PIN, image-free view).
-    # Server-enforced: bots without this flag are invisible AND unreachable to
-    # Safe-Mode sessions.
+    # LEGACY (3.x visibility flags `safe` and `hide_unlocked`, plus the derived
+    # `audience` and `visible` below). There is no Safe Mode or Restricted tier in 4.0, so
+    # nothing reads them to decide who may see or reach a bot: that is `scope`, the profile's
+    # `household_bots` and the permission table (characters.may_use). They stay on the record
+    # so an older config.yaml, an older client and the voice add-on round-trip unchanged.
+    # Migration 010 turns each `hide_unlocked` bot into `hidden`.
     safe: bool = False
-    # NOT Show unlocked (2.4.0): left OFF the rail on unlocked devices —
-    # the sidebar, the new-chat picker, Ctrl-K — while locked (Safe-Mode)
-    # devices still list it when it is `safe`. For bots that belong on the
-    # family tablet but not on the owner's own screen (the kids' science
-    # animals). A display preference, not a gate: the Bot Manager still lists
-    # it, its threads stay reachable by URL, the API still serves it, and a
-    # device may opt back in ("Show hidden bots on this device", Settings ->
-    # Device, localStorage). Security is untouched — who can reach what is
-    # still decided by `safe` and the session tier.
     hide_unlocked: bool = False
+    # 4.0: the Admin's "keep it off the rail" switch (migration 010 writes it for every bot whose
+    # hide_unlocked was on and keeps hide_unlocked beside it as an inert key). Display only: a
+    # hidden household bot still opens by link and is still listed for a profile whose explicit
+    # household list names it (characters.visible_to). Written to config.yaml only when true.
+    hidden: bool = False
     # Quick actions ("Proof this", "Fact-check", ...): False takes the chips, the
-    # composer pill and the action itself away from this bot (the kids' science
-    # animals). The server also ignores an `action` sent to it.
+    # composer pill and the action itself away from this bot. The server also
+    # ignores an `action` sent to it.
     quick_actions: bool = True
     # Optional explicit avatar colour (any CSS colour, e.g. "#a01818"). Drives the
     # letter-block avatar gradient instead of the id-derived hue, so a character
@@ -567,7 +563,7 @@ class Bot:
     # May this bot fire reaction images? OFF for every shipped bot by design —
     # a reaction interrupts every screen in the house, so it is an opt-in
     # per-character trait, not an ambient capability. Toggled in the Bot
-    # Manager (unlocked) and in the Companions panel for safe bots. Each bot
+    # Manager (Settings -> Characters). Each bot
     # switched on here gets its OWN image pool (see reactions.py).
     reactions: bool = False
     # Server-side reaction AUTOPILOT: when this bot's reply carries no
@@ -653,32 +649,59 @@ class Bot:
     # not. Empty = the add-on's default.
     voice: str = ""
     voice_rp: str = ""
-    # 3.0 (characters): profile ids allowed to see this character IN ADDITION to
-    # `audience`. Empty (the default) = everyone the audience allows. The Owner and
-    # Admins always see every character. See app/characters.py.
+    # LEGACY 3.0 per-character profile list: inert in 4.0 (migration 010 folds it into each
+    # profile's `household_bots`). Still round-tripped through config.yaml. See app/characters.py.
     profiles: list = field(default_factory=list)
     # The starter pack this character was installed from ("" = made by hand).
     pack: str = ""
     # One line for the character picker.
     description: str = ""
-    # 4.0 ownership (data model only - nothing reads these yet): ``household`` (the
-    # default: managed by the Owner/Admins, everyone has their own chats with it) or
+    # 4.0 ownership: ``household`` (the
+    # default: managed by the Admins, everyone has their own chats with it) or
     # ``personal`` (belongs to the one profile ``owner_profile``); ``cloned_from`` is the
     # character id a copy was made from. Written to config.yaml only when not default,
     # so an existing roster keeps the file it has always had.
     scope: str = "household"
     owner_profile: str = ""
     cloned_from: str = ""
+    # 4.2: the template a copy was DETACHED from (untick with chats, Stop sharing, template
+    # delete). Lineage only: nothing reads it as a link (kit_id_of ignores it, no kit chat is
+    # pushed); ticking the profile again re-links this bot instead of making a twin.
+    detached_from: str = ""
+    # 4.1 managed bots (app/kits.py): on a personal copy of a bot with a kit, the template
+    # version the copy was last synced to and the managed field values at that sync (the
+    # "baseline": a field still equal to it was never changed by the owner and follows the
+    # template). Written only when set.
+    kit_version: str = ""
+    kit_baseline: dict | None = None
+    # 4.2 live templates (see "Live templates" below). `template` names the household bot a
+    # linked copy follows; `overrides` holds only what the owner changed (stored form, see
+    # _clean_overrides). A linked copy's inheritable fields are RESOLVED at load, so on a loaded
+    # copy they are the effective values and `overrides` is what the file stores. `give_to` marks
+    # a template and says who gets a copy: "everyone" or a list of profile ids ([] = nobody yet).
+    # `resolved_view` is the inheritable view the load produced; the writer compares it with the
+    # bot it is handed to tell "the owner changed this copy" from "an unrelated write". Not data.
+    template: str = ""
+    overrides: dict | None = None
+    give_to: str | list | None = None
+    resolved_view: dict | None = field(default=None, compare=False, repr=False)
+
+    @property
+    def is_linked_copy(self) -> bool:
+        """A copy that follows a template (4.2). Pre-4.2 copies have no `template`."""
+        return bool(self.template)
+
+    @property
+    def is_template(self) -> bool:
+        """A household bot that is handed out as copies (4.2): it carries `give_to`."""
+        return self.give_to is not None and not self.template
 
     @property
     def audience(self) -> str:
-        """Who this character is FOR (3.0): ``all`` (everyone), ``members``
-        (signed-in Members, Admins, Owner; never a Restricted profile) or
-        ``restricted`` (made for Restricted profiles; hidden from the Owner's own
-        rail by default). Derived from the two legacy flags - ``safe`` = reachable by
-        Restricted, ``hide_unlocked`` = kept off the signed-in rail - which stay
-        readable and writable for one release. The server gate is
-        ``audience in (all, restricted)`` for a Restricted caller, i.e. ``safe``."""
+        """LEGACY (3.x): ``all`` / ``members`` / ``restricted``, derived from the two legacy
+        flags ``safe`` and ``hide_unlocked``. 4.0 has no Restricted tier, so this is kept only
+        as round-trip data in config.yaml (``Bot.to_dict`` does not send it); no access decision reads it
+        (characters.may_use does that)."""
         if self.safe and self.hide_unlocked:
             return "restricted"
         if self.safe:
@@ -687,18 +710,14 @@ class Bot:
 
     @property
     def visible(self) -> bool:
-        """Listed on SOME device: shown locked, or shown unlocked. Derived and
-        read-only (2.4.2) -- kept on the wire for older clients and the voice
-        add-on. Never a gate: Safe Mode is `safe` alone."""
-        return bool(self.safe or not self.hide_unlocked)
+        """Derived and read-only: ``not hidden`` (4.0; 2.4.2-3.x derived it from the legacy
+        ``safe`` / ``hide_unlocked`` pair). Kept on the wire for older clients and the voice
+        add-on, which list only visible bots. Display only, never a gate."""
+        return not self.hidden
 
-    # An advisor MAY be a Safe-Mode bot (2026-10-13; until then the
-    # constructor forced `safe` off for every advisor and the Bot Manager's
-    # shield silently reverted). What a locked family device must never do is
-    # steer an exec-capable agent through an LLM-written brief, and that is
-    # enforced per TURN, not per bot: a turn arriving over a Safe-Mode
-    # connection runs with dispatch off (TurnOptions.locked ->
-    # advisor.run_turn(locked=True)), an unlocked turn keeps everything.
+    # Whether an advisor turn may start agent work is decided per TURN, not per
+    # bot: the caller's `dispatch_agents` permission becomes
+    # advisor.run_turn(dispatch=...).
 
     @property
     def agent_id(self) -> str:
@@ -734,7 +753,7 @@ class Bot:
         return f"/static/avatars/{self.avatar}?v={v}"
 
     def to_dict(self) -> dict:
-        """The public bot record. Reachable by a Safe-Mode session, so it
+        """The public bot record. Reachable by every signed-in profile, so it
         carries NO API credentials and no provider base URL — only the fact
         that a direct provider is configured, which is what the UI needs to
         stop offering the first-run "Connect an AI" card."""
@@ -747,9 +766,9 @@ class Bot:
             "model_hint": self.model_hint,
             "order": self.order,
             "visible": self.visible,
-            "safe": self.safe,
-            "hide_unlocked": self.hide_unlocked,
-            "audience": self.audience,
+            "scope": self.scope,
+            "cloned_from": self.cloned_from,
+            "hidden": self.hidden,
             "description": self.description,
             "quick_actions": self.quick_actions,
             "color": self.color,
@@ -796,7 +815,7 @@ class Bot:
     def to_admin_dict(self) -> dict:
         """to_dict() plus the redacted API block (full-session routes only)."""
         # `voice` (which recorded person a bot speaks as) is admin-only: the
-        # plain dict reaches locked Safe-Mode devices for safe bots.
+        # plain dict reaches every profile.
         return {**self.to_dict(), "api": self.api_public(),
                 "advisor": self.advisor_public(), "voice": self.voice,
                 "voice_rp": self.voice_rp}
@@ -827,9 +846,8 @@ def shipped_default_bots() -> list[Bot]:
     # then a message to it is answered with a one-line "not connected yet"
     # notice rather than an error.
     #
-    # `safe: true` so the limited tier (Safe Mode, family devices) has something
-    # to talk to out of the box. A Safe-Mode turn on an advisor runs "locked":
-    # no delegation, and only the `tools_locked` subset of the lookups.
+    # Every profile can use it: a turn in someone else's thread never reads the
+    # Admin's knowledge corpus (advisor.scoped_to_thread).
     #
     # `avatar`: the repo ships the Atlas picture in app/default_avatars/; on
     # start-up firstrun.install_default_avatars() copies any missing file of it
@@ -841,9 +859,12 @@ def shipped_default_bots() -> list[Bot]:
     # Existing installs are untouched: this list only seeds a first run (and the
     # fall-back for a config.yaml with no usable entries). Nothing here is ever
     # merged into a roster that already exists.
+    #
+    # 4.2: Atlas is a TEMPLATE (`give_to: everyone`): nobody chats with it, every profile
+    # (the first Admin at the claim included) gets its own live copy.
     Bot(id="atlas", name="Atlas", emoji="🌍", model_hint="Direct API",
         avatar="atlas-face.png", order=0, safe=True, reactions=False, avatar_pool=False,
-        advisor={"providers": [], "tools": True}),
+        give_to="everyone", advisor={"providers": [], "tools": True}),
     ]
 
 
@@ -860,7 +881,171 @@ def parse_scope(value) -> str:
     return v if v in SCOPES else "household"
 
 
-def _bot_entry(b: Bot) -> dict:
+def parse_give_to(value) -> str | list | None:
+    """``"everyone"`` or a de-duplicated list of profile ids; anything else is "not a template"."""
+    if value == "everyone":
+        return "everyone"
+    if isinstance(value, list):
+        out: list[str] = []
+        for x in value:
+            x = x.strip() if isinstance(x, str) else ""
+            if x and x not in out:
+                out.append(x)
+        return out
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# Live templates (4.2)
+#
+# A linked copy (Bot.template) stores its identity and only the fields its owner changed
+# (`overrides`); every other inheritable field is read from the template at load, so a copy
+# carries the template's whole brain (every advisor key, voice, pictures settings) and follows
+# later template edits. Writers keep handing around the EFFECTIVE bot: the diff against the
+# template happens in _bot_entry, so "owner changed it" needs no baseline.
+# --------------------------------------------------------------------------- #
+
+#: Fields a copy takes from its template unless overridden. Everything else on Bot is the copy's
+#: own (id, scope, owner_profile, template, avatar, hidden, order, cloned_from, pack, kit_*) or
+#: forced off (reactions, reaction_autopilot, avatar_pool: pools are per-id household data).
+INHERITED_FIELDS = (
+    "name", "emoji", "description", "color", "model_hint", "quick_actions", "voice", "voice_rp",
+    "image_jobs", "image_workflow", "image_identity_source", "image_ratio", "advisor",
+)
+
+#: Inside `advisor` a copy may override these (`provider0` = providers[0]); the rest follows.
+_ADVISOR_OVERRIDE_KEYS = ("persona", "tools", "tools_picked", "provider0")
+
+#: The part of providers[0] a copy owns when it picks its own connection; the rest of the entry
+#: (extra_body, max_tokens, read_timeout_s ...) keeps following the template.
+PROVIDER0_IDENTITY = ("provider", "connection", "model", "base_url")
+
+#: Override keys that are marks, not values: `picture` (the owner set their own picture) and
+#: `provider0_picked` (the owner picked the connection/model), `voice_cleared` (policy blanked the
+#: inherited voice because the owner may not use it; reconcile restores it once allowed).
+#: Kept while they still mean something.
+_META_OVERRIDE_KEYS = ("picture", "provider0_picked", "voice_cleared")
+
+_BOOL_FIELDS = ("quick_actions", "image_jobs")
+_STR_LIMITS = {"name": None, "emoji": None, "description": 400, "color": None,
+               "model_hint": None, "voice": 80, "voice_rp": 32, "image_workflow": None,
+               "image_identity_source": None, "image_ratio": None}
+
+
+def _norm_field(name: str, value):
+    """The load-time coercion of one inheritable scalar field."""
+    if name in _BOOL_FIELDS:
+        return bool(value)
+    limit = _STR_LIMITS[name]
+    v = str(value or "")
+    if name in ("voice", "voice_rp"):
+        v = v.strip()
+    return v[:limit] if limit else v
+
+
+def _view(b: Bot) -> dict:
+    """The inheritable fields of a bot (advisor deep-copied)."""
+    return {f: (copy.deepcopy(b.advisor) if f == "advisor" else getattr(b, f))
+            for f in INHERITED_FIELDS}
+
+
+def _clean_overrides(raw) -> dict:
+    """The stored `overrides` mapping reduced to known keys with load-time types."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    for k, v in raw.items():
+        if k in _STR_LIMITS or k in _BOOL_FIELDS:
+            out[k] = _norm_field(k, v)
+        elif k == "advisor" and isinstance(v, dict):
+            adv = {ak: copy.deepcopy(av) for ak, av in v.items() if ak in _ADVISOR_OVERRIDE_KEYS}
+            if isinstance(adv.get("provider0"), dict) is False:
+                adv.pop("provider0", None)
+            if adv:
+                out["advisor"] = adv
+        elif k in _META_OVERRIDE_KEYS and v:
+            out[k] = True
+    return out
+
+
+def _apply_advisor_overrides(base: dict | None, aov: dict) -> dict | None:
+    """The template's advisor block with a copy's persona / tools / provider0 laid over it.
+    A value of None removes the key (the copy has no persona although the template does)."""
+    if not aov:
+        return base
+    adv = copy.deepcopy(base) if base is not None else {}
+    if "persona" in aov:
+        if aov["persona"] is None:
+            adv.pop("persona", None)
+        else:
+            adv["persona"] = aov["persona"]
+    if "tools" in aov:
+        adv["tools"] = aov["tools"]
+        if aov.get("tools_picked") is None:
+            adv.pop("tools_picked", None)
+        else:
+            adv["tools_picked"] = aov["tools_picked"]
+    if isinstance(aov.get("provider0"), dict):
+        provs = list(adv.get("providers") or [])
+        mine = copy.deepcopy(aov["provider0"])
+        if provs and isinstance(provs[0], dict):
+            merged = {k: v for k, v in copy.deepcopy(provs[0]).items() if k not in PROVIDER0_IDENTITY}
+            merged.update({k: v for k, v in mine.items() if k in PROVIDER0_IDENTITY})
+            provs[0] = merged
+        else:
+            provs = [mine, *provs[1:]]
+        adv["providers"] = provs
+    return adv
+
+
+def _advisor_diff(eff: dict | None, base: dict | None) -> dict:
+    """What a copy's effective advisor block overrides relative to the template's
+    (only persona, tools(+tools_picked) and providers[0] can differ; the rest follows)."""
+    eff, base = eff or {}, base or {}
+    out: dict = {}
+    if eff.get("persona") != base.get("persona"):
+        out["persona"] = eff.get("persona")
+    if (eff.get("tools"), eff.get("tools_picked")) != (base.get("tools"), base.get("tools_picked")):
+        out["tools"] = eff.get("tools", False)
+        out["tools_picked"] = eff.get("tools_picked")
+    e0 = (eff.get("providers") or [None])[0]
+    b0 = (base.get("providers") or [None])[0]
+    if isinstance(e0, dict):
+        ident = {k: copy.deepcopy(e0[k]) for k in PROVIDER0_IDENTITY if k in e0}
+        if ident != {k: b0[k] for k in PROVIDER0_IDENTITY if isinstance(b0, dict) and k in b0}:
+            out["provider0"] = ident
+    return out
+
+
+def _overrides_of(b: Bot, template: Bot | None) -> dict:
+    """The `overrides` to store for the effective copy `b`: the fields whose value differs from
+    the template's. An untouched copy (its view equals what the load resolved) keeps exactly the
+    overrides it was loaded with, so a write that changes the TEMPLATE never pins its old values
+    into the copies that happen to be rewritten alongside it."""
+    cur = _view(b)
+    if b.resolved_view is not None and cur == b.resolved_view:
+        return _clean_overrides(b.overrides)
+    # No template to diff against (it is gone): everything the copy shows that is not blank.
+    base = _view(template) if template is not None else _view(Bot(id=b.id, name=""))
+    ov: dict = {}
+    for f in INHERITED_FIELDS:
+        if f == "advisor":
+            aov = _advisor_diff(cur["advisor"], base["advisor"])
+            if aov:
+                ov["advisor"] = aov
+        elif cur[f] != base[f]:
+            ov[f] = cur[f]
+    meta = _clean_overrides(b.overrides)
+    if meta.get("picture"):
+        ov["picture"] = True
+    if meta.get("provider0_picked") and "provider0" in ov.get("advisor", {}):
+        ov["provider0_picked"] = True
+    if meta.get("voice_cleared") and ov.get("voice") == "":
+        ov["voice_cleared"] = True
+    return ov
+
+
+def _bot_entry(b: Bot, template: Bot | None = None) -> dict:
     """The ONE place a Bot becomes a config.yaml record.
 
     Every writer below goes through this. That is not tidiness — it is the fix
@@ -879,7 +1064,28 @@ def _bot_entry(b: Bot) -> dict:
 
     `api` is omitted entirely when unset so a roster with no direct-provider
     bots keeps the same file it has always had.
+
+    A linked copy (`b.template`) is written as identity + `overrides` only. `template` is the
+    template's bot as it is in the roster being written (None when it is gone: the copy then keeps
+    everything it shows). Use :func:`_roster_entries` for a whole roster.
     """
+    if b.template:
+        entry = {"id": b.id, "avatar": b.avatar, "order": b.order, "scope": b.scope,
+                 "owner_profile": b.owner_profile, "template": b.template}
+        if b.cloned_from:
+            entry["cloned_from"] = b.cloned_from
+        if b.pack:
+            entry["pack"] = b.pack
+        if b.kit_version:
+            entry["kit_version"] = b.kit_version
+        if b.kit_baseline is not None:
+            entry["kit_baseline"] = dict(b.kit_baseline)
+        if b.hidden:
+            entry["hidden"] = True
+        ov = _overrides_of(b, template)
+        if ov:
+            entry["overrides"] = ov
+        return entry
     entry = {
         "id": b.id,
         "name": b.name,
@@ -890,8 +1096,7 @@ def _bot_entry(b: Bot) -> dict:
         "safe": b.safe,
         "hide_unlocked": b.hide_unlocked,
         # Written beside the legacy flags (3.0). Derived, so it can never disagree
-        # with them when this process writes; on read, `audience` wins over a
-        # hand-edited flag (see audience_flags).
+        # with them when this process writes. Inert in 4.0 (see Bot.audience).
         "audience": b.audience,
         "quick_actions": b.quick_actions,
         "color": b.color,
@@ -920,6 +1125,16 @@ def _bot_entry(b: Bot) -> dict:
         entry["owner_profile"] = b.owner_profile
     if b.cloned_from:
         entry["cloned_from"] = b.cloned_from
+    if b.detached_from:
+        entry["detached_from"] = b.detached_from
+    if b.kit_version:
+        entry["kit_version"] = b.kit_version
+    if b.kit_baseline is not None:
+        entry["kit_baseline"] = dict(b.kit_baseline)
+    if b.hidden:
+        entry["hidden"] = True
+    if b.give_to is not None:
+        entry["give_to"] = b.give_to if isinstance(b.give_to, str) else list(b.give_to)
     if b.api:
         entry["api"] = dict(b.api)
     if b.advisor:
@@ -927,8 +1142,15 @@ def _bot_entry(b: Bot) -> dict:
     return entry
 
 
+def _roster_entries(bots: list[Bot]) -> list[dict]:
+    """config.yaml records for a whole roster: every bot through _bot_entry, each linked copy
+    diffed against its template as it stands in THIS list."""
+    templates = {b.id: b for b in bots if not b.template}
+    return [_bot_entry(b, templates.get(b.template) if b.template else None) for b in bots]
+
+
 def _write_bots(entries: list[dict]) -> None:
-    """Persist the roster, then lock the file down to owner-only.
+    """Persist the roster, then lock the file down to the file's owner only (0600).
 
     config.yaml can now hold provider API keys, so it is treated as a secret
     even when it does not happen to contain one today — a chmod that only
@@ -965,7 +1187,7 @@ def _write_bots(entries: list[dict]) -> None:
 
 def _write_default_config() -> None:
     """Materialise config.yaml from DEFAULT_BOTS so it's easy to hand-edit."""
-    _write_bots([_bot_entry(b) for b in DEFAULT_BOTS])
+    _write_bots(_roster_entries(DEFAULT_BOTS))
 
 
 # Tiny cache so we don't re-read+parse config.yaml on every request. Keyed by
@@ -978,6 +1200,32 @@ def _invalidate_bots_cache() -> None:
     _bots_cache = None
 
 
+def _resolve_templates(bots: list[Bot]) -> None:
+    """Fill each linked copy's inheritable fields: template values, then its overrides. In place,
+    after the whole file is read (a copy may precede its template). A copy whose template is gone
+    (or is itself a copy) loads from its overrides over the blank defaults and logs a warning."""
+    by_id = {b.id: b for b in bots}
+    for b in bots:
+        if not b.template:
+            continue
+        tpl = by_id.get(b.template)
+        if tpl is None or tpl.template:
+            log.warning("bot %r follows template %r, which is %s; loading it from its own "
+                        "overrides", b.id, b.template,
+                        "itself a copy" if tpl else "not in the roster")
+            tpl = None
+        ov = b.overrides or {}
+        view = _view(tpl) if tpl is not None else _view(b)
+        for f in INHERITED_FIELDS:
+            if f in ov and f != "advisor":
+                view[f] = ov[f]
+        view["advisor"] = _apply_advisor_overrides(view["advisor"], ov.get("advisor") or {})
+        for f, v in view.items():
+            setattr(b, f, v)
+        b.reactions = b.reaction_autopilot = b.avatar_pool = False
+        b.resolved_view = _view(b)
+
+
 def load_bots() -> list[Bot]:
     """Return bots ordered by `order`, from config.yaml over DEFAULT_BOTS.
 
@@ -988,7 +1236,7 @@ def load_bots() -> list[Bot]:
     into every load — any DEFAULT_BOTS id absent from config.yaml was appended
     back — which meant an existing install grew phantom bots on upgrade: entries
     that map to no agent, that the operator never chose, and (if a shipped
-    default is flagged safe) that show up on locked family devices. Removing a
+    default exists) that nobody asked for. Removing a
     bot from config.yaml is a decision; this function must respect it.
     """
     global _bots_cache
@@ -1042,6 +1290,7 @@ def load_bots() -> list[Bot]:
                         bool(e.get("safe", base.safe if base else False)),
                         bool(e.get("hide_unlocked",
                                    base.hide_unlocked if base else False)))),
+                hidden=bool(e.get("hidden", base.hidden if base else False)),
                 quick_actions=bool(e.get("quick_actions",
                                          base.quick_actions if base else True)),
                 color=str(e.get("color", base.color if base else "")),
@@ -1069,6 +1318,15 @@ def load_bots() -> list[Bot]:
                 scope=parse_scope(e.get("scope")),
                 owner_profile=str(e.get("owner_profile") or "").strip()[:64],
                 cloned_from=str(e.get("cloned_from") or "").strip()[:64],
+                detached_from=(str(e.get("detached_from") or "").strip()[:64]
+                               if not e.get("template") else ""),
+                kit_version=str(e.get("kit_version") or "").strip()[:64],
+                kit_baseline=(dict(e["kit_baseline"])
+                              if isinstance(e.get("kit_baseline"), dict) else None),
+                template=str(e.get("template") or "").strip()[:64],
+                overrides=(_clean_overrides(e.get("overrides"))
+                           if e.get("template") else None),
+                give_to=(parse_give_to(e.get("give_to")) if not e.get("template") else None),
                 # No fallback to `base`: a shipped default never carries an
                 # `api` block, and an entry that dropped one did so on purpose.
                 api=dict(e["api"]) if isinstance(e.get("api"), dict) else None,
@@ -1077,6 +1335,8 @@ def load_bots() -> list[Bot]:
             )
         )
         seen.add(bid)
+
+    _resolve_templates(bots)
 
     # Only on the run that MATERIALISED config.yaml may a shipped default be
     # added to what the file says — and even then it is belt-and-braces, since
@@ -1095,13 +1355,12 @@ def load_bots() -> list[Bot]:
 
 
 def fold_visible(visible, safe: bool, hide_unlocked: bool) -> dict:
-    """Fold the pre-2.4.2 `visible` master switch into the two flags.
+    """Fold the pre-2.4.2 `visible` master switch into the two legacy flags (3.x data;
+    nothing in 4.0 reads the result to gate access).
 
-    `visible: false` meant "shown nowhere", which is now "neither": Show
-    locked off AND Show unlocked off. It wins over a `safe: true` beside it,
-    because such a bot was not on any locked device before and must not start
-    being on one. `visible: true` (or absent) changes nothing -- older clients
-    sent it for every bot they held, and it must never un-hide one.
+    `visible: false` meant "shown nowhere": both flags read as off/hidden. `visible: true`
+    (or absent) changes nothing -- older clients sent it for every bot they held, and it
+    must never un-hide one.
     """
     if visible is not None and not bool(visible):
         return {"safe": False, "hide_unlocked": True}
@@ -1111,31 +1370,12 @@ def fold_visible(visible, safe: bool, hide_unlocked: bool) -> dict:
 AUDIENCES = ("all", "members", "restricted")
 
 
-def audience_flags(audience, flags: dict) -> dict:
-    """Resolve an explicit ``audience`` over the legacy ``safe``/``hide_unlocked``
-    pair. ``audience`` wins when it is a known value; anything else (absent, None,
-    a typo) leaves the flags exactly as the file said - the migration is a no-op
-    for a config.yaml that predates 3.0."""
-    a = str(audience or "").strip().lower()
-    if a == "all":
-        return {"safe": True, "hide_unlocked": False}
-    if a == "restricted":
-        return {"safe": True, "hide_unlocked": True}
-    if a == "members":
-        # "Members" is not reachable by Restricted; whether it sits on the rail
-        # (hide_unlocked) is the separate display preference.
-        return {"safe": False, "hide_unlocked": bool(flags.get("hide_unlocked"))}
-    return flags
-
-
 def reconcile_flags(audience, flags: dict) -> dict:
-    """Read side: combine the ``audience`` on disk with the two legacy flags.
+    """LEGACY (3.x) read side: combine the ``audience`` on disk with the two legacy flags.
 
-    Both are written together by every code path, so they normally agree. When they do
+    Both were written together by every code path, so they normally agree. When they do
     not - a hand edit, an old tool that only knows ``safe``/``visible`` - the result is
-    the one that grants LESS: a character is reachable by a Restricted profile only if
-    its flag AND its audience allow it. Widening needs an explicit write through the
-    API (``audience_flags``), which sets both."""
+    the narrower one. Inert in 4.0: it only keeps the round-tripped data stable."""
     a = str(audience or "").strip().lower()
     if a not in AUDIENCES:
         return flags
@@ -1145,48 +1385,79 @@ def reconcile_flags(audience, flags: dict) -> dict:
 
 
 def save_bot_order(items: list[dict]) -> list[Bot]:
-    """Persist ordering/safe/hide_unlocked/reactions flags.
+    """Persist the order and the per-character flags (reactions, pools, pictures, voice).
 
-    `items` = [{id, order?, safe?, hide_unlocked?, reactions?, visible?}] --
-    `visible: false` from an older client folds to "neither" (fold_visible).
+    `items` = [{id, order?, reactions?, avatar_pool?, image_jobs?, voice?, voice_rp?}]. The
+    3.x visibility keys (`safe`, `hide_unlocked`, `audience`, `visible`) are refused by the
+    route (models.BotOrderItem) and never read here: they stay in the file as inert data.
 
     Preserves all other bot fields from the current config so the Bot Manager
     only needs to send the fields it manages.
     """
-    current = {b.id: b for b in load_bots()}
-    ordered = sorted(
-        (it for it in items if isinstance(it, dict) and it.get("id") in current),
-        key=lambda it: it.get("order", 0),
-    )
+    with _ROSTER_LOCK:
+        current = {b.id: b for b in load_bots()}
+        ordered = sorted(
+            (it for it in items if isinstance(it, dict) and it.get("id") in current),
+            key=lambda it: it.get("order", 0),
+        )
 
-    payload_bots = []
-    for idx, it in enumerate(ordered):
-        b = current[it["id"]]
-        payload_bots.append(_bot_entry(replace(
-            b,
-            order=idx,
-            **audience_flags(it.get("audience"), fold_visible(
-                it.get("visible"),
-                bool(it["safe"]) if it.get("safe") is not None else b.safe,
-                (bool(it["hide_unlocked"]) if it.get("hide_unlocked") is not None
-                 else b.hide_unlocked))),
-            reactions=(bool(it["reactions"]) if it.get("reactions") is not None
-                       else b.reactions),
-            avatar_pool=(bool(it["avatar_pool"]) if it.get("avatar_pool") is not None
-                         else b.avatar_pool),
-            image_jobs=(bool(it["image_jobs"]) if it.get("image_jobs") is not None
-                        else b.image_jobs),
-            voice=(str(it["voice"]).strip() if it.get("voice") is not None else b.voice),
-            voice_rp=(str(it["voice_rp"]).strip() if it.get("voice_rp") is not None
-                      else b.voice_rp),
-        )))
+        payload_bots = []
+        for idx, it in enumerate(ordered):
+            b = current[it["id"]]
+            payload_bots.append(replace(
+                b,
+                order=idx,
+                reactions=(bool(it["reactions"]) if it.get("reactions") is not None
+                           else b.reactions),
+                avatar_pool=(bool(it["avatar_pool"]) if it.get("avatar_pool") is not None
+                             else b.avatar_pool),
+                image_jobs=(bool(it["image_jobs"]) if it.get("image_jobs") is not None
+                            else b.image_jobs),
+                voice=(str(it["voice"]).strip() if it.get("voice") is not None else b.voice),
+                voice_rp=(str(it["voice_rp"]).strip() if it.get("voice_rp") is not None
+                          else b.voice_rp),
+            ))
 
-    # Keep any bots the client didn't mention (defensive).
-    mentioned = {it["id"] for it in ordered}
-    payload_bots += [_bot_entry(b) for b in current.values() if b.id not in mentioned]
+        # Keep any bots the client didn't mention (defensive).
+        mentioned = {it["id"] for it in ordered}
+        payload_bots += [b for b in current.values() if b.id not in mentioned]
 
-    _write_bots(payload_bots)
-    return load_bots()
+        _write_bots(_roster_entries(payload_bots))
+        return load_bots()
+
+
+def reorder_subset(ids: list[str], owner_profile_id: str) -> list[str]:
+    """Reorder ONE profile's personal bots inside the global roster (4.3 F1a).
+
+    The roster is one list for the whole house. The owner's bots keep the positions (slots)
+    they already hold; only which of them sits in which slot changes: ``ids`` first, in that
+    order, then the owner's unlisted bots in their current relative order. No other bot moves,
+    so two profiles reordering at once cannot disturb each other (one read-modify-write under
+    :data:`_ROSTER_LOCK`). Raises ``KeyError(id)`` for an id that is not one of the owner's
+    personal bots and ``ValueError(id)`` for a duplicate, before anything is written. Returns
+    the owner's bot ids in their new order."""
+    with _ROSTER_LOCK:
+        bots = load_bots()
+        slots = [i for i, b in enumerate(bots)
+                 if b.scope == "personal" and owner_profile_id and b.owner_profile == owner_profile_id]
+        mine = {bots[i].id: bots[i] for i in slots}
+        for bid in ids:
+            if bid not in mine:
+                raise KeyError(bid)
+        seen: set[str] = set()
+        for bid in ids:
+            if bid in seen:
+                raise ValueError(bid)
+            seen.add(bid)
+        new_mine = [mine[b] for b in ids] + [bots[i] for i in slots if bots[i].id not in seen]
+        new = list(bots)
+        for slot, b in zip(slots, new_mine, strict=True):
+            new[slot] = b
+        if [b.id for b in new] != [b.id for b in bots] or any(
+                b.order != i for i, b in enumerate(bots)):
+            # `order` is renumbered to the list position, so the file says the same as the list.
+            _write_bots(_roster_entries([replace(b, order=i) for i, b in enumerate(new)]))
+        return [b.id for b in new_mine]
 
 
 def get_bot(bot_id: str) -> Bot | None:
@@ -1216,6 +1487,11 @@ def resolve_bot(bot_id: str | None) -> Bot | None:
 
 def save_bot_avatar(bot_id: str, avatar_filename: str) -> Bot | None:
     """Point a bot's avatar at a new file under AVATAR_DIR and persist it."""
+    with _ROSTER_LOCK:
+        return _save_bot_avatar(bot_id, avatar_filename)
+
+
+def _save_bot_avatar(bot_id: str, avatar_filename: str) -> Bot | None:
     bots = load_bots()
     target = next((b for b in bots if b.id == bot_id), None)
     if not target:
@@ -1223,10 +1499,8 @@ def save_bot_avatar(bot_id: str, avatar_filename: str) -> Bot | None:
     # Every non-avatar field is carried over verbatim, via the shared
     # serializer — spelling the list out by hand here is what dropped
     # `reactions` for every bot on an avatar upload until 2026-08-01.
-    _write_bots([
-        _bot_entry(replace(b, avatar=avatar_filename) if b.id == bot_id else b)
-        for b in bots
-    ])
+    _write_bots(_roster_entries(
+        [replace(b, avatar=avatar_filename) if b.id == bot_id else b for b in bots]))
     return get_bot(bot_id)
 
 
@@ -1252,12 +1526,10 @@ def upsert_bot(bot: Bot) -> Bot:
     with _ROSTER_LOCK:
         bots = load_bots()
         if any(b.id == bot.id for b in bots):
-            entries = [_bot_entry(bot if b.id == bot.id else b) for b in bots]
+            merged = [bot if b.id == bot.id else b for b in bots]
         else:
-            entries = [_bot_entry(b) for b in bots]
-            entries.append(_bot_entry(replace(
-                bot, order=max((b.order for b in bots), default=-1) + 1)))
-        _write_bots(entries)
+            merged = [*bots, replace(bot, order=max((b.order for b in bots), default=-1) + 1)]
+        _write_bots(_roster_entries(merged))
         return get_bot(bot.id)  # type: ignore[return-value]
 
 
@@ -1272,6 +1544,41 @@ def update_bot(bot_id: str, mutate) -> Bot | None:
         if bot is None:
             return None
         return upsert_bot(mutate(bot))
+
+
+def new_copy(template: Bot, *, id: str, owner_profile: str, avatar: str = "", order: int = 0,
+             **own) -> Bot:
+    """A linked copy of ``template`` ready for :func:`upsert_bot`: its inheritable fields are the
+    template's current values (so nothing is stored as an override), the per-copy fields are the
+    arguments (``own`` may set cloned_from, pack, hidden). Pools and reactions are off."""
+    return Bot(**{**_view(template), "id": id, "scope": "personal",
+                  "owner_profile": owner_profile, "template": template.id, "avatar": avatar,
+                  "order": order, "overrides": {}, **own})
+
+
+def detach(bot_id: str) -> Bot | None:
+    """Turn a linked copy into a plain own bot holding its effective values (4.2): `template` and
+    `overrides` are cleared and every field is written out, so it no longer follows the template.
+    Used by untick-with-chats, Stop sharing, template delete. A bot that is not a linked copy is
+    returned unchanged; None when there is no such bot."""
+    return update_bot(bot_id, lambda b: replace(
+        b, template="", overrides=None, resolved_view=None,
+        detached_from=b.template or b.detached_from))
+
+
+def reset_overrides(bot_id: str) -> Bot | None:
+    """Clear a linked copy's overrides so every inheritable field follows the template again
+    (the picture file and per-copy fields are untouched). Returns the copy, None when there is
+    no such bot. A copy whose template is gone, and a bot that is not a copy, is returned as is."""
+    with _ROSTER_LOCK:
+        bots = load_bots()
+        b = next((x for x in bots if x.id == bot_id), None)
+        if b is None or not b.template:
+            return b
+        tpl = next((x for x in bots if x.id == b.template and not x.template), None)
+        if tpl is None:
+            return b
+        return upsert_bot(replace(b, **_view(tpl), overrides=None))
 
 
 def remove_bot(bot_id: str) -> bool:
@@ -1290,7 +1597,7 @@ def remove_bot(bot_id: str) -> bool:
         rest = [b for b in bots if b.id != bot_id]
         if not rest:
             raise ValueError("A DisPatch install needs at least one bot")
-        _write_bots([_bot_entry(b) for b in rest])
+        _write_bots(_roster_entries(rest))
         return True
 
 

@@ -93,15 +93,15 @@ test('hide-from-context is offered for API bots and nowhere else', () => {
   }
 });
 
-test('every new message control is behind the unlocked-only gate', () => {
-  const at = MAIN.indexOf("if (!state.decoy) {",
+test('every new message control sits in the history-mutation group of the action row', () => {
+  // Every profile may chat, rename, pin and delete its own chats (4.0), so there is no
+  // unlocked-only gate any more; the controls that rewrite history stay together in `mut`.
+  const at = MAIN.indexOf('const mut = [];',
     MAIN.indexOf('const actions = el(\'div\', { class: \'msg-actions\' })'));
-  assert.notEqual(at, -1, 'the action row keeps its Safe-Mode gate');
-  const gated = blockAt(at);
+  assert.notEqual(at, -1, 'the action row keeps its mutation group');
+  const group = MAIN.slice(at, at + 4000);
   for (const key of ['msg.edit', 'msg.hide_context', 'msg.regenerate']) {
-    assert.ok(gated.includes(`t('${key}')`),
-      `${key} must be inside the !state.decoy block — Safe Mode is view and `
-      + 'send, and a dead button advertises the lock');
+    assert.ok(group.includes(`t('${key}')`), `${key} must be in the mutation group`);
   }
 });
 

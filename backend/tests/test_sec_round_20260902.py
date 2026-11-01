@@ -26,7 +26,8 @@ def test_every_known_proxy_header_marks_the_request_as_proxied():
 
 def test_quota_key_takes_the_hop_the_proxy_appended_not_the_clients_claim():
     proxy = "127.0.0.1"
-    got = main._quota_ip({"x-forwarded-for": "8.8.8.8, 1.1.1.1, 192.0.2.77"}, proxy)
+    from app import policy
+    got = policy.quota_ip({"x-forwarded-for": "8.8.8.8, 1.1.1.1, 192.0.2.77"}, proxy)
     assert got == "192.0.2.77"
 
 
@@ -67,7 +68,7 @@ async def test_doc_ref_with_a_traversing_stored_name_is_not_read(tmp_path, monke
     assert "x.txt" in out
 
 
-async def test_read_routes_refuse_a_decoy_caller_without_the_middleware(tmp_path, monkeypatch):
+async def test_read_routes_refuse_a_signed_out_caller_without_the_middleware(tmp_path, monkeypatch):
     """The middleware matrix in test_auth_gate pins the 403; this pins the
     in-route check so a future route-table edit cannot silently uncover it."""
     from app import auth

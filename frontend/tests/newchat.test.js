@@ -109,7 +109,7 @@ test('wiring: index.html tab is an action, main.js routes and hides it', () => {
   const main = read('js/main.js');
   assert.match(main, /dataset\.action === 'new-chat'/);
   assert.match(main, /syncNewChatTab\(\);/);
-  assert.match(main, /from '\.\/newchat\.js\?v=2'/);
+  assert.match(main, /from '\.\/newchat\.js\?v=4'/);
   assert.ok(read('sw.js').includes("'/static/js/newchat.js'"));
   // review fixes: usability from the roster, the rail only for the fallback; the
   // active tab in the chat view; the last-used key is wiped by privacy mode.
@@ -118,7 +118,7 @@ test('wiring: index.html tab is an action, main.js routes and hides it', () => {
   assert.match(main, /rememberCharacter\(/);
   assert.match(main, /reusableEmptyThread\(/);
   assert.ok(read('js/privacy.js').includes("'dispatch-last-character'"));
-  assert.match(read('index.html'), /main\.js\?v=155/);
+  assert.match(read('index.html'), /main\.js\?v=179/);
   assert.match(readFileSync(join(STATIC, '..', '..', 'README.md'), 'utf8'), /Bots, Chats and New chat/);
 });
 

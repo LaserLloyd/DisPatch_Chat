@@ -1,24 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DisPatch">
-  <!-- DisPatch's mark: a pufferfish, drawn in the same language as the app's
-       chrome icons — line art, round caps and joins, one stroke weight, no
-       fill and no colour. White on black so the tile reads the same whatever
-       theme the app (or the browser tab strip) is wearing.
-       Keep index.html's inline .boot-logo in step with this file. -->
-  <rect width="64" height="64" rx="14" fill="#000000"/>
-  <g fill="none" stroke="#ffffff" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round">
-    <!-- Body: ONE contour — seven pointed spines with the puffed belly arcing
-         between them. Spines added around a circle draw every edge twice and
-         fill in as a sun at any real size; a scalloped ring reads as a bumpy
-         ball, not a spiked one. The bare arc on the right is where the tail
-         meets the body, which is what keeps this a pufferfish and not a
-         sea urchin. -->
-    <path d="M30.8 19.9 L30.0 12.7 L26.7 19.2 A13.3 13.3 0 0 0 22.8 19.7 L18.0 14.3 L19.1 21.5 A13.3 13.3 0 0 0 16.2 24.1 L9.1 22.5 L14.1 27.7 A13.3 13.3 0 0 0 13.2 31.6 L6.5 34.3 L13.6 35.7 A13.3 13.3 0 0 0 15.1 39.4 L11.1 45.4 L17.8 42.5 A13.3 13.3 0 0 0 21.1 44.7 L21.3 51.9 L25.1 45.7 A13.3 13.3 0 0 0 29.0 45.6 L33.4 51.4 L32.9 44.1 A13.3 13.3 0 0 0 30.8 19.9 Z"/>
-    <!-- Tail: deliberately small. A big fan is the single thing that makes a
-         round fish read as an ordinary one. -->
-    <path d="M40.5 26.5 q6.5 -2.5 8.5 -4.5 q-1.5 5.5 -1.5 10.5 q0 5 1.5 10.5 q-2 -2 -8.5 -4.5"/>
-    <!-- Mouth: an arc, not a dot — a dot this size reads as a second eye. -->
-    <path d="M14.2 36.8 q3.2 2.8 5.8 0.4" stroke-width="2.5"/>
-    <!-- The one solid shape in the mark, so the eye survives a 32px favicon. -->
-    <circle cx="21" cy="28" r="2.5" fill="#ffffff" stroke="none"/>
-  </g>
+  <!-- DisPatch's mark (4.0): a "D" whose bowl is a speech bubble — the tail at
+       the foot of the stem — holding a small lit house: conversation, at home.
+       Ivory line on a deep navy tile, the house in brass; one stroke weight,
+       round joins, like the app's chrome icons. It reads as a D down to 16 px.
+       Keep index.html's inline .boot-logo in step with this file, and re-render
+       favicon.ico, favicon-32.png, icon-192.png and icon-512.png from it. -->
+  <defs>
+    <linearGradient id="dp-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b2033"/>
+      <stop offset="1" stop-color="#0d1020"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#dp-tile)"/>
+  <path d="M16.5 14.5 H32 A18.5 17 0 0 1 32 48.5 H24.5 L16 54 L16.5 48.5 Z" fill="none" stroke="#f2ebdd" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M33.2 23.7 L41.5 30.6 Q42.1 31.1 42.1 31.9 V39.1 Q42.1 40.1 41.1 40.1 H25.3 Q24.3 40.1 24.3 39.1 V31.9 Q24.3 31.1 24.9 30.6 Z M30.9 40.1 V35.6 a2.3 2.3 0 0 1 4.6 0 V40.1 Z" fill="#c9a35b" fill-rule="evenodd"/>
 </svg>

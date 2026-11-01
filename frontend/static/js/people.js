@@ -1,55 +1,70 @@
-// Settings -> People & Access (owner and admin only).
+// Settings -> People & Access (Admins only).
 //
-// Four groups in the Settings modal's own .dev-group / .dev-row vocabulary, so
-// every palette applies and this file carries no colour (main.js adds the
-// sign-in rules and Restricted limits between This device and Machine access,
-// through deps.extraGroups, and Activity becomes a closed disclosure):
+// Groups in the Settings modal's own .dev-group / .dev-row vocabulary, so every palette
+// applies and this file carries no colour:
 //
-//   People        every profile with its role badge, PIN / password
-//                 indicators and disabled state; create, edit (name, role,
-//                 PIN, password, budgets, session timeout, disabled), delete,
-//                 and "sign out everywhere".
-//   This device   "Open this device as..." (binds THIS browser to a Member or
-//                 Restricted profile) and the devices the server knows.
-//   Activity      per-profile counts for the last 7 days (never message
-//                 content) and the admin audit log (last, collapsed).
-//   Machine access (Owner and Admins) the API key, rotated on demand and shown once,
-//                 and the on-box trust switch.
+//   People        every profile with its type (Admin / User / Basic), the protected first
+//                 Admin, the lock-screen profile, PIN / password indicators; create, edit
+//                 (name, type, picture, PIN, password, sign-out time, disabled), the
+//                 permission toggles, household bots, allowed backends, Reset this profile,
+//                 delete, and "sign out everywhere".
+//   When locked   "When locked, show: [the default profile / the profile list]" - drawn by
+//                 people-perms.js (renderPeoplePerms, run by settings-nav SECTION_HOOKS).
+//   Devices       the remembered devices and Forget (a device is not bound to a profile).
+//   Activity      per-profile counts for the last 7 days (never message content) and the
+//                 admin audit log.
+//   Machine access (Admins) the API key, rotated on demand and shown once, and the on-box
+//                 trust switch.
 //
-// The server enforces everything here (role, budgets, who may create an
-// Admin). This module only decides what to OFFER, via profiles.js.
+// The server enforces everything here (type changes, the wipe, the protected Admin, the
+// lock-target fence). This module only decides what to OFFER. Chats are private to their
+// profile: an Admin sees counts, never content, and the dialogs say so.
 //
 // Pure-ish: nothing runs at import time. App-shaped things arrive through
-// `deps` ({ toast, confirm, role, onSelfChanged, api?, extraGroups?,
-// collapseActivity? }), which is also how the tests drive it without main.js.
+// `deps` ({ toast, confirm, role, onChanged?, api?, w5?, extraGroups?, collapseActivity? }),
+// which is also how the tests drive it without main.js.
 
-import { api as realApi } from './api.js?v=35';
-import { t, has, relTime, fullTimestamp } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
+import { api as realApi } from './api.js?v=37';
+import { w5 as realW5 } from './w5-api.js?v=3';
+import { t, has, relTime, fullTimestamp } from './i18n.js?v=5';
+import { el } from './util.js?v=23';
+import { nimEnabled } from './nim.js?v=8';
+import { pictureRow, isUploadedPicture } from './profile-picture.js?v=6';
+import { disclosureText } from './host-notice.js?v=7';
+import { linkButtonFor, defaultRequest as oidcRequest } from './oidc-settings.js?v=2';
+import { ACTIVITY_COLUMNS, activityRows, activityTotals, avatarSpec, markNode } from './profiles.js?v=6';
 import {
-  ACTIVITY_COLUMNS, activityRows, activityTotals, bindableProfiles, budgetsToForm, canManage,
-  createPayload, patchPayload, roleOptions, avatarSpec, isAdminRole,
-} from './profiles.js?v=2';
+  askDialog, countsTally, permTables, permissionsPanel, householdPanel, giveToPanel, backendsPanel,
+  profileCalls, errorText,
+} from './people-perms.js?v=8';
 
 let seq = 0;          // a newer mount supersedes a slower, older one
 let uid = 0;
 const nextId = (p) => `${p}-${++uid}`;
 
+/** Who may use this pane: the protected first Admin ("owner" in the 3.x words) and Admins. */
+const isAdminActor = (role) => role === 'admin';
+
+/** The people table shows no "limit hits" column: 4.0 has no limits to hit. */
+const COLUMNS = ACTIVITY_COLUMNS;
+
 function errText(e) {
   if (!e) return '';
   // 3.0 error envelope: a code we have words for beats the raw detail.
   const known = {
-    password_required: 'people.err_password_required',
     incorrect_credential: 'signin.wrong',
     permission_denied: 'people.err_denied',
   };
   if (e.code && known[e.code]) return t(known[e.code]);
-  const msg = String(e.message || e).replace(/^\d{3}:\s*/, '');
-  return e.fix ? `${msg} ${e.fix}` : msg;
+  return errorText(e);
 }
 
 const hintLine = (text, cls = '') =>
   el('span', { class: 'dev-row-hint' + (cls ? ` ${cls}` : ''), text });
+
+/** The line a non-Admin profile is told about what an Admin sees (one mapping, in
+ *  host-notice.js: the sign-in popup and Settings -> Account show it too). */
+export { disclosureText };
 
 function group(id, title, hint, body) {
   return el('section', { class: 'dev-group', id, 'aria-labelledby': `${id}-h` }, [
@@ -62,133 +77,332 @@ function group(id, title, hint, body) {
 /** A labelled control. The label is a real <label for>, never a placeholder. */
 function field(labelText, input, hint) {
   if (!input.id) input.id = nextId('pf');
-  const kids = [el('label', { for: input.id, text: labelText }), input];
+  const parts = [el('label', { for: input.id, text: labelText }), input];
   if (hint) {
     const h = el('span', { class: 'people-field-hint', id: `${input.id}-hint`, text: hint });
     input.setAttribute('aria-describedby', h.id);
-    kids.push(h);
+    parts.push(h);
   }
-  return el('div', { class: 'sec-field people-field' }, kids);
+  return el('div', { class: 'sec-field people-field' }, parts);
 }
 
 const numberInput = (value, extra = {}) =>
   el('input', { type: 'number', inputmode: 'numeric', min: '0', step: '1', value: value || '', ...extra });
 
-const roleLabel = (role) => t(`role.${role}`);
+// ---- pure ------------------------------------------------------------------
+
+/** The profile types, in the order the select lists them. */
+export const TYPES = Object.freeze(['user', 'basic', 'admin']);
+export const typeLabel = (role) => t(`people.type_${role}`);
+export const typeHint = (role) => t(`people.type_${role}_hint`);
+
+/** Does the actor manage this row? Every Admin manages every profile but THE protected one. */
+export const canEditRow = (actorRole, p, meId) =>
+  isAdminActor(actorRole) && (!p.protected || p.id === meId);
+
+const wholeNumber = (v) => /^\d+$/.test(String(v).trim());
+
+/** The create form -> POST /api/people. PINs and passwords are optional on every type. */
+export function createBody(form) {
+  const errors = {};
+  const name = String(form.name || '').trim();
+  if (!name) errors.name = 'required';
+  const role = form.role;
+  const body = { name, role };
+  if (form.pin) {
+    if (String(form.pin).length < 4) errors.pin = 'min_4'; else body.pin = String(form.pin);
+  }
+  if (form.password) {
+    if (role !== 'admin') errors.password = 'role';
+    else if (String(form.password).length < 8) errors.password = 'min_8';
+    else body.password = String(form.password);
+  }
+  if (form.avatar) body.avatar = String(form.avatar).trim();
+  const sm = String(form.sessionMinutes || '').trim();
+  if (sm !== '') {
+    if (!wholeNumber(sm) || Number(sm) < 1 || Number(sm) > 43200) errors.sessionMinutes = 'range_1_43200';
+    else body.session_timeout = Number(sm) * 60;
+  }
+  if (form.householdBots !== undefined && form.householdBots !== null && role !== 'admin') {
+    body.household_bots = form.householdBots;
+  }
+  return { body, errors };
+}
+
+/** The edit form -> PATCH /api/people/{id}: only what changed. The type has its own route. */
+export function patchBody(person, form) {
+  const errors = {};
+  const patch = {};
+  const name = String(form.name || '').trim();
+  if (!name) errors.name = 'required';
+  else if (name !== person.name) patch.name = name;
+  const avatar = String(form.avatar || '').trim();
+  // An uploaded picture is changed by its own buttons: the emoji box (empty for one) never clears it.
+  const uploaded = isUploadedPicture(person.avatar);
+  if (uploaded ? avatar !== '' : avatar !== (person.avatar || '')) patch.avatar = avatar;
+  const sm = String(form.sessionMinutes || '').trim();
+  const before = Number.isInteger(person.session_timeout) ? Math.round(person.session_timeout / 60) : null;
+  if (sm !== '') {
+    if (!wholeNumber(sm) || Number(sm) < 1 || Number(sm) > 43200) errors.sessionMinutes = 'range_1_43200';
+    else if (Number(sm) !== before) patch.session_timeout = Number(sm) * 60;
+  }
+  if (typeof form.disabled === 'boolean' && form.disabled !== !!person.disabled) patch.disabled = form.disabled;
+  return { patch, errors };
+}
+
+const FORM_ERRORS = {
+  required: 'people.err_required', min_4: 'people.err_min_4', min_8: 'people.err_min_8',
+  range_1_43200: 'people.err_range_1_43200',
+};
+const formError = (errors) => {
+  const first = Object.entries(errors)[0];
+  if (!first) return '';
+  const [k, code] = first;
+  return FORM_ERRORS[code] ? t(FORM_ERRORS[code], { field: k }) : String(code);
+};
 
 export function avatarNode(profile, cls = 'people-avatar') {
-  const spec = avatarSpec(profile);
+  const spec = avatarSpec(profile, { noImages: nimEnabled() });
+  if (spec.kind === 'mark') return markNode(cls);
   if (spec.kind === 'img') {
     return el('img', { class: cls, src: spec.src, alt: '', width: '32', height: '32', draggable: 'false' });
   }
   return el('span', { class: `${cls} people-avatar-text`, 'aria-hidden': 'true', text: spec.text });
 }
 
-function roleBadge(role) {
-  return el('span', { class: `people-role people-role-${role}`, text: roleLabel(role) });
+function typeBadge(role) {
+  return el('span', { class: `people-role people-role-${role}`, text: typeLabel(role) });
 }
 
 // ---- People ---------------------------------------------------------------
 
 function indicators(p) {
   const out = [];
-  out.push(hintLine(p.has_pin ? t('people.pin_set') : t('people.pin_none'), 'people-ind'));
-  if (p.role === 'owner' || p.role === 'admin') {
+  // The default profile's own sentence (below) says "no PIN"; a plain "No PIN" next to it repeats it.
+  if (p.has_pin || !p.lock_target) out.push(hintLine(p.has_pin ? t('people.pin_set') : t('people.pin_none'), 'people-ind'));
+  if (p.role === 'admin') {
     out.push(hintLine(p.has_password ? t('people.password_set') : t('people.password_none'), 'people-ind'));
   }
   if (p.disabled) out.push(hintLine(t('people.disabled_tag'), 'people-ind people-disabled'));
+  // 4.3 Fable: the shared default profile never has a PIN or password (the server refuses one).
+  if (p.lock_target) out.push(hintLine(t('people.default_no_pin'), 'people-ind people-default-nopin'));
   return out;
 }
 
 function personRow(p, ctx) {
-  const manage = canManage(ctx.role, p.role);
+  const mine = p.id === ctx.data.me;
   const edit = el('button', {
     type: 'button', class: 'btn-secondary', text: t('people.edit'),
     'aria-label': t('people.edit_aria', { name: p.name }),
   });
   edit.addEventListener('click', () => ctx.openEditor(p));
+  const warn = p.role === 'admin' && p.no_credential
+    ? hintLine(t('people.no_credential_warning'), 'people-warn') : null;
+  const editable = canEditRow(ctx.role, p, ctx.data.me);
+  // A second Admin sees the Owner's row with no Edit button: say why.
+  const why = !editable && p.protected && isAdminActor(ctx.role)
+    ? hintLine(t('people.protected_note'), 'people-owner-note') : null;
   return el('div', { class: 'dev-row people-row' + (p.disabled ? ' people-row-off' : ''), dataset: { person: p.id } }, [
     avatarNode(p),
     el('span', { class: 'dev-row-text' }, [
-      el('strong', {}, [p.name, ' ', roleBadge(p.role)]),
+      el('strong', {}, [p.name, ' ', typeBadge(p.role),
+        p.protected ? el('span', { class: 'ui-badge people-protected', title: t('people.protected_hint'), text: t('people.protected') }) : null,
+        p.lock_target ? el('span', { class: 'ui-badge people-lockscreen', text: t('people.lock_target_badge') }) : null,
+        mine ? el('span', { class: 'ui-badge', text: t('people.you_tag') }) : null]),
       el('span', { class: 'people-inds' }, indicators(p)),
+      warn,
+      why,
     ]),
-    manage ? edit : null,
+    oidcButton(p, ctx),
+    editable ? edit : null,
   ]);
 }
 
+/** 4.3 (#24): "Link sign-in" / "Unlink sign-in" for a row (own row, or any row for the Owner). */
+function oidcButton(p, ctx) {
+  const o = ctx.oidc;
+  if (!o || !o.enabled) return null;
+  const meProfile = ctx.data.people.find((x) => x.id === ctx.data.me) || null;
+  return linkButtonFor(p, {
+    me: { profile: meProfile }, enabled: o.enabled, links: o.links || [], t, el,
+    toast: ctx.toast, onChange: () => ctx.reloadOidc(),
+  });
+}
+
+/** 4.3 Fable: the list order. The Owner, then Admins, Users, Basic profiles; the shared default
+ *  profile last in its group; the server's order otherwise. */
+const TYPE_RANK = { admin: 1, user: 2, basic: 3 };
+export function sortPeople(people) {
+  const rank = (p) => (p.protected ? 0 : (TYPE_RANK[p.role] || 4));
+  return (people || []).map((p, i) => [p, i])
+    .sort(([a, i], [b, j]) => (rank(a) - rank(b)) || ((a.lock_target ? 1 : 0) - (b.lock_target ? 1 : 0)) || (i - j))
+    .map(([p]) => p);
+}
+
 function listBody(ctx) {
-  const { people } = ctx.data;
+  const people = sortPeople(ctx.data.people);
   const rows = people.length
     ? people.map((p) => personRow(p, ctx))
     : [el('div', { class: 'dev-row' }, [hintLine(t('people.empty'))])];
   return el('div', { class: 'dev-group-body', id: 'people-list' }, rows);
 }
 
+// ---- the dialogs (counts, never content) ----------------------------------------
+
+async function countsOrError(ctx, fn) {
+  try { return await fn(); } catch (e) {
+    ctx.toast(t('people.counts_failed', { error: errText(e) }), true);
+    return null;
+  }
+}
+
+/** User -> Basic: the downgrade dialog, with the counts including File Server files and cloned voices. */
+async function confirmDowngrade(ctx, person, pv) {
+  const c = pv.counts || {};
+  const r = await askDialog({
+    title: t('people.downgrade_title', { name: person.name }),
+    body: t('people.downgrade_confirm', { bots: c.bots || 0, chats: c.chats || 0, files: c.files || 0, voices: c.voices || 0 }),
+    tally: countsTally(c),
+    notes: [t('people.downgrade_kept')],
+    okText: t('people.downgrade_button'),
+  });
+  return r === 'ok';
+}
+
+async function resetProfile(ctx, person, showErr) {
+  const pv = await countsOrError(ctx, () => profileCalls.resetPreview(person.id));
+  if (!pv) return;
+  const c = pv.counts || {};
+  const notes = [t(pv.outcome === 'household' ? 'people.reset_outcome_household' : 'people.reset_outcome_atlas', { name: person.name })];
+  // 4.3 Fable: another profile's voices, by name; the counts are the tiles, not a second sentence.
+  const own = person.id === ctx.data.me;
+  if (pv.keeps_voices !== false) notes.push(own ? t('reset.voices_kept') : t('reset.voices_kept_name', { name: person.name }));
+  if (person.lock_target) notes.push(t('reset.shared_warning'));
+  const r = await askDialog({
+    title: t('people.reset_title', { name: person.name }),
+    body: `${t('reset.admin_desc')} ${t('reset.cannot_undo')}`,
+    tally: countsTally(c, { voices: false }),
+    notes,
+    okText: t('reset.confirm_button'),
+  });
+  if (r !== 'ok') return;
+  try {
+    await profileCalls.reset(person.id, pv.token);
+    ctx.toast(t('people.reset_done', { name: person.name }));
+    ctx.closeEditor();
+    await ctx.reload();
+  } catch (e) {
+    if (e && e.code === 'reset_stale') { showErr(t('reset.stale')); return; }
+    showErr(errText(e));
+  }
+}
+
+async function deleteProfile(ctx, person, showErr) {
+  const pv = await countsOrError(ctx, () => ctx.api.deletePreview(person.id));
+  if (!pv) return;
+  const r = await askDialog({
+    title: t('people.delete_title', { name: person.name }),
+    body: t('people.delete_body', { name: person.name }),
+    tally: countsTally(pv.counts),
+    okText: t('people.delete_button'),
+  });
+  if (r !== 'ok') return;
+  try {
+    await ctx.api.deletePerson(person.id, pv.token);
+    ctx.toast(t('people.deleted', { name: person.name }));
+    ctx.closeEditor();
+    await ctx.reload();
+  } catch (e) { showErr(errText(e)); }
+}
+
+// ---- the editor ---------------------------------------------------------------
+
 /** The create / edit form. `person` null = create. */
 function editorPanel(ctx, person) {
   const creating = !person;
-  const form = budgetsToForm(person || {});
-  const { options, adminBlocked } = roleOptions(ctx.role, ctx.data.owner_has_password);
-  const roleChoices = (person && !options.includes(person.role) ? [person.role, ...options] : options);
+  const mine = !creating && person.id === ctx.data.me;
+  const limited = mine || (!creating && person.protected);          // own profile: name, picture, reset
+  // 4.3 Fable: the shared default profile never gets a PIN or password: no field, no Save PIN.
+  const noCredential = !creating && !!person.lock_target;
+  const title = creating ? t('people.new_title') : t('people.edit_title', { name: person.name });
 
   const name = el('input', { type: 'text', maxlength: '40', value: person ? person.name : '', autocomplete: 'off' });
-  const role = el('select', { class: 'ui-select' }, roleChoices.map((r) => {
-    const o = el('option', { value: r, text: roleLabel(r) });
-    if ((person ? person.role : 'member') === r) o.selected = true;
-    return o;
-  }));
-  if (person && person.role === 'owner') role.disabled = true;
+  const role = el('select', { class: 'ui-select people-type' }, TYPES.map((r) => el('option', { value: r, text: typeLabel(r) })));
+  role.value = person ? person.role : 'user';
+  if (limited) role.disabled = true;
+  const roleHint = el('span', { class: 'people-field-hint', id: nextId('pe-rh') });
+  role.setAttribute('aria-describedby', roleHint.id);
   const avatar = el('input', { type: 'text', maxlength: '8', value: person && !/^\//.test(person.avatar || '') ? (person.avatar || '') : '', autocomplete: 'off' });
   const pin = el('input', { type: 'password', inputmode: 'numeric', autocomplete: 'new-password', maxlength: '32' });
   const password = el('input', { type: 'password', autocomplete: 'new-password', maxlength: '128' });
-
-  const fMinutes = numberInput(form.minutes, { min: '1', max: '1440' });
-  const qStart = el('input', { type: 'time', value: form.quietStart });
-  const qEnd = el('input', { type: 'time', value: form.quietEnd });
-  const fTurns = numberInput(form.turns, { max: '100000' });
-  const fThreads = numberInput(form.threads, { max: '100000' });
-  const fFeedback = numberInput(form.feedback, { max: '100000' });
-  const fUpload = numberInput(form.uploadMb, { max: '100000' });
-  const fSession = numberInput(form.sessionMinutes, { min: '1', max: '43200' });
+  const fSession = numberInput(person && Number.isInteger(person.session_timeout) ? String(Math.round(person.session_timeout / 60)) : '', { min: '1', max: '43200' });
   const disabled = el('input', { type: 'checkbox' });
   disabled.checked = !!(person && person.disabled);
 
-  const err = el('div', { class: 'lock-error people-error', role: 'alert', 'aria-live': 'assertive', hidden: '' });
+  const err = el('div', { class: 'lock-error people-error people-editor-error', role: 'alert', 'aria-live': 'assertive', hidden: '' });
   const showErr = (m) => { err.textContent = m || ''; err.hidden = !m; };
 
   const pinField = field(t(creating ? 'people.pin_new' : 'people.pin_change'), pin, t('people.pin_hint'));
+  if (creating) pinField.querySelector('label').textContent = t('people.pin_optional');
   const pwField = field(t(creating ? 'people.password_new' : 'people.password_change'), password, t('people.password_hint'));
-  const syncCredFields = () => {
+  if (creating) pwField.querySelector('label').textContent = t('people.password_optional');
+  const noCred = el('p', { class: 'people-field-hint people-warn', role: 'note', hidden: '', text: t('people.no_credential_warning') });
+  const syncRole = () => {
     const r = role.value;
-    // Member and Restricted use a PIN; an Admin uses a password (the Owner or
-    // another Admin sets it). Members must have a PIN, a Restricted profile may go without.
-    pinField.hidden = !(r === 'member' || r === 'restricted');
-    pwField.hidden = r !== 'admin' || (!creating && !isAdminRole(ctx.role));
+    roleHint.textContent = r === 'user' && person && person.role === 'basic'
+      ? `${typeHint(r)} ${t('people.upgrade_note')}` : typeHint(r);
+    pwField.hidden = r !== 'admin' || limited || noCredential;
+    pinField.hidden = limited || noCredential;
+    const none = creating && r === 'admin' && !pin.value && !password.value;
+    noCred.hidden = !none;
   };
-  role.addEventListener('change', syncCredFields);
-  syncCredFields();
+  role.addEventListener('change', syncRole);
+  pin.addEventListener('input', syncRole);
+  password.addEventListener('input', syncRole);
 
-  const quiet = el('div', { class: 'sec-field people-field people-quiet', role: 'group', 'aria-labelledby': 'people-quiet-l' }, [
-    el('span', { class: 'people-group-label', id: 'people-quiet-l', text: t('people.quiet_hours') }),
-    el('div', { class: 'people-quiet-row' }, [
-      field(t('people.quiet_from'), qStart),
-      field(t('people.quiet_to'), qEnd),
-    ]),
-    el('span', { class: 'people-field-hint', text: t('people.quiet_hint') }),
-  ]);
-
-  const budgets = el('fieldset', { class: 'people-budgets' }, [
-    el('legend', { text: t('people.budgets') }),
-    el('p', { class: 'people-field-hint', text: t('people.budgets_hint') }),
-    field(t('people.minutes_per_day'), fMinutes),
-    quiet,
-    field(t('people.turns_per_day'), fTurns),
-    field(t('people.threads_per_day'), fThreads),
-    field(t('people.feedback_per_day'), fFeedback),
-    field(t('people.upload_mb'), fUpload),
-    field(t('people.session_minutes'), fSession, t('people.session_hint')),
-  ]);
+  // Sections that need data from the server fill in after the form is up.
+  const lower = el('div', { class: 'pe-lower' });
+  let households = null;             // the create form's household picker (getValue())
+  const fill = async () => {
+    const [chars, conns] = await Promise.all([
+      ctx.w5.allCharacters().catch(() => ({ characters: [] })),
+      ctx.w5.connections().catch(() => ({ connections: [] })),
+    ]);
+    // 4.2: an existing profile is given templates (give_to); only the create form still sends a list.
+    const manage = creating ? null : await (ctx.calls || profileCalls).manage().catch(() => null);
+    let bots = chars.characters || [];
+    if (creating) {
+      // The household rows carry `give_to`, which says which templates every profile gets anyway.
+      const mg = await (ctx.calls || profileCalls).manage().catch(() => null);
+      if (mg && Array.isArray(mg.household) && mg.household.length) bots = mg.household;
+      const draft = { role: role.value, household_bots: role.value === 'basic' ? [] : 'all' };
+      const mountHouse = () => {
+        const r = role.value;
+        const host = lower.querySelector('.pe-house-host');
+        if (r === 'admin') { host.replaceChildren(); households = null; return; }
+        const pp = householdPanel({ ...draft, role: r, household_bots: r === 'basic' ? [] : 'all' }, { bots, toast: ctx.toast });
+        households = pp;
+        host.replaceChildren(pp);
+      };
+      lower.replaceChildren(el('div', { class: 'pe-house-host' }));
+      role.addEventListener('change', mountHouse);
+      mountHouse();
+      return;
+    }
+    const parts = [];
+    if (!limited) {
+      parts.push(permissionsPanel(person, { tables: ctx.tables, api: ctx.api, toast: ctx.toast, confirm: ctx.confirm,
+        onChanged: () => ctx.refreshRows() }));
+      if (person.role !== 'admin') {
+        parts.push(giveToPanel(person, { templates: (manage && manage.household) || [], profiles: (manage && manage.profiles) || [],
+          toast: ctx.toast, onChanged: () => ctx.refreshRows() }));
+      }
+      if (person.role === 'user') {
+        parts.push(backendsPanel(person, { connections: conns.connections || [], toast: ctx.toast, calls: ctx.calls }));
+      }
+    }
+    lower.replaceChildren(...parts);
+  };
 
   const save = el('button', { type: 'button', class: 'btn-primary', text: t(creating ? 'people.create' : 'common.save') });
   const cancel = el('button', { type: 'button', class: 'btn-secondary', text: t('common.cancel') });
@@ -196,38 +410,35 @@ function editorPanel(ctx, person) {
   const extra = [];
 
   if (!creating) {
-    const del = el('button', { type: 'button', class: 'btn-secondary danger-text', text: t('people.delete') });
-    del.addEventListener('click', async () => {
-      if (!await ctx.confirm(t('people.delete_confirm', { name: person.name }), { danger: true })) return;
-      try {
-        await ctx.api.deletePerson(person.id);
-        ctx.toast(t('people.deleted', { name: person.name }));
-        ctx.closeEditor();
-        await ctx.reload();
-      } catch (e) { showErr(errText(e)); }
-    });
-    const out = el('button', { type: 'button', class: 'btn-secondary', text: t('people.sign_out_everywhere') });
-    out.addEventListener('click', async () => {
-      try {
-        await ctx.api.signOutPerson(person.id);
-        ctx.toast(t('people.signed_out', { name: person.name }));
-      } catch (e) { showErr(errText(e)); }
-    });
-    extra.push(out, del);
-
-    if (!pinField.hidden || person.role === 'member' || person.role === 'restricted') {
-      const setPin = el('button', { type: 'button', class: 'btn-secondary', text: t('people.pin_save') });
-      setPin.addEventListener('click', async () => {
-        if (String(pin.value).length < 4) { showErr(t('people.err_pin_short')); return; }
+    const reset = el('button', { type: 'button', class: 'btn-secondary', text: t('people.reset_button') });
+    reset.addEventListener('click', () => resetProfile(ctx, person, showErr));
+    extra.push(reset);
+    if (!limited) {
+      const out = el('button', { type: 'button', class: 'btn-secondary', text: t('people.sign_out_everywhere') });
+      out.addEventListener('click', async () => {
         try {
-          await ctx.api.setPersonPin(person.id, pin.value);
-          pin.value = '';
-          ctx.toast(t('people.pin_saved', { name: person.name }));
-          await ctx.reload({ keep: person.id });
+          await ctx.api.signOutPerson(person.id);
+          ctx.toast(t('people.signed_out', { name: person.name }));
         } catch (e) { showErr(errText(e)); }
       });
-      extra.unshift(setPin);
-      if (person.role === 'restricted' && person.has_pin) {
+      const del = el('button', { type: 'button', class: 'btn-secondary danger-text', text: t('people.delete') });
+      del.addEventListener('click', () => deleteProfile(ctx, person, showErr));
+      extra.push(out, del);
+
+      if (!noCredential) {
+        const setPin = el('button', { type: 'button', class: 'btn-secondary', text: t('people.pin_save') });
+        setPin.addEventListener('click', async () => {
+          if (String(pin.value).length < 4) { showErr(t('people.err_pin_short')); return; }
+          try {
+            await ctx.api.setPersonPin(person.id, pin.value);
+            pin.value = '';
+            ctx.toast(t('people.pin_saved', { name: person.name }));
+            await ctx.reload({ keep: person.id });
+          } catch (e) { showErr(errText(e)); }
+        });
+        extra.unshift(setPin);
+      }
+      if (person.has_pin) {
         const clr = el('button', { type: 'button', class: 'btn-secondary', text: t('people.pin_remove') });
         clr.addEventListener('click', async () => {
           try {
@@ -238,34 +449,27 @@ function editorPanel(ctx, person) {
         });
         extra.splice(1, 0, clr);
       }
-    }
-    if (person.role === 'admin' && isAdminRole(ctx.role) && person.id !== (ctx.data && ctx.data.me)) {
-      const setPw = el('button', { type: 'button', class: 'btn-secondary', text: t('people.password_save') });
-      setPw.addEventListener('click', async () => {
-        if (String(password.value).length < 8) { showErr(t('people.err_password_short')); return; }
-        try {
-          await ctx.api.setPersonPassword(person.id, password.value);
-          password.value = '';
-          ctx.toast(t('people.password_saved', { name: person.name }));
-          await ctx.reload({ keep: person.id });
-        } catch (e) { showErr(errText(e)); }
-      });
-      extra.unshift(setPw);
+      if (person.role === 'admin' && !noCredential) {
+        const setPw = el('button', { type: 'button', class: 'btn-secondary', text: t('people.password_save') });
+        setPw.addEventListener('click', async () => {
+          if (String(password.value).length < 8) { showErr(t('people.err_password_short')); return; }
+          try {
+            await ctx.api.setPersonPassword(person.id, password.value);
+            password.value = '';
+            ctx.toast(t('people.password_saved', { name: person.name }));
+            await ctx.reload({ keep: person.id });
+          } catch (e) { showErr(errText(e)); }
+        });
+        extra.unshift(setPw);
+      }
     }
   }
 
   const collect = () => ({
     name: name.value, role: role.value, avatar: avatar.value, pin: pin.value, password: password.value,
-    minutes: fMinutes.value, quietStart: qStart.value, quietEnd: qEnd.value, turns: fTurns.value,
-    threads: fThreads.value, feedback: fFeedback.value, uploadMb: fUpload.value,
     sessionMinutes: fSession.value, disabled: disabled.checked,
+    householdBots: households ? households.getValue() : undefined,
   });
-  const errorText = (errors) => {
-    const first = Object.entries(errors)[0];
-    if (!first) return '';
-    const [k, code] = first;
-    return t(`people.err_${code}`, { field: k });
-  };
 
   save.addEventListener('click', async () => {
     showErr('');
@@ -273,21 +477,41 @@ function editorPanel(ctx, person) {
     save.disabled = true;
     try {
       if (creating) {
-        const { body, errors } = createPayload(f);
-        if (Object.keys(errors).length) { showErr(errorText(errors)); return; }
-        await ctx.api.createPerson(body);
+        const { body, errors } = createBody(f);
+        if (Object.keys(errors).length) { showErr(formError(errors)); return; }
+        const made = await ctx.api.createPerson(body);
         pin.value = ''; password.value = '';
         ctx.toast(t('people.created', { name: body.name }));
         ctx.closeEditor();
-        await ctx.reload();
+        await ctx.reload({ keep: made && made.id });
       } else {
-        const { patch, errors } = patchPayload(person, f);
-        if (Object.keys(errors).length) { showErr(errorText(errors)); return; }
-        if (!Object.keys(patch).length) { ctx.closeEditor(); return; }
-        await ctx.api.patchPerson(person.id, patch);
+        const { patch, errors } = patchBody(person, f);
+        if (Object.keys(errors).length) { showErr(formError(errors)); return; }
+        // 4.3 Fable: a PIN or password typed into the form is saved by the main Save too (it
+        // used to be dropped unless "Save PIN" was pressed first).
+        const typedPin = !pinField.hidden && f.pin ? String(f.pin) : '';
+        const typedPw = !pwField.hidden && f.password ? String(f.password) : '';
+        if (typedPin && typedPin.length < 4) { showErr(t('people.err_pin_short')); return; }
+        if (typedPw && typedPw.length < 8) { showErr(t('people.err_password_short')); return; }
+        // The type has its own route: a preview first, and User -> Basic deletes the profile's
+        // own bots and chats (and cloned voices), so it is confirmed with the counts.
+        const newRole = !limited && f.role !== person.role ? f.role : null;
+        if (newRole) {
+          const pv = await ctx.api.rolePreview(person.id, newRole);
+          const body = { role: newRole };
+          if (pv && pv.deletes) {
+            if (!await confirmDowngrade(ctx, person, pv)) return;
+            body.confirm_token = pv.token;
+          }
+          await ctx.api.changeRole(person.id, body);
+        }
+        if (Object.keys(patch).length) await ctx.api.patchPerson(person.id, patch);
+        if (typedPin) { await ctx.api.setPersonPin(person.id, typedPin); pin.value = ''; }
+        if (typedPw) { await ctx.api.setPersonPassword(person.id, typedPw); password.value = ''; }
+        if (!newRole && !Object.keys(patch).length && !typedPin && !typedPw) { ctx.closeEditor(); return; }
         ctx.toast(t('people.saved', { name: f.name.trim() || person.name }));
         ctx.closeEditor();
-        await ctx.reload();
+        await ctx.reload(newRole ? { keep: person.id } : {});
       }
     } catch (e) {
       showErr(errText(e));
@@ -297,73 +521,50 @@ function editorPanel(ctx, person) {
   });
   cancel.addEventListener('click', () => ctx.closeEditor());
 
-  const blocked = adminBlocked && creating
-    ? hintLine(t(adminBlocked === 'owner_needs_password' ? 'people.admin_needs_password' : 'people.admin_owner_only'), 'people-admin-note')
-    : null;
-
-  const root = el('div', { class: 'people-editor dev-group-body', id: 'people-editor', role: 'group',
-    'aria-label': creating ? t('people.new_title') : t('people.edit_title', { name: person.name }) }, [
+  const root = el('div', { class: 'people-editor dev-group-body', id: 'people-editor', role: 'group', 'aria-label': title }, [
     el('div', { class: 'people-form' }, [
-      el('h4', { class: 'people-editor-title', text: creating ? t('people.new_title') : t('people.edit_title', { name: person.name }) }),
+      el('h4', { class: 'people-editor-title', text: title }),
+      limited ? el('p', { class: 'people-field-hint', text: t(mine ? 'people.self_note' : 'people.protected_note') }) : null,
       field(t('people.name'), name),
-      field(t('people.role'), role),
-      blocked,
+      field(t('people.type_label'), role), roleHint,
       field(t('people.avatar'), avatar, t('people.avatar_hint')),
+      creating
+        ? el('p', { class: 'people-field-hint', text: t('picture.save_first') })
+        : el('div', { class: 'sec-field people-field people-picture' }, [
+          el('span', { class: 'people-field-label', text: t('picture.title') }),
+          pictureRow({
+            profile: person, base: `/api/people/${encodeURIComponent(person.id)}/avatar`, toast: ctx.toast,
+            chooseFace: ctx.chooseFace,
+            onChanged: async (p) => { person.avatar = p.avatar; await ctx.refreshRows(); },
+          }),
+        ]),
       pinField,
       pwField,
-      budgets,
-      creating ? null : el('label', { class: 'sec-remember-row people-disabled-row' }, [
+      noCredential ? el('p', { class: 'people-field-hint people-default-nopin', role: 'note', text: t('people.default_no_pin') }) : null,
+      noCred,
+      limited ? null : field(t('people.session_minutes'), fSession, t('people.session_hint')),
+      creating || limited ? null : el('label', { class: 'sec-remember-row people-disabled-row' }, [
         disabled, el('span', { text: t('people.disabled_label') })]),
+      lower,
       err,
       el('div', { class: 'bm-actions people-actions' }, actions),
       extra.length ? el('div', { class: 'bm-actions people-actions people-actions-extra' }, extra) : null,
     ]),
   ]);
+  syncRole();
+  fill().catch((e) => lower.replaceChildren(hintLine(t('people.load_failed', { error: errText(e) }))));
   return { root, focus: () => name.focus() };
 }
 
-// ---- This device ------------------------------------------------------------
+// ---- Devices ------------------------------------------------------------------
 
 function deviceGroup(ctx) {
   const dv = ctx.devices || { devices: [], this_device: null };
-  const mine = dv.devices.find((d) => d.this_device) || null;
-  const bound = mine ? mine.default_profile_id : null;
-  const choices = bindableProfiles(ctx.data.people);
+  // A device is not bound to a profile (unsigned devices land on the lock target, set above);
+  // only the list of remembered devices and Forget remain.
+  const rows = [];
 
-  const select = el('select', { id: 'people-device-select', class: 'ui-select' }, [
-    el('option', { value: '', text: t('people.device_nobody') }),
-    ...choices.map((p) => el('option', { value: p.id, text: `${p.name} (${roleLabel(p.role)})` })),
-  ]);
-  select.value = bound && choices.some((p) => p.id === bound) ? bound : '';
-  select.addEventListener('change', async () => {
-    const want = select.value || null;
-    select.disabled = true;
-    try {
-      await ctx.api.bindThisDevice(want);
-      ctx.toast(t(want ? 'people.device_bound' : 'people.device_unbound'));
-      await ctx.reloadDevices();
-    } catch (e) {
-      select.value = bound || '';
-      ctx.toast(errText(e), true);
-    } finally { select.disabled = false; }
-  });
-
-  const rows = [
-    el('div', { class: 'dev-row dev-row-block people-device-pick' }, [
-      el('label', { for: 'people-device-select', class: 'dev-row-text' }, [
-        el('strong', { text: t('people.device_open_as') }),
-        hintLine(t('people.device_hint')),
-      ]),
-      select,
-    ]),
-  ];
-
-  const nameOf = (id) => {
-    const p = ctx.data.people.find((x) => x.id === id);
-    return p ? p.name : null;
-  };
   for (const d of dv.devices) {
-    const who = d.default_profile_id ? nameOf(d.default_profile_id) : null;
     const label = d.label || t('people.device_unnamed');
     const forget = el('button', {
       type: 'button', class: 'btn-secondary', text: t('people.device_forget'),
@@ -377,29 +578,15 @@ function deviceGroup(ctx) {
         await ctx.reloadDevices();
       } catch (e) { ctx.toast(errText(e), true); }
     });
-    const btns = [];
-    if (d.this_device && d.default_profile_id) {
-      const unbind = el('button', { type: 'button', class: 'btn-secondary', text: t('people.device_unbind') });
-      unbind.addEventListener('click', async () => {
-        try {
-          await ctx.api.bindThisDevice(null);
-          ctx.toast(t('people.device_unbound'));
-          await ctx.reloadDevices();
-        } catch (e) { ctx.toast(errText(e), true); }
-      });
-      btns.push(unbind);
-    }
-    btns.push(forget);
     rows.push(el('div', { class: 'dev-row people-device', dataset: { device: d.id } }, [
       el('span', { class: 'dev-row-text' }, [
         el('strong', {}, [label, d.this_device ? ` (${t('people.device_this')})` : '']),
-        hintLine(who ? t('people.device_opens_as', { name: who }) : t('people.device_opens_ask')),
         d.last_seen ? hintLine(t('people.device_seen', { when: relTime(d.last_seen) })) : null,
       ]),
-      el('span', { class: 'people-row-actions' }, btns),
+      el('span', { class: 'people-row-actions' }, [forget]),
     ]));
   }
-  return group('people-devices', t('people.device_title'), t('people.device_intro'),
+  return group('people-devices', t('people.devices_title'), t('people.devices_intro'),
     el('div', { class: 'dev-group-body', id: 'people-devices-body' }, rows));
 }
 
@@ -408,16 +595,16 @@ function deviceGroup(ctx) {
 function activityTable(rows) {
   const head = el('tr', {}, [
     el('th', { scope: 'col', text: t('people.col_day') }),
-    ...ACTIVITY_COLUMNS.map((c) => el('th', { scope: 'col', class: 'people-num', text: t(`people.col_${c}`) })),
+    ...COLUMNS.map((c) => el('th', { scope: 'col', class: 'people-num', text: t(`people.col_${c}`) })),
   ]);
   const body = rows.map((r) => el('tr', {}, [
     el('th', { scope: 'row', text: r.day }),
-    ...ACTIVITY_COLUMNS.map((c) => el('td', { class: 'people-num', text: String(r.counts[c]) })),
+    ...COLUMNS.map((c) => el('td', { class: 'people-num', text: String(r.counts[c]) })),
   ]));
   const totals = activityTotals(rows);
   const foot = el('tr', { class: 'people-total' }, [
     el('th', { scope: 'row', text: t('people.col_total') }),
-    ...ACTIVITY_COLUMNS.map((c) => el('td', { class: 'people-num', text: String(totals[c]) })),
+    ...COLUMNS.map((c) => el('td', { class: 'people-num', text: String(totals[c]) })),
   ]);
   return el('div', { class: 'people-table-wrap', tabindex: '0', role: 'region', 'aria-label': t('people.activity_title') }, [
     el('table', { class: 'people-table' }, [
@@ -448,7 +635,8 @@ function auditList(entries, ctx) {
 // A kind we have words for is localized; anything else is shown as the server
 // wrote it, so a new audit kind is never invisible.
 function auditKind(kind) {
-  const key = `people.audit_${kind}`;
+  // A dotted kind (plugin.approve) would walk a nested path; its key uses `_`.
+  const key = `people.audit_${String(kind).replace(/\./g, '_')}`;
   return has(key) ? t(key) : String(kind);
 }
 
@@ -496,12 +684,16 @@ function activityGroup(ctx) {
     ]));
 }
 
-// ---- Machine access (Owner and Admins) -----------------------------------------------
+// ---- Machine access (Admins) ---------------------------------------------------------
 
 async function machineGroup(ctx) {
   let info;
   try { info = await ctx.api.apiTokenInfo(); } catch { return null; }
   const status = hintLine(info.has_token ? t('people.machine_has_key') : t('people.machine_no_key'), 'people-machine-status');
+  // 4.3 Fable: replacing the key and the trust switch are the Owner's (a second Admin reads them).
+  const meRow = ctx.data.people.find((x) => x.id === ctx.data.me);
+  const owner = !ctx.data.me || !!(meRow && meRow.protected);
+  const ownerOnly = owner ? null : hintLine(t('agents.only_owner'), 'people-owner-only');
   const shown = el('div', { class: 'people-key', hidden: '' });
   const rotate = el('button', { type: 'button', class: 'btn-secondary', text: t(info.has_token ? 'people.machine_rotate' : 'people.machine_create') });
   rotate.addEventListener('click', async () => {
@@ -513,11 +705,17 @@ async function machineGroup(ctx) {
       status.textContent = t('people.machine_has_key');
       rotate.textContent = t('people.machine_rotate');
       if (r && r.api_token) showKey(shown, r.api_token, ctx);
-    } catch (e) { ctx.toast(errText(e), true); } finally { rotate.disabled = false; }
+    } catch (e) { ctx.toast(errText(e), true); } finally { rotate.disabled = !owner; }
   });
 
   const trust = el('input', { type: 'checkbox', 'aria-label': t('people.machine_trust_aria') });
   trust.checked = !!info.machine_loopback_trust;
+  if (!owner) {
+    rotate.disabled = true;
+    trust.disabled = true;
+    rotate.title = t('agents.only_owner');
+    trust.title = t('agents.only_owner');
+  }
   trust.addEventListener('change', async () => {
     const want = trust.checked;
     trust.disabled = true;
@@ -527,7 +725,7 @@ async function machineGroup(ctx) {
     } catch (e) {
       trust.checked = !want;
       ctx.toast(errText(e), true);
-    } finally { trust.disabled = false; }
+    } finally { trust.disabled = !owner; }
   });
 
   const scopes = (info.machine_scopes || []).length
@@ -537,7 +735,7 @@ async function machineGroup(ctx) {
   return group('people-machine', t('people.machine_title'), t('people.machine_intro'),
     el('div', { class: 'dev-group-body', id: 'people-machine-body' }, [
       el('div', { class: 'dev-row dev-row-block' }, [
-        el('span', { class: 'dev-row-text' }, [el('strong', { text: t('people.machine_key') }), status, scopes]),
+        el('span', { class: 'dev-row-text' }, [el('strong', { text: t('people.machine_key') }), status, scopes, ownerOnly]),
         rotate,
       ]),
       el('div', { class: 'dev-row dev-row-block' }, [shown]),
@@ -579,20 +777,25 @@ function showKey(host, key, ctx) {
 // ---- Mount ------------------------------------------------------------------------
 
 /**
- * Settings -> People & Profiles came on screen: (re)build the pane.
+ * Settings -> People & Access came on screen: (re)build the pane.
  *   pane  #spane-people
  *   deps  { toast(msg, isErr), confirm(msg, opts) -> Promise<bool>, role,
- *           onSelfChanged?(), api? }
+ *           onChanged?(), api?, w5?, extraGroups?(), collapseActivity? }
  */
 export async function mountPeopleSettings(pane, deps) {
   const a = deps.api || realApi;
+  const w5 = deps.w5 || realW5;
   const mine = ++seq;
-  const intro = el('p', { class: 'muted modal-hint', text: t('people.hint') });
+  const intro = el('p', { class: 'muted modal-hint', text: t('people.page_hint') });
   pane.replaceChildren(intro, el('p', { class: 'muted modal-hint', text: t('common.loading') }));
   let data;
   let devices = null;
+  let oidc = null;
+  // GET /api/oidc/links -> {enabled, links}; null when it cannot be read (no buttons then).
+  const loadOidc = () => (deps.oidcLinks || (() => oidcRequest('GET', '/api/oidc/links')))().catch(() => null);
   try {
     [data, devices] = await Promise.all([a.people(), a.devices().catch(() => null)]);
+    oidc = await loadOidc();
   } catch (e) {
     if (mine !== seq) return;
     const retry = el('button', { type: 'button', class: 'btn-secondary', text: t('common.retry') });
@@ -603,11 +806,16 @@ export async function mountPeopleSettings(pane, deps) {
   }
   if (mine !== seq) return;
 
-  const role = deps.role || (data.me && data.me.role) || 'admin';
+  const role = deps.role || 'admin';
+  const read = (d) => ({
+    people: d.profiles || [], me: typeof d.me === 'string' ? d.me : (d.me && d.me.id) || '',
+    disclosure: disclosureText(d),
+  });
   const ctx = {
-    api: a, role, data: { people: data.profiles || [], owner_has_password: !!data.owner_has_password },
-    devices, toast: deps.toast, confirm: deps.confirm,
-    openEditor: () => {}, closeEditor: () => {}, reload: () => {}, reloadDevices: () => {},
+    api: a, w5, role, calls: profileCalls, data: read(data), tables: permTables(data),
+    devices, oidc, toast: deps.toast, confirm: deps.confirm, chooseFace: deps.chooseFace,
+    reloadOidc: () => {},
+    openEditor: () => {}, closeEditor: () => {}, reload: () => {}, reloadDevices: () => {}, refreshRows: () => {},
   };
 
   const listHost = el('div', { class: 'people-list-host' });
@@ -615,51 +823,71 @@ export async function mountPeopleSettings(pane, deps) {
   const deviceHost = el('div', { class: 'people-device-host' });
   const activityHost = el('div', { class: 'people-activity-host' });
   const machineHost = el('div', { class: 'people-machine-host' });
-  let editing = null;      // profile id being edited, 'new', or null
 
   const renderList = () => {
-    listHost.replaceChildren(group('people-people', t('people.title'), t('people.intro'), listBody(ctx)));
-    if (canCreate(role)) {
+    const g = group('people-people', t('people.title'), t('people.page_intro'), listBody(ctx));
+    if (ctx.data.disclosure) {
+      g.querySelector('.dev-group-hint').after(el('p', { class: 'dev-group-hint people-disclosure', text: ctx.data.disclosure }));
+    }
+    listHost.replaceChildren(g);
+    if (isAdminActor(role)) {
       const add = el('button', { type: 'button', class: 'btn-primary people-add', id: 'people-add', text: t('people.add') });
       add.addEventListener('click', () => ctx.openEditor(null));
-      listHost.querySelector('.dev-group').append(el('div', { class: 'people-add-row' }, [add]));
+      g.append(el('div', { class: 'people-add-row' }, [add]));
     }
   };
   const renderDevices = () => deviceHost.replaceChildren(deviceGroup(ctx));
   const renderActivity = () => activityHost.replaceChildren(activityGroup(ctx));
 
   ctx.openEditor = (person) => {
-    editing = person ? person.id : 'new';
     const ed = editorPanel(ctx, person);
     editorHost.replaceChildren(ed.root);
     try { ed.root.scrollIntoView({ block: 'nearest' }); } catch { /* ignore */ }
     ed.focus();
   };
-  ctx.closeEditor = () => { editing = null; editorHost.replaceChildren(); };
+  ctx.closeEditor = () => { editorHost.replaceChildren(); };
+  const announce = () => pane.dispatchEvent(new CustomEvent('people:changed', { detail: { profiles: ctx.data.people } }));
   ctx.reload = async ({ keep } = {}) => {
     try {
       const fresh = await a.people();
-      ctx.data = { people: fresh.profiles || [], owner_has_password: !!fresh.owner_has_password };
+      ctx.data = read(fresh);
+      ctx.tables = permTables(fresh);
     } catch (e) { ctx.toast(errText(e), true); return; }
     renderList();
     renderDevices();
     renderActivity();
+    announce();
     if (keep) {
       const p = ctx.data.people.find((x) => x.id === keep);
       if (p) ctx.openEditor(p);
     }
     if (deps.onChanged) deps.onChanged();
   };
+  // A permission switch changed a row's badges (the lock-screen profile, the warning): redraw
+  // the list without touching the open editor.
+  ctx.refreshRows = async () => {
+    try {
+      ctx.data = read(await a.people());
+    } catch { return; }
+    renderList();
+    announce();
+  };
   ctx.reloadDevices = async () => {
     try { ctx.devices = await a.devices(); } catch { /* keep the old list */ }
     renderDevices();
   };
+  ctx.reloadOidc = async () => {
+    ctx.oidc = await loadOidc();
+    renderList();
+  };
+  // The lock-screen group changed who the default profile is.
+  pane.addEventListener('people:refresh', () => ctx.reload());
 
   renderList();
   renderDevices();
   renderActivity();
-  // 3.2 (People & Access): the caller's groups after This device (the sign-in
-  // rules, the Restricted limits), and Activity & audit as a closed disclosure.
+  // The caller's groups after Devices (the sign-in rules), and Activity & audit as a closed
+  // disclosure.
   const extra = (deps.extraGroups && deps.extraGroups()) || {};
   listHost.dataset.anchor = 'people';
   deviceHost.dataset.anchor = 'device';
@@ -675,7 +903,7 @@ export async function mountPeopleSettings(pane, deps) {
     activityHost.dataset.anchor = 'activity';
   }
   const parts = [intro, listHost, editorHost, deviceHost, ...(extra.afterDevices || [])];
-  if (isAdminRole(role)) {
+  if (isAdminActor(role)) {
     const g = await machineGroup(ctx);
     if (mine !== seq) return;
     if (g) machineHost.replaceChildren(g);
@@ -684,5 +912,3 @@ export async function mountPeopleSettings(pane, deps) {
   parts.push(activityPart, ...(extra.end || []));
   pane.replaceChildren(...parts);
 }
-
-const canCreate = (role) => role === 'owner' || role === 'admin';

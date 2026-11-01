@@ -143,6 +143,29 @@ def resolve_inside(root: Path, relative: str | os.PathLike[str]) -> Path:
     return cand
 
 
+def resolve_tool_path(root: Path, path: str | os.PathLike[str]) -> Path:
+    """A path a TOOL CALL names (absolute or relative to ``root``) as a real path inside ``root``.
+
+    4.3 (#8). Unlike :func:`resolve_inside` (agent-supplied names, never absolute), the SDK's
+    built-in tools pass absolute paths (``Read``'s ``file_path``), so an absolute path is
+    accepted when its REAL location (symlinks and ``..`` resolved) lies inside the real root.
+    ``~`` forms, NUL bytes and Windows drive/UNC forms that point elsewhere are refused.
+    """
+    p = os.fspath(path)
+    if not isinstance(p, str) or not p or "\x00" in p:
+        raise WorkspaceError("empty or NUL-containing path")
+    if p.startswith("~"):
+        raise WorkspaceError(f"home-relative path not allowed: {p!r}")
+    root_real = Path(os.path.realpath(Path(root)))
+    joined = p if os.path.isabs(p) else os.path.join(root_real, p)
+    cand = Path(os.path.realpath(joined))
+    try:
+        cand.relative_to(root_real)
+    except ValueError:
+        raise WorkspaceError(f"{p!r} is outside the workspace") from None
+    return cand
+
+
 def _rm_readonly(func, path, _exc):             # pragma: no cover - Windows git objects
     os.chmod(path, stat.S_IWRITE)
     func(path)

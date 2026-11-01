@@ -1,0 +1,9 @@
+event: session.status_running
+data: {"type": "session.status_running", "id": "sevt_41", "processed_at": "2026-10-31T00:00:01Z"}
+
+event: session.error
+data: {"type": "session.error", "id": "sevt_42", "processed_at": "2026-10-31T00:00:02Z", "error": {"type": "model_overloaded_error", "message": "The model is overloaded.", "retry_status": {"type": "exhausted"}}}
+
+event: session.status_idle
+data: {"type": "session.status_idle", "id": "sevt_43", "processed_at": "2026-10-31T00:00:03Z", "stop_reason": {"type": "retries_exhausted"}}
+

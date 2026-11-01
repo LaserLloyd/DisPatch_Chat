@@ -1,6 +1,7 @@
-// Settings -> Bots inline editing (js/bots-edit.js): the PATCH / POST / DELETE
-// request shapes of docs/design/platform-2-3.md section 3, driven through the
-// REAL api client against a stubbed fetch, with real English strings.
+// Settings -> Characters -> Add (js/bots-edit.js): the POST request shape of
+// docs/design/platform-2-3.md section 3, driven through the REAL api client against a
+// stubbed fetch, with real English strings. (4.3: the row editing it once carried went with
+// the old roster; the Characters page edits rows.)
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -47,7 +48,7 @@ async function setup(extra = {}) {
       headers: new win.Headers(), json: async () => body,
     };
   };
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   calls.length = 0;
   const mod = await import(`../static/js/bots-edit.js?t=${Math.random()}`);
@@ -65,155 +66,6 @@ async function setup(extra = {}) {
 
 const tick = async () => { for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0)); };
 const fire = (win, node, type = 'click') => node.dispatchEvent(new win.Event(type, { bubbles: true }));
-
-const DIRECT = { id: 'atlas', name: 'Atlas', emoji: '🌍', model_hint: '', backend: 'direct', tools: true, connected: true };
-
-test('backend kinds: the four badges, and an old server row (no backend) reads as an agent', { skip: dom.skip }, async () => {
-  const { mod } = await setup();
-  const label = (b) => mod.backendBadge(b).textContent;
-  assert.equal(label({ backend: 'direct' }), 'Direct API');
-  assert.equal(label({ backend: 'legacy-api' }), 'Legacy API');
-  assert.equal(label({ backend: 'agent' }), 'Agent');
-  assert.equal(label({ backend: 'app' }), 'App');
-  assert.equal(label({}), 'Agent');
-  assert.equal(mod.backendBadge({ backend: 'direct' }).dataset.backend, 'direct');
-});
-
-test('"Not connected: choose a connection" only for a direct-API bot with connected === false', { skip: dom.skip }, async () => {
-  const { mod, ctx, rec, win } = await setup();
-  assert.equal(mod.notConnectedLink({ ...DIRECT, connected: true }, ctx), null);
-  assert.equal(mod.notConnectedLink({ ...DIRECT }, ctx), null);
-  assert.equal(mod.notConnectedLink({ backend: 'agent', connected: false }, ctx), null);
-  assert.equal(mod.notConnectedLink({ backend: 'legacy-api', connected: false }, ctx), null);
-  const link = mod.notConnectedLink({ ...DIRECT, connected: false }, ctx);
-  assert.equal(link.textContent, 'Not connected: choose a connection');
-  fire(win, link);
-  assert.equal(rec.ai, 1);
-});
-
-test('Lookups pill: direct-API bots only; a click PATCHes {tools} and reports the row', { skip: dom.skip }, async () => {
-  const { mod, ctx, rec, win } = await setup({
-    'PATCH /api/bots/atlas': () => [200, { ...DIRECT, tools: false }],
-  });
-  assert.equal(mod.lookupsPill({ backend: 'agent' }, ctx), null);
-  assert.equal(mod.lookupsPill({ backend: 'legacy-api' }, ctx), null);
-  const pill = mod.lookupsPill(DIRECT, ctx);
-  assert.equal(pill.textContent, 'Lookups');
-  assert.equal(pill.getAttribute('aria-pressed'), 'true');
-  assert.ok(pill.classList.contains('on'));
-  fire(win, pill);
-  await tick();
-  assert.deepEqual(calls, [{ key: 'PATCH /api/bots/atlas', body: { tools: false } }]);
-  assert.equal(pill.getAttribute('aria-pressed'), 'false');
-  assert.ok(!pill.classList.contains('on'));
-  assert.equal(rec.patched[0][0], 'atlas');
-  assert.equal(rec.patched[0][1].tools, false);
-  // tools missing on the row reads as on (the default for a direct bot)
-  assert.equal(mod.lookupsPill({ backend: 'direct', id: 'x' }, ctx).getAttribute('aria-pressed'), 'true');
-});
-
-test('Lookups pill: a refusal leaves it where it was and says why', { skip: dom.skip }, async () => {
-  const { mod, ctx, rec, win } = await setup({ 'PATCH /api/bots/atlas': () => [422, { detail: 'nope' }] });
-  const pill = mod.lookupsPill(DIRECT, ctx);
-  fire(win, pill);
-  await tick();
-  assert.equal(pill.getAttribute('aria-pressed'), 'true');
-  assert.equal(rec.patched.length, 0);
-  assert.match(rec.toasts[0][0], /Could not save: nope/);
-  assert.equal(rec.toasts[0][1], true);
-});
-
-test('edit: the pencil opens name / emoji / model fields and Save PATCHes only what changed', { skip: dom.skip }, async () => {
-  const { mod, ctx, rec, win } = await setup({
-    'PATCH /api/bots/atlas': () => [200, { ...DIRECT, name: 'Atlas 2', model_hint: 'MiniMax M3' }],
-  });
-  const c = mod.rowControls(DIRECT, ctx);
-  const panel = c.panel;
-  assert.ok(panel.classList.contains('hidden'));
-  fire(win, c.edit);
-  assert.ok(!panel.classList.contains('hidden'));
-  const f = (k) => panel.querySelector(`[data-bm="${k}"]`);
-  assert.equal(f('name').value, 'Atlas');
-  assert.equal(f('emoji').value, '🌍');
-  f('name').value = '  Atlas 2 ';
-  f('model_hint').value = 'MiniMax M3';
-  fire(win, f('edit-save'));
-  await tick();
-  assert.deepEqual(calls, [{ key: 'PATCH /api/bots/atlas', body: { name: 'Atlas 2', model_hint: 'MiniMax M3' } }]);
-  assert.deepEqual(rec.toasts.at(-1), ['Saved.', false]);
-  assert.equal(rec.patched[0][1].name, 'Atlas 2');
-});
-
-test('edit: nothing changed closes without a request; an empty name is refused client-side', { skip: dom.skip }, async () => {
-  const { mod, ctx, rec, win } = await setup();
-  const c = mod.rowControls(DIRECT, ctx);
-  fire(win, c.edit);
-  fire(win, c.panel.querySelector('[data-bm="edit-save"]'));
-  await tick();
-  assert.equal(calls.length, 0);
-  assert.ok(c.panel.classList.contains('hidden'));
-  fire(win, c.edit);
-  c.panel.querySelector('[data-bm="name"]').value = '   ';
-  fire(win, c.panel.querySelector('[data-bm="edit-save"]'));
-  await tick();
-  assert.equal(calls.length, 0);
-  assert.deepEqual(rec.toasts.at(-1), ['Give the bot a name.', true]);
-});
-
-test('edit: Cancel throws the edits away', { skip: dom.skip }, async () => {
-  const { mod, ctx, win } = await setup();
-  const c = mod.rowControls(DIRECT, ctx);
-  fire(win, c.edit);
-  const name = c.panel.querySelector('[data-bm="name"]');
-  name.value = 'Something else';
-  fire(win, [...c.panel.querySelectorAll('button')].find((b) => b.textContent === 'Cancel'));
-  assert.ok(c.panel.classList.contains('hidden'));
-  fire(win, c.edit);
-  assert.equal(name.value, 'Atlas');
-  assert.equal(calls.length, 0);
-});
-
-test('remove: confirm first; Cancel sends nothing; OK DELETEs and reports', { skip: dom.skip }, async () => {
-  const { mod, ctx, rec, win } = await setup({ 'DELETE /api/bots/atlas': () => [200, { removed: 'atlas' }] });
-  const btn = mod.removeButton(DIRECT, ctx);
-  rec.answer = false;
-  fire(win, btn);
-  await tick();
-  assert.equal(calls.length, 0);
-  assert.equal(rec.confirms.length, 1);
-  assert.match(rec.confirms[0][0], /Remove Atlas\? Its chats stay/);
-  assert.equal(rec.confirms[0][1].danger, true);
-  rec.answer = true;
-  fire(win, btn);
-  await tick();
-  assert.deepEqual(calls, [{ key: 'DELETE /api/bots/atlas', body: null }]);
-  assert.deepEqual(rec.removed, ['atlas']);
-  assert.deepEqual(rec.toasts.at(-1), ['Atlas removed.', false]);
-});
-
-test('remove: an app-owned bot answers 409 and gets its own message; the bot stays', { skip: dom.skip }, async () => {
-  const { mod, ctx, rec, win } = await setup({ 'DELETE /api/bots/jobboard': () => [409, { detail: 'owned by app' }] });
-  const btn = mod.removeButton({ id: 'jobboard', name: 'Job Board', backend: 'app' }, ctx);
-  fire(win, btn);
-  await tick();
-  assert.deepEqual(rec.removed, []);
-  assert.deepEqual(rec.toasts.at(-1), ['Job Board comes with an app and cannot be removed here.', true]);
-  assert.equal(btn.disabled, false, 'can be retried');
-});
-
-test('remove: any other failure shows the server text without the status prefix', { skip: dom.skip }, async () => {
-  const { mod, ctx, rec, win } = await setup({ 'DELETE /api/bots/atlas': () => [404, { detail: 'No such bot' }] });
-  fire(win, mod.removeButton(DIRECT, ctx));
-  await tick();
-  assert.deepEqual(rec.toasts.at(-1), ['Could not remove: No such bot', true]);
-});
-
-test('bot ids and values are encoded into the path, never concatenated raw', { skip: dom.skip }, async () => {
-  const { mod, ctx, win } = await setup({ 'DELETE /api/bots/a%2Fb%3F': () => [200, {}] });
-  fire(win, mod.removeButton({ id: 'a/b?', name: 'x', backend: 'agent' }, ctx));
-  await tick();
-  assert.equal(calls[0].key, 'DELETE /api/bots/a%2Fb%3F');
-});
 
 test('add bot: a direct-API bot POSTs {name, emoji, backend}', { skip: dom.skip }, async () => {
   const row = { id: 'helper', name: 'Helper', backend: 'direct', tools: true, connected: false, visible: true };
@@ -245,11 +97,11 @@ test('add bot: an agent bot needs a valid agent id, and sends it', { skip: dom.s
   q('add-backend').value = 'agent';
   fire(win, q('add-backend'), 'change');
   assert.ok(!q('add-agent').closest('label').classList.contains('hidden'));
-  assert.match(node.querySelector('.bm-add-hint').textContent, /OpenClaw gateway/);
+  assert.match(node.querySelector('.bm-add-hint').textContent, /OpenClaw server/);
   fire(win, q('add-confirm'));
   await tick();
   assert.equal(calls.length, 0, 'no agent id yet');
-  assert.match(rec.toasts.at(-1)[0], /Enter the agent's id/);
+  assert.match(rec.toasts.at(-1)[0], /Enter the agent's name/);
   q('add-agent').value = 'not valid!';
   fire(win, q('add-confirm'));
   await tick();
@@ -277,34 +129,17 @@ test('add bot: a name is required; a server refusal is shown and nothing is adde
   assert.deepEqual(rec.toasts.at(-1), ['Could not add the bot: id taken', true]);
 });
 
-test('api.js carries the three bot calls', async () => {
+test('api.js carries the Add call', async () => {
   const src = readFileSync(join(STATIC, 'js', 'api.js'), 'utf8');
   assert.match(src, /addBot: \(body\) => j\('\/api\/bots', \{ method: 'POST'/);
-  assert.match(src, /patchBot: \(id, patch\) => j\(`\/api\/bots\/\$\{encodeURIComponent\(id\)\}`, \{ method: 'PATCH'/);
-  assert.match(src, /deleteBot: \(id\) => j\(`\/api\/bots\/\$\{encodeURIComponent\(id\)\}`, \{ method: 'DELETE' \}\)/);
 });
 
-test('main.js builds every Characters row: who-can-see select, Details, the ⋯ menu, drag and ▲/▼, instant save', () => {
-  assert.match(MAIN, /import \{ rowControls, addBotRow, backendKind \} from '\.\/bots-edit\.js\?v=\d+';/);
-  assert.match(MAIN, /const ctl = rowControls\(bot, botEditCtx\(\)\);/);
-  // Rename / Personality / Remove are the ⋯ menu's, using the same controls bots-edit.js builds.
-  assert.match(MAIN, /run: \(\) => ctl\.edit\.click\(\)/);
-  assert.match(MAIN, /run: \(\) => ctl\.persona\.click\(\)/);
-  assert.match(MAIN, /run: \(\) => ctl\.remove\.click\(\), danger: true/);
-  // Parking a character in Tools & more (this device only) moved from the ⌥ pill into the ⋯ menu.
-  assert.match(MAIN, /label: t\(parked \? 'chars\.menu_unpark' : 'chars\.menu_park'\),\s+run: \(\) => \{ toggleMenuBot\(bot\.id\); renderSidebar\(\); renderBotManager\(\); \},/);
-  // Add is a menu: a blank character, or a starter pack.
+test('main.js: Settings -> Characters -> Add opens this form; the rows are the Characters page\'s', () => {
+  assert.match(MAIN, /import \{ addBotRow \} from '\.\/bots-edit\.js\?v=\d+';/);
   assert.match(MAIN, /showAddCharacter\(\)/);
   assert.match(MAIN, /const row = addBotRow\(\{/);
-  for (const part of ['moveBtn(-1), moveBtn(1)', 'pickAvatarFile(bot.id)', 'wireDrag(row);', 'avatar_pool: !!b.avatar_pool',
-    "sw('chars.feat_reactions', 'reactions'", "sw('chars.feat_pool', 'avatar_pool'", "sw('chars.feat_pictures', 'image_jobs'"]) {
-    assert.ok(MAIN.includes(part), part);
-  }
-  // Every change saves at once (no Save button, no unsaved-changes guard).
-  assert.doesNotMatch(MAIN, /bmDirty|saveBotManager|'bm-done'/);
-  assert.match(MAIN, /async function doSaveRoster\(/);
-  // A removed bot drops out of both the roster and the sidebar list.
-  assert.match(MAIN, /bmBots = bmBots\.filter\(\(x\) => x\.id !== id\);/);
-  assert.match(MAIN, /state\.bots = state\.bots\.filter\(\(x\) => x\.id !== id\);/);
-  assert.match(MAIN, /openAi: \(\) => setSettingsTab\('connections'\)/);
+  assert.match(MAIN, /onAdded: \(r\) => \{ onCharacterAdded\(r\); host\.replaceChildren\(\); \},/);
+  // A new character joins the rail at once and the page refetches.
+  assert.match(MAIN, /function onCharacterAdded\(row\) \{[\s\S]{0,200}state\.bots\.push\(row\)[\s\S]{0,80}refreshCharactersPage\(\);/);
+  assert.doesNotMatch(MAIN, /bmDirty|saveBotManager|'bm-done'|rowControls|doSaveRoster/);
 });

@@ -3,7 +3,7 @@
 // Run: node --test frontend/tests/
 //
 // Pins: the default grouping (profile chip, Tasks, File Server and the theme
-// button in the popup; Lock/Unlock, send-a-file and Settings on the bar);
+// button in the popup; Lock/Unlock and Settings on the bar);
 // moving in, out and along both lists; the layout persisting per device; a
 // Restricted view getting the shipped bar whatever is stored; the real
 // elements moving (so their own visibility rules still apply); drag-and-drop
@@ -38,7 +38,7 @@ async function boot() {
   globalThis.fetch = async (u) => (String(u).startsWith('/static/locales/en.json')
     ? { ok: true, status: 200, json: async () => EN, headers: new win.Headers() }
     : { ok: false, status: 404, json: async () => ({}), headers: new win.Headers() });
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   win.HTMLDialogElement.prototype.showModal = function showModal() { this.open = true; };
   return win;
@@ -46,11 +46,11 @@ async function boot() {
 const R = () => import(`../static/js/railmenu.js?t=${Math.random()}`);
 const ids = (host) => [...host.children].map((n) => n.id).filter(Boolean);
 
-test('default: profile chip, Tasks, File Server and theme in the popup; lock, send-a-file and Settings on the bar', async () => {
+test('default: Tasks, File Server and theme in the popup; the profile switch, lock and Settings on the bar', async () => {
   const M = await R();
   assert.deepEqual(M.defaultLayout(), {
-    rail: ['lock-now', 'unlock-btn', 'drop-btn', 'manage-bots'],
-    menu: ['profile-chip', 'tasks-btn', 'fs-chip', 'theme-toggle'],
+    rail: ['profile-chip', 'lock-now', 'manage-bots', 'switch-profile'],
+    menu: ['tasks-btn', 'fs-chip', 'theme-toggle'],
   });
   for (const id of M.RAIL_ITEMS) assert.ok(HTML.includes(`id="${id}"`), `${id} is a real rail button`);
 });
@@ -59,27 +59,29 @@ test('moving in, out and along both lists; normalize repairs junk and keeps new 
   const M = await R();
   let l = M.defaultLayout();
   l = M.moveItem(l, 'manage-bots', 'menu', 'tasks-btn');
-  assert.deepEqual(l.menu, ['profile-chip', 'manage-bots', 'tasks-btn', 'fs-chip', 'theme-toggle']);
+  assert.deepEqual(l.menu, ['manage-bots', 'tasks-btn', 'fs-chip', 'theme-toggle']);
+  l = M.moveItem(l, 'profile-chip', 'menu', 'tasks-btn');
+  assert.deepEqual(l.menu, ['manage-bots', 'profile-chip', 'tasks-btn', 'fs-chip', 'theme-toggle']);
   l = M.moveItem(l, 'profile-chip', 'rail', 'lock-now');
-  assert.deepEqual(l.rail, ['profile-chip', 'lock-now', 'unlock-btn', 'drop-btn']);
+  assert.deepEqual(l.rail, ['profile-chip', 'lock-now', 'switch-profile']);
   l = M.moveItem(l, 'tasks-btn', 'rail', null);
   assert.equal(l.rail.at(-1), 'tasks-btn');
   l = M.nudgeItem(l, 'tasks-btn', -1);
-  assert.deepEqual(l.rail.slice(-2), ['tasks-btn', 'drop-btn']);
+  assert.deepEqual(l.rail.slice(-2), ['tasks-btn', 'switch-profile']);
   assert.deepEqual(M.nudgeItem(l, 'profile-chip', -1), l, 'the first one cannot move up');
   const n = M.normalizeLayout({ rail: ['manage-bots', 'nope', 'manage-bots', 7], menu: ['lock-now'] });
-  assert.deepEqual(n.rail, ['manage-bots', 'unlock-btn', 'drop-btn']);
-  assert.deepEqual(n.menu, ['lock-now', 'profile-chip', 'tasks-btn', 'fs-chip', 'theme-toggle']);
+  assert.deepEqual(n.rail, ['manage-bots', 'profile-chip', 'switch-profile']);
+  assert.deepEqual(n.menu, ['lock-now', 'tasks-btn', 'fs-chip', 'theme-toggle']);
   assert.deepEqual(M.normalizeLayout('garbage'), M.defaultLayout());
 });
 
-test('the layout persists per device, and Restricted gets the shipped bar whatever is stored', { skip: dom.skip }, async () => {
+test('the layout persists per device, and a corrupt value reads as the default', { skip: dom.skip }, async () => {
   const win = await boot();
   const M = await R();
   M.saveLayout(M.moveItem(M.defaultLayout(), 'manage-bots', 'menu', null));
   assert.ok(JSON.parse(win.localStorage.getItem('dispatch-rail-layout')).menu.includes('manage-bots'));
   assert.ok(M.loadLayout().menu.includes('manage-bots'));
-  assert.deepEqual(M.activeLayout(true), { rail: M.RAIL_ITEMS, menu: [] });
+  assert.deepEqual(M.activeLayout(), M.loadLayout());
   win.localStorage.setItem('dispatch-rail-layout', '{not json');
   assert.deepEqual(M.loadLayout(), M.defaultLayout());
 });
@@ -94,18 +96,12 @@ test('applyLayout moves the real buttons; hidden ones stay hidden; pins stay bef
   rail.insertBefore(pin, doc.getElementById('manage-bots'));
   const tasks = doc.getElementById('tasks-btn');
   const shown = M.applyLayout(M.defaultLayout(), { rail, menu });
-  assert.deepEqual(ids(menu), ['profile-chip', 'tasks-btn', 'fs-chip', 'theme-toggle']);
-  assert.deepEqual(ids(rail), ['lock-now', 'unlock-btn', 'drop-btn', 'pin-x', 'manage-bots']);
+  assert.deepEqual(ids(menu), ['tasks-btn', 'fs-chip', 'theme-toggle']);
+  assert.deepEqual(ids(rail), ['profile-chip', 'lock-now', 'pin-x', 'manage-bots', 'switch-profile']);
   assert.equal(doc.getElementById('tasks-btn'), tasks, 'the same element, handlers and all');
   assert.equal(tasks.getAttribute('role'), 'menuitem');
   assert.ok(tasks.classList.contains('hidden'), 'its own visibility rule still applies');
   assert.equal(shown, [...menu.children].filter((b) => !b.classList.contains('hidden')).length);
-  // Restricted: everything back on the bar, no menu roles, nothing draggable.
-  M.applyLayout(M.activeLayout(true), { rail, menu, decoy: true });
-  assert.deepEqual(ids(menu), []);
-  assert.deepEqual(ids(rail), [...M.RAIL_ITEMS.slice(0, -1), 'pin-x', 'manage-bots']);
-  assert.equal(tasks.getAttribute('role'), null);
-  assert.equal(doc.getElementById('lock-now').getAttribute('draggable'), 'false');
 });
 
 const dragData = [];
@@ -144,41 +140,28 @@ test('drag: rail -> popup button -> into the popup; popup row -> bar; reorder in
   const gear = doc.getElementById('manage-bots');
   assert.equal(drag(win, gear, 'dragover').defaultPrevented, true);
   drag(win, gear, 'drop', { y: -100 });   // the top half of Settings: before it
-  assert.deepEqual(ids(rail).slice(-2), ['fs-chip', 'manage-bots']);
+  assert.deepEqual(ids(rail).slice(-3), ['fs-chip', 'manage-bots', 'switch-profile']);
   assert.ok(!ids(menu).includes('fs-chip'));
 
-  const chip = doc.getElementById('profile-chip');
+  const first = doc.getElementById('tasks-btn');
   drag(win, doc.getElementById('lock-now'), 'dragstart');
-  drag(win, chip, 'drop', { y: -100 });
+  drag(win, first, 'drop', { y: -100 });
   assert.equal(ids(menu)[0], 'lock-now', 'reordered inside the popup');
   // A text/bot drag that did not start on a rail button does nothing.
   assert.equal(drag(win, gear, 'dragover').defaultPrevented, false);
 });
 
-test('a Restricted device cannot start a rail drag', { skip: dom.skip }, async () => {
-  const win = await boot();
-  const M = await R();
-  const doc = win.document;
-  const rail = doc.getElementById('gear-row');
-  let moved = 0;
-  M.wireRailDrag({ rail, menu: doc.getElementById('tools-more'), toolList: null, isDecoy: () => true,
-    openMenu() {}, onMove: () => { moved++; } });
-  drag(win, doc.getElementById('lock-now'), 'dragstart');
-  drag(win, doc.getElementById('manage-bots'), 'drop');
-  assert.equal(moved, 0);
-});
-
 test('"Arrange the bar" moves without dragging, and Reset restores the default', { skip: dom.skip }, async () => {
   const win = await boot();
   const M = await R();
-  const { el } = await import('../static/js/util.js?v=20');
-  const { t } = await import('../static/js/i18n.js?v=4');
+  const { el } = await import('../static/js/util.js?v=23');
+  const { t } = await import('../static/js/i18n.js?v=5');
   let changes = 0;
   const { dialog } = M.openArrangeDialog({ t, el, labelOf: (id) => id, visible: () => true, onChange: () => { changes++; } });
   const rowOf = (id) => dialog.querySelector(`.rail-arrange-row[data-id="${id}"]`);
   assert.match(dialog.textContent, /On the bar/);
   assert.match(dialog.textContent, /In Tools & more/);
-  const move = [...rowOf('manage-bots').querySelectorAll('button')].find((b) => b.textContent === 'Move to Tools');
+  const move = [...rowOf('manage-bots').querySelectorAll('button')].find((b) => b.textContent === 'Move to Tools & more');
   move.click();
   assert.ok(M.loadLayout().menu.includes('manage-bots'));
   assert.equal(changes, 1);
@@ -191,9 +174,9 @@ test('"Arrange the bar" moves without dragging, and Reset restores the default',
 
 test('wiring: main.js applies the layout with the pins, the popup has the section, the key is wiped by privacy mode', () => {
   const main = read('js/main.js');
-  assert.match(main, /from '\.\/railmenu\.js\?v=1'/);
-  assert.match(main, /renderLinkRail\(document\.getElementById\('gear-row'\), \{ decoy: state\.decoy, openViewer \}\);\n  applyRailLayout\(\);/);
-  assert.match(main, /applyLayout\(activeLayout\(state\.decoy\)/);
+  assert.match(main, /from '\.\/railmenu\.js\?v=5'/);
+  assert.match(main, /renderLinkRail\(document\.getElementById\('gear-row'\), \{ openViewer \}\);\n  applyRailLayout\(\);/);
+  assert.match(main, /applyLayout\(activeLayout\(\)/);
   assert.match(HTML, /<div class="tools-more" id="tools-more" role="none"><\/div>/);
   assert.match(read('js/privacy.js'), /'dispatch-rail-layout'/);
   assert.match(read('sw.js'), /'\/static\/js\/railmenu\.js'/);
@@ -205,7 +188,7 @@ test('a rail drag carries only its own MIME type, never text (so a drop on the c
   const M = await R();
   const doc = win.document;
   const rail = doc.getElementById('gear-row');
-  M.wireRailDrag({ rail, menu: doc.getElementById('tools-more'), toolList: null, isDecoy: () => false, openMenu() {}, onMove() {} });
+  M.wireRailDrag({ rail, menu: doc.getElementById('tools-more'), toolList: null, openMenu() {}, onMove() {} });
   dragData.length = 0;
   drag(win, doc.getElementById('lock-now'), 'dragstart');
   assert.deepEqual(dragData, [['application/x-dispatch-rail', 'lock-now']]);

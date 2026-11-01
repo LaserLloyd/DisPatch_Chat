@@ -1,0 +1,753 @@
+bots:
+- id: main
+  name: Bits
+  avatar: main-face.png
+  emoji: ⚡
+  model_hint: Minimax M3 👁
+  order: 0
+  safe: false
+  hide_unlocked: false
+  quick_actions: true
+  color: ''
+  reactions: true
+  reaction_autopilot: true
+  avatar_pool: true
+  image_jobs: true
+  image_workflow: anima-Rev8-26
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: ''
+  voice_rp: ''
+- id: trainer
+  name: Sam
+  avatar: trainer-face.png
+  emoji: 💪
+  model_hint: Dark Scarlett 27B V2.0.i1 Q5 K M Hb16 (Main PC)
+  order: 1
+  safe: false
+  hide_unlocked: false
+  quick_actions: true
+  color: '#ff6b35'
+  reactions: true
+  reaction_autopilot: true
+  avatar_pool: true
+  image_jobs: true
+  image_workflow: krea2_small
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: ''
+  voice_rp: ''
+- id: Doxy
+  name: Doxy
+  avatar: Doxy-face.png
+  emoji: 🔧
+  model_hint: Dark Scarlett 27B V2.0.i1 Q5 K M Hb16 (Main PC)
+  order: 2
+  safe: false
+  hide_unlocked: false
+  quick_actions: true
+  color: ''
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: true
+  image_jobs: true
+  image_workflow: anima-Bits
+  image_identity_source: /data/identity.md
+  image_ratio: '2:3'
+  agent: ''
+  voice: ''
+  voice_rp: ''
+- id: alpha
+  name: Alpha
+  avatar: alpha-face.png
+  emoji: ✨
+  model_hint: Minimax M2.7 Highspeed
+  order: 3
+  safe: true
+  hide_unlocked: false
+  quick_actions: true
+  color: ''
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: ''
+  voice_rp: ''
+- id: jobboard
+  name: Job Board
+  avatar: jobboard-face.png
+  emoji: 🎯
+  model_hint: ''
+  order: 4
+  safe: false
+  hide_unlocked: true
+  quick_actions: true
+  color: '#2e7d32'
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: scout
+  voice: ''
+  voice_rp: ''
+  hidden: true
+- id: DS_Flash
+  name: Flash
+  avatar: DS_Flash-face.png
+  emoji: ⚡
+  model_hint: Minimax M3 👁
+  order: 5
+  safe: false
+  hide_unlocked: true
+  quick_actions: true
+  color: ''
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: true
+  image_workflow: z-image-turbo
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: ''
+  voice_rp: ''
+  hidden: true
+- id: reviewer
+  name: Reviewer
+  avatar: reviewer-face.png
+  emoji: 🔍
+  model_hint: Kimi K3 👁
+  order: 6
+  safe: false
+  hide_unlocked: true
+  quick_actions: true
+  color: '#6e56cf'
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: true
+  image_workflow: z-image-turbo
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: ''
+  voice_rp: ''
+  hidden: true
+- id: advisor
+  name: Sage
+  avatar: advisor-face.png
+  emoji: 🦉
+  model_hint: MiniMax-M3
+  order: 7
+  safe: false
+  hide_unlocked: false
+  quick_actions: true
+  color: ''
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: ''
+  voice_rp: ''
+  advisor:
+    owner: Owner
+    knowledge_dir: /data/knowledge
+    profile_fallback:
+    - /data/USER.md
+    - /data/USER-PREFERENCES.md
+    providers:
+    - provider: custom
+      model: MiniMax-M3
+      max_tokens: 4096
+      extra_body:
+        reasoning_split: true
+        thinking:
+          type: disabled
+      connection: openai_compatible
+    - provider: custom
+      model: unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q5_K_S
+      extra_body:
+        priority: 1
+      read_timeout_s: 180
+      connection: openai_compatible-2
+    embeddings:
+      connection: openai_compatible-2
+      model: mradermacher/Qwen3-VL-Embedding-8B-GGUF/Qwen3-VL-Embedding-8B.Q6_K
+      timeout_s: 2
+      extra_body:
+        priority: 3
+    research_agent: ds_flash
+    action_agent: main
+    agents:
+    - ds_flash
+    - main
+    - reviewer
+    tools: true
+    location: Example City, Country
+    persona: '[redacted persona, 942 chars] You are {name}, talking with {owner}.'
+- id: atlas
+  name: Atlas
+  avatar: atlas-face.png
+  emoji: 🌍
+  model_hint: MiniMax-M3
+  order: 8
+  safe: true
+  hide_unlocked: false
+  quick_actions: true
+  color: ''
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: true
+  image_workflow: z-image-turbo
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: ''
+  voice_rp: ''
+  advisor:
+    owner: Owner
+    knowledge_dir: /data/knowledge-atlas
+    profile_fallback:
+    - /data/USER.md
+    - /data/USER-PREFERENCES.md
+    providers:
+    - provider: custom
+      model: MiniMax-M3
+      max_tokens: 4096
+      extra_body:
+        reasoning_split: true
+        thinking:
+          type: disabled
+      connection: openai_compatible
+    - provider: custom
+      model: unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q5_K_S
+      extra_body:
+        priority: 1
+      read_timeout_s: 180
+      connection: openai_compatible-2
+    embeddings:
+      connection: openai_compatible-2
+      model: mradermacher/Qwen3-VL-Embedding-8B-GGUF/Qwen3-VL-Embedding-8B.Q6_K
+      timeout_s: 2
+      extra_body:
+        priority: 3
+    research_agent: ds_flash
+    action_agent: main
+    agents:
+    - ds_flash
+    - main
+    - reviewer
+    tools: true
+    location: Example City, Country
+- id: wikka
+  name: Wikka
+  avatar: wikka-face.png
+  emoji: 📚
+  model_hint: MiniMax-M3
+  order: 9
+  safe: true
+  hide_unlocked: false
+  quick_actions: true
+  color: '#10b981'
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: ''
+  voice_rp: ''
+  advisor:
+    owner: Owner
+    knowledge_dir: /data/knowledge-wikka
+    profile_fallback:
+    - /data/USER.md
+    - /data/USER-PREFERENCES.md
+    persona: '[redacted persona, 811 chars] You are {name}, talking with {owner}.'
+    providers:
+    - provider: custom
+      model: MiniMax-M3
+      max_tokens: 4096
+      extra_body:
+        reasoning_split: true
+        thinking:
+          type: disabled
+      connection: openai_compatible
+    - provider: custom
+      model: unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q5_K_S
+      extra_body:
+        priority: 1
+      read_timeout_s: 180
+      connection: openai_compatible-2
+    embeddings:
+      connection: openai_compatible-2
+      model: mradermacher/Qwen3-VL-Embedding-8B-GGUF/Qwen3-VL-Embedding-8B.Q6_K
+      timeout_s: 2
+      extra_body:
+        priority: 3
+    research_agent: ds_flash
+    action_agent: main
+    agents:
+    - ds_flash
+    - main
+    - reviewer
+    lookup:
+      kind: infoforge
+      max_articles: 3
+      chars_per_article: 3500
+      timeout_s: 8
+    tools: true
+    location: Example City, Country
+- id: kid_lobster
+  name: Lulu the Lobster
+  avatar: kid_lobster-face.png
+  emoji: 🦞
+  model_hint: MiniMax-M3
+  order: 10
+  safe: true
+  hide_unlocked: true
+  quick_actions: false
+  color: '#e4572e'
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: builtin:bf_lily
+  voice_rp: ''
+  hidden: true
+  advisor:
+    owner: the child
+    persona: '[redacted persona, 2618 chars] You are {name}, talking with {owner}.'
+    providers:
+    - provider: custom
+      model: MiniMax-M3
+      max_tokens: 700
+      extra_body:
+        reasoning_split: true
+        thinking:
+          type: disabled
+      connection: openai_compatible
+    - provider: custom
+      model: unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q5_K_S
+      extra_body:
+        priority: 1
+      read_timeout_s: 180
+      connection: openai_compatible-2
+    tools: false
+    history_chars: 8000
+- id: kid_fruitbat
+  name: Benny the Fruit Bat
+  avatar: kid_fruitbat-face.png
+  emoji: 🦇
+  model_hint: MiniMax-M3
+  order: 11
+  safe: true
+  hide_unlocked: true
+  quick_actions: false
+  color: '#7e57c2'
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: builtin:am_puck
+  voice_rp: ''
+  hidden: true
+  advisor:
+    owner: the child
+    persona: '[redacted persona, 2655 chars] You are {name}, talking with {owner}.'
+    providers:
+    - provider: custom
+      model: MiniMax-M3
+      max_tokens: 700
+      extra_body:
+        reasoning_split: true
+        thinking:
+          type: disabled
+      connection: openai_compatible
+    - provider: custom
+      model: unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q5_K_S
+      extra_body:
+        priority: 1
+      read_timeout_s: 180
+      connection: openai_compatible-2
+    tools: false
+    history_chars: 8000
+- id: kid_octopus
+  name: Inky the Octopus
+  avatar: kid_octopus-face.png
+  emoji: 🐙
+  model_hint: MiniMax-M3
+  order: 12
+  safe: true
+  hide_unlocked: true
+  quick_actions: false
+  color: '#ec6fa0'
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: builtin:af_sky
+  voice_rp: ''
+  hidden: true
+  advisor:
+    owner: the child
+    persona: '[redacted persona, 2603 chars] You are {name}, talking with {owner}.'
+    providers:
+    - provider: custom
+      model: MiniMax-M3
+      max_tokens: 700
+      extra_body:
+        reasoning_split: true
+        thinking:
+          type: disabled
+      connection: openai_compatible
+    - provider: custom
+      model: unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q5_K_S
+      extra_body:
+        priority: 1
+      read_timeout_s: 180
+      connection: openai_compatible-2
+    tools: false
+    history_chars: 8000
+- id: kid_bee
+  name: Bizzy the Bee
+  avatar: kid_bee-face.png
+  emoji: 🐝
+  model_hint: MiniMax-M3
+  order: 13
+  safe: true
+  hide_unlocked: true
+  quick_actions: false
+  color: '#f2b705'
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: builtin:af_bella
+  voice_rp: ''
+  hidden: true
+  advisor:
+    owner: the child
+    persona: '[redacted persona, 2703 chars] You are {name}, talking with {owner}.'
+    providers:
+    - provider: custom
+      model: MiniMax-M3
+      max_tokens: 700
+      extra_body:
+        reasoning_split: true
+        thinking:
+          type: disabled
+      connection: openai_compatible
+    - provider: custom
+      model: unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q5_K_S
+      extra_body:
+        priority: 1
+      read_timeout_s: 180
+      connection: openai_compatible-2
+    tools: false
+    history_chars: 8000
+- id: kid_owl
+  name: Oscar the Owl
+  avatar: kid_owl-face.png
+  emoji: 🦉
+  model_hint: MiniMax-M3
+  order: 14
+  safe: true
+  hide_unlocked: true
+  quick_actions: false
+  color: '#8d6e63'
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: builtin:bm_fable
+  voice_rp: ''
+  hidden: true
+  advisor:
+    owner: the child
+    persona: '[redacted persona, 2798 chars] You are {name}, talking with {owner}.'
+    providers:
+    - provider: custom
+      model: MiniMax-M3
+      max_tokens: 700
+      extra_body:
+        reasoning_split: true
+        thinking:
+          type: disabled
+      connection: openai_compatible
+    - provider: custom
+      model: unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q5_K_S
+      extra_body:
+        priority: 1
+      read_timeout_s: 180
+      connection: openai_compatible-2
+    tools: false
+    history_chars: 8000
+- id: kid_frog
+  name: Freddie the Frog
+  avatar: kid_frog-face.png
+  emoji: 🐸
+  model_hint: MiniMax-M3
+  order: 15
+  safe: true
+  hide_unlocked: true
+  quick_actions: false
+  color: '#43a047'
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: builtin:am_liam
+  voice_rp: ''
+  hidden: true
+  advisor:
+    owner: the child
+    persona: '[redacted persona, 2599 chars] You are {name}, talking with {owner}.'
+    providers:
+    - provider: custom
+      model: MiniMax-M3
+      max_tokens: 700
+      extra_body:
+        reasoning_split: true
+        thinking:
+          type: disabled
+      connection: openai_compatible
+    - provider: custom
+      model: unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q5_K_S
+      extra_body:
+        priority: 1
+      read_timeout_s: 180
+      connection: openai_compatible-2
+    tools: false
+    history_chars: 8000
+- id: kid_tortoise
+  name: Toby the Tortoise
+  avatar: kid_tortoise-face.png
+  emoji: 🐢
+  model_hint: MiniMax-M3
+  order: 16
+  safe: true
+  hide_unlocked: true
+  quick_actions: false
+  color: '#7c8b3a'
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: builtin:am_santa
+  voice_rp: ''
+  hidden: true
+  advisor:
+    owner: the child
+    persona: '[redacted persona, 2650 chars] You are {name}, talking with {owner}.'
+    providers:
+    - provider: custom
+      model: MiniMax-M3
+      max_tokens: 700
+      extra_body:
+        reasoning_split: true
+        thinking:
+          type: disabled
+      connection: openai_compatible
+    - provider: custom
+      model: unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q5_K_S
+      extra_body:
+        priority: 1
+      read_timeout_s: 180
+      connection: openai_compatible-2
+    tools: false
+    history_chars: 8000
+- id: kid_penguin
+  name: Pip the Penguin
+  avatar: kid_penguin-face.png
+  emoji: 🐧
+  model_hint: MiniMax-M3
+  order: 17
+  safe: true
+  hide_unlocked: true
+  quick_actions: false
+  color: '#3f7cc4'
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: builtin:af_nova
+  voice_rp: ''
+  hidden: true
+  advisor:
+    owner: the child
+    persona: '[redacted persona, 2638 chars] You are {name}, talking with {owner}.'
+    providers:
+    - provider: custom
+      model: MiniMax-M3
+      max_tokens: 700
+      extra_body:
+        reasoning_split: true
+        thinking:
+          type: disabled
+      connection: openai_compatible
+    - provider: custom
+      model: unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q5_K_S
+      extra_body:
+        priority: 1
+      read_timeout_s: 180
+      connection: openai_compatible-2
+    tools: false
+    history_chars: 8000
+- id: pe63d316c0739
+  name: Atlas
+  avatar: pe63d316c0739-face.png
+  emoji: 🌍
+  model_hint: MiniMax-M3
+  order: 18
+  safe: false
+  hide_unlocked: false
+  quick_actions: true
+  color: ''
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: ''
+  voice_rp: ''
+  pack: atlas
+  scope: personal
+  owner_profile: 8f78572fc3dff747bd6eaf8f0b384867
+  cloned_from: atlas
+  kit_version: 52a03a87f6c3788b
+  kit_baseline:
+    name: Atlas
+    emoji: 🌍
+    description: ''
+    color: ''
+    persona: ''
+    quick_actions: true
+    tools: true
+    picture: 55a5cd932e0453ef8f351949a8cff223
+  advisor:
+    providers:
+    - provider: custom
+      model: MiniMax-M3
+      connection: openai_compatible
+    tools: true
+- id: pe98625e74f37
+  name: Own Bot
+  avatar: pe98625e74f37-face.png
+  emoji: 🤦
+  model_hint: MiniMax-M3
+  order: 20
+  safe: false
+  hide_unlocked: false
+  quick_actions: true
+  color: ''
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: ''
+  voice_rp: ''
+  scope: personal
+  owner_profile: 8f78572fc3dff747bd6eaf8f0b384867
+  advisor:
+    providers:
+    - provider: custom
+      model: MiniMax-M3
+      connection: openai_compatible
+    tools: true
+    persona: '[redacted persona, 739 chars] You are {name}, talking with {owner}.'
+- id: pe2aa88a6cb9e
+  name: Atlas
+  avatar: pe2aa88a6cb9e-face.png
+  emoji: 🌍
+  model_hint: MiniMax-M3
+  order: 21
+  safe: false
+  hide_unlocked: false
+  quick_actions: true
+  color: ''
+  reactions: false
+  reaction_autopilot: false
+  avatar_pool: false
+  image_jobs: false
+  image_workflow: ''
+  image_identity_source: ''
+  image_ratio: ''
+  agent: ''
+  voice: ''
+  voice_rp: ''
+  pack: atlas
+  scope: personal
+  owner_profile: 1643f014f0507dbcdcceac1214d0c5e4
+  cloned_from: atlas
+  kit_version: 52a03a87f6c3788b
+  kit_baseline:
+    name: Atlas
+    emoji: 🌍
+    description: ''
+    color: ''
+    persona: ''
+    quick_actions: true
+    tools: true
+    picture: 55a5cd932e0453ef8f351949a8cff223
+  advisor:
+    providers:
+    - provider: custom
+      model: MiniMax-M3
+      connection: openai_compatible
+    tools: true

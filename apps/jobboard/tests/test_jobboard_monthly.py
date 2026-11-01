@@ -193,8 +193,7 @@ async def test_list_months_after_creating_jobs(wired):
     threads, with parsed (year, month) metadata."""
     res = await jobs.create_job_from_dict(_payload(
         "https://example.com/careers/senior-engineer"))
-    # The wired DB has no PIN installed (auth_gate's no-PIN allow). Build a
-    # fake request whose .state.decoy is False.
+    # The wired DB has no PIN installed (auth_gate's no-PIN allow).
     req = _FakeRequest(cookie=None)
     out = await jobs.list_months(request=req, bot_id="jobboard")
     assert "months" in out
@@ -263,14 +262,13 @@ async def test_current_month_ensure_creates(wired):
     assert out2["thread"]["id"] == out["thread"]["id"]
 
 
-def _FakeRequest(cookie=None, decoy=False):
-    """Inline copy of the helper from test_jobboard_api.py — we need a
-    request whose ``state.decoy`` is set so ``_is_decoy`` returns
-    False in the no-PIN install used by the wired fixture."""
+def _FakeRequest(cookie=None):
+    """Inline copy of the helper from test_jobboard_api.py (the no-PIN install the
+    wired fixture uses lets it through)."""
     from types import SimpleNamespace
     return SimpleNamespace(
         cookies={"lc_session": cookie} if cookie else {},
-        state=SimpleNamespace(decoy=decoy, machine=False, session=None),
+        state=SimpleNamespace(machine=False, session=None),
         query_params={},
     )
 

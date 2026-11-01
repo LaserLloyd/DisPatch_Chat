@@ -9,6 +9,8 @@ Three kinds of backup sit side by side under ``<data>/backups/`` and are listed 
 ``snapshot``       ``chats-<stamp>.db`` - the rotating online database copies ``main._make_backup``
                    has always written (plain SQLite, every 6 hours by default).
 ``premigration``   ``<version>-<stamp>/`` - what ``migrate.py`` copies before it changes anything.
+``prerestore``     ``pre-restore-<stamp>/`` - what a restore copies before it replaces anything
+                   (4.3: its own kind, kept 3, never counted as a pre-migration copy).
 
 Encryption (``.dpbk``): AES-256-GCM over a gzip'd tar, in 1 MiB chunks, key = scrypt(passphrase, salt).
 The header (magic, KDF parameters, salt, nonce prefix) is bound into every chunk's authentication
@@ -69,11 +71,11 @@ DATA_FILES = (
     "gateway-mirror.json", "media-origins.json", "voice.yaml", "voice-acks.yaml", "advisor.db",
     "RECOVERY-CODE.txt",
 )
-DATA_DIRS = ("avatars", "reactions/pack", "voices")
+DATA_DIRS = ("avatars", "profile-avatars", "reactions/pack", "voices")
 MEDIA_DIRS = ("media", "files")
 #: top-level names a restore may write; anything else in an archive is refused.
 ALLOWED_TOP = frozenset({"chats.db", "MANIFEST.json", "secrets.json", *DATA_FILES,
-                         "avatars", "reactions", "voices", "media", "files"})
+                         "avatars", "profile-avatars", "reactions", "voices", "media", "files"})
 
 
 def make_private(path: Path, *, directory: bool = False) -> None:
@@ -127,8 +129,39 @@ def recovery_key() -> str:
     return "-".join("".join(pysecrets.choice(_RECOVERY_ALPHABET) for _ in range(5)) for _ in range(5))
 
 
+PASSPHRASE_REF = "setting.system.backup_passphrase"
+#: sha256 of the recovery key DisPatch generated (4.3, N-16): the reveal route shows the stored
+#: passphrase only while it is still that generated key, never one a person chose.
+GENERATED_REF = "backup.generated_key_sha256"
+_RECOVERY_SHAPE = re.compile(r"^[A-HJKMNP-Z2-9]{5}(?:-[A-HJKMNP-Z2-9]{5}){4}$")
+
+
 def configured_passphrase() -> str | None:
-    return secret_store.get("setting.system.backup_passphrase")
+    return secret_store.get(PASSPHRASE_REF)
+
+
+def _digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def store_generated_key(key: str) -> None:
+    """Keep a generated recovery key as the install's backup passphrase, and remember that it was
+    generated (so the protected Admin may see it again later, after re-entering a credential)."""
+    secret_store.put(PASSPHRASE_REF, key)
+    secret_store.put(GENERATED_REF, _digest(key))
+
+
+def generated_key() -> str | None:
+    """The stored passphrase when DisPatch generated it, else None (a passphrase somebody chose is
+    never shown). A key generated before 4.3 left no record: one that has exactly the recovery-key
+    shape and no record saying otherwise counts as generated."""
+    pw = configured_passphrase()
+    if not pw:
+        return None
+    mark = secret_store.get(GENERATED_REF)
+    if mark:
+        return pw if pysecrets.compare_digest(mark, _digest(pw)) else None
+    return pw if _RECOVERY_SHAPE.match(pw) else None
 
 
 # --------------------------------------------------------------------------- #
@@ -303,24 +336,144 @@ def _walk(root: Path, rel: str) -> list[tuple[Path, str]]:
     return out
 
 
-def _secrets_document() -> dict[str, str]:
-    """Connection API keys (and secret settings) by reference, for the archive. Read from the secret
-    store so a restore on another computer has them; encrypted like everything else."""
-    out: dict[str, str] = {}
+# --- the secret stores (4.3, issue #35) -------------------------------------------------------
+#
+# Two stores hold credentials. ``secret_store`` (connection keys, secret settings, anything a
+# later feature adds such as an OIDC client secret) and the agents' provider (``agents/secrets.py``:
+# the Anthropic key, the gateway token, ``MCP_*`` / ``STUDIOFORGE_*`` header secrets). Both fall
+# back to ONE file, ``<data>/agents/secrets.json``; with an OS keyring they use two keyring
+# services. An archive carries every name either store holds, each name once, in one flat
+# ``secrets.json`` ({name: value}, the format older versions read); a restore sends each name back
+# to the store its reader asks (``_is_agent_name``).
+
+#: Never inside an archive: the archive's own key, and the record that it was generated.
+_NOT_ARCHIVED = frozenset({PASSPHRASE_REF, GENERATED_REF})
+_AGENT_CONSTANTS = ("ANTHROPIC_API_KEY", "OPENCLAW_GATEWAY_TOKEN")
+
+
+def _secrets_file() -> Path:
+    return Path(config.DATA_DIR) / "agents" / "secrets.json"
+
+
+def _file_names() -> set[str]:
+    """Every name in the shared 0600 file (the store of both, without a keyring)."""
     try:
-        from . import connections, settings_schema
+        doc = json.loads(_secrets_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    return {str(k) for k in doc} if isinstance(doc, dict) else set()
+
+
+def _is_agent_name(name: str) -> bool:
+    """A name the agents' provider owns: the two constants and the ``MCP_`` / ``STUDIOFORGE_``
+    names ``agents_api`` lets a person set. Everything else is ``secret_store``'s."""
+    if name in _AGENT_CONSTANTS:
+        return True
+    return bool(re.fullmatch(r"[A-Z][A-Z0-9_]{2,63}", name)) and name.startswith(("MCP_", "STUDIOFORGE_"))
+
+
+def _agent_store():
+    """The agents' secret store WITHOUT the environment (an operator's ``ANTHROPIC_API_KEY`` in a
+    unit file is not the install's to copy): the running task manager's own store when there is
+    one, else what ``agents.secrets.default_provider`` would build. ``DISPATCH_SECRET_STORE=file``
+    (containers, the test suite) means the file and never a keyring."""
+    from .agents.secrets import ChainSecretProvider, EnvSecretProvider, FileSecretProvider
+    if secret_store._mode() == "file":
+        return FileSecretProvider(_secrets_file())
+    with contextlib.suppress(Exception):
+        from . import agents_service
+        if agents_service.manager is not None:
+            sp = agents_service.manager.secrets
+            ps = [p for p in getattr(sp, "providers", [sp]) if not isinstance(p, EnvSecretProvider)]
+            if ps:
+                return ChainSecretProvider(ps)
+    from .agents.secrets import default_provider
+    sp = default_provider(Path(config.DATA_DIR))
+    return ChainSecretProvider([p for p in getattr(sp, "providers", [sp])
+                                if not isinstance(p, EnvSecretProvider)])
+
+
+def _store_for(name: str):
+    return _agent_store() if _is_agent_name(name) else secret_store.provider()
+
+
+def _known_store_names() -> set[str]:
+    """Names ``secret_store`` is known to hold even when a keyring hides them from a listing:
+    every connection's ``secret:`` reference and every secret setting."""
+    out: set[str] = set()
+    with contextlib.suppress(Exception):
+        from . import connections
         for c in connections.list_all():
             if c.credential_ref.startswith("secret:"):
-                v = secret_store.get(c.credential_ref[7:])
-                if v:
-                    out[c.credential_ref[7:]] = v
-        for d in settings_schema.all_defs():
-            if d.secret and d.key != "system.backup_passphrase":
-                v = secret_store.get(f"setting.{d.key}")
-                if v:
-                    out[f"setting.{d.key}"] = v
-    except Exception:
-        log.exception("could not collect secrets for the backup")
+                out.add(c.credential_ref[7:])
+    with contextlib.suppress(Exception):
+        from . import settings_schema
+        out.update(f"setting.{d.key}" for d in settings_schema.all_defs() if d.secret)
+    return out
+
+
+def _known_agent_names() -> set[str]:
+    """The agents' names: the two constants and every header secret an agent definition names."""
+    out = set(_AGENT_CONSTANTS)
+    with contextlib.suppress(Exception):
+        from . import agents_store
+        for a in agents_store.list_agents():
+            for srv in ((a.get("spec") or {}).get("mcp_servers") or {}).values():
+                out.update(str(v) for v in (srv.get("header_secrets") or {}).values())
+    return out
+
+
+def _secrets_document() -> dict[str, str]:
+    """Every secret either store holds, by name, for the archive (encrypted like everything else).
+    Generic: the shared file is listed whole, so a name no code here knows (a later feature's)
+    travels too; names a keyring hides are found through what refers to them."""
+    out: dict[str, str] = {}
+    names = _file_names() | _known_store_names() | _known_agent_names()
+    for name in sorted(names - _NOT_ARCHIVED):
+        try:
+            v = _store_for(name).get(name)
+        except Exception:
+            log.warning("could not read the secret %s for the backup", name)
+            continue
+        if v:
+            out[name] = v
+    return out
+
+
+def _referenced_names(db: Path) -> set[str]:
+    """Secret names the data in ``db`` refers to: connections' ``secret:`` references and the
+    agents' header secrets. Read-only; a missing table or file is simply nothing."""
+    out: set[str] = set()
+    if not db.is_file():
+        return out
+    try:
+        con = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)
+    except sqlite3.Error:
+        return out
+    try:
+        with contextlib.suppress(sqlite3.Error):
+            for (ref,) in con.execute("SELECT credential_ref FROM connections"):
+                if isinstance(ref, str) and ref.startswith("secret:") and len(ref) > 7:
+                    out.add(ref[7:])
+        with contextlib.suppress(sqlite3.Error):
+            for (spec,) in con.execute("SELECT spec FROM agents"):
+                with contextlib.suppress(ValueError, TypeError, AttributeError):
+                    for srv in ((json.loads(spec) or {}).get("mcp_servers") or {}).values():
+                        out.update(str(v) for v in (srv.get("header_secrets") or {}).values())
+    finally:
+        con.close()
+    return out - _NOT_ARCHIVED
+
+
+def _missing(names: set[str] | list[str]) -> list[str]:
+    """The names neither store has a value for now (each asked of its own store)."""
+    out = []
+    for n in sorted(set(names)):
+        try:
+            if not _store_for(n).get(n):
+                out.append(n)
+        except Exception:
+            out.append(n)
     return out
 
 
@@ -427,6 +580,231 @@ def prune_archives(keep: int) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# Snapshot tiers (4.0 scale and retention, BUILD-PLAN-v2 1.13.3)
+# --------------------------------------------------------------------------- #
+#
+# The rotating ``chats-<stamp>.db`` snapshots are written every 6 hours and trimmed by
+# ``main._prune_backups`` to the newest N. At 1-2 GB each that is too much disk for too little
+# history, so the daily maintenance task replaces "keep 12" with tiers:
+#
+#   recent   the newest ``keep_recent`` snapshots (default 8 = two days at 6-hourly)
+#   daily    the last snapshot of each of the newest ``keep_daily`` days (default 7)
+#   weekly   the last snapshot of each of the newest ``keep_weekly`` ISO weeks older than the
+#            oldest kept day (default 4)
+#
+# never fewer than ``MIN_SNAPSHOTS`` in total. A daily or weekly keeper is hard-linked into
+# ``backups/tiers/{daily,weekly}/`` (same bytes, no extra disk), which is what protects it from
+# ``main._prune_backups``'s newest-N rule; the root copy of everything that is not "recent" is then
+# dropped. ``list_backups`` and ``resolve_id`` see the tier folders, so a daily or weekly keeper can
+# be restored like any snapshot.
+
+MIN_SNAPSHOTS = 4
+TIER_DIRNAME = "tiers"
+TIERS = ("daily", "weekly")
+_SNAP_STAMP = re.compile(r"^chats-(\d{8})-(\d{6})\.db$")
+
+
+def tier_dir(tier: str) -> Path:
+    return backup_root() / TIER_DIRNAME / tier
+
+
+def _snap_time(name: str) -> datetime | None:
+    m = _SNAP_STAMP.match(name)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")  # noqa: DTZ007  (the rotation stamps local time)
+    except ValueError:
+        return None
+
+
+def plan_snapshot_tiers(names: list[str], *, keep_recent: int = 8, keep_daily: int = 7,
+                        keep_weekly: int = 4, min_total: int = MIN_SNAPSHOTS) -> dict[str, list[str]]:
+    """Which snapshot names each tier keeps. Pure: ``names`` are ``chats-YYYYMMDD-HHMMSS.db``
+    (anything else is ignored). Returns ``{"recent", "daily", "weekly", "keep", "drop"}``; the
+    lists are newest first."""
+    stamped = sorted(((t, n) for n in names if (t := _snap_time(n)) is not None), reverse=True)
+    ordered = [n for _t, n in stamped]
+    recent = ordered[:max(0, keep_recent)]
+    by_day: dict[str, str] = {}
+    for t, n in stamped:                      # newest first: the first seen of a day is its last
+        by_day.setdefault(t.strftime("%Y-%m-%d"), n)
+    days = sorted(by_day, reverse=True)[:max(0, keep_daily)]
+    daily = [by_day[d] for d in days]
+    oldest_day = days[-1] if days else None
+    by_week: dict[str, str] = {}
+    for t, n in stamped:
+        if oldest_day is not None and t.strftime("%Y-%m-%d") >= oldest_day:
+            continue
+        iso = t.isocalendar()
+        by_week.setdefault(f"{iso[0]}-{iso[1]:02d}", n)
+    weeks = sorted(by_week, reverse=True)[:max(0, keep_weekly)]
+    weekly = [by_week[w] for w in weeks]
+    keep = list(dict.fromkeys(recent + daily + weekly))
+    if len(keep) < min_total:
+        for n in ordered:
+            if n not in keep:
+                keep.append(n)
+            if len(keep) >= min_total:
+                break
+    keep_set = set(keep)
+    return {"recent": recent, "daily": daily, "weekly": weekly,
+            "keep": [n for n in ordered if n in keep_set],
+            "drop": [n for n in ordered if n not in keep_set]}
+
+
+def _link_or_copy(src: Path, dst: Path) -> None:
+    if dst.exists():
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_name(dst.name + ".part")
+    with contextlib.suppress(OSError):
+        tmp.unlink()
+    try:
+        os.link(src, tmp)
+    except OSError:
+        shutil.copy2(src, tmp)
+    os.replace(tmp, dst)
+
+
+def _usable_snapshot(p: Path) -> bool:
+    try:
+        if p.stat().st_size <= 0:
+            return False
+        with open(p, "rb") as fh:
+            return fh.read(16) == b"SQLite format 3\x00"
+    except OSError:
+        return False
+
+
+def prune_snapshot_tiers(*, keep_recent: int = 8, keep_daily: int = 7, keep_weekly: int = 4,
+                         dry_run: bool = False) -> dict[str, Any]:
+    """Apply :func:`plan_snapshot_tiers` to ``backups/``: link the daily and weekly keepers into
+    ``backups/tiers/``, drop the root copies that are no longer "recent" and every tier file the
+    plan no longer keeps. Only the rotation's own stamped files are ever touched. A snapshot that is
+    empty or not a database never counts as a keeper (a failed ``VACUUM INTO`` leaves one)."""
+    root = backup_root()
+    out: dict[str, Any] = {"removed": 0, "bytes": 0, "kept": 0, "plan": {}}
+    if not root.is_dir():
+        return out
+    names: dict[str, Path] = {}
+    for tier_name in ("", *TIERS):
+        d = root if not tier_name else tier_dir(tier_name)
+        if not d.is_dir():
+            continue
+        for p in d.iterdir():
+            if p.is_file() and _SNAP_RE.match(p.name) and p.name not in names and _usable_snapshot(p):
+                names[p.name] = p
+    plan = plan_snapshot_tiers(list(names), keep_recent=keep_recent, keep_daily=keep_daily,
+                               keep_weekly=keep_weekly)
+    out["plan"] = plan
+    out["kept"] = len(plan["keep"])
+    if dry_run:
+        out["removed"] = len(plan["drop"])
+        out["bytes"] = sum(names[n].stat().st_size for n in plan["drop"] if n in names)
+        return out
+    want = {"daily": set(plan["daily"]) - set(plan["recent"]),
+            "weekly": (set(plan["weekly"]) | set()) - set(plan["recent"]) - set(plan["daily"])}
+    # link first (a keeper must exist in its tier before any root copy goes)
+    for tier, keepers in want.items():
+        for n in keepers:
+            _link_or_copy(names[n], tier_dir(tier) / n)
+    recent = set(plan["recent"])
+    drop = set(plan["drop"])
+
+    def _unlink(p: Path) -> None:
+        try:
+            st = p.stat()
+            p.unlink()
+        except OSError:
+            return
+        if st.st_nlink <= 1:                       # the last link: the bytes are really freed
+            out["bytes"] += st.st_size
+
+    # a tier file the plan no longer keeps in that tier (never the only copy of a kept snapshot)
+    for tier in TIERS:
+        d = tier_dir(tier)
+        if not d.is_dir():
+            continue
+        for p in d.iterdir():
+            if not (p.is_file() and _SNAP_RE.match(p.name)) or p.name in want[tier]:
+                continue
+            if p.name in drop or (p.name in recent and (root / p.name).exists()):
+                _unlink(p)
+    # a root file that is not "recent": its tier link exists, or the plan drops it
+    for p in root.iterdir():
+        if not (p.is_file() and _SNAP_RE.match(p.name)) or p.name in recent:
+            continue
+        if p.name in drop or any((tier_dir(t) / p.name).exists() for t in TIERS):
+            _unlink(p)
+    out["removed"] = sum(1 for n in drop
+                         if not (root / n).exists() and not any((tier_dir(t) / n).exists() for t in TIERS))
+    return out
+
+
+def prune_premigration(keep: int = 3, *, dry_run: bool = False) -> dict[str, int]:
+    """Keep the newest ``keep`` ``<version>-<stamp>/`` pre-migration copies (``migrate.KEEP_BACKUPS``
+    is 3; at the size a year-old database reaches, three is enough)."""
+    root = backup_root()
+    rows = {"removed": 0, "bytes": 0}
+    if not root.is_dir():
+        return rows
+    dirs = sorted((p for p in root.iterdir() if p.is_dir() and _PRE_RE.match(p.name)),
+                  key=lambda p: p.stat().st_mtime)
+    for p in dirs[:-keep] if keep > 0 else dirs:
+        size = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+        rows["bytes"] += size
+        rows["removed"] += 1
+        if not dry_run:
+            shutil.rmtree(p, ignore_errors=True)
+    return rows
+
+
+#: Pre-restore copies kept (4.3, #36). The newest is never removed, whatever ``keep`` says.
+KEEP_PRERESTORE = 3
+
+
+def prune_prerestore(keep: int = KEEP_PRERESTORE, *, dry_run: bool = False) -> dict[str, int]:
+    """Keep the newest ``keep`` ``pre-restore-<stamp>/`` copies (at least one: the newest is the
+    way back from the last restore). Run by the daily maintenance task, never by a restore, so a
+    restore never deletes anything while it makes its own copy."""
+    root = backup_root()
+    rows = {"removed": 0, "bytes": 0}
+    if not root.is_dir():
+        return rows
+    dirs = sorted((p for p in root.iterdir() if p.is_dir() and _PRERESTORE_RE.match(p.name)),
+                  key=lambda p: p.name)          # the stamp sorts by time
+    for p in dirs[:-max(1, keep)]:
+        rows["bytes"] += sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+        rows["removed"] += 1
+        if not dry_run:
+            shutil.rmtree(p, ignore_errors=True)
+    return rows
+
+
+def backup_in_progress() -> bool:
+    """True while a backup is being written: an unfinished ``.part`` archive or work folder, or a
+    snapshot file touched in the last two minutes that is not yet a database."""
+    root = backup_root()
+    now = datetime.now(UTC).timestamp()
+    try:
+        for d in (root, archive_dir()):
+            if not d.is_dir():
+                continue
+            for p in d.iterdir():
+                name = p.name
+                if name.endswith(".part") or name.startswith("dispatch-bk-"):
+                    if now - p.stat().st_mtime < 6 * 3600:
+                        return True
+                elif p.is_file() and _SNAP_RE.match(name) and now - p.stat().st_mtime < 120:
+                    if not _usable_snapshot(p):
+                        return True
+    except OSError:
+        return False
+    return False
+
+
+# --------------------------------------------------------------------------- #
 # Reading an archive
 # --------------------------------------------------------------------------- #
 
@@ -499,8 +877,10 @@ def read_archive(path: Path, passphrase: str, *, extract_to: Path | None = None)
 _SNAP_RE = re.compile(r"^chats-\d{8}-\d{6}\.db$")
 #: ``<version>-YYYYMMDD-HHMMSS``. The version is whatever wrote the copy: app/migrate.py's
 #: ``3.0.0``, or the container entrypoint's previous image version (``3.0.0-b1``, ``dev``,
-#: ``unrecorded``), so anything up to the stamp is accepted.
-_PRE_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+-]*-\d{8}-\d{6}$")
+#: ``unrecorded``), so anything up to the stamp is accepted - except ``pre-restore-``, which is
+#: a restore's own copy (4.3, #36; the same exclusion is in ``migrate._BACKUP_DIR_RE``).
+_PRE_RE = re.compile(r"^(?!pre-restore-)[0-9A-Za-z][0-9A-Za-z.+-]*-\d{8}-\d{6}$")
+_PRERESTORE_RE = re.compile(r"^pre-restore-\d{8}-\d{6}(?:-\d+)?$")
 
 
 def _archive_row(p: Path) -> dict:
@@ -522,24 +902,49 @@ def list_backups() -> list[dict]:
             created = datetime.fromtimestamp(st.st_mtime, UTC).isoformat(timespec="seconds")
             if p.is_file() and _SNAP_RE.match(p.name):
                 rows.append({"id": f"snapshot:{p.name}", "kind": "snapshot", "name": p.name,
-                             "size": st.st_size, "created": created, "encrypted": False, "restorable": True})
+                             "size": st.st_size, "created": created, "encrypted": False, "restorable": True,
+                             "tier": "recent"})
             elif p.is_dir() and _PRE_RE.match(p.name):
                 size = sum(f.stat().st_size for f in p.iterdir() if f.is_file())
                 rows.append({"id": f"premigration:{p.name}", "kind": "premigration", "name": p.name,
                              "size": size, "created": created, "encrypted": False, "restorable": True})
+            elif p.is_dir() and _PRERESTORE_RE.match(p.name):
+                size = sum(f.stat().st_size for f in p.iterdir() if f.is_file())
+                rows.append({"id": f"prerestore:{p.name}", "kind": "prerestore", "name": p.name,
+                             "size": size, "created": created, "encrypted": False, "restorable": True})
+        seen = {r["name"] for r in rows if r["kind"] == "snapshot"}
+        for tier in TIERS:
+            d = tier_dir(tier)
+            if not d.is_dir():
+                continue
+            for p in d.iterdir():
+                if p.is_file() and _SNAP_RE.match(p.name) and p.name not in seen:
+                    st = p.stat()
+                    seen.add(p.name)
+                    rows.append({"id": f"snapshot:{p.name}", "kind": "snapshot", "name": p.name,
+                                 "size": st.st_size, "encrypted": False, "restorable": True, "tier": tier,
+                                 "created": datetime.fromtimestamp(st.st_mtime, UTC).isoformat(timespec="seconds")})
     rows.sort(key=lambda r: r["created"], reverse=True)
     return rows
 
 
 def resolve_id(backup_id: str) -> tuple[str, Path]:
     kind, _, name = (backup_id or "").partition(":")
-    if kind not in ("archive", "snapshot", "premigration") or not name or "/" in name or "\\" in name or ".." in name:
+    if (kind not in ("archive", "snapshot", "premigration", "prerestore") or not name or "/" in name
+            or "\\" in name or ".." in name):
         raise BackupError("backup_not_found", "Unknown backup", 404)
-    base = {"archive": archive_dir(), "snapshot": backup_root(), "premigration": backup_root()}[kind]
+    base = {"archive": archive_dir(), "snapshot": backup_root(), "premigration": backup_root(),
+            "prerestore": backup_root()}[kind]
     p = base / name
+    if kind == "snapshot" and not p.exists():       # a daily or weekly keeper lives in backups/tiers/
+        for tier in TIERS:
+            if (tier_dir(tier) / name).is_file():
+                p = tier_dir(tier) / name
+                break
     ok = {"archive": p.is_file() and p.suffix == EXT,
           "snapshot": p.is_file() and bool(_SNAP_RE.match(name)),
-          "premigration": p.is_dir() and bool(_PRE_RE.match(name))}[kind]
+          "premigration": p.is_dir() and bool(_PRE_RE.match(name)),
+          "prerestore": p.is_dir() and bool(_PRERESTORE_RE.match(name))}[kind]
     if not ok:
         raise BackupError("backup_not_found", "Unknown backup", 404)
     return kind, p
@@ -577,9 +982,16 @@ def stage_restore(backup_id: str, passphrase: str | None = None) -> dict:
         else:
             what = []
             for f in p.iterdir():
-                if f.is_file() and f.name in ALLOWED_TOP:
+                if f.is_file() and f.name in ALLOWED_TOP and f.name != "secrets.json":
                     shutil.copy2(f, stage / f.name)
                     what.append(f.name)
+            # A pre-migration / pre-restore copy holds the secret file itself ({name: value}, the
+            # archive's own format): its names go back through the stores like an archive's.
+            sec = p / "agents" / "secrets.json"
+            if sec.is_file():
+                shutil.copy2(sec, stage / "secrets.json")
+                make_private(stage / "secrets.json")
+                what.append("agents/secrets.json")
         if kind != "archive":
             _quick_check(stage / "chats.db") if (stage / "chats.db").exists() else None
     except BaseException:
@@ -588,7 +1000,42 @@ def stage_restore(backup_id: str, passphrase: str | None = None) -> dict:
     marker = {"staging": str(stage), "source": backup_id, "staged_at": datetime.now(UTC).isoformat(timespec="seconds"),
               "files": what}
     pending_path().write_text(json.dumps(marker), encoding="utf-8")
-    return {"staged": True, "restart_required": True, "source": backup_id, "files": what}
+    return {"staged": True, "restart_required": True, "source": backup_id, "files": what,
+            "re_enter": _re_enter_preview(stage)}
+
+
+def _staged_secret_names(stage: Path) -> set[str]:
+    try:
+        doc = json.loads((stage / "secrets.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    return {str(k) for k, v in doc.items() if v} if isinstance(doc, dict) else set()
+
+
+def _re_enter_preview(stage: Path) -> list[str]:
+    """What the restore will not be able to put back: secrets the restored data refers to that
+    neither the backup nor this install holds. (Only a restored ``chats.db`` changes what is
+    referred to; a backup without one leaves the references as they are.)"""
+    with contextlib.suppress(Exception):
+        refs = _referenced_names(stage / "chats.db")
+        return _missing(refs - _staged_secret_names(stage))
+    return []
+
+
+LAST_RESTORE = ".last-restore.json"
+
+
+def last_restore() -> dict | None:
+    """The last applied restore (``applied_at``, ``source``, ``previous``) and the secrets that
+    still need entering again (``re_enter``, re-checked now: a name drops off once it is set)."""
+    try:
+        doc = json.loads((Path(config.DATA_DIR) / LAST_RESTORE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(doc, dict):
+        return None
+    doc["re_enter"] = _missing([str(n) for n in doc.get("re_enter") or []])
+    return doc
 
 
 def _quick_check(db: Path) -> None:
@@ -648,6 +1095,12 @@ def apply_pending_restore() -> dict | None:
             if p.is_file():
                 shutil.copy2(p, pre / name)
                 make_private(pre / name)
+        sec_now = _secrets_file()
+        if sec_now.is_file():                     # the keys the restore is about to overwrite
+            (pre / "agents").mkdir(exist_ok=True)
+            make_private(pre / "agents", directory=True)
+            shutil.copy2(sec_now, pre / "agents" / "secrets.json")
+            make_private(pre / "agents" / "secrets.json")
     except (OSError, sqlite3.Error) as e:
         log.error("a restore is staged but the copy of the current data to %s failed (%s); NOT restoring. "
                   "Free some space or fix the error and restart, or cancel it with DELETE /api/backups/pending",
@@ -670,13 +1123,7 @@ def apply_pending_restore() -> dict | None:
             make_private(tmp)           # before it is published: no moment when it is world-readable
         os.replace(tmp, dst)
         applied.append(rel)
-    sec = stage / "secrets.json"
-    if sec.is_file():
-        try:
-            for ref, value in json.loads(sec.read_text(encoding="utf-8")).items():
-                secret_store.put(str(ref), str(value))
-        except Exception:
-            log.exception("restoring secrets failed; re-enter the connection keys")
+    failed = _put_back_secrets(stage / "secrets.json")
     harden_restored(data, applied)
     shutil.rmtree(stage, ignore_errors=True)
     mp.unlink(missing_ok=True)
@@ -688,8 +1135,51 @@ def apply_pending_restore() -> dict | None:
         connections.reset_schema_cache()
         tool_manifests.reset_schema_cache()
         config.invalidate_stored_env()
+    re_enter = sorted(set(failed) | set(_missing(_referenced_names(data / "chats.db"))))
+    with contextlib.suppress(OSError):
+        doc = {"applied_at": datetime.now(UTC).isoformat(timespec="seconds"),
+               "source": str(marker.get("source") or ""), "previous": pre.name, "re_enter": re_enter}
+        (data / LAST_RESTORE).write_text(json.dumps(doc), encoding="utf-8")
+        make_private(data / LAST_RESTORE)
+    if re_enter:
+        log.warning("restore applied; re-enter these secrets (the backup could not put them back): %s",
+                    ", ".join(re_enter))
     log.warning("restore applied (%d files); the previous state is in %s", len(applied), pre)
-    return {"applied": True, "files": applied, "previous": str(pre)}
+    return {"applied": True, "files": applied, "previous": str(pre), "re_enter": re_enter}
+
+
+def _put_back_secrets(sec: Path) -> list[str]:
+    """Write every name of a backup's ``secrets.json`` into the store that owns it. Returns the
+    names that did not stick (a locked keyring, a read-only store): the person re-enters them."""
+    if not sec.is_file():
+        return []
+    try:
+        doc = json.loads(sec.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        log.error("the backup's secrets could not be read; re-enter the keys")
+        return ["secrets.json"]
+    if not isinstance(doc, dict):
+        return []
+    failed: list[str] = []
+    agents = None
+    for name, value in doc.items():
+        name, value = str(name), str(value)
+        if not value or name in _NOT_ARCHIVED:
+            continue
+        try:
+            if _is_agent_name(name):
+                agents = agents or _agent_store()
+                agents.set(name, value)
+                if agents.get(name) != value:
+                    raise RuntimeError("the agents' secret store did not keep the value")
+                from .agents.secrets import GLOBAL_REDACTOR
+                GLOBAL_REDACTOR.register(value)
+            else:
+                secret_store.put(name, value)
+        except Exception as e:
+            log.error("could not restore the secret %s (%s); re-enter it", name, type(e).__name__)
+            failed.append(name)
+    return failed
 
 
 # --------------------------------------------------------------------------- #
@@ -717,10 +1207,11 @@ def run_scheduled_once() -> dict | None:
     pw = configured_passphrase()
     if not pw:
         pw = recovery_key()
-        secret_store.put("setting.system.backup_passphrase", pw)
+        store_generated_key(pw)
         log.warning("no backup passphrase was set, so a recovery key was generated and saved in this install's secret "
-                    "store as the backup passphrase. It is not shown anywhere: set your own passphrase in "
-                    "Settings > System > Backups to be able to read these archives on another computer")
+                    "store as the backup passphrase. It is not shown anywhere unasked: the main Admin can show it "
+                    "once in Settings > System > Backups after re-entering the PIN or password, or set your own "
+                    "passphrase there to be able to read these archives on another computer")
     row = create_archive(pw, include_media=bool(settings_store.get("system.encrypted_backup_include_media", False)))
     prune_archives(int(settings_store.get("system.encrypted_backup_keep", 7)))
     return row
@@ -808,6 +1299,28 @@ def _tail(path: Path, lines: int = 2000) -> str:
     return "\n".join(data.splitlines()[-lines:])
 
 
+def _ring_tail(lines: int) -> str:
+    """The in-memory log ring (``app/logbuffer.py``, 4.3 #18) when there is no log file: DisPatch
+    logs to stderr / the journal, so the file is usually absent. Empty when the ring is absent."""
+    try:
+        from . import logbuffer  # type: ignore[attr-defined]
+    except ImportError:
+        return ""
+    try:
+        try:
+            got = logbuffer.tail(lines)
+        except TypeError:
+            got = logbuffer.tail()
+    except Exception:
+        log.exception("could not read the in-memory log for the support bundle")
+        return ""
+    if isinstance(got, str):
+        text = got
+    else:
+        text = "\n".join(str(x) for x in (got or []))
+    return "\n".join(text.splitlines()[-lines:])
+
+
 def build_support_bundle(*, include_prompts: bool = False, log_lines: int = 2000) -> bytes:
     """A zip of what a maintainer needs to help - versions, settings (secrets redacted), connection
     and character summaries (no keys, no prompts unless asked), health, the tail of the log (scrubbed).
@@ -829,7 +1342,8 @@ def build_support_bundle(*, include_prompts: bool = False, log_lines: int = 2000
     from . import characters
     chars = []
     for b in config.load_bots():
-        chars.append({"id": b.id, "name": b.name, "audience": b.audience,
+        chars.append({"id": b.id, "name": b.name, "scope": b.scope,
+                      "hidden": b.hidden,
                       "backend": characters.backend_kind(b),
                       "connection": characters.connection_of(b) or None,
                       "model": characters.model_of(b), "reactions": b.reactions, "pack": b.pack,
@@ -843,7 +1357,7 @@ def build_support_bundle(*, include_prompts: bool = False, log_lines: int = 2000
     except Exception:
         docs["backups.json"] = []
     logp = Path(config.env("LOG_FILE", "") or (Path(config.LOG_DIR) / "dispatch.log"))
-    log_text = redact_text(_tail(logp, log_lines))
+    log_text = redact_text(_tail(logp, log_lines) or _ring_tail(log_lines))
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for name, doc in docs.items():

@@ -1,0 +1,36 @@
+event: session.status_running
+data: {"type": "session.status_running", "id": "sevt_01", "processed_at": "2026-10-31T00:00:01Z"}
+
+event: user.message
+data: {"type": "user.message", "id": "sevt_02", "processed_at": "2026-10-31T00:00:01Z", "content": [{"type": "text", "text": "Summarize README.md"}]}
+
+event: span.model_request_start
+data: {"type": "span.model_request_start", "id": "sevt_03", "processed_at": "2026-10-31T00:00:02Z"}
+
+event: agent.message
+data: {"type": "agent.message", "id": "sevt_04", "processed_at": "2026-10-31T00:00:02Z", "content": [{"type": "text", "text": "Let me read the file."}]}
+
+event: agent.tool_use
+data: {"type": "agent.tool_use", "id": "sevt_05", "processed_at": "2026-10-31T00:00:02Z", "name": "read", "input": {"file_path": "/workspace/README.md"}, "evaluated_permission": "allow"}
+
+event: span.model_request_end
+data: {"type": "span.model_request_end", "id": "sevt_06", "processed_at": "2026-10-31T00:00:03Z", "is_error": false, "model_request_start_id": "sevt_03", "model_usage": {"input_tokens": 1200, "output_tokens": 80, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}}
+
+event: agent.tool_result
+data: {"type": "agent.tool_result", "id": "sevt_07", "processed_at": "2026-10-31T00:00:03Z", "tool_use_id": "sevt_05", "is_error": false, "content": [{"type": "text", "text": "# Demo\nHello."}]}
+
+event: span.model_request_start
+data: {"type": "span.model_request_start", "id": "sevt_08", "processed_at": "2026-10-31T00:00:04Z"}
+
+event: agent.message
+data: {"type": "agent.message", "id": "sevt_09", "processed_at": "2026-10-31T00:00:04Z", "content": [{"type": "text", "text": "The README says hello."}]}
+
+event: span.model_request_end
+data: {"type": "span.model_request_end", "id": "sevt_10", "processed_at": "2026-10-31T00:00:05Z", "is_error": false, "model_request_start_id": "sevt_08", "model_usage": {"input_tokens": 1400, "output_tokens": 30, "cache_read_input_tokens": 1100, "cache_creation_input_tokens": 0}}
+
+event: session.usage
+data: {"type": "session.usage", "id": "sevt_11", "processed_at": "2026-10-31T00:00:05Z", "list_cost": {"amount": "3", "currency": "USD"}, "active_seconds": 4}
+
+event: session.status_idle
+data: {"type": "session.status_idle", "id": "sevt_12", "processed_at": "2026-10-31T00:00:05Z", "stop_reason": {"type": "end_turn"}}
+

@@ -7,7 +7,7 @@
 // The important half is that nothing is FETCHED. A CSS `display: none` would
 // hide every image while still downloading it, which for a feature whose whole
 // claim is "these are not here" would be the dishonest implementation. So NIM
-// rides the same chokepoint Safe Mode uses — renderMarkdown's `noMedia`, which
+// rides the markdown chokepoint — renderMarkdown's `noMedia`, which
 // strips media from the markdown SOURCE before any innerHTML assignment — and
 // the browser never issues the request.
 //
@@ -107,21 +107,25 @@ export function initNim() {
 /** May this session switch NIM OFF?
  *
  *  The point of the ratchet: enable NIM, hand someone the tablet, and no
- *  picture can come back without the PIN. Turning it ON is always allowed —
+ *  picture can come back without signing in. Turning it ON is always allowed —
  *  a control that refuses to make things stricter would be absurd.
  *
- *  `decoy` is main.js's state.decoy, itself `pinSet && !authenticated`, so ONE
- *  check covers both agreed rules: an unlocked session may disable (being
- *  unlocked IS the credential — no second prompt), and a device with no PIN at
- *  all may disable (there is no credential to demand).
+ *  `locked` is main.js's nimLocked(): the install has a lock and nobody is
+ *  signed in on this device (the shared default profile an unsigned device
+ *  lands on counts as nobody). A signed-in profile may disable — being signed
+ *  in IS the credential, no second prompt — and a device with no lock at all
+ *  may disable (there is no credential to demand).
  *
  *  This is a UX gate, NOT a security boundary. The flag is localStorage and
  *  anyone with devtools can flip it. It stops a handed-over tablet; it does not
- *  stop a determined adult, and the UI copy must never imply otherwise. The
- *  real server-side protection is Safe Mode, which redacts decoy traffic.
+ *  stop a determined adult, and the UI copy must never imply otherwise.
  */
-export function canDisableNim(decoy) {
-  return !decoy;
+export function canDisableNim(locked) {   // eslint-disable-line no-unused-vars
+  // 4.0 (maintainer, 2026-10-24): "allow any user to change modes". The ratchet stopped
+  // the shared PIN-less profile (and a signed-out lock screen) from ever turning
+  // NIM back off, which stranded the household tile with no pictures. Anyone may
+  // switch it either way now; the parameter stays so the callers read the same.
+  return true;
 }
 
 /** Is a message nothing but pictures?
@@ -190,19 +194,19 @@ export function shouldDropMessage(msg, stripSource) {
 /** The Settings row. Self-contained, like privacyRow(), so the settings modal
  *  needs to know nothing about how any of this works.
  *
- *  `decoy` decides whether the box is operable; `onChange` re-renders. When it
+ *  `locked` decides whether the box is operable; `onChange` re-renders. When it
  *  is locked we still show it CHECKED — hiding the control would leave the user
  *  wondering why there are no pictures.
  *
- *  `pinSet` picks the hint. Three states, three sentences: locked ("unlock with
- *  your PIN"), PIN set ("once on, it takes the PIN to turn off"), and no PIN at
+ *  `pinSet` picks the hint. Three states, three sentences: locked ("sign in to turn
+ *  this off"), PIN set ("a device nobody is signed in on keeps it on"), and no PIN at
  *  all — where the ratchet is vacuous (canDisableNim returns true with no PIN)
  *  and promising a PIN gate would be a lie. That third string (nim.hint_nopin)
  *  was translated into all eight locales and then never rendered.
  */
-export function nimRow(t, { decoy = false, pinSet = true, onChange } = {}) {
+export function nimRow(t, { locked: deviceLocked = false, pinSet = true, onChange } = {}) {
   const on = nimEnabled();
-  const locked = on && !canDisableNim(decoy);
+  const locked = on && !canDisableNim(deviceLocked);
   const label = document.createElement('label');
   label.className = 'bm-avatar-style';
   const box = document.createElement('input');
@@ -215,10 +219,10 @@ export function nimRow(t, { decoy = false, pinSet = true, onChange } = {}) {
   strong.textContent = t ? t('nim.title') : 'No-Image Mode';
   const hintKey = locked ? 'nim.hint_locked' : (pinSet ? 'nim.hint' : 'nim.hint_nopin');
   const hintEn = locked
-    ? ' — pictures are hidden. Unlock with your PIN to turn this off.'
-    : ' — hide every picture: chat images, avatars and reactions. Nothing is'
+    ? ' — pictures are hidden. Sign in to turn this off.'
+    : ' — hide every picture: chat pictures, profile and bot pictures and reactions. Nothing is'
       + ' downloaded.' + (pinSet
-        ? ' Once on, it takes the PIN to turn off.'
+        ? ' Once on, a device nobody is signed in on keeps it on until someone signs in.'
         : ' Set a PIN to stop this being switched off.');
   text.append(strong, document.createTextNode(t ? ` — ${t(hintKey)}` : hintEn));
   label.append(box, text);

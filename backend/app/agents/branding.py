@@ -118,6 +118,200 @@ def scan_tree(root: Path, patterns: Iterable[str] = ("*.py", "*.json", "*.md", "
 
 
 # --------------------------------------------------------------------------- #
+# Repository-wide scan (issue #20): every surface a user or a reader sees
+# --------------------------------------------------------------------------- #
+
+# Repository-relative globs. ``.js`` files are scanned by their STRING LITERALS
+# only (a UI label lives in a string; a code comment is not shipped text); every
+# other file is scanned line by line. ``**`` is recursive.
+REPO_SCAN_GLOBS: tuple[str, ...] = (
+    "frontend/static/locales/*.json",
+    "frontend/static/js/**/*.js",
+    "frontend/static/index.html",
+    "apps/*/static/**/*.js",
+    "apps/*/static/**/*.html",
+    "apps/*/static/**/*.json",
+    "apps/*/locales/*.json",
+    "backend/app/agents/**/*.py",
+    "README.md",
+    "CHANGELOG.md",
+    "docs/**/*.md",
+)
+# Design notes and research quote product names on purpose (they discuss the
+# label rules themselves); they are not user-facing.
+REPO_SCAN_EXCLUDE: tuple[str, ...] = ("docs/design/",)
+
+# Quoted history that may keep a forbidden name (e.g. a CHANGELOG entry quoting
+# an old label it removed). Each entry is (repository-relative path, a fragment
+# that must appear on the offending line). The fragment must NOT itself contain
+# a forbidden label (this file is scanned). An entry that no longer matches any
+# hit is reported as stale by :func:`stale_allowlist_entries`, so the list
+# cannot silently grow into a loophole.
+BRANDING_ALLOWLIST: tuple[tuple[str, str], ...] = ()
+
+
+_JS_KEYWORDS_BEFORE_EXPR = frozenset({
+    "return", "typeof", "case", "do", "else", "in", "of", "new", "delete", "void",
+    "throw", "instanceof", "yield", "await"})
+
+
+def _js_regex_may_start(last: str, word: str) -> bool:
+    """A ``/`` starts a regex literal unless the previous token is a value."""
+    if not last:
+        return True
+    if last.isalnum() or last in "_$":
+        return word in _JS_KEYWORDS_BEFORE_EXPR
+    return last not in ")]"     # after a value-closing bracket it is a division
+
+
+def js_string_literals(src: str) -> list[tuple[int, str]]:
+    """(line, text) of every string and template literal in ``src``.
+
+    A small lexer, not a parser: it skips ``//`` and ``/* */`` comments and regex
+    literals (best effort, by the previous token) so a quote inside them does not
+    desynchronise it. Template ``${...}`` expressions are kept in the text, which
+    can only add hits, never hide one.
+    """
+    out: list[tuple[int, str]] = []
+    i, n, line = 0, len(src), 1
+    last, word = "", ""  # last significant character / identifier, for the regex heuristic
+    while i < n:
+        c = src[i]
+        if c == "\n":
+            line += 1
+            i += 1
+            continue
+        if c.isspace():
+            i += 1
+            continue
+        if src.startswith("//", i):
+            j = src.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if src.startswith("/*", i):
+            j = src.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            line += src.count("\n", i, j)
+            i = j
+            continue
+        if c in "'\"`":
+            start_line, j, buf = line, i + 1, []
+            while j < n and src[j] != c:
+                if src[j] == "\\" and j + 1 < n:
+                    buf.append(src[j:j + 2])
+                    if src[j + 1] == "\n":
+                        line += 1
+                    j += 2
+                    continue
+                if src[j] == "\n":
+                    line += 1
+                    if c != "`":
+                        break        # unterminated: stop at the line end
+                buf.append(src[j])
+                j += 1
+            out.append((start_line, "".join(buf)))
+            i = j + 1
+            last, word = ")", ""     # a string is a value
+            continue
+        if c == "/" and _js_regex_may_start(last, word):
+            j, in_class = i + 1, False
+            while j < n and src[j] != "\n":
+                if src[j] == "\\":
+                    j += 2
+                    continue
+                if src[j] == "[":
+                    in_class = True
+                elif src[j] == "]":
+                    in_class = False
+                elif src[j] == "/" and not in_class:
+                    break
+                j += 1
+            i = j + 1
+            last, word = ")", ""     # a regex is a value
+            continue
+        if c.isalnum() or c in "_$":
+            j = i
+            while j < n and (src[j].isalnum() or src[j] in "_$"):
+                j += 1
+            word, last = src[i:j], src[j - 1]
+            i = j
+            continue
+        last, word = c, ""
+        i += 1
+    return out
+
+
+def scan_js_file(path: Path) -> list[BrandingViolation]:
+    """Forbidden labels inside the string literals of a JavaScript file."""
+    out: list[BrandingViolation] = []
+    for ln, s in js_string_literals(Path(path).read_text(encoding="utf-8")):
+        for v in scan_text(s, str(path)):
+            out.append(BrandingViolation(str(path), ln + v.line - 1, v.text, v.match))
+    return out
+
+
+def scan_file(path: Path) -> list[BrandingViolation]:
+    """Scan one file the way its type calls for (JS literals, locale JSON, or lines)."""
+    p = Path(path)
+    if p.suffix == ".js":
+        return scan_js_file(p)
+    text = p.read_text(encoding="utf-8")
+    return scan_text(text, str(p))
+
+
+def repo_scan_files(repo: Path) -> list[Path]:
+    """Every file the repository-wide lint covers, sorted, without duplicates."""
+    repo = Path(repo)
+    seen: dict[Path, None] = {}
+    for pat in REPO_SCAN_GLOBS:
+        for p in sorted(repo.glob(pat)):
+            if not p.is_file() or "__pycache__" in p.parts or "node_modules" in p.parts:
+                continue
+            rel = p.relative_to(repo).as_posix()
+            if any(rel.startswith(x) for x in REPO_SCAN_EXCLUDE):
+                continue
+            seen.setdefault(p, None)
+    return list(seen)
+
+
+def _allowed(rel: str, v: BrandingViolation,
+             allowlist: Iterable[tuple[str, str]]) -> bool:
+    return any(rel == path and frag in v.text for path, frag in allowlist)
+
+
+def scan_repo_file(repo: Path, path: Path,
+                   allowlist: Iterable[tuple[str, str]] = BRANDING_ALLOWLIST
+                   ) -> list[BrandingViolation]:
+    """Violations in one repository file, minus the allow-listed quoted history."""
+    rel = Path(path).relative_to(repo).as_posix()
+    allow = tuple(allowlist)
+    return [v for v in scan_file(path) if not _allowed(rel, v, allow)]
+
+
+def scan_repo(repo: Path, allowlist: Iterable[tuple[str, str]] = BRANDING_ALLOWLIST
+              ) -> list[BrandingViolation]:
+    allow = tuple(allowlist)
+    out: list[BrandingViolation] = []
+    for p in repo_scan_files(repo):
+        out.extend(scan_repo_file(repo, p, allow))
+    return out
+
+
+def stale_allowlist_entries(repo: Path,
+                            allowlist: Iterable[tuple[str, str]] = BRANDING_ALLOWLIST
+                            ) -> list[tuple[str, str]]:
+    """Allow-list entries that no longer excuse any hit (delete them)."""
+    repo = Path(repo)
+    stale = []
+    for path, frag in allowlist:
+        p = repo / path
+        hits = scan_file(p) if p.is_file() else []
+        if not any(frag in v.text for v in hits):
+            stale.append((path, frag))
+    return stale
+
+
+# --------------------------------------------------------------------------- #
 # Quarantine (reader vs actor)
 # --------------------------------------------------------------------------- #
 

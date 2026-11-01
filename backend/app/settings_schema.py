@@ -51,7 +51,7 @@ GROUPS: tuple[tuple[str, str, str], ...] = (
     ("connections", "Connections", "The models and servers DisPatch talks to, and how it finds them."),
     ("voice", "Voice", "Speech recognition and voices (provided by the voice add-on)."),
     ("tools", "Tools & Modules", "Plugins, agent runtimes and the optional panes."),
-    ("people", "People & Profiles", "Sign-in, session lengths and what a Restricted profile may do in a day."),
+    ("people", "People & Profiles", "Sign-in, session lengths, and what programs holding the API key may do."),
     ("appearance", "Appearance", "Defaults for a new device: theme, language and avatar style."),
     ("system", "System", "Network, backups, logs and limits."),
 )
@@ -99,8 +99,8 @@ class SettingDef(BaseModel):
     unit: str = ""
     binding: str = "store"                   # "store" | "file:<adapter>" (see settings_store.ADAPTERS)
     owner: str = "core"                      # "core" | "voice" | "tool:<id>"
-    #: Host control and access posture: only a caller who may administer the system (the Owner,
-    #: ``admin_system``) can change it - an Admin holding ``manage_settings`` cannot. Set from
+    #: Host control and access posture: only a caller holding ``admin_system`` (every Admin) can
+    #: change it; a profile merely granted ``manage_settings`` cannot. Set from
     #: OWNER_ONLY_PREFIXES, not by hand on each row.
     owner_only: bool = False
     since: int = 1
@@ -149,35 +149,34 @@ _ONOFFAUTO_LABELS = {"auto": "Automatic", "on": "On", "off": "Off"}
 _CORE: tuple[SettingDef, ...] = (
     # ============================ SYSTEM ================================= #
     _d("system.public_url", "url", "", "Public address",
-       "The address other devices use to reach DisPatch, e.g. https://chat.example.net. An https:// "
-       "address tells the Health tab the connection is encrypted.", "system", section="Network",
+       "The address other devices use to open DisPatch, for example https://chat.example.net. "
+       "Start it with https:// when the connection is encrypted.", "system", section="Network",
        env="DISPATCH_PUBLIC_URL", placeholder="https://chat.example.net"),
-    _d("system.behind_tls", "boolean", False, "A reverse proxy provides HTTPS",
-       "Say so when TLS ends at a proxy in front of DisPatch (Caddy, Tailscale Serve) so Health does "
-       "not warn about plain HTTP.", "system", section="Network", env="DISPATCH_BEHIND_TLS"),
+    _d("system.behind_tls", "boolean", False, "Another program adds HTTPS (reverse proxy)",
+       "Turn on when a program in front of DisPatch (such as Caddy or Tailscale Serve) makes the connection "
+       "secure, so Settings stops warning that it is not.", "system", section="Network", env="DISPATCH_BEHIND_TLS"),
     _d("system.network_exposure", "choice", "local", "Who can reach DisPatch",
-       "Local only (this computer), or your home network. The listen address itself is set by the "
-       "launcher (--host, or BIND_ADDR in the Docker compose file); this records the decision so "
-       "Health can tell you when the two disagree.", "system", section="Network",
+       "This computer only, or every device on your home network. The setup wizard warns when DisPatch "
+       "is actually started differently (--host, or BIND_ADDR for Docker).", "system", section="Network",
        choices=["local", "lan"], choice_labels={"local": "This computer only", "lan": "My home network"}),
-    _d("system.host", "string", "127.0.0.1", "Listen address (informational)",
-       "What DisPatch reports as its own address. The launcher flag (--host) is what binds the port.",
+    _d("system.host", "string", "127.0.0.1", "Address DisPatch reports (information only)",
+       "Shown for information. The address DisPatch really uses is set when it starts (--host).",
        "system", section="Network", level="advanced", env="DISPATCH_HOST", restart_required=True),
-    _d("system.port", "integer", 8765, "Port (informational)",
-       "The port DisPatch reports. The launcher flag (--port) is what binds it.",
+    _d("system.port", "integer", 8765, "Port DisPatch reports (information only)",
+       "Shown for information. The port DisPatch really uses is set when it starts (--port).",
        "system", section="Network", level="advanced", env="DISPATCH_PORT", restart_required=True,
        min=1, max=65535),
-    _d("system.backup_interval", "integer", 21600, "Database snapshot interval",
-       "How often the database is copied aside automatically (every 6 hours by default). Off turns it off.",
+    _d("system.backup_interval", "integer", 21600, "Automatic copies: how often",
+       "How often DisPatch saves a quick copy of its database (every 6 hours by default). Off stops it.",
        "system", section="Backups", env="DISPATCH_BACKUP_INTERVAL", restart_required=True,
        min=0, max=30 * 86400, unit="seconds"),
-    _d("system.backup_keep", "integer", 12, "Snapshots to keep",
-       "How many rotated database snapshots to keep before the oldest is deleted.",
+    _d("system.backup_keep", "integer", 12, "Automatic copies to keep",
+       "How many quick copies to keep before the oldest is deleted.",
        "system", section="Backups", env="DISPATCH_BACKUP_KEEP", restart_required=True,
        min=1, max=1000),
     _d("system.encrypted_backup_enabled", "boolean", False, "Scheduled encrypted backups",
-       "Write a complete, encrypted backup (chats, characters, settings, avatars) on a schedule. "
-       "The first one generates a recovery key and shows it once - keep it somewhere safe.",
+       "Make a complete, locked backup (chats, bots, settings, pictures) on a schedule. "
+       "The first one makes a recovery key and shows it once: keep it somewhere safe.",
        "system", section="Backups"),
     _d("system.encrypted_backup_interval_hours", "integer", 24, "Encrypted backup interval",
        "How often a scheduled encrypted backup is written.", "system", section="Backups", level="advanced",
@@ -189,77 +188,150 @@ _CORE: tuple[SettingDef, ...] = (
        "Add the media and File Server folders to encrypted backups. They can be large.",
        "system", section="Backups", level="advanced"),
     _d("system.backup_passphrase", "secret", None, "Backup passphrase",
-       "The passphrase that encrypts backups. Leave empty to let DisPatch generate a recovery key. "
-       "Either way it is kept in this install's secret store (the schedule needs it) and never shown again, "
-       "so keep your own copy somewhere else.", "system", section="Backups", level="advanced", secret=True),
+       "The passphrase that locks backups. Leave it empty and DisPatch makes a recovery key instead. "
+       "DisPatch keeps it for scheduled backups but never shows it again, "
+       "so keep your own copy.", "system", section="Backups", level="advanced", secret=True),
     _d("system.log_file", "path", "", "Log file",
-       "Where the Health tab reads log lines from. Empty uses <data folder>/logs/dispatch.log.",
+       "Where Settings → System reads log lines from. Empty uses <data folder>/logs/dispatch.log.",
        "system", section="Diagnostics", level="advanced", env="DISPATCH_LOG_FILE"),
     _d("system.files_total_max", "integer", 20 * 1024 ** 3, "File Server size limit",
        "How much the File Server may hold before uploads are refused (20 GB by default).",
        "system", section="Limits", level="advanced", env="DISPATCH_FILES_TOTAL_MAX",
        restart_required=True, min=1024 ** 2, unit="bytes"),
+    # ---- Storage and retention (WP-SCALE-OPS, BUILD-PLAN-v2 1.13). Every default deletes no
+    # chat and no image: images are kept forever unless an Admin chooses "N months".
+    _d("system.maintenance.enabled", "boolean", True, "Daily clean-up",
+       "Run the daily clean-up: remove old records, tidy files and shrink the database.",
+       "system", section="Storage", level="advanced"),
+    _d("system.maintenance.time", "string", "04:30", "Daily clean-up time",
+       "The time of day (HH:MM, local time) the clean-up runs. It waits "
+       "while a backup is running.", "system", section="Storage", level="advanced",
+       placeholder="04:30"),
+    _d("system.retention.images.mode", "choice", "forever", "Keep made pictures for",
+       "Forever, or a number of months. Covers every picture DisPatch made: "
+       "reactions already shown, Image Studio, chat pictures and used "
+       "picture-set pictures. Pictures still in use are never removed; an old one waits "
+       "in the trash before it is deleted.", "system", section="Storage",
+       choices=["forever", "months"], choice_labels={"forever": "Forever", "months": "A number of months"}),
+    _d("system.retention.images.months", "integer", 12, "Made pictures: months to keep",
+       "Used when pictures are kept for a number of months. A picture is old when its last use in a chat "
+       "and its own date are both older than this.", "system", section="Storage",
+       min=1, max=120, unit="months"),
+    _d("system.retention.images.trash_days", "integer", 14, "Removed pictures: days in the trash",
+       "How long an expired picture stays recoverable before it is deleted for good.",
+       "system", section="Storage", level="advanced", min=1, max=365, unit="days"),
+    _d("system.retention.activity_days", "integer", 90, "Activity log: days to keep",
+       "Sign-in and usage rows older than this are deleted.", "system", section="Storage",
+       level="advanced", min=7, max=3650, unit="days"),
+    _d("system.retention.audit_days", "integer", 400, "Audit log: days to keep",
+       "Admin audit rows (who changed what) older than this are deleted.", "system",
+       section="Storage", level="advanced", min=30, max=3650, unit="days"),
+    _d("system.retention.task_event_days", "integer", 90, "Agent task events: days to keep",
+       "Event logs of finished agent tasks older than this are deleted.", "system",
+       section="Storage", level="advanced", min=7, max=3650, unit="days"),
+    _d("system.retention.job_event_days", "integer", 60, "Job events: days to keep",
+       "Event rows of closed Job Board jobs older than this are deleted.", "system",
+       section="Storage", level="advanced", min=7, max=3650, unit="days"),
+    _d("system.retention.usage_days", "integer", 45, "Daily usage counters: days to keep",
+       "Machine upload counters older than this are deleted.", "system", section="Storage",
+       level="advanced", min=7, max=3650, unit="days"),
+    _d("system.retention.transcript_seen_days", "integer", 180, "Copied agent chat records: days to keep",
+       "DisPatch remembers which agent messages it already copied in. Records older than this are deleted.", "system",
+       section="Storage", level="advanced", min=35, max=3650, unit="days"),
+    _d("system.retention.image_job_days", "integer", 90, "Finished image jobs: days to keep",
+       "Finished, failed and cancelled picture requests older than this are deleted (the picture "
+       "itself follows the image rule above).", "system", section="Storage", level="advanced",
+       min=7, max=3650, unit="days"),
+    _d("system.retention.agent_spend_days", "integer", 400, "Agent spend rows: days to keep",
+       "Per-day agent usage totals older than this are deleted.", "system", section="Storage",
+       level="advanced", min=30, max=3650, unit="days"),
+    _d("system.retention.approval_days", "integer", 180, "Decided approvals: days to keep",
+       "Agent approval requests that have been decided, older than this, are deleted.", "system",
+       section="Storage", level="advanced", min=7, max=3650, unit="days"),
+    _d("system.retention.job_feedback_days", "integer", 180, "Closed-job feedback: days to keep",
+       "Votes and comments on closed Job Board jobs older than this are deleted.", "system",
+       section="Storage", level="advanced", min=7, max=3650, unit="days"),
+    _d("system.retention.orphan_grace_days", "integer", 7, "Unused files: days before the trash",
+       "A picture or upload that nothing uses any more moves to the trash only after this "
+       "many days.", "system", section="Storage", level="advanced", min=1, max=365, unit="days"),
+    _d("system.retention.orphan_trash_days", "integer", 14, "Unused files: days in the trash",
+       "How long a swept file stays in the trash before it is deleted for good.", "system",
+       section="Storage", level="advanced", min=1, max=365, unit="days"),
+    _d("system.backups.keep_recent", "integer", 8, "Automatic copies: recent ones to keep",
+       "How many of the newest (6-hourly) quick copies to keep.", "system",
+       section="Backups", level="advanced", min=1, max=200),
+    _d("system.backups.keep_daily", "integer", 7, "Automatic copies: daily ones to keep",
+       "How many daily copies (the last of each day) to keep beyond the recent ones.",
+       "system", section="Backups", level="advanced", min=0, max=400),
+    _d("system.backups.keep_weekly", "integer", 4, "Automatic copies: weekly ones to keep",
+       "How many weekly copies (the last of each week) to keep beyond the daily ones.",
+       "system", section="Backups", level="advanced", min=0, max=400),
     _d("system.push_subject", "string", "", "Push notification contact",
-       "A mailto: address push services can reach if your server misbehaves. Empty uses a placeholder.",
+       "An email address (mailto:…) the notification services can contact about your DisPatch. Optional.",
        "system", section="Notifications", level="advanced", env="DISPATCH_PUSH_SUBJECT",
        legacy_prefix_alias=True, placeholder="mailto:you@example.com"),
 
     # ============================ PEOPLE ================================= #
-    _d("people.lock_timeout_seconds", "integer", 600, "Owner and Admin auto-lock",
-       "How long an Owner or Admin session may sit idle before it locks.", "people",
+    _d("people.lock_timeout_seconds", "integer", 600, "Admins: sign out after idle",
+       "How long an Admin can be idle before the device signs out.", "people",
        section="Sessions", min=30, max=7 * 86400, unit="seconds", binding="file:security"),
-    _d("people.session_timeout_member", "integer", 3600, "Member session length",
-       "How long a Member session may sit idle before it ends.", "people", section="Sessions",
+    _d("people.session_timeout_user", "integer", 3600, "Users: sign out after idle",
+       "How long a User can be idle before the device signs out.", "people", section="Sessions",
        level="advanced", min=30, max=30 * 86400, unit="seconds", binding="file:security"),
-    _d("people.session_timeout_restricted", "integer", 1800, "Restricted session length",
-       "How long a Restricted profile's session may sit idle before it ends.", "people",
+    _d("people.session_timeout_basic", "integer", 1800, "Basic profiles: sign out after idle",
+       "How long a Basic profile can be idle before the device signs out.", "people",
        section="Sessions", level="advanced", min=30, max=30 * 86400, unit="seconds",
        binding="file:security"),
-    _d("people.remember_device_days", "integer", 0, "Remember signed-in devices",
-       "Off, or how many days a device that ticks 'keep this device signed in' at sign-in stays signed "
-       "in (renewed by use). Turning it off forgets every remembered device.", "people", section="Sessions", min=0, max=365,
-       unit="days", binding="file:security"),
-    _d("people.machine_loopback_trust", "boolean", True, "Trust programs on this computer",
-       "Let programs running on the same computer (agents, cron jobs) call the API without a key. "
-       "Turn off once every program uses the machine API key.", "people", section="Machines",
-       level="advanced", binding="file:security"),
-    _d("people.anonymous_access", "choice", "restricted", "A device that has not signed in",
-       "Restricted shows the Restricted profile's view; None shows only the sign-in screen.",
-       "people", section="Sessions", choices=["restricted", "none"],
-       choice_labels={"restricted": "Restricted view", "none": "Sign-in screen only"},
+    _d("people.lock_target", "choice", "profile_list", "After sign-out, open",
+       "What a device opens after someone signs out, and before anyone signs in: the shared "
+       "default profile or the sign-in screen.", "people", section="Sessions",
+       choices=["default_profile", "profile_list"],
+       choice_labels={"default_profile": "The default profile", "profile_list": "The sign-in screen"},
        binding="file:security"),
-    _d("people.restricted_daily_turns", "integer", 200, "Restricted: replies per day",
-       "How many messages one Restricted device or profile may send per day.", "people",
-       section="Restricted limits", env="DISPATCH_DECOY_TURN_QUOTA", restart_required=True,
-       min=0, max=100000),
-    _d("people.restricted_daily_threads", "integer", 50, "Restricted: new chats per day",
-       "How many new conversations one Restricted device or profile may start per day.", "people",
-       section="Restricted limits", env="DISPATCH_DECOY_THREAD_QUOTA", restart_required=True,
-       min=0, max=100000),
-    _d("people.restricted_daily_feedback", "integer", 100, "Restricted: ratings per day",
-       "How many reply ratings one Restricted device or profile may give per day.", "people",
-       section="Restricted limits", level="advanced", env="DISPATCH_DECOY_FEEDBACK_QUOTA",
-       restart_required=True, min=0, max=100000),
-    _d("people.restricted_daily_upload_bytes", "integer", 200 * 1024 ** 2, "Restricted: uploads per day",
-       "How much in pictures and files one Restricted device or profile may upload per day.",
-       "people", section="Restricted limits", level="advanced", env="DISPATCH_DECOY_UPLOAD_QUOTA",
+    _d("people.default_profile", "string", "", "Default profile",
+       "The profile a device opens after sign-out. It can't be an Admin "
+       "or have a PIN or password; agent bots and voice cloning are always off for it.", "people",
+       section="Sessions", level="advanced", binding="file:security"),
+    _d("people.remember_device_days", "integer", 0, "Remember signed-in devices",
+       "Off, or how many days a device stays signed in when 'Keep this device signed in' is ticked "
+       "(each use starts the count again). Off signs out every remembered device.", "people", section="Sessions", min=0, max=365,
+       unit="days", binding="file:security"),
+    _d("people.machine_loopback_trust", "boolean", False, "Trust programs on this computer",
+       "Let programs on the DisPatch computer (agents, scheduled jobs) use DisPatch without a key. "
+       "Turn off once every program sends the access key.", "people", section="Machines",
+       level="advanced", binding="file:security"),
+    # 4.3 Fable: the DNS-rebinding guard (policy.host_allowed). Drawn under System > Network.
+    _d("people.host_check", "choice", "log", "Unknown addresses",
+       "What happens when someone opens DisPatch by an address that is not on its list below. "
+       "'Allow and list them' lets them in and shows the address here so you can add it; "
+       "'Block them' refuses them, which stops a harmful web page from posing as DisPatch. Switch "
+       "to Block only when the list of unknown addresses holds nothing you use. If you lock "
+       "yourself out, set host_check: log in security.yaml and restart DisPatch.",
+       "people", section="Network", choices=["log", "enforce"],
+       choice_labels={"log": "Allow and list them", "enforce": "Block them"},
+       env="DISPATCH_HOST_CHECK", binding="file:security"),
+    _d("people.allowed_hosts", "list", [], "Other addresses for DisPatch",
+       "Extra names or addresses people use to open DisPatch, separated by commas, e.g. "
+       "chat.example.net, *.home.example (*. means any name ending in it). This computer's own "
+       "names and addresses are always allowed. DISPATCH_ALLOWED_HOSTS adds more.",
+       "people", section="Network", placeholder="chat.example.net, *.home.example",
+       binding="file:security"),
+    _d("people.machine_daily_upload_bytes", "integer", 200 * 1024 ** 2, "Program uploads per day",
+       "How much programs with the access key (agents, scheduled jobs) may upload "
+       "per day, all together, so a runaway agent can't fill the disk. People have no daily limit.",
+       "people", section="Machines", level="advanced", env="DISPATCH_MACHINE_UPLOAD_QUOTA",
        restart_required=True, min=0, unit="bytes"),
 
     # ========================== CHARACTERS =============================== #
-    _d("characters.default_audience", "choice", "members", "Audience for new characters",
-       "Who a character you add can be seen by unless you pick: Members (signed-in people), "
-       "Restricted (made for Restricted profiles) or Everyone.", "characters",
-       choices=["members", "restricted", "all"],
-       choice_labels={"members": "Members", "restricted": "Restricted profiles", "all": "Everyone"}),
     _d("characters.greeting", "boolean", False, "Greet new chats",
-       "Show a short canned greeting at the top of a new chat (no model call is made).",
+       "Show a short fixed greeting at the top of each new chat. No AI is asked.",
        "characters", env="DISPATCH_GREETING"),
 
     # ========================== CONNECTIONS ============================== #
-    _d("connections.allow_private_targets", "boolean", False, "Allow link-local and metadata targets",
-       "Connections to link-local and cloud-metadata addresses (169.254.x.x, fe80::, "
-       "metadata.google.internal) are refused to stop DisPatch being used to reach internal services. "
-       "Turn on only if you really run a model server there.", "connections", section="Safety",
+    _d("connections.allow_private_targets", "boolean", False, "Allow special network addresses",
+       "DisPatch refuses a few special addresses (169.254.x.x, fe80::, "
+       "metadata.google.internal) so nobody can use it to reach hidden services. "
+       "Turn on only if your AI server really is at one of them.", "connections", section="Safety",
        level="advanced"),
     _d("connections.discovery_targets", "list", list(DEFAULT_DISCOVERY_TARGETS), "Find servers: where to look",
        "The hosts Find servers probes for StudioForge, LM Studio, Ollama and OpenAI-style servers, on ports "
@@ -274,7 +346,7 @@ _CORE: tuple[SettingDef, ...] = (
        "whatever this says.", "connections", section="Safety", level="advanced",
        env="DISPATCH_DISCOVERY_PROBE_DOCKER_HOST"),
     _d("connections.default", "choice", "", "Default connection",
-       "The connection a new character uses when you do not pick one.", "connections",
+       "The connection a new bot uses when you don't pick one.", "connections",
        choices_from="connections", choices=[""], choice_labels={"": "None"}),
     _d("connections.clawforge_url", "url", "", "Image server (MCP) address",
        "An MCP image server (ClawForge or compatible) for picture jobs, e.g. http://host:8700/mcp.",
@@ -288,27 +360,27 @@ _CORE: tuple[SettingDef, ...] = (
        "DisPatch's own address as the image server sees it, so it can report a finished picture "
        "straight away instead of waiting to be asked.", "connections", section="Image server",
        level="advanced", env="DISPATCH_CALLBACK_BASE", restart_required=True),
-    _d("connections.image_jobs", "choice", "auto", "Picture jobs",
-       "Let characters ask for pictures. Automatic turns it on when an image server or image API is "
-       "configured.", "connections", section="Image server", env="DISPATCH_IMAGE_JOBS",
+    _d("connections.image_jobs", "choice", "auto", "Picture making",
+       "Let bots make pictures. Automatic turns it on when an image server or picture service is "
+       "set up.", "connections", section="Image server", env="DISPATCH_IMAGE_JOBS",
        restart_required=True, choices=["auto", "1", "0"],
        choice_labels={"auto": "Automatic", "1": "On", "0": "Off"}),
-    _d("connections.image_cli", "string", "", "Image command for picture pools",
-       "A command that makes one picture for the avatar and reaction pools. Empty turns the pools' "
-       "automatic top-up off.", "connections", section="Image server", level="advanced",
+    _d("connections.image_cli", "string", "", "Picture tool for refills",
+       "A command that makes one picture, used to refill picture sets and reaction pictures. "
+       "Empty turns automatic refills off.", "connections", section="Image server", level="advanced",
        env="DISPATCH_IMAGE_CLI"),
-    _d("connections.image_cli_timeout", "integer", 300, "Image command timeout",
-       "How long to wait for one picture from the image command.", "connections",
+    _d("connections.image_cli_timeout", "integer", 300, "Picture tool time limit",
+       "How long to wait for one picture from the picture tool.", "connections",
        section="Image server", level="advanced", env="DISPATCH_IMAGE_CLI_TIMEOUT", min=10, max=7200,
        unit="seconds"),
     _d("connections.gpu_cli", "string", "", "GPU status command",
-       "A command that reports free GPU memory, so pools stay off a busy card.", "connections",
+       "A command that reports free graphics-card memory, so refills wait while the card is busy.", "connections",
        section="Image server", level="advanced", env="DISPATCH_GPU_CLI"),
     _d("connections.gpu_lease_url", "url", "", "GPU lease address",
-       "A lease service the picture pools ask before using a shared GPU.", "connections",
+       "A booking service that refills ask before using a shared graphics card.", "connections",
        section="Image server", level="advanced", env="DISPATCH_GPU_LEASE_URL"),
     _d("connections.studioforge_panel", "boolean", False, "StudioForge panel tab",
-       "Show StudioForge's control panel as a tool in the left rail. Needs the panel address below.",
+       "Show StudioForge's control panel as a tool on the bar. Needs the panel address below.",
        "connections", section="StudioForge", env="DISPATCH_STUDIOFORGE", restart_required=True),
     _d("connections.studioforge_panel_url", "url", "", "StudioForge panel address",
        "Where StudioForge's panel is, e.g. http://192.0.2.20:8080.", "connections",
@@ -320,63 +392,64 @@ _CORE: tuple[SettingDef, ...] = (
 
     # ====================== TOOLS & MODULES ============================= #
     _d("tools.livetools_enabled", "boolean", True, "Built-in lookups",
-       "Web search, weather, Wikipedia, exchange rates and a calculator for direct-API characters. "
-       "Off removes them from every character at once.", "tools", section="Lookups",
+       "Web search, weather, Wikipedia, exchange rates and a calculator for bots that talk to an AI "
+       "service directly. Off removes them from every bot at once.", "tools", section="Lookups",
        binding="file:tools"),
     _d("tools.openclaw_bin", "string", "openclaw", "OpenClaw command",
-       "The openclaw program used for agent characters. Change it when it is not on the PATH.",
+       "The openclaw program agent bots use. Change it when it is not on the PATH.",
        "tools", section="Agents", level="advanced", env="OPENCLAW_BIN", legacy_prefix_alias=False,
        restart_required=True),
-    _d("tools.agent_timeout", "integer", 900, "Agent turn timeout",
-       "How long an agent may take to answer before the turn is abandoned.", "tools", section="Agents",
+    _d("tools.agent_timeout", "integer", 900, "Agent reply time limit",
+       "How long an agent may take to answer before DisPatch gives up.", "tools", section="Agents",
        level="advanced", env="DISPATCH_AGENT_TIMEOUT", restart_required=True, min=10, max=86400,
        unit="seconds"),
     _d("tools.agent_max_concurrency", "integer", 3, "Agents running at once",
-       "How many agent turns may run at the same time (protects local models).", "tools",
+       "How many agent replies may run at the same time (protects AI models on your own computers).", "tools",
        section="Agents", level="advanced", env="DISPATCH_MAX_CONCURRENCY", restart_required=True,
        min=1, max=64),
-    _d("tools.gateway_ws", "choice", "off", "Agent gateway socket",
-       "Off: replies are read from transcripts. Shadow: connect and compare without delivering. "
-       "On: replies arrive over the gateway socket.", "tools", section="Agents", level="advanced",
+    _d("tools.gateway_ws", "choice", "off", "Live agent replies (gateway connection)",
+       "Off: replies are read from the agents' records. Test: connect and compare, deliver nothing. "
+       "On: replies arrive live.", "tools", section="Agents", level="advanced",
        env="DISPATCH_GATEWAY_WS", restart_required=True, choices=["off", "shadow", "1"],
-       choice_labels={"off": "Off", "shadow": "Shadow (compare only)", "1": "On"}),
-    _d("tools.turn_transport", "choice", "auto", "How turns reach the agent",
-       "Automatic uses the gateway socket when connected, else the command line. Gateway only fails "
-       "a turn rather than falling back; Command line always spawns the agent.", "tools",
+       choice_labels={"off": "Off", "shadow": "Test only (compare)", "1": "On"}),
+    _d("tools.turn_transport", "choice", "auto", "How messages reach agents",
+       "Automatic uses the live connection when it is up, else starts the agent program. Live only "
+       "fails a message rather than fall back; Start the program always starts it.", "tools",
        section="Agents", level="advanced", env="DISPATCH_TURN_TRANSPORT", restart_required=True,
        choices=["auto", "1", "0"],
-       choice_labels={"auto": "Automatic", "1": "Gateway only", "0": "Command line"}),
-    _d("tools.mirror_enabled", "boolean", True, "Mirror gateway chats",
-       "Copy the agent runtime's own conversations into DisPatch threads.", "tools",
+       choice_labels={"auto": "Automatic", "1": "Live only", "0": "Start the program"}),
+    _d("tools.mirror_enabled", "boolean", True, "Copy agent chats into DisPatch",
+       "Copy conversations the agents have elsewhere into DisPatch chats.", "tools",
        section="Agents", level="advanced", env="DISPATCH_MIRROR", restart_required=True),
-    _d("tools.mirror_poll", "integer", 4, "Mirror check interval", "How often the mirror checks while busy.",
+    _d("tools.mirror_poll", "integer", 4, "Copying: check every",
+       "How often DisPatch checks for new agent messages while they are busy.",
        "tools", section="Agents", level="advanced", env="DISPATCH_MIRROR_POLL", restart_required=True,
        min=1, max=3600, unit="seconds"),
-    _d("tools.mirror_idle_max", "integer", 60, "Mirror idle interval",
-       "The longest the mirror waits between checks when nothing is happening.", "tools",
+    _d("tools.mirror_idle_max", "integer", 60, "Copying: longest wait when quiet",
+       "The longest DisPatch waits between checks when nothing is happening.", "tools",
        section="Agents", level="advanced", env="DISPATCH_MIRROR_IDLE_MAX", restart_required=True,
        min=1, max=86400, unit="seconds"),
-    _d("tools.mirror_horizon_h", "integer", 72, "Mirror history window",
-       "Conversations idle for longer than this when first seen are followed from now, not imported.",
+    _d("tools.mirror_horizon_h", "integer", 72, "Copying: how far back",
+       "A conversation quiet for longer than this when first found is followed from now on, not copied from its start.",
        "tools", section="Agents", level="advanced", env="DISPATCH_MIRROR_HORIZON_H",
        restart_required=True, min=1, max=24 * 365, unit="hours"),
-    _d("tools.mirror_kinds", "string", "webchat,main", "Mirror these session kinds",
-       "Comma-separated session kinds to mirror (webchat, main, other).", "tools", section="Agents",
+    _d("tools.mirror_kinds", "string", "webchat,main", "Copying: kinds of conversation",
+       "Which kinds to copy, separated by commas (webchat, main, other).", "tools", section="Agents",
        level="advanced", env="DISPATCH_MIRROR_KINDS", restart_required=True),
-    _d("tools.harness", "choice", "auto", "DeepSeek Harness pane",
-       "A coding-agent pane (needs the dsh program). Automatic turns it on when dsh is installed.",
+    _d("tools.harness", "choice", "auto", "Coding agent (DeepSeek Harness)",
+       "A coding agent page (needs the dsh program). Automatic turns it on when dsh is installed.",
        "tools", section="Harness", env="DISPATCH_HARNESS", restart_required=True,
        choices=_ONOFFAUTO, choice_labels=_ONOFFAUTO_LABELS),
     _d("tools.harness_unit", "string", "dsh-web.service", "Harness service name",
        "The systemd user unit that runs dsh web.", "tools", section="Harness", level="advanced",
        env="DISPATCH_HARNESS_UNIT", restart_required=True),
     _d("tools.harness_port", "integer", 3080, "Harness port",
-       "The loopback port dsh web listens on.", "tools", section="Harness", level="advanced",
+       "The port the coding agent's screen uses on the DisPatch computer.", "tools", section="Harness", level="advanced",
        env="DISPATCH_HARNESS_PORT", restart_required=True, min=1, max=65535),
     _d("tools.harness_remote_url", "url", "", "Harness address for other devices",
        "An address a browser elsewhere can open for the harness page.", "tools", section="Harness",
        level="advanced", env="DISPATCH_HARNESS_REMOTE_URL", restart_required=True),
-    _d("tools.mail", "choice", "auto", "Emails pane (MailForge)",
+    _d("tools.mail", "choice", "auto", "Emails page (MailForge)",
        "Show MailForge's dashboard as a tool. Automatic turns it on when MailForge's runtime files "
        "are found.", "tools", section="MailForge", env="DISPATCH_MAIL", restart_required=True,
        choices=_ONOFFAUTO, choice_labels=_ONOFFAUTO_LABELS),
@@ -386,8 +459,8 @@ _CORE: tuple[SettingDef, ...] = (
     _d("tools.mail_remote_url", "url", "", "MailForge address for other devices",
        "The address a browser elsewhere can open for MailForge.", "tools", section="MailForge",
        level="advanced", env="DISPATCH_MAIL_REMOTE_URL", restart_required=True),
-    _d("tools.practice", "choice", "auto", "Clients pane",
-       "A client-pipeline dashboard proxied from another service on this computer. Automatic turns "
+    _d("tools.practice", "choice", "auto", "Clients page",
+       "A client dashboard from another program on the DisPatch computer. Automatic turns "
        "it on when its PIN file exists.", "tools", section="Clients pane", level="advanced",
        env="DISPATCH_PRACTICE", restart_required=True, choices=_ONOFFAUTO,
        choice_labels=_ONOFFAUTO_LABELS),
@@ -406,14 +479,14 @@ _CORE: tuple[SettingDef, ...] = (
     _d("appearance.default_language", "choice", "en", "Default language",
        "The language a device uses until its user picks another.", "appearance",
        choices_from="locales", choices=["en"]),
-    _d("appearance.avatar_style", "choice", "rich", "Default avatar style",
-       "Rich shows full pictures, Minimal shows small round avatars. A device can override it.",
+    _d("appearance.avatar_style", "choice", "rich", "Default picture style",
+       "Pictures, or names instead of pictures. Each device can choose its own (Appearance).",
        "appearance", choices=["rich", "minimal"],
-       choice_labels={"rich": "Rich", "minimal": "Minimal"}),
+       choice_labels={"rich": "Pictures", "minimal": "Names only"}),
 )
 
 #: Settings that run a program, name a file or a server the host will contact, or change who can
-#: reach DisPatch and how: host control (``admin_system``), which the Owner and Admins hold and a
+#: reach DisPatch and how: host control (``admin_system``), which every Admin holds and a
 #: profile merely granted ``manage_settings`` does not. The flag keeps its 3.0 name ``owner_only``.
 #: Everything under ``system.`` is here; the rest are the named ones.
 OWNER_ONLY_PREFIXES: tuple[str, ...] = (
@@ -421,7 +494,8 @@ OWNER_ONLY_PREFIXES: tuple[str, ...] = (
     "tools.mirror_", "tools.harness", "tools.mail", "tools.practice",
     "connections.allow_private_targets", "connections.clawforge", "connections.callback_base",
     "connections.image", "connections.gpu", "connections.studioforge",
-    "people.machine_loopback_trust", "people.anonymous_access",
+    "people.machine_loopback_trust", "people.lock_target", "people.default_profile",
+    "people.host_check", "people.allowed_hosts",
 )
 
 CORE_SETTINGS: tuple[SettingDef, ...] = tuple(
@@ -436,15 +510,19 @@ UI_SECTIONS: tuple[tuple[str, str], ...] = (
     ("system.public_url", "system#network"),
     ("system.behind_tls", "system#network"),
     ("system.network_exposure", "system#network"),
+    ("people.host_check", "system#network"),
+    ("people.allowed_hosts", "system#network"),
     ("system.backup_", "system#backups"),
     ("system.encrypted_backup_", "system#backups"),
     ("system.", "system"),
     ("people.lock_timeout_seconds", "people#signin-rules"),
     ("people.session_timeout_", "people#signin-rules"),
     ("people.remember_device_days", "people#signin-rules"),
-    ("people.anonymous_access", "people#signin-rules"),
-    ("people.machine_loopback_trust", "people#machine"),
-    ("people.restricted_daily_", "people#restricted-limits"),
+    # Drawn by the People pane's own "When locked, show" picker (people-perms.js lockTargetGroup,
+    # anchor lock-target), never as schema rows: the frontend lists both in BESPOKE_KEYS.
+    ("people.lock_target", "people#lock-target"),
+    ("people.default_profile", "people#lock-target"),
+    ("people.machine_", "people#machine"),
     ("characters.", "characters"),
     ("connections.default", "connections#list"),
     ("connections.image_jobs", "connections#images"),
@@ -472,10 +550,10 @@ PRESETS: dict[str, tuple[int, ...]] = {
     "system.encrypted_backup_interval_hours": (6, 12, 24, 48, 168),
     "system.files_total_max": tuple(n * 1024 ** 3 for n in (1, 5, 10, 20, 50, 100)),
     "people.lock_timeout_seconds": (60, 300, 600, 900, 1800, 3600, 2 * 3600, 4 * 3600, 86400),
-    "people.session_timeout_member": (900, 1800, 3600, 2 * 3600, 4 * 3600, 8 * 3600, 86400, 7 * 86400),
-    "people.session_timeout_restricted": (600, 900, 1800, 3600, 2 * 3600, 4 * 3600),
+    "people.session_timeout_user": (900, 1800, 3600, 2 * 3600, 4 * 3600, 8 * 3600, 86400, 7 * 86400),
+    "people.session_timeout_basic": (600, 900, 1800, 3600, 2 * 3600, 4 * 3600),
     "people.remember_device_days": (0, 7, 30, 90, 180, 365),
-    "people.restricted_daily_upload_bytes": (0, *(n * 1024 ** 2 for n in (50, 100, 200, 500, 1024))),
+    "people.machine_daily_upload_bytes": (0, *(n * 1024 ** 2 for n in (50, 100, 200, 500, 1024))),
     "connections.image_cli_timeout": (60, 120, 300, 600, 1200),
     "tools.agent_timeout": (120, 300, 600, 900, 1800, 3600, 2 * 3600),
     "tools.mirror_poll": (2, 4, 10, 30, 60),
@@ -508,7 +586,10 @@ def _placed(d: SettingDef) -> SettingDef:
 CORE_SETTINGS = tuple(_placed(d) for d in CORE_SETTINGS)
 
 #: key -> reason it was removed, so an old database row is reported rather than dropped.
-RETIRED: dict[str, str] = {}
+RETIRED: dict[str, str] = {
+    "characters.default_audience": "4.0: who uses a character is each profile's household list "
+                                   "(People), not an audience",
+}
 
 _registry: dict[str, SettingDef] = {d.key: d for d in CORE_SETTINGS}
 _plugin_keys: dict[str, set[str]] = {}          # owner -> keys it contributed
@@ -536,15 +617,6 @@ def all_defs() -> list[SettingDef]:
 
 def get_def(key: str) -> SettingDef | None:
     return _registry.get(key)
-
-
-def by_env() -> dict[str, SettingDef]:
-    """env variable suffix (``BACKUP_KEEP``, ``OPENCLAW_BIN``) -> its definition."""
-    out: dict[str, SettingDef] = {}
-    for d in _registry.values():
-        for name in d.env_names():
-            out[name] = d
-    return out
 
 
 def register(defs: list[SettingDef], owner: str) -> None:
@@ -781,7 +853,8 @@ _SECTION_NAMES = {"appearance": "Appearance", "account": "Account", "voice": "Vo
                   "characters": "Characters", "connections": "AI & Connections",
                   "people": "People & Access", "plugins": "Plugins & Apps", "system": "System"}
 _ANCHOR_NAMES = {"network": "Network", "backups": "Backups", "signin-rules": "Sign-in rules",
-                 "machine": "Machine access", "restricted-limits": "Restricted limits",
+                 "lock-target": "Default profile",
+                 "machine": "Access for programs",
                  "list": "Connections", "images": "Image generation", "agents": "Agents",
                  "lookups": "Built-in lookups"}
 
@@ -814,8 +887,9 @@ def markdown_reference() -> str:
         "**Env** is the variable that overrides the setting. `DISPATCH_X` also answers to the legacy "
         "`LOCAL_CHAT_X`. A setting set by an environment variable shows *set by environment* in the "
         "app and cannot be changed there. **Restart** means the new value is used from the next start. "
-        "*Host control* settings run a program, name a server the host contacts, or change who can reach DisPatch: "
-        "they need `admin_system` (the Owner and Admins); a profile granted only `manage_settings` cannot change them.",
+        "*Owner only* settings run a program, name a server the DisPatch computer contacts, or change who can "
+        "reach DisPatch: "
+        "they need `admin_system` (Admins); a profile granted only `manage_settings` cannot change them.",
         "",
     ]
     for gid, label, desc in GROUPS:
@@ -843,7 +917,7 @@ def markdown_reference() -> str:
                 rng = f" In {d.unit}."
             env = " / ".join(f"`{n}`" for n in d.env_names()) or ""
             desc_txt = d.description.replace("|", "\\|") + rng
-            sec = (" *(secret, write-only)*" if d.secret else "") + (" *(host control)*" if d.owner_only else "")
+            sec = (" *(secret, write-only)*" if d.secret else "") + (" *(Owner only)*" if d.owner_only else "")
             out.append(f"| `{d.key}` | {d.type} | {default} | {d.level} | "
                        f"{'yes' if d.restart_required else ''} | {env} | {shown_in(d.ui_section)} | "
                        f"{desc_txt}{sec} |")

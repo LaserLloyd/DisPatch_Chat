@@ -20,12 +20,20 @@ const MAIN = read('js/main.js');
 const EN = JSON.parse(read('locales/en.json'));
 const get = (o, k) => k.split('.').reduce((a, p) => (a == null ? a : a[p]), o);
 
-test('seven sections in two groups (plus Voice), in nav order', () => {
+test('eight sections in three groups (You, Bots & characters, Household), in nav order', () => {
   assert.deepEqual(SECTION_IDS, ['appearance', 'account', 'voice', 'characters', 'connections', 'people', 'plugins', 'system']);
   assert.deepEqual(SECTIONS.filter((s) => s.group === 'you').map((s) => s.id), ['appearance', 'account', 'voice']);
+  assert.deepEqual(SECTIONS.filter((s) => s.group === 'bots').map((s) => s.id), ['characters']);
   assert.deepEqual(SECTIONS.filter((s) => s.group === 'household').map((s) => s.id),
-    ['characters', 'connections', 'people', 'plugins', 'system']);
+    ['connections', 'people', 'plugins', 'system']);
   for (const s of SECTIONS) assert.ok(get(EN, s.label), `${s.id}: ${s.label} is in en.json`);
+});
+
+test('the markup lists the sections in SECTIONS order, each group heading right before its first section', () => {
+  const order = [...HTML.matchAll(/id="stab-([a-z]+)"|id="snav-h-([a-z]+)"/g)].map((m) => (m[1] ? m[1] : `#${m[2]}`));
+  assert.deepEqual(order, ['#you', 'appearance', 'account', 'voice', '#bots', 'characters', '#household', 'connections', 'people', 'plugins', 'system', '#addons']);
+  // the Bots heading goes with the Characters tab: a profile that cannot see Characters sees no heading
+  assert.match(MAIN, /getElementById\('snav-h-bots'\)[\s\S]{0,200}toggle\('hidden', !ok\)/);
 });
 
 test('every tab id Settings ever had resolves to a section (and keeps its subsection)', () => {
@@ -73,8 +81,9 @@ test('the voice add-on\'s settings.open(\'voice\') and shell.settings.pane(\'voi
   assert.deepEqual(resolveSettingsTarget('voice'), { id: 'voice', anchor: '' });
   assert.match(HTML, /id="spane-voice"[^>]*>\s*<div class="ext-pane" id="ext-pane-voice"><\/div>/);
   assert.match(MAIN, /openSettings: \(id\) => openSettingsTab\(id\)/);
-  // The add-on's per-character control saves at once now, like the switches beside it.
-  assert.match(MAIN, /const extras = botRowExtrasFor\(cur\(\), \(patch\) => \{[\s\S]{0,400}if \(any\) saveRoster\(/);
+  // The add-on's per-character control lives in the Characters page's Details (4.3 F1b): main.js
+  // hands botRowExtrasFor to the page, which PATCHes voice / voice_rp at once.
+  assert.match(MAIN, /deps: \{ openTab: \(tab\) => setSettingsTab\(tab\), botRowExtrasFor, isMenuBot, toggleMenuBot, renderSidebar,/);
 });
 
 test('every static search row names a section, an anchor that exists in the markup or a module, and a real label', () => {
@@ -84,14 +93,14 @@ test('every static search row names a section, an anchor that exists in the mark
   }
   const anchors = new Set([...HTML.matchAll(/data-anchor="([^"]+)"/g)].map((m) => m[1]));
   // Anchors set by modules at mount time.
-  for (const a of ['people', 'device', 'machine', 'activity', 'signin-rules', 'restricted-limits', 'addons', 'tools', 'lookups',
-    'discover', 'hidden-bots']) anchors.add(a);
+  for (const a of ['people', 'device', 'machine', 'activity', 'signin-rules', 'lock-target', 'addons', 'tools', 'lookups',
+    'discover', 'reset', 'mydata', 'mine', 'household']) anchors.add(a);
   for (const r of STATIC_ROWS) if (r.anchor) assert.ok(anchors.has(r.anchor), `anchor ${r.anchor}`);
 });
 
 test('search: static rows and schema rows, only what this session may see, label matches first', () => {
   const schema = { settings: [
-    { key: 'people.lock_timeout_seconds', label: 'Owner and Admin auto-lock', description: 'How long a session may sit idle.', group: 'people', ui_section: 'people#signin-rules' },
+    { key: 'people.lock_timeout_seconds', label: 'Admin auto-lock', description: 'How long a session may sit idle.', group: 'people', ui_section: 'people#signin-rules' },
     { key: 'system.backup_keep', label: 'Snapshots to keep', description: 'How many.', group: 'system', ui_section: 'system#backups' },
   ] };
   const t = (k) => get(EN, k) || k;
@@ -122,7 +131,7 @@ test('schemaTarget: ui_section wins, else the group\'s section', () => {
 
 test('index.html: a vertical tablist with group headings, a search box and a back button; no tab strip', () => {
   assert.match(HTML, /<div class="settings-tabs" id="settings-tabs" role="tablist" aria-orientation="vertical"/);
-  for (const g of ['you', 'household', 'addons']) assert.match(HTML, new RegExp(`data-i18n="settings\\.group_${g}"`));
+  for (const g of ['you', 'bots', 'household', 'addons']) assert.match(HTML, new RegExp(`data-i18n="settings\\.group_${g}"`));
   assert.match(HTML, /<input type="search" class="ui-input settings-search-input" id="settings-search"[^>]*role="combobox"/);
   assert.match(HTML, /id="settings-search-results" role="listbox"/);
   assert.match(HTML, /id="settings-back" hidden/);
@@ -155,13 +164,13 @@ test('app.css: the side nav is a desktop column; under 900px the nav is the page
   assert.match(css, /\[dir="rtl"\] \.settings-back svg \{ transform: scaleX\(-1\); \}/);
 });
 
-test('Account: one sign-in change at a time, by role; a Member changes their own PIN; paths only for the Owner', () => {
+test('Account: one sign-in change at a time, by profile; every non-shared profile changes its own PIN; paths only for the protected Admin', () => {
   const fn = MAIN.slice(MAIN.indexOf('function accountChoices()'), MAIN.indexOf('let accountChoice ='));
   assert.match(fn, /out\.push\(a\.pinSet \? 'pin_change' : 'pin_set'\);/);
   assert.match(fn, /if \(a\.claimed\) out\.push\(a\.needsPassword \? 'pw_set' : 'pw_change'\);/);
   assert.match(fn, /if \(a\.pinSet\) out\.push\('pin_remove'\);/);
-  assert.match(fn, /\} else if \(state\.role === 'admin'\) \{\s+out\.push\(a\.needsPassword \? 'pw_set' : 'pw_change'\);/);
-  assert.match(fn, /\} else if \(state\.role === 'member'\) \{\s+out\.push\('my_pin'\);/);
+  assert.match(fn, /\} else if \(!\(a\.profile && a\.profile\.shared\)\) \{/);
+  assert.match(fn, /if \(state\.role === 'admin'\) out\.push\(a\.needsPassword \? 'pw_set' : 'pw_change'\);\s+\/\/[^\n]*\n\s+out\.push\(selfCredential\(\) === 'none' \? 'my_pin_set' : 'my_pin'\);/);
   // The PIN form and the password form never show together.
   const open = MAIN.slice(MAIN.indexOf('function openAccountForm('), MAIN.indexOf('function activateSecurityPane('));
   assert.match(open, /pinForm\.hidden = !pinModes\.includes\(accountChoice\);/);
@@ -175,11 +184,9 @@ test('Account: one sign-in change at a time, by role; a Member changes their own
   for (const c of ['pin_change', 'pin_set', 'pin_remove', 'pw_set', 'pw_change', 'my_pin']) assert.ok(EN.acct[`opt_${c}`], c);
 });
 
-test('Restricted: the gear says Companions (with a people icon), not Settings', () => {
-  const fn = MAIN.slice(MAIN.indexOf('function syncGearButton()'), MAIN.indexOf('function wireRecoveryUi()'));
-  assert.match(fn, /const key = comp \? 'companions\.title' : 'nav\.settings';/);
-  assert.match(fn, /railIcon\(comp \? RAIL_ICONS\.users : RAIL_ICONS\.gear\)/);
-  assert.match(MAIN, /if \(dom\['unlock-btn'\]\) dom\['unlock-btn'\]\.classList\.toggle\('hidden', !state\.decoy\);\n  syncGearButton\(\);/);
+test('the gear always opens Settings (no Companions face, no unlock button)', () => {
+  assert.doesNotMatch(MAIN, /syncGearButton|companions|unlock-btn/);
+  assert.match(MAIN, /dom\['manage-bots'\]\.addEventListener\('click', \(\) => \{ openBotManager\(\); \}\);/);
 });
 
 // Every literal Settings target in the code must land where its content lives:
@@ -365,9 +372,9 @@ test('main.js: one deep-link follow at a time - a new reveal, a section change o
 test('app.css: plain notes inside Settings cards read at the card size, not the fluid body size', () => {
   const css = read('app.css');
   // Every note in the backups card (the schedule line, "No backups yet" inside the list, the
-  // status line), the backups checkbox and a character's agent note.
-  assert.match(css, /#botmanager \.settings-pane :is\(\.sys-backups-host p\.muted, \.sys-backups-host \.bkp-check, \.chr-drawer \.chr-panel > p\.muted\) \{ font-size: 13px;/);
-  // Only those three: other notes in Settings (the Account card's .muted) keep their own size.
+  // status line) and the backups checkbox (the old roster drawer's agent note went with the drawer, 4.3 L3).
+  assert.match(css, /#botmanager \.settings-pane :is\(\.sys-backups-host p\.muted, \.sys-backups-host \.bkp-check\) \{ font-size: 13px;/);
+  // Only those: other notes in Settings (the Account card's .muted) keep their own size.
   assert.doesNotMatch(css, /\.settings-pane :is\(p\.muted\b/);
 });
 
@@ -416,4 +423,17 @@ test('createRevealer: the later deep link wins in either order, and closing mid-
   const ticket = r.begin();
   r.end();
   assert.equal(r.reveal(ticket, {}, 'viewer', 'system'), true);
+});
+
+test('search lists a setting once when a section draws it with its own control under the same name', async () => {
+  const N = await import('../static/js/settings-nav.js');
+  const schema = { settings: [
+    { key: 'people.lock_target', label: 'When locked, show', ui_section: 'people#lock-target', group: 'people' },
+    { key: 'people.default_profile', label: 'Default profile', ui_section: 'people#lock-target', group: 'people' },
+  ] };
+  const t = (k) => (k === 'lock.target_title' ? 'When locked, show' : k);
+  const index = N.buildSearchIndex({ t, schema });
+  const hits = N.searchSettings(index, 'when locked');
+  assert.equal(hits.filter((h) => h.label === 'When locked, show').length, 1);
+  assert.ok(N.searchSettings(index, 'default profile').some((h) => h.anchor === 'key:people.default_profile'));
 });

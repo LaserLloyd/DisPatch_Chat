@@ -7,7 +7,479 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-11-01
+
+The 37 open GitHub issues from the 3.0 review, a host tier for the main Admin, agent schedules and two new agent
+backends, outside sign-in (OpenID Connect), and the old Settings roster removed. See
+backend/app/guide/whats-new-4.3.0.md. **Upgrade notes** are at the end of this entry; two of them change what a
+second Admin or an unattended agent can do.
+
 ### Security
+
+- **Host allow-list against DNS rebinding.** A request whose `Host` names neither this computer (loopback,
+  hostname, `.local`, `<hostname>.<tailnet>.ts.net`, an interface address) nor the public URL, a single-address <!-- scrub-ok: Tailscale's own domain suffix, not a real tailnet -->
+  trusted proxy or an `allowed_hosts` entry is logged (`host_check: log`, the default) or refused with 421
+  `host_not_allowed` before sign-in (`host_check: enforce`; `DISPATCH_HOST_CHECK`, `DISPATCH_ALLOWED_HOSTS`).
+  Settings → System → Network shows the unknown names with an Allow button (`GET /api/system/host-check`, Owner
+  only); both settings are host tier. See docs/security.md "Addresses DisPatch answers to".
+- **The shared default profile never has a PIN or password.** Choosing a profile with one as the default was
+  already refused (422 `lock_target_invalid`); now setting a PIN or password ON the current default profile is
+  refused too, for an Admin in People (`POST /api/people/{id}/pin`, `/password`) and for the profile itself
+  (`POST /api/auth/pin`, which answered 403 `lock_target_fence` before): 409 `default_profile_no_credential`, "The
+  shared default profile cannot have a PIN or password. Pick another default profile in Settings > People first."
+  One guard in `accounts.update_profile` refuses it for every writer. Settings shows a sentence instead of Set PIN
+  on that profile.
+- **Host tier: host-level powers are the Owner's (the main, protected Admin) only.** Since 3.0 every Admin held
+  `admin_system`, so a second Admin could already run code on the host through the coding harness. A new
+  `Requirement.host` flag in `route_policy.py` (`"host": true` in `docs/contracts/routes.json`) is enforced by
+  `policy.authorize` (`Principal.is_host` = the protected Admin, or an install nobody has claimed; never a machine).
+  A second Admin now gets 403 `host_owner_only` on the coding harness (`/api/harness/*`), the local file viewer
+  (`/api/local/*`, `/local/file/*`), the MailForge status/launch route (`/api/mail/status`), the practice proxy
+  (`/api/practice/*`, `/api/practice-links/*`), transcript recovery (`/api/recover/transcript`) and the OpenClaw
+  session list, transcript and import (`/api/openclaw/sessions`, `/api/openclaw/transcript`,
+  `/api/openclaw/import`: they read session stores outside the data folder; before, any profile holding
+  `manage_agents` reached them). A typed
+  `[[media:/local/path]]` in a chat is copied off the host only for the Owner. The settings that name a program
+  DisPatch runs or a host file it reads or writes (`tools.openclaw_bin`, `connections.image_cli`,
+  `connections.gpu_cli`, `tools.harness_unit`, `system.log_file`, `tools.mail_data_dir`,
+  `tools.practice_pin_file`) are the Owner's too, and show "Owner only" to other Admins. This narrows the 4.0
+  rule "Admin = every Owner permission" for host-level powers only. Every Admin keeps People, Characters, backups,
+  storage and maintenance, network, plugins, the dashboard and the data invariants. An install with one Admin sees
+  no change. `tests/test_i43_host_tier.py` classifies every `admin_system` route.
+- **Agent host powers are the Owner's (#30).** Shell and file tools (`Bash`, `BashOutput`, `KillShell`, `Edit`,
+  `MultiEdit`, `Write`, `NotebookEdit`, and glob entries such as `*` that cover them), taking any tool out of
+  `always_ask` (for a new agent: anything narrower than the shipped list), an interactive agent with an empty
+  `always_ask`, local-program (stdio) and privileged MCP servers, `unattended_allow`, `trust_repo_settings`, a
+  header secret sent to a server that is not on this computer, every new `bash_allow` entry, and `repo_path` on
+  `POST /api/tasks` need the protected Admin. Grants are compared one by one against the stored agent, so an Admin
+  can still edit an agent the Owner approved.
+- **Only `localhost`, `127.0.0.1` and `::1` count as local for header secrets (#37).** `foo.localhost` and the
+  rest of 127/8 are remote, so sending a secret there is an Owner grant.
+- **Connections (#31).** Only the Owner can name a server environment variable as a connection key
+  (403 `env_key_owner_only`) on `POST/PATCH /api/connections`, `POST /api/llm/connect` (both backends),
+  `POST /api/llm/quicksetup` and the image API form (`PUT /api/llm/image`, `/api/llm/image/test`). Moving a
+  connection that holds a key (stored or environment) to another server now compares scheme, host and port (it
+  was host only) and needs the Owner, as does changing a connection's required permission. Renaming a connection or
+  changing its model stays every Admin's, also when the form re-sends the variable it already names.
+  `POST /api/connections/test` with `use_connection` and no address now tests the connection's own address (it
+  used the type's default, so a proxy connection's key could reach the vendor). `POST /api/llm/test` uses a server
+  variable or a bot's saved key only against that bot's own server for a non-Owner Admin.
+  `POST /api/llm/connect` re-saving a bot at another server with its saved key needs the Owner.
+- **Unclaimed install (#2).** An install nobody has claimed answers only a browser on this computer that typed a
+  loopback address (`localhost`, `127.x`, `[::1]`). A page that points its own name at 127.0.0.1 (DNS rebinding)
+  or posts from another site gets 403 `setup_required`; `/ws` and the add-on socket close. With
+  `DISPATCH_ALLOW_OPEN_INSTALL=1` the Host is not checked, but another site's page still cannot post. One predicate
+  (`policy.local_setup_request`) decides it for HTTP, `/ws` and the add-on socket.
+- **One sign-in throttle (#3).** Unlock, profile sign-in and switch, the setup token, the recovery code, password
+  and PIN changes, the backup-key reveal and outside sign-in all go through `auth_attempts.guarded_verify`. At the
+  install-wide ceiling only a remembered device of that profile, or a browser on this computer, has its credential
+  checked; every other device waits, right PIN or not. IPv6 clients are counted per /64.
+- **Session caps (#4).** Picking a profile with no PIN is limited to 20 sign-ins per address per 10 minutes. A
+  profile holds at most 64 live sessions (2,000 for the install): the oldest one that is not a remembered device
+  makes room; when all of them are remembered devices the sign-in is refused with 429 `too_many_sessions`.
+- **Forwarded headers (#5).** `X-Forwarded-For` / `X-Forwarded-Proto` are believed only from loopback or a
+  configured proxy: `trusted_proxies` in `security.yaml`, or `DISPATCH_TRUSTED_PROXIES` (comma-separated CIDRs).
+  The same rule decides the throttle address, so behind the shipped Caddy profile every client now has its own
+  bucket and `Secure` cookies work.
+- **A wrong API key is refused (#7)**, with 401 `invalid_api_key`, even from this computer with
+  `machine_loopback_trust` on. A fresh install starts with `machine_loopback_trust: false`; an existing
+  `security.yaml` without the key keeps `true`. Startup logs one posture line and warns while loopback trust is on.
+- **Masked settings (#6).** `GET /api/settings` sends values of keys the schema does not know as
+  `{masked, type, length}`, never the value. The agent and connection secret files are made private with
+  `fsperm.ensure_private` after every write (an owner-only ACL on Windows).
+- **Sockets (#33).** A tab on the shared default profile that only listens is signed out at the next server event
+  when the Owner disables that profile, sets a PIN on it, changes its role or moves the lock target.
+- **Fired reaction pictures belong to the bot that fired them.** A picture fired from Bits' pool is served only to
+  whoever may see Bits, no longer to any signed-in profile that has its id. Pictures fired before 4.3 are served as
+  before.
+- **Give-to and Stop sharing previews** are bound to the Admin who previewed them and to the exact profile lists.
+  Another Admin spending the token gets 409 `give_to_stale` / `stop_sharing_stale`.
+- **Claude Agent tool policy (#8).** Every tool call passes an always-on policy check (`agents/tool_policy.py`) in
+  all three modes. A file or folder outside the task's workspace (symlinks and `..` resolved) is refused with a
+  reason the agent sees.
+- **Approvals (#34).** Two answers to one approval request can no longer both succeed: one wins, the other gets 404
+  `approval_not_found`, and the audit row keeps the first decision.
+- Dependencies: pillow 13.0.0 and certifi 2026.10.23 (security advisories).
+
+### Added
+
+- **Animal Friends starter pack** (`backend/app/starter_packs/animal_friends.yaml`): eight gentle animal bots for
+  small children (lobster, fruit bat, octopus, bee, owl, frog, tortoise, penguin), each with a kid-safe persona, a
+  Kokoro voice and a picture. Install copies the pictures (`backend/app/starter_packs/pictures/`) into the avatar
+  folder under the upload route's names. Pack `defaults` may now set `advisor.owner`, `advisor.history_chars` and
+  `max_tokens`; Animal Friends sets tools and quick actions off. New route
+  `GET /api/starter-packs/{pack_id}/pictures/{character_id}` (manage_characters) serves a pack bot's small picture.
+- **Add-a-pack dialog**: a starter pack opens a dialog with a checkbox per bot (bots already added are ticked,
+  greyed and marked Added), Select all, the connection picker, **Add selected (N)**, **Add all** and Cancel. It sends
+  `only` with the chosen ids. Household also shows the packs as cards for anyone who manages characters.
+- **Agent schedules (#13).** Tasks → Schedules runs an agent on a rule: every N minutes (15 or more), every day at a
+  time, or every week on a day at a time, in a chosen time zone, optionally posting into one of your own chats.
+  Missed runs are not replayed (one catch-up run). A schedule that can no longer run switches itself off and says
+  why; the owner gets one chat line and a push. `GET/POST /api/agents/schedules`,
+  `PATCH/DELETE /api/agents/schedules/{id}`. Admins can see everyone's schedules and pause or delete them, but not
+  read another profile's prompt.
+- **Command-line agent backend (`cli`, #13).** Runs a program the Owner saved under Settings → AI & Connections →
+  Agents → Command-line programs (`GET/PUT /api/agents/cli-presets`, Owner only). The program must print Claude
+  `stream-json` lines. Off unless the Owner adds a program.
+- **Claude Managed Agents backend (`managed`, #13).** Off by default (`agents.managed.enabled`), **not verified
+  against the live service**: it was tested only against recorded event streams.
+- **Default limits for agent tasks (#10).** $2.00 and 60 turns per task, $10.00 per agent per day, when the agent
+  sets none. Admins change them in Settings → AI & Connections → Agents → Default limits for tasks
+  (`agents.default_max_usd`, `agents.default_max_turns`, `agents.default_max_usd_per_day`). They apply to agent
+  tasks only: chat turns with Bits and the others, and the advisor's hand-off and research runs, are never limited
+  by them. Money limits apply only to backends that report money (Claude); OpenClaw tasks get the turn limit only.
+- **Approval timeout (#11).** An approval nobody answers within `agents.approval_timeout_s` (default 30 minutes) is
+  denied, recorded `expired`, and the task's chat says so. Task cards show "Waiting for your OK (n min left)".
+- **Bash allow-list (#8).** Per agent, "Shell commands that may run without asking" (`approval_policy.bash_allow`,
+  command prefixes). A command that matches one prefix as a whole single command runs without a card; any other
+  Bash call asks (interactive) or is refused (unattended, plan). Each new entry needs the Owner.
+- **Claude provider routes (#9).** Amazon Bedrock, Google Cloud and Microsoft Foundry now pass their credentials from
+  the server environment (a fixed list of variable names per route) and refuse to start with `auth_failed` naming
+  what is missing. `GET /api/agents/claude/routes`; the picker greys out a route this computer cannot use and lists
+  what it needs. **Unverified live**: no cloud credentials were available, only fake environments.
+- **Outside sign-in (OpenID Connect, #24).** Off by default. The Owner sets one provider in Settings → System →
+  Outside sign-in. A profile signs in with it only after it was linked (People → Link sign-in, or Settings →
+  Account for your own profile): no new profiles, no matching by email. Needs an https `DISPATCH_PUBLIC_URL`. See
+  [docs/oidc.md](docs/oidc.md).
+- **Show recovery key (#17).** Settings → System → Backups, the Owner only, after typing the PIN or password again;
+  shows a key DisPatch generated (never a passphrase you chose). `POST /api/backups/recovery-key/reveal`.
+- **Settings links (#27).** `#settings`, `#settings/<section>` and `#settings/<section>/<anchor>` open Settings there.
+- **Characters → Mine keeps your own order.** Drag a bot by its grip, or use Move up / Move down in its ☰ menu
+  (keyboard and screen readers hear the new position). `PUT /api/me/characters/order` reorders only your own bots;
+  the rail drag works for every signed-in profile through it. Basic profiles get Characters → Mine to put their bots
+  in order. Details → Abilities has Reactions and Avatar pool switches, and the voice add-on's voice picker. The ☰
+  menu has "Show in Tools & more only (this device)" and back.
+- New invariants: **I9** no two connections with the same type, address and key (report-only), **I10** every
+  enabled schedule names a live owner and an agent that owner may use, **I11** outside sign-in links name live
+  profiles and the Owner keeps a local credential, **I12** the default profile is enabled, not an Admin, and has
+  no PIN or password.
+- **Windows installer (#23).** A per-user installer, built on demand and on tags
+  (`.github/workflows/windows-installer.yml`); listens on 127.0.0.1 until `launcher.json` says otherwise;
+  uninstall keeps your data unless you ask. Built only on a Windows runner, not on this project's own machines yet.
+- **Container (#12, #16, #38, #15).** `--build-arg AGENTS_CLAUDE=1` (or `AGENTS_CLAUDE=1` in `.env`) installs the
+  Claude Agent backend, with its own bundled CLI (no Node.js; about 300 MB more). `docker-compose.yml` runs the app
+  with a read-only root and a 64 MB `/tmp`; uploads still spool through `/data/tmp`. `HOME` is `/data/home`, on the
+  data volume (an old `/home/app/.openclaw` mount is linked into it). The Caddy profile sits on a fixed address of
+  a declared subnet (`DISPATCH_NET_PREFIX` to change it) and the app trusts forwarded headers
+  from that one address. Compose passes `DISPATCH_PUBLIC_PORT` for the setup banner. `deploy/compose/stack.yml`
+  no longer pins its network name.
+- **Logs without a log file (#18).** The log view in Settings → System (the dashboard) and the support bundle read the last 2,000 log lines
+  from memory when no log file is configured; every line passes the redactor first. The setup banner prints
+  `DISPATCH_PUBLIC_URL`, else `http://localhost:$DISPATCH_PUBLIC_PORT`, else the bind port.
+- Testing: `tests/e2e/roles_axe.py` signs in as every profile type on a desktop and a phone viewport and in
+  Arabic, walks every Settings section the role may see, and fails on any serious or critical axe-core finding not
+  in `tests/e2e/axe-allowlist.json`; `--sw-upgrade` checks that one reload after an upgrade loads only new files.
+  `tests/e2e/_scratch.py` starts a seeded scratch instance. `tests/perf/bench.py` measures p50/p95 for sign-in,
+  the hello frame, thread pages, the roster and a 20-socket broadcast. `tests/smoke/openclaw_smoke.py` drives the
+  OpenClaw transport against a fake gateway. New workflow `.github/workflows/e2e.yml` (pull requests and manual
+  runs); axe-core 4.14.0 is a test-only devDependency. `scripts/ci-local.sh` runs the CI jobs locally.
+
+### Changed
+
+- Settings -> Characters: the Mine | Household tabs are a full-width tab bar with an icon, a count and a one-line
+  hint on each tab, the selected one filled. Service worker cache `local-chat-v202`.
+- **Agent concurrency (#11).** A task waiting for an approval gives its slot back; when the answer comes and every
+  slot is taken, it waits for a free one. At most 2 × `agents.max_concurrent` tasks may wait for approval at once.
+  Daily caps are reserved, not just checked: a starting task sets aside its cap from the agent's day budget, so two
+  tasks that start together cannot both spend the same money. New table `agent_reservations`.
+- **Claude Agent availability (#12).** A missing API key or route credential is reported before a missing SDK;
+  inside a container the message says to rebuild with `--build-arg AGENTS_CLAUDE=1`.
+- **Backups (#35, #36).** Encrypted archives carry every secret either store holds (connection keys, secret
+  settings, the agents' secrets, the outside sign-in client secret), each name once. A restore sends each one back
+  to the store that reads it, and lists any key it could not put back as `re_enter` (in the restore answer, the
+  start-up log and under Backups). Pre-restore copies are their own kind ("Before restore"), are never counted as
+  pre-upgrade copies, cannot be deleted from Settings, and the nightly maintenance keeps the newest 3.
+- **Migrations (#17).** The pre-migration copy includes `agents/secrets.json`, and `python -m app.migrate --restore`
+  puts it back or removes it. Connection adoption (step 006) is safe to re-run after a crash.
+- **Legacy `/api/bots` writes are deprecated.** `POST /api/bots`, `PATCH/DELETE /api/bots/{id}`,
+  `/api/bots/personas` and `/api/bots/order` send `Deprecation: true` and a `Link` to the `/api/characters` route
+  that replaces them. Status and body are unchanged; `GET /api/bots` and `/api/bots/all` are not deprecated.
+- The branding lint covers the frontend, apps, README, CHANGELOG and `docs/` (#20).
+- `GET /api/characters/manage` rows carry `order`, `voice`, `voice_rp` and `badges.avatar_pool`; `actions` gains
+  `reactions`, `avatar_pool`, `reorder` and `voice_extras`. `PATCH /api/characters/{id}` accepts `voice_rp`.
+- Schedule notices reach the owner's devices as a push ping (kind `schedule`; tapping it opens Tasks).
+
+### Removed
+
+- The old Settings bot roster (the 2.x/3.x Personality editor and `characters.js`): Settings → Characters is the one
+  place. 22 unused backend helpers and 121 unused CSS selectors; a test now fails on a selector nothing produces.
+
+### Fixed
+
+- `log-tail.txt` in the support bundle was always empty: nothing wrote the log file it read (#18).
+- A restore's pre-restore copy was counted (and pruned) as a pre-upgrade copy (#36).
+- The 403 for a character you may not use named `character` as the missing permission; it is `use_chat` with
+  `"reason": "character_not_allowed"` (#17).
+- CI: the ForgeUI step installed the wrong distribution name, and two workflow lint findings.
+- Agents: an approval answer could take a slot while a queued task was starting, so one task ran over
+  `agents.max_concurrent`; the answer now takes its slot under the same lock as the queue.
+- Agents: a continue (`send`/`resume`) that failed after setting money aside kept that reservation until the next
+  restart; it is released at once.
+- Agents: a Glob/Grep pattern whose `{...}` or `[...]` group names a folder (`{/etc,src}/*`, `[/]etc`, `{..,x}`)
+  is refused; plain patterns such as `src/{a,b}.py` still work.
+- Schedules: the next run is written before the task is created, so a crash in between can never fire the same
+  occurrence twice.
+- `GET /api/oidc/start` is limited to 30 a minute per address, so a flood cannot push real sign-ins out of the
+  sign-in table (this computer is exempt).
+- A role change re-checks idle default-profile tabs at once, like disable, permissions and PIN changes.
+
+### Already fixed or closed without code
+
+- #14 (`connections.discovery_probe_docker_host`), #28 (the slim StudioForge `-cuda` image fetches its engine),
+  #29 (the order-dependent WebSocket test), #32 (Restricted voice limits no longer exist).
+
+### Upgrade notes
+
+- **A second Admin loses host-level things:** the coding harness, the local file viewer, MailForge and the
+  practice proxy, transcript recovery, the host settings listed above, agent shell and file tools, connection
+  environment keys, outside sign-in and the backup-key reveal. The Owner keeps all of them. An install with one
+  Admin sees no change.
+- **Unattended agents that use Bash lose Bash** until the Owner fills their "Shell commands that may run without
+  asking" list: every Bash call is refused until then. An interactive agent whose Admin had taken Bash out of
+  `always_ask` now gets a card per command again.
+- Agent tasks get the default limits above when the agent sets none.
+- A fresh install starts with `machine_loopback_trust: false`. An existing `security.yaml` keeps what it says.
+- Reload any DisPatch tab that was already open, once (service worker `local-chat-v200`).
+- No migration step: 4.3 only adds tables (`agent_reservations`, `schedules`, `oidc_links`) and files (`oidc.yaml`,
+  `reactions/spent/.owners.jsonl`) that 4.2 ignores, so the 4.2 code runs on the same data if you go back.
+
+## [4.2.0] - 2026-10-26
+
+One owner per bot, live household templates, a Characters page, a resizable Settings window and Image Studio
+upgrades. See backend/app/guide/whats-new-4.2.0.md. **Migration `012_templates` runs at the first start** (a
+backup is taken first); see the rollback line at the end of this entry.
+
+### Added
+
+- **One owner per bot (R1-R4).** Every bot has exactly one owner profile. Agent, app and legacy-API bots (Bits
+  and the other agent bots) are the protected Admin's personal bots (same ids, so crons and machine callers keep working);
+  a household bot is a **template** (`give_to`: `"everyone"` or a list of profiles) that nobody chats with, and
+  every profile it is given to has one linked **copy**. A turn, a thread and a machine call on a template resolve
+  to its owner's copy or answer 403/409 (`template_not_chattable`, `template_has_no_copy`).
+- **Live templates.** A copy stores only what its owner changed (`overrides`); everything else follows the template
+  at load, so a template edit (name, picture, personality, lookups, connection, voice ...) reaches every copy that
+  did not change that field; **Reset to household version** clears the overrides.
+- **Characters page** (Settings -> Characters: **Mine** / **Household**): `GET /api/characters/manage`, one edit
+  route `PATCH /api/characters/{id}` with a per-kind allowlist, **Who can use it** (`GET .../give-to/preview` +
+  `PUT .../give-to`, signed single-use token), **Stop sharing** (`POST .../stop-sharing/preview` + `.../stop-sharing`)
+  and **Share** (`POST /api/me/characters/{id}/share`). The API is in `docs/contracts/openapi.json`.
+- **Detach keeps lineage:** a copy detached from its template (unticked while it has chats, Stop sharing, template
+  delete) stores `detached_from: <template id>` (never a kit link). Ticking the profile again re-links that bot, its
+  chats and its changes (stored as overrides) instead of making a second copy.
+- **Owner deliberate delete:** the Owner can delete his own agent / app bots and Sage from Mine
+  (`GET /api/me/characters/{id}/delete-preview`, `DELETE /api/me/characters/{id}?confirm=true`; without `confirm`
+  409 `confirm_required`). Reset profile still keeps them (Sage is named in the Reset preview as kept).
+- `everyone_to_list` on the give-to preview; `actions.details` on a manage row; `overridden` on
+  `/api/me/characters/{id}`.
+- **Reactions are scoped to the profile that owns the chat** (frames, pools and push), never every device in the
+  house.
+- **`GET /api/health/invariants`** (`admin_system` or the machine scope **`machine:health`**): the eight data
+  invariants I1-I8 as ids and counts; they are also checked at every start (`invariants: I1-I8 hold` in the journal).
+  Add `machine:health` to `machine_scopes` in `security.yaml` before a machine (box-smoke) reads it.
+- Resizable Settings window; Image Studio: newest first, delete by age, keyboard generate, several generations at once.
+- Profile create paths (`POST /api/people`, the family wizard, `python -m app.profiles create`) make the copies of
+  the templates ticked for the new profile.
+
+### Changed
+
+- Household bots are templates: `POST /api/characters` (direct) and starter-pack installs create a template given to
+  the creating profile; the 4.1 kit panel is reduced to chats (`auto_clone` only ever adds).
+- Migration 012 and its backup folder are named **4.2.0** (`backups/4.2.0-<stamp>/`); older `4.0.0-*` folders are still
+  found, kept and restorable. The second run says "already on 4.2".
+- `PATCH /api/characters/{id}` on an agent bot refuses `connection`, `model` and `tools` (422 `character_invalid`);
+  a template no longer takes `hidden` (a copy does not inherit it either; hide is per copy / own / agent bot).
+- `connection: null` on your own bot is honoured: a copy goes back to its template's connection, an own bot drops
+  the reference.
+- The advisor digest of a copy is filed under its template id (`conversations/<day>-atlas.md`), not the copy's id.
+- `POST /api/characters/{id}/clone` answers 200 when the profile already has the copy, 201 when it made one.
+
+### Fixed
+
+- Untick a profile that has chats, tick it again: two identical bots on its rail (see "detach keeps lineage").
+- A second Admin creating an agent-backed character made a bot nobody could see or delete: now 403 `agent_create_owner_only`.
+- Reset profile / Delete in Mine could remove Sage (`advisor`) and silently stop its nightly digest.
+- The "Get my copy" row a User sees: its picture was a 403, it read "Given to 0 profiles" and its Details failed.
+- The Owner got a second "Meet Atlas" at the first start after 012 (his own thread is adopted by title).
+- `/api/me/characters/{id}` and the manage row disagreed about which fields a copy overrides.
+
+### Rollback
+
+Stop `local-chat`, redeploy the 4.1 files, then `uv run python -m app.migrate --restore <data>/backups/<folder>` where
+`<folder>` is the one that holds `012-created.json` (`4.2.0-<stamp>` from this release, `4.0.0-<stamp>` from an early
+4.2 build); it restores chats.db, config.yaml, security and the kits, removes the pictures 012 created, then start.
+
+## [4.1.0] — 2026-10-25
+
+Managed bots ("bot kits"): a household bot becomes a template whose setup and chats reach every copy.
+
+### Added
+
+- **Kits.** A household bot with a kit keeps its personal copies up to date: name, emoji, description, colour,
+  personality, quick actions, the lookups switch and the picture follow the household bot, except the fields a
+  copy's owner changed (each copy keeps a baseline of the values it was last synced to). Connection and model are
+  never managed. Atlas ships with a kit (its guide chats); an Admin can attach one to any direct household bot in
+  Settings → Characters → Details → **Copies & chats**: **Give every profile a copy** (auto-clone for every Admin and
+  User profile it may be used by; the protected first Admin keeps the household original), **kit chats** (title,
+  Markdown, audience everyone/admins; an edited chat is sent again unless the Admin unticks it) and **Push to copies
+  now**. The panel shows the copy count only. Kits live in `<data>/bot-kits/<bot>.yaml`; what each copy received
+  and which profiles removed their copy are in `<data>/bot-kits/state.json`. Design: [docs/design/bot-kits.md](docs/design/bot-kits.md).
+- **Reset to default for a copy:** `POST /api/me/characters/{id}/reset` and a button in Settings → My bots: the
+  managed fields and picture go back to the template, and kit chats whose thread was deleted are posted again.
+- `GET/PUT/DELETE /api/characters/{id}/kit` and `POST /api/characters/{id}/kit/push` (`manage_characters`).
+- `managed` on `/api/characters` and own-bot rows; My bots marks such copies "Kept up to date by your household"
+  and offers **Add to my bots** for a managed household bot even when it is hidden from the lists.
+
+### Fixed
+
+- Deleting your Atlas and adding it back (Make my own copy) gave a copy that was not an Atlas (no guide chats, no
+  "What's new", not connected with the others). Every copy now goes through one path.
+
+### Changed
+
+- The 4.0 guide queue (`.atlas-guides-pending.json`) is replaced by the kit engine; an upgraded install counts the
+  guides its Atlas copies already have, and a profile that has chats but no Atlas copy is treated as having removed it.
+- A copy of a household bot keeps the source's lookups switch (it was always on).
+- Kit chat bodies written by an Admin are shown, never acted on: `[[media:…]]`, `[[pic:…]]`, `:react:` and the
+  other in-text markers are broken before posting.
+
+
+## [4.0.0] — 2026-10-23
+
+Chat-first profiles. The 3.x ladder (Owner, Admin, Member, Restricted, plus Safe Mode and a decoy view for
+anyone not signed in) is replaced by three roles, private chats and a shared default profile. Read the
+[upgrade notes](#400-upgrade-notes) before you update a live install. The entries under "Earlier work in this
+release" further down are the changes made since 3.1.0; some of them describe the 3.x model that 4.0 then replaced.
+
+### Profiles and privacy
+
+- **Three roles: Admin, User, Basic.** Owner becomes the **protected first Admin** (it cannot be demoted, disabled or
+  deleted, and no other Admin can change its credentials), Admin stays Admin, Member becomes User, Restricted becomes
+  Basic. PINs and passwords are optional on every profile (an Admin signs in with a password). The permission table
+  is one table with three columns per role (on, switchable by an Admin, never): [docs/security.md](docs/security.md#what-each-role-may-do),
+  `docs/contracts/permissions.json`.
+- **Chats are private to the profile they were had in.** Other profiles, Admins included, cannot list, open, search,
+  export or receive live frames of them, and the same goes for a profile's own bots and its File Server files and
+  Image Studio history. A thread or file you may not read answers 404. The sign-in popup says "Admins can't open your
+  chats in the app". Machines (the API key) write into any existing thread and read only the first Admin's.
+- **DisPatch, the shared default profile.** A User with no PIN that locked and unsigned devices land on (the
+  `lock_target: default_profile` setting; or `profile_list` to show the sign-in screen). Everyone who uses it shares its
+  bots and chats, on purpose. Agent bots, approving agent actions and voice cloning are never effective on it and cannot
+  be granted (422). A profile button switches to your own profile.
+- **Sign-in popup.** A short card shown once per sign-in (closes on a click anywhere, the close button or Esc) replaces
+  the permanent Restricted strip. It says where chats are stored, that they are private, that the DisPatch profile is
+  shared, and who reset your PIN, if an Admin did.
+- **Every new Admin or User gets its own Atlas**, and **Reset to default** (Settings → You → Account, or an Admin from
+  People without seeing the contents) deletes a profile's bots and chats and gives it a fresh Atlas (a Basic profile
+  goes back to its assigned household bots). The dialog names the counts. Anyone using the DisPatch profile can reset it.
+- **Own bots.** A User or Admin makes bots of their own (by hand, or by describing one to an AI that drafts it), and
+  copies household bots: setup only (name, picture, personality, voice, backend), never chats; agent bots cannot be
+  copied. An Admin can copy a bot into a profile. A User picks a backend only among the household connections an Admin
+  allows for that profile; **API keys are household connections** that every profile's bots use, and only an Admin sees them.
+- **Role changes and removal name what they delete.** Basic to User keeps everything; User to Basic keeps the name and PIN
+  and deletes every private bot and chat; removing a profile deletes its chats, bots, pictures, files and cloned voices.
+  Each shows the counts first and takes a one-time confirmation token.
+- **Per-profile voice clones** with DisPatch Voice 1.6.0 or later (`ctx.register_voice_access`, `ctx.register_profile_data`;
+  `EXT_API` stays 1): a clone belongs to the profile that made it, gated by the new `voice_lab` permission; Reset keeps
+  clones, deleting a profile or User to Basic removes them. An older add-on keeps every clone route Admin-only. See
+  [docs/voice.md](docs/voice.md).
+- **One Atlas corpus per person.** An advisor's notes, `_profile.md` and home location belong to one profile
+  (`advisor.corpus_profile`, default the first Admin); chats owned by anyone else get no corpus.
+
+### Removed
+
+- **No Restricted tier, no Safe Mode, no decoy view, no supervision.** Gone: the turn-time safety layer and output filter,
+  `tools_locked`, the locked voice socket, quiet hours, minutes per day, and **all per-profile daily budgets and
+  limits** (messages, conversations, ratings, uploads, agent dollars). Bots answer unrestricted for whoever may use them.
+  `DISPATCH_DECOY_*` is ignored. The one byte guard left is plumbing: machine uploads share 200 MB a day
+  (`DISPATCH_MACHINE_UPLOAD_QUOTA`).
+- **Device binding** ("this device opens as that profile") and `PUT /api/people/devices/this`; the `anonymous_access`
+  setting (replaced by `lock_target`); `/api/agents/profile-budgets`; the `budgets` field of a profile (the People API
+  answers 422); `locked_status` for add-ons; the `audience`, `safe`, `hide_unlocked`, `visible` and `profiles` inputs of the
+  bot and character APIs (422; old values in `config.yaml` are inert data).
+- **The kids' starter pack** (Animal Friends) is no longer shipped; the Assistants pack remains.
+
+### Kept on purpose
+
+- **Image generation hard lines**, now enforced on the server for every image prompt (`app/image_guard.py`; `[[pic:]]`
+  markers, image jobs, Image Studio): nothing sexual involving a person under 18 (depictions are adult-only), and no
+  sexual imagery of real, identifiable people. Everything else stays unrestricted.
+- The machine API key and its scopes, the CSRF and Origin checks, the one-way File Server for Basic profiles (upload
+  only), and the Local Viewer, coding terminal and Mail/Clients/Job Board (Admin only).
+
+### Scale and retention
+
+Designed for 20 profiles over three years (about 1-2 million messages) with no slowdown.
+
+- **Migration 011** adds indexes for every owner-scoped hot query (thread lists, unread counts, File Server lists, and
+  the time columns the maintenance prunes by), proven by query-plan tests; gives each message its thread's owner and
+  rebuilds the search index with it, so a search ranks only the caller's own messages; and switches the database to
+  incremental auto-vacuum with one `VACUUM` (the one long step on a large database; it is logged). The search index is
+  no longer rebuilt on every start.
+- **Paged lists:** `GET /api/threads` pages by `cursor` / `limit` (default 50, pinned first; `archived=1` for archived
+  chats), `hello` carries the first page and `next_cursor`, and a thread's history pages with `limit` / `before`. An
+  opt-in synthetic-load benchmark (`pytest -m scale`) checks the latency budgets.
+- **A daily maintenance task** (04:30 local by default; skipped, and retried 30 minutes later, while the maintenance
+  marker exists or a backup runs) prunes old activity (audit entries keep longer), task and job events, usage counters,
+  mirror bookkeeping, expired sessions and devices, finished image jobs, agent spend, decided approvals and closed-job
+  feedback, in small batches; moves orphaned files to `<data>/trash/` (purged after 14 days); runs the search-index and
+  SQLite upkeep; and keeps backup snapshots in tiers (8 six-hourly, 7 daily, 4 weekly, never fewer than 4; migration
+  backups: the newest 3). Every step is logged per run. Nothing in the defaults deletes a chat. An Admin can change
+  the time and every retention period and run it by hand (`POST /api/maintenance/run`, with a dry run).
+- **Archive old chats (per profile, off by default):** a profile can archive its own chats older than N months
+  (`/api/me/archive`). Archived chats leave the rail, stay searchable and open by link; pinned chats and chats with an
+  open job are skipped; nothing is deleted. The Archived view (the archive button above the chat list, or Ctrl-K
+  "Archived chats") lists them with **Move back** (`PATCH /api/threads/{id}` with `archived: false`; `true` archives),
+  owner-scoped like every thread route; a moved-back chat stays on the rail.
+- **Generated images: keep forever (the default) or N months**, an Admin setting that covers every picture DisPatch
+  generated (fired reaction-pool images, Image Studio results, `[[pic:]]` and image-job pictures, spent avatar-pool
+  images, thread avatar snapshots nothing uses). Uploads and attachments are never touched. Pictures still in use
+  (current avatars, the unfired reaction shelf, anything a recent message shows, anything a running job needs) are
+  kept. An expired picture answers `410 Gone` with `X-Image-Expired: 1` and shows an "image expired" placeholder;
+  the files sit in `<data>/trash/` for 14 days and can be restored. A dry-run count
+  (`GET /api/maintenance/images/preview`) comes before saving.
+- **In the app:** the chat list loads a page at a time (Show more, or scroll); a long chat opens on its newest 100
+  messages with Load earlier, and above about 300 messages on screen the list is windowed so it never grows without
+  bound; the Storage and Generated images cards live in Settings → System and the archive control in You → Account;
+  the "image expired" placeholder shows in chats, the reaction history and Image Studio. See
+  [docs/maintenance.md](docs/maintenance.md).
+
+### Interface
+
+- ThemeForge 2.0.1 is vendored: the app's icons come from its shared icon set (`ui-theme/icons.svg`).
+- Settings is grouped You / Household, and People, Reset to default, My bots, the profile switch and the sign-in popup
+  are new screens.
+- No screen says "Owner" any more: the protected first Admin is "the main Admin", and the host-level powers (agent
+  hooks, local MCP programs, Backups, Machine access) say "Admins", which is who holds them. The People disclosure line
+  arrives as a code (`disclosure_code`) and is shown in the reader's language; `disclosure` keeps the English text.
+
+<a id="400-upgrade-notes"></a>
+### Upgrade notes
+
+- The server migrates on start after taking a backup (`<data>/backups/<version>-<stamp>/`); to look first, run
+  `python -m app.migrate --dry-run` with the server stopped. Migration 010 maps roles (Owner to the protected Admin,
+  Admin to Admin, Member to User, Restricted to Basic) and keeps every chat with the owner migration 009 gave it. If
+  exactly one Restricted profile had no PIN and `anonymous_access` was `restricted`, it becomes the shared default
+  profile (as a User) and the lock lands on it (`--default-profile <id|name>` picks it explicitly); otherwise the lock
+  shows the profile list. `hide_unlocked` becomes `hidden`, and a character's `profiles` list folds into each profile's
+  `household_bots`. Existing bots stay household bots; a profile's own Atlas appears when it is created or on its first Reset.
+- **Rollback is a restore, nothing more:** stop the server, restore the pre-upgrade copy of the data directory (or
+  `python -m app.migrate --restore <backup dir>`), and redeploy the previous release. There is no downgrade of a migrated
+  database in place.
+- Stored role words are still `owner`, `admin`, `member` and `restricted` in `chats.db`; only `app/accounts.py` maps them,
+  and old role words are still accepted wherever a role is typed. A later migration renames them.
+- On-box callers must send the API key if you set `machine_loopback_trust: false`; see the 3.x notes below.
+- An old voice add-on (1.5.x) keeps working; clone routes stay Admin-only until you update it to 1.6.0 or later.
+
+### Later
+
+- **Migration 012:** rename the stored role words (`owner/member/restricted` to `admin/user/basic`) with a 12-step table
+  rebuild on a dedicated connection, once 4.0 has been live a while. Not part of 4.0.
+- Retire the 3.x keys that are inert data today (the reaction and pool `safe` flag kept in yaml for a 3.x rollback;
+  `DecoyError`, a deprecated alias in the add-on SDKs).
+
+### Earlier work in this release (since 3.1.0, on the 3.x model; superseded where 4.0 above differs)
+
+#### Security
 
 - **Machines can upload again, and the host scripts carry the API key.** `POST /api/upload` has a machine
   scope, `machine:upload`; since 3.0 an agent or cron that handed a document back got 401 `signin_required`,
@@ -42,7 +514,7 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `find_or_create_daily_thread` (`owner=`) require the owner keyword since the ownership groundwork below
   (docs/extensions.md). `EXT_API` stays 1.
 
-### Ownership groundwork (data model only)
+#### Ownership groundwork (data model only)
 
 Groundwork for per-profile privacy. **Nothing anyone can see or do changes in this step**: who may read a chat,
 a file or a character is decided exactly as before.
@@ -70,13 +542,13 @@ a file or a character is decided exactly as before.
   (`household` | `personal`, absent = household), `owner_profile`, `cloned_from` (written to config.yaml only
   when set).
 
-### Settings, simpler
+#### Settings, simpler
 
 - **Seven sections instead of thirteen tabs.** Settings is grouped by who it is for. *You*: Appearance (theme,
   language, avatar style, menu-bar shortcuts), Account (who you are, sign-in, notifications, pictures and privacy,
   the host-storage notice, recovery, About) and Voice. *Household* (the Owner and Admins): Characters (with their
   reactions and avatar pools), AI & Connections (connections, the one-key quick setup, image generation, agents),
-  People & Access (profiles, this device, sign-in rules, Restricted limits, machine access, activity), Plugins &
+  People & Access (profiles, this device, sign-in rules, Restricted limits (3.x; replaced in 4.0), machine access, activity), Plugins &
   Apps and System (health, backups, network). Add-on tabs form a third group. On a desktop the sections are a
   side nav; on a phone Settings opens on a list with a one-line summary per section, and a section slides in with a
   back button (the phone's Back returns to the list).
@@ -99,7 +571,7 @@ a file or a character is decided exactly as before.
   restart says so, and the section shows one "Restart DisPatch to apply N changes" line. Forms that need several
   fields (a connection, a person, a PIN) keep their own button.
 - **Characters.** A compact row per character: picture, name with small feature icons, a **Who can see it**
-  dropdown (Everyone / Members and up / Restricted profiles only / Hidden, exactly the two `safe` /
+  dropdown (3.x; replaced in 4.0) (Everyone / Members and up / Restricted profiles only / Hidden, exactly the two `safe` /
   `hide_unlocked` flags; widening to Restricted asks first), **Details** (Reactions, Avatar pool, Pictures in
   chat, Lookups and the voice add-on's control as switches, then connection, model, description and which profiles
   may see it) and a **⋯** menu (Change photo, Rename, Personality, Remove). **Add ▾** offers a new character or a
@@ -122,7 +594,7 @@ a file or a character is decided exactly as before.
 - **Help texts point at the new sections** (server problem fixes and messages too: Settings > Account, AI &
   Connections, People & Access, Plugins & Apps).
 
-### Fixed
+#### Fixed
 
 - Changing your PIN or password no longer ends "remember this device": the session it re-issues keeps the old
   one's persistence (a plain sign-in is not promoted).
@@ -135,7 +607,7 @@ a file or a character is decided exactly as before.
   chats too; zh no longer calls the Owner an administrator there.
 - The markup fallback of the host-storage notice matches its English string.
 
-### Image Studio, the rail, uploads and the host-storage notice
+#### Image Studio, the rail, uploads and the host-storage notice
 
 - **Image Studio: Sort and Clear from here down.** The results grid has a "Sort:" control (Oldest first, the old
   layout and default, or Newest first), remembered per device (`dispatch-imagestudio-sort`). Each picture has
@@ -1512,5 +1984,6 @@ theme rather than by commit.
 - The scrubber gained more pattern classes and now scans commit messages and
   pushes, not just the working tree.
 
-[Unreleased]: https://github.com/LaserLloyd/DisPatch_Chat/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/LaserLloyd/DisPatch_Chat/compare/v4.3.0...HEAD
+[4.3.0]: https://github.com/LaserLloyd/DisPatch_Chat/releases/tag/v4.3.0
 [1.0.0]: https://github.com/LaserLloyd/DisPatch_Chat/releases/tag/v1.0.0

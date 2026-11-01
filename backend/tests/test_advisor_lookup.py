@@ -1,6 +1,6 @@
 """Advisor `lookup`: the bot reads external reference material itself.
 
-Wikka (the Wikipedia bot) used to answer every factual question by briefing
+Librarian (the Wikipedia bot) used to answer every factual question by briefing
 ds_flash, who ran InfoForge through the gateway — 30 s to 3 min per answer and
 a marker contract MiniMax did not always honour. With ``advisor.lookup`` the
 turn runs ``infoforge search --json --text`` itself (a fixed argv, no shell,
@@ -40,7 +40,7 @@ def _no_real_probe(monkeypatch):
 
 def _with_lookup(extra: dict | None = None) -> None:
     bot = config.get_bot("adv")
-    config.upsert_bot(config.Bot(id="adv", name="Wikka", advisor={
+    config.upsert_bot(config.Bot(id="adv", name="Librarian", advisor={
         **bot.advisor, "lookup": {"kind": "infoforge", "max_articles": 2,
                                  "chars_per_article": 60, **(extra or {})}}))
 
@@ -115,16 +115,15 @@ def test_lookup_failure_or_timeout_never_fails_the_turn(adv_env, monkeypatch):
         assert seen["messages"][-1]["content"].endswith("q")
 
 
-def test_a_locked_turn_still_gets_the_lookup(adv_env, monkeypatch):
+def test_a_turn_gets_the_lookup(adv_env, monkeypatch):
     tmp_path, _ = adv_env
     _with_lookup()
     calls = _capture_runner(monkeypatch)
     advisor.bind(_rec_hooks(tmp_path)[0])
     seen = _run_with_reply(monkeypatch, "Leonardo.")
-    asyncio.run(advisor.run_turn("t1", "adv", "q", locked=True))
-    assert calls, "a local, read-only search is fine from a locked device"
+    asyncio.run(advisor.run_turn("t1", "adv", "q"))
+    assert calls, "a local, read-only search runs on every turn"
     assert "### Mona Lisa" in seen["messages"][-1]["content"]
-    assert "Safe Mode" in seen["system"]
 
 
 def test_lookup_runs_the_real_runner_with_a_fixed_argv(tmp_path):

@@ -198,7 +198,7 @@ def test_models_route_offers_whatever_settings_configures(route_client, fake_svc
     assert "MiniMax-M3" in text and "MiniMax (cloud)" in text
     # Locked again → the whole surface is 403, models included.
     route_client.post("/api/auth/lock")
-    assert route_client.get("/api/harness/models").status_code == 403
+    assert route_client.get("/api/harness/models").status_code in (401, 403)
 
 
 def test_jobs_submit_list_cancel(route_client, fake_svc, tmp_path, monkeypatch):
@@ -226,14 +226,14 @@ def test_jobs_submit_list_cancel(route_client, fake_svc, tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Gates: Safe Mode (decoy) 403 everywhere; disabled → 404; feature flag
+# Gates: signed out 401/403 everywhere; disabled → 404; feature flag
 # --------------------------------------------------------------------------- #
 
 @pytest.mark.parametrize("method,path", HARNESS_ROUTES)
-def test_safe_mode_gets_403_everywhere(route_client, fake_svc, method, path):
-    auth.set_pin("1234")            # a PIN exists, no session → Safe Mode
+def test_signed_out_is_refused_everywhere(route_client, fake_svc, method, path):
+    auth.set_pin("1234")            # a PIN exists, no session → signed out
     r = route_client.request(method, path, json={} if method == "POST" else None)
-    assert r.status_code == 403, (path, r.status_code, r.text)
+    assert r.status_code in (401, 403), (path, r.status_code, r.text)
     assert fake_svc["calls"] == [] and fake_svc["runner"].calls == []
 
 
@@ -275,8 +275,12 @@ def test_not_installed_is_reported_not_500(route_client, fake_svc, monkeypatch):
     assert r.json()["installed"] is False
 
 
-def test_redactor_drops_harness_state_frames():
-    assert main.redact_for_decoy({"type": "harness_state", "jobs": {}}) is None
+def test_the_scoper_drops_harness_state_frames_without_admin_system():
+    from app import policy
+    user = policy.Principal(kind="profile", role="user", profile_id="u", name="U",
+                            permissions=frozenset({"use_chat", "use_images"}))
+    assert main.scope_frame_for_principal({"type": "harness_state", "jobs": {}}, user) is None
+    assert main.scope_frame_for_principal({"type": "harness_state", "jobs": {}}, None) is None
 
 
 def test_status_reports_remote_url_only_when_configured(route_client, fake_svc, monkeypatch):

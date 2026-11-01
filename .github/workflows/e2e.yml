@@ -1,0 +1,80 @@
+name: E2E
+
+# The role-matrix browser suite (tests/e2e/roles_axe.py: five profiles x desktop/phone x
+# en + ar, axe-core gate on serious/critical), the gateway smoke test against a FAKE
+# gateway (tests/smoke/openclaw_smoke.py, never --live here) and the perf numbers
+# (tests/perf/bench.py, thresholds are warnings only).
+#
+# Test data only: every run starts its own scratch instance with seeded profiles named
+# Owner/Admin/User/Basic/DisPatch, a local fake model and a fake voice add-on. The
+# screenshots it uploads show nothing else (docs/screenshots/ALLOWED.txt rules: no
+# names, no private hosts - the instance is 127.0.0.1 inside the runner).
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Browser matrix + axe + smoke + perf
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DISPATCH_E2E_DATA: ${{ runner.temp }}/dispatch-e2e
+      PLAYWRIGHT_VERSION: "1.64.1"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        # Exact version, like ci.yml (setup-uv publishes no moving major tags).
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Backend dependencies
+        working-directory: backend
+        run: uv sync --frozen --python 3.13
+      - name: Frontend test dependencies (jsdom, axe-core)
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - name: Playwright chromium-headless-shell
+        working-directory: backend
+        run: |
+          uv run --with "playwright==${PLAYWRIGHT_VERSION}" python -m playwright install --with-deps --only-shell chromium
+      - name: Role matrix + axe
+        working-directory: backend
+        run: |
+          uv run --with "playwright==${PLAYWRIGHT_VERSION}" python ../tests/e2e/roles_axe.py \
+            --data "$DISPATCH_E2E_DATA/e2e" --fresh \
+            --shots "$DISPATCH_E2E_DATA/shots" --shot-prefix e2e- \
+            --inventory "$DISPATCH_E2E_DATA/icon-inventory.md" \
+            --out "$DISPATCH_E2E_DATA/e2e-results.json"
+      - name: Gateway smoke (fake gateway)
+        if: always()
+        working-directory: backend
+        run: uv run python ../tests/smoke/openclaw_smoke.py --data "$DISPATCH_E2E_DATA/smoke" --fresh
+      - name: Perf (warnings only)
+        if: always()
+        working-directory: backend
+        run: uv run python ../tests/perf/bench.py --data "$DISPATCH_E2E_DATA/perf" --fresh --out "$DISPATCH_E2E_DATA/perf.json"
+      - name: Upload screenshots and reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/dispatch-e2e/shots/
+            ${{ runner.temp }}/dispatch-e2e/*.json
+            ${{ runner.temp }}/dispatch-e2e/*.md
+            ${{ runner.temp }}/dispatch-e2e/*.server.log

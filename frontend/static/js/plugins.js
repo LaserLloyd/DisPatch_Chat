@@ -3,7 +3,7 @@
 //
 // Four groups, in the Settings modal's own group/row style (.dev-group /
 // .dev-row, so every palette applies and this file carries no colour), in
-// the order an Owner uses them (3.2):
+// the order an Admin uses them (3.2):
 //
 //   Add-ons          one row per extension the host knows (GET /api/plugins):
 //                    name, version, state and an install-wide switch bound to
@@ -21,12 +21,12 @@
 // `deps` ({ mountTools(host), toast(msg, isErr), openTab(id), api? }), which
 // is also how the tests drive it without main.js.
 
-import { api as realApi } from './api.js?v=35';
-import { t } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
-import { COMMANDS, commandBlock } from './voice-absent.js?v=16';
-import { catalogGroup } from './integrations.js?v=2';
-import { has } from './i18n.js?v=4';
+import { api as realApi } from './api.js?v=37';
+import { t } from './i18n.js?v=5';
+import { el } from './util.js?v=23';
+import { COMMANDS, commandBlock } from './voice-absent.js?v=22';
+import { catalogGroup } from './integrations.js?v=5';
+import { has } from './i18n.js?v=5';
 
 let seq = 0;          // a newer mount supersedes a slower, older one
 

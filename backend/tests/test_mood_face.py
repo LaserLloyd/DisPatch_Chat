@@ -268,4 +268,4 @@ async def test_mood_face_route_denies_safe_mode_for_an_unsafe_bot(rx_env):
 
     decoy = rx_env()   # PIN is already set (via _unlocked above) — this
                        # client never unlocked, so it is served Safe Mode.
-    assert decoy.get(f"/api/messages/{msg.id}/mood-face").status_code == 403
+    assert decoy.get(f"/api/messages/{msg.id}/mood-face").status_code in (401, 403)

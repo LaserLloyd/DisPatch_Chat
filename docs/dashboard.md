@@ -5,8 +5,8 @@ what do I do about it?**
 
 Open it from **Settings → System** (the ⚙ button in the gear rail).
 Everything on it is read-only — the dashboard
-never changes anything, it only looks. It is admin-only: a limited (Safe-Mode)
-device cannot see it, and neither can anyone without the PIN.
+never changes anything, it only looks. It is admin-only: no other role can see it,
+and neither can anyone without the PIN.
 
 - `GET /api/dashboard` — the cheap snapshot the page polls while it is open.
 - `GET /api/dashboard/deep` — the expensive checks, only when you press the
@@ -89,8 +89,8 @@ whether last night's snapshot worked.
 Live WebSocket clients — open browser tabs, phones, and the app on a wall
 display — split into:
 
-- **Full** — unlocked, admin-capable sessions.
-- **Limited** — Safe-Mode devices (no PIN entered, or the session idled out).
+- **Signed in** — sockets with a live session.
+- **Lapsed** — sockets whose session has idled out or that predate the PIN.
 
 Counts only. The dashboard deliberately shows no addresses, no device names and
 no session identifiers: knowing *how many* people are connected is operations,
@@ -144,8 +144,8 @@ No PIN is configured.
 machine-local, set `DISPATCH_HOST=127.0.0.1` and restart.
 
 #### `auth.lock`
-🟢 A PIN is set. Locked devices get the limited Safe-Mode view; media and
-unlisted assistants stay behind the PIN.
+🟢 A PIN is set. A device that has not signed in lands on the lock-target profile (or the profile list); media and
+bots that profile may not use stay behind a sign-in.
 
 #### `net.tls`
 Whether traffic is encrypted.

@@ -1,6 +1,6 @@
 ## What already works
 
-Out of the box, with nothing else installed, you get chat with any AI API (with my lookups: web and news search, weather, Wikipedia, exchange rates, the time and a calculator), quick actions, Safe Mode for family devices, reactions from the built-in pack, the file drop and push notifications on an https address. Everything below is optional. Take the steps in this order and stop wherever you have what you need. Settings → Plugins & Apps → **Discover more** shows the status of each one.
+Out of the box, with nothing else installed, you get chat with any AI API (with my lookups: web and news search, weather, Wikipedia, exchange rates, the time and a calculator), quick actions, profiles with private chats, reactions from the built-in pack, the file drop and push notifications on an https address. Everything below is optional. Take the steps in this order and stop wherever you have what you need. Settings → Plugins & Apps → **Discover more** shows the status of each one.
 
 ## The quickest start: one key for everything
 
@@ -22,7 +22,7 @@ What you get: pictures in chat. A bot with pictures switched on writes `[[pic:�
 
 What it needs: either an image API key (MiniMax image-01, OpenAI, xAI Grok, or any host with the OpenAI images endpoint), or your own image server that speaks MCP, such as a ComfyUI-style server.
 
-How: **Settings → AI & Connections → Image generation**. Pick the provider, press Test (one picture), then Save. Then switch Pictures in chat on in a bot's Details under **Settings → Characters**. API pictures cost money per image; DisPatch makes one per request and never refills anything in the background with a paid API. Reaction and avatar pools use an image command-line tool of your own (`DISPATCH_IMAGE_CLI`).
+How: **Settings → AI & Connections → Image generation**. Pick the provider, press Test (one picture), then Save. Then switch Pictures in chat on in a bot's Details under **Settings → Characters**. API pictures cost money per image; DisPatch makes one per request and never refills anything in the background with a paid API. Reaction pictures and picture sets are refilled by a picture tool of your own (`DISPATCH_IMAGE_CLI`).
 
 ## 3. StudioForge, for local models
 
@@ -38,7 +38,7 @@ What you get: agent bots that can use tools, read and write files and work on lo
 
 What it needs: the OpenClaw agent runtime on the same machine: [github.com/openclaw/openclaw](https://github.com/openclaw/openclaw).
 
-How: put the `openclaw` command on DisPatch's PATH, or run its gateway and set `DISPATCH_GATEWAY_WS=1`, then add an agent bot in **Settings → Characters → Add → New character → Agent**. Agents are never reachable from Safe Mode unless you mark them safe.
+How: put the `openclaw` command on DisPatch's PATH, or run its gateway and set `DISPATCH_GATEWAY_WS=1`, then add an agent bot in **Settings → Characters → Add → New character → Agent**. Agent bots can run commands on this computer and read anyone's chats, so they are off for Users and Basic profiles until an Admin switches them on.
 
 ## 5. DisPatch Voice
 
@@ -58,7 +58,7 @@ For faster and better voices the add-on can hand speech to a GPU machine running
 
 What you get: a bot that searches a full offline copy of Wikipedia before it answers and cites the article, with nothing leaving your network.
 
-What it needs: InfoForge ([github.com/LaserLloyd/InfoForge](https://github.com/LaserLloyd/InfoForge), version 2.1.0 or newer for a read-only lookup) and a kiwix server with a Wikipedia file. Without it, a bot can use the online encyclopedia the same way: set `lookup: {kind: wikipedia}` in its `advisor:` block in `config.yaml`. That sends the user's words to wikipedia.org, also from Safe Mode devices.
+What it needs: InfoForge ([github.com/LaserLloyd/InfoForge](https://github.com/LaserLloyd/InfoForge), version 2.1.0 or newer for a read-only lookup) and a kiwix server with a Wikipedia file. Without it, a bot can use the online encyclopedia the same way: set `lookup: {kind: wikipedia}` in its `advisor:` block in `config.yaml`. That sends the user's words to wikipedia.org, from every profile.
 
 How: put the `infoforge` command on PATH and set `lookup: {kind: infoforge}` on the bot.
 
@@ -68,7 +68,7 @@ What you get: an Emails tab for a local email assistant that sorts, screens and 
 
 What it needs: MailForge running on the same machine: [github.com/LaserLloyd/MailForge](https://github.com/LaserLloyd/MailForge).
 
-How: run MailForge, then restart DisPatch. With `DISPATCH_MAIL=auto` (the default) DisPatch finds it by its data directory and shows the tab to unlocked devices.
+How: run MailForge, then restart DisPatch. With `DISPATCH_MAIL=auto` (the default) DisPatch finds it by its data directory and shows the tab to Admins.
 
 ## Something else?
 

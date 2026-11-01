@@ -33,38 +33,34 @@ const dom = { skip: domSkip(jsdom ? false : 'jsdom is not installed') };
 
 // ------------------------------------------------------------------ roles
 
-test('normalizeRole trusts the server, and falls back the way 2.x worked', () => {
-  assert.equal(P.normalizeRole({ role: 'member' }), 'member');
-  assert.equal(P.normalizeRole({ role: 'nonsense', decoy: true }), 'restricted');
-  assert.equal(P.normalizeRole({ decoy: true }), 'restricted');
-  assert.equal(P.normalizeRole({ pin_set: false }), 'owner');
-  assert.equal(P.normalizeRole(null), 'owner');
+test('normalizeRole trusts the server; anything unknown reads as the lowest type', () => {
+  assert.equal(P.normalizeRole({ role: 'user' }), 'user');
+  assert.equal(P.normalizeRole({ role: 'admin', protected: true }), 'admin');
+  assert.equal(P.normalizeRole({ role: 'basic' }), 'basic');
+  assert.equal(P.normalizeRole({ role: 'member' }), 'basic', 'the 3.x words are gone');
+  assert.equal(P.normalizeRole({ pin_set: false }), 'basic');
+  assert.equal(P.normalizeRole(null), 'basic');
 });
 
-test('admin surfaces are for owner and admin only; a Member is signed in but not an admin', () => {
-  assert.equal(P.isAdminRole('owner'), true);
+test('admin surfaces are for Admins only; a User is signed in but not an admin', () => {
   assert.equal(P.isAdminRole('admin'), true);
-  assert.equal(P.isAdminRole('member'), false);
-  assert.equal(P.isAdminRole('restricted'), false);
+  assert.equal(P.isAdminRole('user'), false);
+  assert.equal(P.isAdminRole('basic'), false);
   assert.equal(P.isAdminRole(undefined), false);
 });
 
-test('canManage mirrors the server: the Owner and Admins manage everyone but THE Owner', () => {
-  assert.equal(P.canManage('owner', 'admin'), true);
-  assert.equal(P.canManage('owner', 'owner'), false);
-  assert.equal(P.canManage('admin', 'member'), true);
-  assert.equal(P.canManage('admin', 'restricted'), true);
-  assert.equal(P.canManage('admin', 'admin'), true);
-  assert.equal(P.canManage('admin', 'owner'), false);
-  assert.equal(P.canManage('member', 'restricted'), false);
-  assert.equal(P.canManage('restricted', 'member'), false);
-});
-
-test('the Admin role is offered to the Owner and Admins, once the Owner has a password', () => {
-  assert.deepEqual(P.roleOptions('owner', true), { options: ['admin', 'member', 'restricted'], adminBlocked: null });
-  assert.deepEqual(P.roleOptions('owner', false), { options: ['member', 'restricted'], adminBlocked: 'owner_needs_password' });
-  assert.deepEqual(P.roleOptions('admin', true), { options: ['admin', 'member', 'restricted'], adminBlocked: null });
-  assert.deepEqual(P.roleOptions('member', true), { options: ['member', 'restricted'], adminBlocked: 'not_owner' });
+test('the rail groups Mine and Household, and a household bot the profile copied stands down', () => {
+  const bots = [
+    { id: 'atlas', name: 'Atlas', scope: 'household' }, { id: 'helper', name: 'Helper', scope: 'household' },
+    { id: 'p1', name: 'Atlas', scope: 'personal', cloned_from: 'atlas' }, { id: 'p2', name: 'Mine', scope: 'personal' },
+  ];
+  const g = P.railGroups(bots);
+  assert.deepEqual(g.mine.map((b) => b.id), ['p1', 'p2']);
+  assert.deepEqual(g.household.map((b) => b.id), ['helper'], 'one Atlas, not two');
+  assert.deepEqual(P.railGroups(bots.slice(0, 2)).household.map((b) => b.id), ['atlas', 'helper']);
+  assert.deepEqual(P.railGroups(null), { mine: [], household: [] });
+  assert.equal(P.isMineBot({ scope: 'personal' }), true);
+  assert.equal(P.isMineBot({ scope: 'household' }), false);
 });
 
 // ------------------------------------------------------------- credentials
@@ -83,9 +79,9 @@ test('only the secret in use goes into the sign-in options', () => {
   assert.deepEqual(P.credentialOptions('pin', ''), {});
 });
 
-test('the keypad stays when the only profile is the Owner and the install has a PIN', () => {
-  const owner = (credential) => ({ id: 'o', name: 'Owner', role: 'owner', credential });
-  const kid = { id: 'k', name: 'Kid', role: 'restricted', credential: 'none' };
+test('the keypad stays when the only profile is the protected Admin and the install has a PIN', () => {
+  const owner = (credential) => ({ id: 'o', name: 'Ada', role: 'admin', protected: true, credential });
+  const kid = { id: 'k', name: 'Kid', role: 'basic', credential: 'none' };
   assert.equal(P.signInMode({ claimed: true, pin_set: true, profiles: [owner('pin_or_password')] }), 'keypad');
   assert.equal(P.signInMode({ claimed: true, pinSet: true, profiles: [owner('pin_or_password')] }), 'keypad', 'state.auth spelling');
   assert.equal(P.signInMode({ claimed: true, profiles: [owner('pin')] }), 'keypad');
@@ -96,12 +92,12 @@ test('the keypad stays when the only profile is the Owner and the install has a 
   assert.equal(P.signInMode({ pin_set: true }), 'keypad');        // a 2.x server sends no profiles
 });
 
-test('tiles list the Owner first, then by role, then by name', () => {
+test('tiles list the shared default profile first, then the protected Admin, then by type, then by name', () => {
   const names = P.sortTiles([
-    { name: 'Zed', role: 'member' }, { name: 'Kid', role: 'restricted' },
-    { name: 'Ann', role: 'member' }, { name: 'Boss', role: 'owner' }, { name: 'Ops', role: 'admin' },
+    { name: 'Zed', role: 'user' }, { name: 'Kid', role: 'basic' }, { name: 'Ann', role: 'user' },
+    { name: 'Boss', role: 'admin', protected: true }, { name: 'Ops', role: 'admin' }, { name: 'DisPatch', role: 'user', shared: true },
   ]).map((p) => p.name);
-  assert.deepEqual(names, ['Boss', 'Ops', 'Ann', 'Zed', 'Kid']);
+  assert.deepEqual(names, ['DisPatch', 'Boss', 'Ops', 'Ann', 'Zed', 'Kid']);
 });
 
 test('avatars: same-origin picture, short glyph, or the initial -- never a foreign URL', () => {
@@ -148,132 +144,30 @@ test('createCountdown ticks once a second, finishes at zero, and stop() cancels'
   assert.equal(d3, 1, 'a zero wait is done at once');
 });
 
-// ------------------------------------------------------------------ budgets
-
-test('budgets: the server row -> the form strings', () => {
-  const f = P.budgetsToForm({
-    budgets: { minutes_per_day: 45, quiet_hours: '20:30-07:00', turns: 100, upload_mb: 50 },
-    session_timeout: 1800,
-  });
-  assert.deepEqual(f, {
-    minutes: '45', quietStart: '20:30', quietEnd: '07:00', turns: '100', threads: '', feedback: '',
-    uploadMb: '50', sessionMinutes: '30',
-  });
-  assert.deepEqual(P.budgetsToForm({}), P.EMPTY_BUDGET_FORM);
-  assert.equal(P.budgetsToForm({ budgets: { quiet_hours: '7:05-9:00' } }).quietStart, '07:05');
-});
-
-test('budgets: the form -> the API payload; an empty box is absent, not zero', () => {
-  const r = P.formToBudgets({ minutes: '45', quietStart: '20:30', quietEnd: '07:00', turns: '100', threads: '', feedback: '0', uploadMb: '', sessionMinutes: '30' });
-  assert.deepEqual(r.errors, {});
-  assert.deepEqual(r.budgets, { minutes_per_day: 45, quiet_hours: '20:30-07:00', turns: 100, feedback: 0 });
-  assert.equal(r.session_timeout, 1800);
-  assert.deepEqual(P.formToBudgets({}).budgets, {});
-});
-
-test('budgets: bad input is reported by field and nothing is silently coerced', () => {
-  assert.equal(P.formToBudgets({ minutes: '0' }).errors.minutes, 'range_1_1440');
-  assert.equal(P.formToBudgets({ minutes: '1441' }).errors.minutes, 'range_1_1440');
-  assert.equal(P.formToBudgets({ minutes: '4.5' }).errors.minutes, 'range_1_1440');
-  assert.equal(P.formToBudgets({ turns: '-1' }).errors.turns, 'range_0_100000');
-  assert.equal(P.formToBudgets({ uploadMb: '100001' }).errors.uploadMb, 'range_0_100000');
-  assert.equal(P.formToBudgets({ quietStart: '20:00' }).errors.quiet, 'both_times');
-  assert.equal(P.formToBudgets({ quietStart: '20:00', quietEnd: '20:00' }).errors.quiet, 'same_times');
-  assert.equal(P.formToBudgets({ sessionMinutes: '0' }).errors.sessionMinutes, 'range_1_43200');
-  assert.equal(P.formToBudgets({ sessionMinutes: '43201' }).errors.sessionMinutes, 'range_1_43200');
-});
-
-test('quiet hours parse and format symmetrically', () => {
-  assert.deepEqual(P.parseQuietHours('20:30-07:00'), { start: '20:30', end: '07:00' });
-  assert.deepEqual(P.parseQuietHours('garbage'), { start: '', end: '' });
-  assert.equal(P.formatQuietHours('20:30', '07:00'), '20:30-07:00');
-  assert.equal(P.formatQuietHours('20:30', ''), '');
-});
-
-test('createPayload: each role needs its own credential', () => {
-  assert.deepEqual(P.createPayload({ name: ' Sam ', role: 'member', pin: '1234' }).body, { name: 'Sam', role: 'member', pin: '1234' });
-  assert.equal(P.createPayload({ name: 'Sam', role: 'member', pin: '12' }).errors.pin, 'min_4');
-  assert.equal(P.createPayload({ name: 'Sam', role: 'member' }).errors.pin, 'min_4');
-  assert.deepEqual(P.createPayload({ name: 'Kid', role: 'restricted' }).errors, {});
-  assert.equal(P.createPayload({ name: 'Kid', role: 'restricted', pin: '1' }).errors.pin, 'min_4');
-  assert.equal(P.createPayload({ name: 'Ops', role: 'admin', password: 'short' }).errors.password, 'min_8');
-  assert.deepEqual(P.createPayload({ name: 'Ops', role: 'admin', password: 'longenough' }).body, { name: 'Ops', role: 'admin', password: 'longenough' });
-  assert.equal(P.createPayload({ name: '  ', role: 'member', pin: '1234' }).errors.name, 'required');
-  const withBudgets = P.createPayload({ name: 'Kid', role: 'restricted', minutes: '30', sessionMinutes: '10' }).body;
-  assert.deepEqual(withBudgets.budgets, { minutes_per_day: 30 });
-  assert.equal(withBudgets.session_timeout, 600);
-});
-
-test('patchPayload sends only what changed', () => {
-  const person = { id: 'p1', name: 'Kid', role: 'restricted', avatar: '', disabled: false, budgets: { minutes_per_day: 30 }, session_timeout: 600 };
-  const same = P.budgetsToForm(person);
-  assert.deepEqual(P.patchPayload(person, { ...same, name: 'Kid', role: 'restricted', avatar: '', disabled: false }).patch, {});
-  const changed = P.patchPayload(person, { ...same, name: 'Kiddo', role: 'member', avatar: '🦊', minutes: '', disabled: true });
-  assert.deepEqual(changed.patch, { name: 'Kiddo', role: 'member', avatar: '🦊', budgets: {}, disabled: true });
-  assert.equal(P.patchPayload({ ...person, role: 'owner' }, { ...same, name: 'Kid', role: 'member' }).patch.role, undefined, 'the Owner\'s role is never patched');
-});
-
 // ----------------------------------------------------------------- activity
 
-test('activity rows: newest first, six columns, zero-filled, at most 7 days', () => {
+test('activity rows: newest first, five columns, zero-filled, at most 7 days', () => {
   const days = Array.from({ length: 9 }, (_, i) => ({ day: `2026-10-${String(10 + i).padStart(2, '0')}`, counts: i === 8 ? { turn: 4, upload: 1, odd_kind: 9 } : {} }));
   const rows = P.activityRows({ days }, 7);
   assert.equal(rows.length, 7);
   assert.equal(rows[0].day, '2026-10-18');
-  assert.deepEqual(rows[0].counts, { login: 0, turn: 4, thread: 0, upload: 1, feedback: 0, limit_hit: 0 });
+  assert.deepEqual(rows[0].counts, { login: 0, turn: 4, thread: 0, upload: 1, feedback: 0 });
   assert.equal(rows[0].total, 5, 'unknown kinds are not summed into the visible columns');
   assert.deepEqual(P.activityRows(null), []);
   const totals = P.activityTotals(rows);
   assert.equal(totals.turn, 4);
 });
 
-test('usage lines: today against the limits, over-limit flagged', () => {
-  const lines = P.usageLines(
-    { active_seconds: 1800, 'action:turn': 100, 'action:thread': 1, upload_bytes: 5 * 1024 * 1024 },
-    { minutes_per_day: 45, turns: 100, upload_mb: 50 });
-  const by = Object.fromEntries(lines.map((l) => [l.key, l]));
-  assert.deepEqual([by.minutes.used, by.minutes.limit, by.minutes.over], [30, 45, false]);
-  assert.deepEqual([by.turns.used, by.turns.limit, by.turns.over], [100, 100, true]);
-  assert.deepEqual([by.threads.used, by.threads.limit], [1, null]);
-  assert.equal(by.upload_mb.used, 5);
-  assert.equal(P.usageLines(null, null).every((l) => l.used === 0 && l.limit === null && !l.over), true);
-});
-
-// ------------------------------------------------------------ policy frames
-
-test('ws error frames: policy refusals become the notice, the rest stay plain', () => {
-  assert.deepEqual(P.wsErrorKind({ type: 'error', code: 'time_limit' }), { kind: 'notice', code: 'time_limit' });
-  assert.deepEqual(P.wsErrorKind({ error: { code: 'quiet_hours' } }), { kind: 'notice', code: 'quiet_hours' });
-  assert.equal(P.wsErrorKind({ code: 'safe_mode' }).kind, 'restricted');
-  assert.equal(P.wsErrorKind({ code: 'permission_denied' }).kind, 'denied');
-  assert.equal(P.wsErrorKind({ message: 'boom' }).kind, 'plain');
-  assert.equal(P.wsErrorKind(null).kind, 'plain');
-  assert.equal(P.blockNoticeKey('time_limit'), 'notice.time_limit');
-  assert.equal(P.blockNoticeKey('permission_denied'), null);
-});
-
-test('only Members and Restricted profiles can be bound to a device', () => {
-  const ids = P.bindableProfiles([
-    { id: 'o', role: 'owner' }, { id: 'a', role: 'admin' }, { id: 'm', role: 'member' },
-    { id: 'r', role: 'restricted' }, { id: 'x', role: 'member', disabled: true },
-  ]).map((p) => p.id);
-  assert.deepEqual(ids, ['m', 'r']);
-});
-
-test('a character\'s audience follows the two switches, then the server field', () => {
-  assert.equal(P.audienceOf({ safe: true, hide_unlocked: true }), 'restricted');
-  assert.equal(P.audienceOf({ safe: true, hide_unlocked: false }), 'all');
-  assert.equal(P.audienceOf({ safe: false, hide_unlocked: false }), 'members');
-  assert.equal(P.audienceOf({ safe: false, audience: 'all' }), 'members', 'a click before Save wins over the stale field');
-  assert.equal(P.audienceOf({ audience: 'restricted' }), 'restricted');
-  assert.equal(P.audienceOf({}), 'members');
-});
-
 // --------------------------------------------------------------------- api.js
 
 const NAMES = ['me', 'login', 'switchProfile', 'setupOwner', 'changePassword', 'apiTokenInfo', 'rotateApiToken',
   'people', 'createPerson', 'patchPerson', 'deletePerson', 'setPersonPin', 'clearPersonPin', 'setPersonPassword',
-  'signOutPerson', 'devices', 'bindThisDevice', 'forgetDevice', 'peopleActivity', 'peopleAudit', 'myActivity'];
+  'signOutPerson', 'devices', 'forgetDevice', 'peopleActivity', 'peopleAudit',
+  'rolePreview', 'changeRole', 'setHouseholdBots', 'deletePreview'];
+
+test('api.js no longer binds a device to a profile (4.0: the route is gone)', () => {
+  assert.doesNotMatch(API_SRC, /bindThisDevice|devices\/this/);
+});
 
 test('api.js declares every 3.0 call the backend parity test greps for', () => {
   for (const n of NAMES) assert.match(API_SRC, new RegExp(`\\b${n}:\\s`), n);
@@ -333,15 +227,18 @@ test('errorExtras reads the 3.0 envelope, retry_after and the Retry-After header
 test('api.login / switchProfile / setupOwner / changePassword post the contract bodies', { skip: dom.skip }, async () => {
   const { api } = await loadApi();
   apiRoutes = {
-    'POST /api/auth/login': () => [200, { ok: true, role: 'member' }],
+    'POST /api/auth/login': () => [200, { ok: true, role: 'user' }],
     'POST /api/auth/switch': () => [200, { ok: true, role: 'admin' }],
     'POST /api/auth/setup': () => [200, { ok: true, claimed: true }],
     'POST /api/auth/password': () => [200, { ok: true }],
     'POST /api/auth/api-token': () => [200, { ok: true, api_token: 'k' }],
     'GET /api/people/activity?profile_id=p1&days=7': () => [200, { summary: { days: [] } }],
     'GET /api/people/activity': () => [200, { summary: { days: [] } }],
-    'GET /api/me/activity?days=7': () => [200, {}],
-    'PUT /api/people/devices/this': () => [200, {}],
+    'GET /api/people/p1/role/preview?role=basic': () => [200, { counts: {}, token: 'tk', deletes: true }],
+    'POST /api/people/p1/role': () => [200, {}],
+    'PUT /api/people/p1/household-bots': () => [200, {}],
+    'GET /api/people/p1/delete/preview': () => [200, { counts: {}, token: 'tk2' }],
+    'POST /api/people/p1/delete': () => [200, {}],
   };
   await api.login('p1', { pin: '1234', remember: true });
   await api.switchProfile('p2', { password: 'pw' });
@@ -353,9 +250,11 @@ test('api.login / switchProfile / setupOwner / changePassword post the contract 
   await api.setMachineAccess({ machineLoopbackTrust: false });
   await api.peopleActivity({ profileId: 'p1', days: 7 });
   await api.peopleActivity();
-  await api.myActivity(7);
-  await api.bindThisDevice('kid');
-  await api.bindThisDevice(null);
+  await api.rolePreview('p1', 'basic');
+  await api.changeRole('p1', { role: 'basic', confirm_token: 'tk' });
+  await api.setHouseholdBots('p1', ['b1']);
+  await api.deletePreview('p1');
+  await api.deletePerson('p1', 'tk2');
   const bodies = apiCalls.map((c) => [c.key, c.body]);
   assert.deepEqual(bodies, [
     ['POST /api/auth/login', { profile_id: 'p1', pin: '1234', remember: true }],
@@ -368,9 +267,11 @@ test('api.login / switchProfile / setupOwner / changePassword post the contract 
     ['POST /api/auth/api-token', { machine_loopback_trust: false }],
     ['GET /api/people/activity?profile_id=p1&days=7', null],
     ['GET /api/people/activity', null],
-    ['GET /api/me/activity?days=7', null],
-    ['PUT /api/people/devices/this', { profile_id: 'kid' }],
-    ['PUT /api/people/devices/this', { profile_id: null }],
+    ['GET /api/people/p1/role/preview?role=basic', null],
+    ['POST /api/people/p1/role', { role: 'basic', confirm_token: 'tk' }],
+    ['PUT /api/people/p1/household-bots', { household_bots: ['b1'] }],
+    ['GET /api/people/p1/delete/preview', null],
+    ['POST /api/people/p1/delete', { confirm_token: 'tk2' }],
   ]);
 });
 
@@ -379,13 +280,14 @@ test('every person route encodes its id as ONE path segment', { skip: dom.skip }
   apiRoutes = {};
   const evil = 'a/../b?x=1';
   const enc = encodeURIComponent(evil);
-  for (const fn of [() => api.patchPerson(evil, {}), () => api.deletePerson(evil), () => api.setPersonPin(evil, '1234'),
+  for (const fn of [() => api.patchPerson(evil, {}), () => api.deletePerson(evil, 't'), () => api.setPersonPin(evil, '1234'),
     () => api.clearPersonPin(evil), () => api.setPersonPassword(evil, 'longenough'), () => api.signOutPerson(evil),
-    () => api.forgetDevice(evil)]) {
+    () => api.forgetDevice(evil), () => api.rolePreview(evil, 'basic'), () => api.changeRole(evil, { role: 'user' }),
+    () => api.setHouseholdBots(evil, 'all'), () => api.deletePreview(evil)]) {
     await fn().catch(() => {});
   }
   for (const c of apiCalls) assert.ok(c.key.includes(enc), c.key);
-  assert.equal(apiCalls.length, 7);
+  assert.equal(apiCalls.length, 11);
 });
 
 test('a failed call carries code, fix and retryAfter without changing err.message', { skip: dom.skip }, async () => {
@@ -410,21 +312,19 @@ test('a failed call carries code, fix and retryAfter without changing err.messag
   });
 });
 
-test('time_limit / quiet_hours / signin_required reach their hooks; signin_required does not trip onLocked', { skip: dom.skip }, async () => {
+test('signin_required reaches its hook and does not trip onLocked; a plain 401 does', { skip: dom.skip }, async () => {
   const mod = await loadApi();
   const seen = [];
-  mod.setOnPolicyBlock((code) => seen.push(['block', code]));
   mod.setOnSignInRequired(() => seen.push(['signin']));
   mod.setOnLocked(() => seen.push(['locked']));
   apiRoutes = {
-    'GET /api/bots': () => [403, { detail: 'No', error: { code: 'time_limit', message: 'x' } }],
     'GET /api/threads?bot_id=b': () => [401, { detail: 'Sign in', error: { code: 'signin_required', message: 'x' } }],
     'GET /api/files': () => [401, { detail: 'expired' }],
   };
-  await assert.rejects(mod.api.bots());
   await assert.rejects(mod.api.threads('b'), (e) => e.signInRequired === true && e.code === 'signin_required');
   await assert.rejects(mod.api.files());
-  assert.deepEqual(seen, [['block', 'time_limit'], ['signin'], ['locked']]);
+  assert.deepEqual(seen, [['signin'], ['locked']]);
+  assert.equal(typeof mod.setOnPolicyBlock, 'undefined', 'the time-limit hook went with the limits');
 });
 
 // ------------------------------------------------------------- DOM: signin.js
@@ -452,16 +352,16 @@ async function boot(url = 'http://127.0.0.1:18765/') {
     const [status, body] = h ? h(opts) : [404, { detail: 'Not Found' }];
     return { ok: status >= 200 && status < 300, status, statusText: String(status), headers: new win.Headers(), json: async () => body };
   };
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   return win;
 }
 
 const PROFILES = [
-  { id: 'o1', name: 'Boss', role: 'owner', avatar: '', credential: 'pin_or_password' },
+  { id: 'o1', name: 'Boss', role: 'admin', protected: true, avatar: '', credential: 'pin_or_password' },
   { id: 'a1', name: 'Ops', role: 'admin', avatar: '', credential: 'password' },
-  { id: 'm1', name: 'Sam', role: 'member', avatar: '🦊', credential: 'pin' },
-  { id: 'r1', name: 'Kid', role: 'restricted', avatar: '', credential: 'none' },
+  { id: 'm1', name: 'Sam', role: 'user', avatar: '🦊', credential: 'pin' },
+  { id: 'r1', name: 'Kid', role: 'basic', avatar: '', credential: 'none' },
 ];
 
 test('sign-in: one tile per profile, with name and role label', { skip: dom.skip }, async () => {
@@ -471,7 +371,7 @@ test('sign-in: one tile per profile, with name and role label', { skip: dom.skip
   renderSignIn(host, { profiles: PROFILES, onSubmit: async () => {} });
   const tiles = [...host.querySelectorAll('.signin-tile')];
   assert.deepEqual(tiles.map((b) => b.querySelector('.signin-name').textContent), ['Boss', 'Ops', 'Sam', 'Kid']);
-  assert.deepEqual(tiles.map((b) => b.querySelector('.signin-role').textContent), ['Owner', 'Admin', 'Member', 'Restricted']);
+  assert.deepEqual(tiles.map((b) => b.querySelector('.signin-role').textContent), ['Admin', 'Admin', 'User', 'Basic']);
   assert.ok(tiles.every((b) => b.tagName === 'BUTTON' && b.type === 'button'), 'keyboard operable');
 });
 
@@ -551,7 +451,10 @@ test('sign-in: a 429 disables submit and counts down', { skip: dom.skip }, async
   const go = host.querySelector('.signin-go');
   assert.equal(go.disabled, true, 'submit is disabled while throttled');
   assert.match(host.querySelector('.signin-wait').textContent, /1:30/);
-  assert.match(host.querySelector('#signin-cred-error').textContent, /90 seconds/);
+  // 4.3 Fable: one visible line (the countdown); the seconds sentence is for screen readers only.
+  assert.match(host.querySelector('.signin-wait-announce').textContent, /90 seconds/);
+  assert.ok(host.querySelector('.signin-wait-announce').classList.contains('sr-only'));
+  assert.equal(host.querySelector('#signin-cred-error').hidden, true);
 });
 
 test('setup: the token field exists only for a network install, and the form validates before sending', { skip: dom.skip }, async () => {
@@ -561,7 +464,7 @@ test('setup: the token field exists only for a network install, and the form val
   const remote = renderSetup({ setupRequired: true, onSubmit: async (v) => { sent.push(v); } });
   win.document.body.append(remote.form);
   assert.ok(remote.form.querySelector('#setup-token'));
-  assert.equal(remote.form.querySelector('label[for="setup-token"]').textContent, 'Setup token');
+  assert.equal(remote.form.querySelector('label[for="setup-token"]').textContent, 'Setup code');
   const submit = () => remote.form.dispatchEvent(new win.Event('submit', { cancelable: true }));
   submit();
   assert.equal(sent.length, 0);
@@ -572,77 +475,29 @@ test('setup: the token field exists only for a network install, and the form val
   assert.equal(remote.form.querySelector('.setup-error').textContent, 'The two passwords do not match.');
   remote.form.querySelector('#setup-confirm').value = 'longenough';
   submit();
-  assert.equal(remote.form.querySelector('.setup-error').textContent, 'Enter the setup token from the server log.');
+  assert.equal(remote.form.querySelector('.setup-error').textContent, 'Enter the setup code from the DisPatch log.');
   remote.form.querySelector('#setup-token').value = ' tok123 ';
   remote.form.querySelector('#setup-pin').value = '4321';
   submit();
   await tick();
-  assert.deepEqual(sent, [{ name: 'Owner', password: 'longenough', newPin: '4321', setupToken: 'tok123' }]);
+  assert.deepEqual(sent, [{ name: 'Admin', password: 'longenough', newPin: '4321', setupToken: 'tok123' }]);
 
   const local = renderSetup({ setupRequired: false, onSubmit: async () => {}, idPrefix: 'loc' });
   assert.equal(local.form.querySelector('#loc-token'), null, 'no token field on the box itself');
-});
-
-test('restricted banner: slim, non-dismissible, with the disclosure and a link to the panel', { skip: dom.skip }, async () => {
-  const win = await boot();
-  const { paintRestrictedBanner } = await import(`../static/js/signin.js?t=${Math.random()}`);
-  const host = win.document.getElementById('restricted-banner');
-  let opened = 0;
-  paintRestrictedBanner(host, { show: true, onMore: () => { opened++; } });
-  assert.equal(host.hidden, false);
-  assert.equal(host.querySelector('.restricted-text').textContent,
-    'The owner can see a summary of this profile\'s activity. Chats are kept on the host computer and are shared: anyone who can use the same character can read them, other profiles too, and devices that haven\'t signed in if this install lets them.');
-  assert.equal(host.querySelectorAll('button').length, 1, 'only the link; there is no close button');
-  host.querySelector('.restricted-more').click();
-  assert.equal(opened, 1);
-  paintRestrictedBanner(host, { show: false });
-  assert.equal(host.hidden, true);
-  assert.equal(host.childNodes.length, 0);
-});
-
-test('restricted panel: the link says who can see what, and the panel says the Owner and Admins can open the chats', { skip: dom.skip }, async () => {
-  const win = await boot();
-  const { paintRestrictedBanner, openRestrictedPanel } = await import(`../static/js/signin.js?t=${Math.random()}`);
-  const host = win.document.getElementById('restricted-banner');
-  paintRestrictedBanner(host, { show: true, onMore: () => {} });
-  assert.equal(host.querySelector('.restricted-more').textContent, 'Who can see what?');
-  const D = win.HTMLDialogElement && win.HTMLDialogElement.prototype;
-  if (D && !D.showModal) { D.showModal = function () { this.open = true; }; D.close = function () { this.open = false; }; }
-  const dlg = await openRestrictedPanel({ fetchActivity: async () => ({ today: {}, limits: {}, summary: [] }) });
-  assert.equal(dlg.querySelector('.ui-dialog-title').textContent, 'Who can see what');
-  const text = dlg.textContent;
-  assert.match(text, /The Owner and Admins can open this profile's chats too/);
-  assert.match(text, /Your activity summary/, 'the summary keeps its own heading');
-  dlg.remove();
-});
-
-test('access notice: time_limit and quiet_hours each get their own words', { skip: dom.skip }, async () => {
-  const win = await boot();
-  const { paintAccessNotice } = await import(`../static/js/signin.js?t=${Math.random()}`);
-  const host = win.document.getElementById('access-notice');
-  paintAccessNotice(host, 'time_limit', { onRetry: () => {}, onSwitch: () => {} });
-  assert.equal(host.querySelector('#access-title').textContent, 'Today\'s time is used up');
-  assert.equal(host.querySelectorAll('button').length, 2);
-  paintAccessNotice(host, 'quiet_hours', { onRetry: () => {}, onSwitch: null });
-  assert.equal(host.querySelector('#access-title').textContent, 'Not available right now');
-  assert.equal(host.querySelectorAll('button').length, 1, 'no Switch button when there is nobody to switch to');
 });
 
 // ------------------------------------------------------------- DOM: people.js
 
 const PEOPLE = () => ({
   profiles: [
-    { id: 'o1', name: 'Boss', role: 'owner', avatar: '', has_pin: true, has_password: true, budgets: {}, grants: [], denies: [], session_timeout: null, disabled: false },
-    { id: 'a1', name: 'Ops', role: 'admin', avatar: '', has_pin: false, has_password: true, budgets: {}, grants: [], denies: [], session_timeout: null, disabled: false },
-    { id: 'm1', name: 'Sam', role: 'member', avatar: '🦊', has_pin: true, has_password: false, budgets: {}, grants: [], denies: [], session_timeout: null, disabled: false },
-    { id: 'r1', name: 'Kid', role: 'restricted', avatar: '', has_pin: false, has_password: false,
-      budgets: { minutes_per_day: 45, quiet_hours: '20:30-07:00' }, grants: [], denies: [], session_timeout: 900, disabled: true },
+    { id: 'o1', name: 'Boss', role: 'admin', protected: true, avatar: '', has_pin: true, has_password: true, grants: [], denies: [], session_timeout: null, disabled: false },
+    { id: 'a1', name: 'Ops', role: 'admin', avatar: '', has_pin: false, has_password: true, grants: [], denies: [], session_timeout: null, disabled: false },
+    { id: 'm1', name: 'Sam', role: 'user', avatar: '🦊', has_pin: true, has_password: false, grants: [], denies: [], session_timeout: null, disabled: false },
+    { id: 'r1', name: 'Pat', role: 'basic', avatar: '', has_pin: false, has_password: false, grants: [], denies: [], session_timeout: 900, disabled: true },
   ],
-  me: { id: 'o1', role: 'owner' },
-  roles: ['owner', 'admin', 'member', 'restricted'],
+  me: { id: 'o1', role: 'admin' },
+  roles: ['admin', 'user', 'basic'],
   role_permissions: {},
-  can_create_admin: true,
-  owner_has_password: true,
   disclosure: 'x',
 });
 
@@ -657,16 +512,16 @@ function peopleRoutes(over = {}) {
     'GET /api/people/audit': () => [200, { entries: [{ ts: '2026-10-17T10:00:00Z', kind: 'profile_created', profile_id: 'o1', subject: 'r1', detail: '' }] }],
     'GET /api/auth/api-token': () => [200, { has_token: true, machine_loopback_trust: true, machine_scopes: ['read'], all_scopes: ['read'] }],
     'POST /api/auth/api-token': () => [200, { ok: true, machine_loopback_trust: true, api_token: 'dp_secret_key' }],
-    'PUT /api/people/devices/this': () => [200, {}],
     'POST /api/people': () => [201, { id: 'new' }],
     'PATCH /api/people/r1': () => [200, {}],
-    'DELETE /api/people/m1': () => [200, { ok: true }],
+    'GET /api/people/m1/delete/preview': () => [200, { counts: { bots: 1, chats: 2, pictures: 0, voices: 0 }, token: 'del-tok' }],
+    'POST /api/people/m1/delete': () => [200, { ok: true }],
     'POST /api/people/m1/sign-out': () => [200, { ok: true }],
     ...(over.routes || {}),
   };
 }
 
-async function mountPeople(role = 'owner', over = {}) {
+async function mountPeople(role = 'admin', over = {}) {
   const win = await boot();
   peopleRoutes(over);
   const mod = await import(`../static/js/people.js?t=${Math.random()}`);
@@ -683,139 +538,27 @@ async function mountPeople(role = 'owner', over = {}) {
   return { win, pane, rec };
 }
 
-test('People tab: a row per profile with role badge and PIN / password / disabled indicators', { skip: dom.skip }, async () => {
-  const { pane } = await mountPeople('owner');
-  const rows = [...pane.querySelectorAll('.people-row')];
-  assert.equal(rows.length, 4);
-  const text = (r) => r.textContent.replace(/\s+/g, ' ');
-  assert.match(text(rows[0]), /Boss.*Owner.*PIN set.*Password set/);
-  assert.match(text(rows[2]), /Sam.*Member.*PIN set/);
-  assert.doesNotMatch(text(rows[2]), /password/i, 'only the Owner and Admins have a password');
-  assert.match(text(rows[3]), /Kid.*Restricted.*No PIN.*Disabled/);
-  // The Owner row has no Edit button (nobody edits the Owner here); the others do.
-  assert.equal(rows[0].querySelector('button'), null);
-  assert.ok(rows[1].querySelector('button[aria-label="Edit Ops"]'));
-});
-
-test('People tab: an Admin manages everyone but the Owner, other Admins included, and has Machine access', { skip: dom.skip }, async () => {
+test('People tab: This device lists remembered devices with Forget only (4.0: no binding)', { skip: dom.skip }, async () => {
   const { pane } = await mountPeople('admin');
-  const editable = [...pane.querySelectorAll('.people-row')].filter((r) => r.querySelector('button')).map((r) => r.dataset.person);
-  assert.ok(!editable.includes('o1'), 'THE Owner is never editable by an Admin');
-  assert.ok(editable.includes('m1') && editable.includes('r1'), editable.join());
-  pane.querySelector('#people-add').click();
-  const roles = [...pane.querySelectorAll('#people-editor select option')].map((o) => o.value);
-  assert.deepEqual(roles, ['admin', 'member', 'restricted'], 'an Admin can add an Admin');
-});
-
-test('People tab: the Owner sees the Admin role only when they have a password', { skip: dom.skip }, async () => {
-  const withPw = await mountPeople('owner');
-  withPw.pane.querySelector('#people-add').click();
-  assert.deepEqual([...withPw.pane.querySelectorAll('#people-editor select option')].map((o) => o.value), ['admin', 'member', 'restricted']);
-  const p = PEOPLE(); p.owner_has_password = false;
-  const noPw = await mountPeople('owner', { people: p });
-  noPw.pane.querySelector('#people-add').click();
-  assert.deepEqual([...noPw.pane.querySelectorAll('#people-editor select option')].map((o) => o.value), ['member', 'restricted']);
-  assert.match(noPw.pane.querySelector('.people-admin-note').textContent, /set your own password/);
-});
-
-test('People tab: creating a Member posts the PIN and budgets from the form', { skip: dom.skip }, async () => {
-  const { pane, win } = await mountPeople('owner');
-  pane.querySelector('#people-add').click();
-  const ed = pane.querySelector('#people-editor');
-  const byLabel = (txt) => { const l = [...ed.querySelectorAll('label')].find((x) => x.textContent === txt); return ed.querySelector(`#${l.getAttribute('for')}`); };
-  byLabel('Name').value = 'Pat';
-  byLabel('PIN').value = '2468';
-  byLabel('Minutes per day').value = '60';
-  byLabel('From').value = '21:00';
-  byLabel('Until').value = '07:30';
-  apiCalls.length = 0;
-  [...ed.querySelectorAll('button')].find((b) => b.textContent === 'Add person').click();
-  await tick(); await tick();
-  const post = apiCalls.find((c) => c.key === 'POST /api/people');
-  assert.deepEqual(post.body, { name: 'Pat', role: 'member', pin: '2468', budgets: { minutes_per_day: 60, quiet_hours: '21:00-07:30' } });
-  void win;
-});
-
-test('People tab: a bad budget is refused in the form, before any request', { skip: dom.skip }, async () => {
-  const { pane } = await mountPeople('owner');
-  pane.querySelector('#people-add').click();
-  const ed = pane.querySelector('#people-editor');
-  const byLabel = (txt) => { const l = [...ed.querySelectorAll('label')].find((x) => x.textContent === txt); return ed.querySelector(`#${l.getAttribute('for')}`); };
-  byLabel('Name').value = 'Pat';
-  byLabel('PIN').value = '2468';
-  byLabel('Minutes per day').value = '5000';
-  apiCalls.length = 0;
-  [...ed.querySelectorAll('button')].find((b) => b.textContent === 'Add person').click();
-  await tick();
-  assert.equal(apiCalls.some((c) => c.key === 'POST /api/people'), false);
-  assert.equal(ed.querySelector('.people-error').textContent, 'Minutes per day must be a whole number from 1 to 1440.');
-});
-
-test('People tab: editing sends only the change, and Delete asks first', { skip: dom.skip }, async () => {
-  const { pane, rec } = await mountPeople('owner');
-  pane.querySelector('[data-person="r1"] button').click();
-  const ed = pane.querySelector('#people-editor');
-  const field = (txt) => { const l = [...ed.querySelectorAll('label')].find((x) => x.textContent === txt); return ed.querySelector(`#${l.getAttribute('for')}`); };
-  assert.equal(field('Minutes per day').value, '45');
-  assert.equal(field('From').value, '20:30');
-  assert.equal(field('Sign out after (minutes)').value, '15');
-  assert.equal(ed.querySelector('.people-disabled-row input').checked, true);
-  field('Minutes per day').value = '30';
-  ed.querySelector('.people-disabled-row input').checked = false;
-  apiCalls.length = 0;
-  [...ed.querySelectorAll('button')].find((b) => b.textContent === 'Save').click();
-  await tick(); await tick();
-  const patch = apiCalls.find((c) => c.key === 'PATCH /api/people/r1');
-  assert.deepEqual(patch.body, { budgets: { minutes_per_day: 30, quiet_hours: '20:30-07:00' }, disabled: false });
-
-  pane.querySelector('[data-person="m1"] button').click();
-  apiCalls.length = 0;
-  [...pane.querySelectorAll('#people-editor button')].find((b) => b.textContent === 'Delete').click();
-  await tick(); await tick();
-  assert.equal(rec.confirms.length, 1);
-  assert.match(rec.confirms[0], /Delete Sam\?/);
-  assert.ok(apiCalls.some((c) => c.key === 'DELETE /api/people/m1'));
-});
-
-test('People tab: This device lists only Members and Restricted and binds through PUT /api/people/devices/this', { skip: dom.skip }, async () => {
-  const p = PEOPLE(); p.profiles[3].disabled = false;     // a disabled profile cannot be bound
-  const { pane } = await mountPeople('owner', { people: p });
-  const select = pane.querySelector('#people-device-select');
-  assert.deepEqual([...select.options].map((o) => o.textContent), ['Nobody (ask who\'s using it)', 'Sam (Member)', 'Kid (Restricted)']);
-  assert.equal(select.value, 'r1', 'this browser is currently bound to Kid');
-  apiCalls.length = 0;
-  select.value = 'm1';
-  select.dispatchEvent(new (pane.ownerDocument.defaultView.Event)('change'));
-  await tick();
-  assert.deepEqual(apiCalls[0], { key: 'PUT /api/people/devices/this', body: { profile_id: 'm1' } });
+  assert.equal(pane.querySelector('#people-device-select'), null);
   const devs = [...pane.querySelectorAll('.people-device')];
   assert.equal(devs.length, 2);
-  assert.match(devs[0].textContent, /Hall tablet \(this device\).*Opens as Kid/);
-  assert.match(devs[0].textContent, /Unbind/);
-  assert.match(devs[1].textContent, /Unnamed device.*Asks who is using it/);
-  assert.doesNotMatch(devs[1].textContent, /Unbind/);
-});
-
-test('People tab: activity is a real table with a caption and counts only', { skip: dom.skip }, async () => {
-  const { pane } = await mountPeople('owner');
-  const table = pane.querySelector('.people-table');
-  assert.ok(table.querySelector('caption'));
-  assert.deepEqual([...table.querySelectorAll('thead th')].map((h) => h.textContent),
-    ['Day', 'Sign-ins', 'Messages', 'New chats', 'Uploads', 'Feedback', 'Limit hits']);
-  assert.ok([...table.querySelectorAll('th[scope="col"]')].length >= 7);
-  assert.match(table.querySelector('tbody tr').textContent, /2026-10-17/);
-  assert.match(pane.querySelector('.people-audit').textContent, /Profile created/);
+  assert.match(devs[0].textContent, /Hall tablet \(this device\)/);
+  for (const d of devs) {
+    assert.doesNotMatch(d.textContent, /Unbind|Opens as|Asks who/);
+    assert.match(d.textContent, /Forget/);
+  }
 });
 
 test('People tab: Machine access shows the rotated key once, with a Copy button', { skip: dom.skip }, async () => {
-  const { pane, rec } = await mountPeople('owner');
+  const { pane, rec } = await mountPeople('admin');
   const group = pane.querySelector('#people-machine');
   assert.ok(group);
   assert.match(group.textContent, /A key is set\./);
   const trust = group.querySelector('input[type="checkbox"]');
   assert.equal(trust.checked, true);
-  assert.match(group.textContent, /Off: they must send the API key/);
-  [...group.querySelectorAll('button')].find((b) => b.textContent === 'Rotate key').click();
+  assert.match(group.textContent, /Off: they must send the key/);
+  [...group.querySelectorAll('button')].find((b) => b.textContent === 'Replace key').click();
   await tick(); await tick();
   assert.equal(rec.confirms.length, 1, 'rotating asks first');
   const keyBox = group.querySelector('.people-key');
@@ -834,7 +577,7 @@ test('People & Access: the caller\'s groups go after This device; Activity & aud
     return { afterDevices: [mk('x-rules'), mk('x-limits')], end: [mk('x-adv')] };
   };
   let win = null;
-  const { pane } = await mountPeople('owner', { deps: { extraGroups: () => groups(globalThis.document), collapseActivity: true } });
+  const { pane } = await mountPeople('admin', { deps: { extraGroups: () => groups(globalThis.document), collapseActivity: true } });
   win = pane.ownerDocument;
   const order = [...pane.children].map((n) => n.id || n.dataset.anchor || n.className);
   const at = (x) => order.findIndex((o) => String(o).includes(x));
@@ -850,14 +593,13 @@ test('People & Access: the caller\'s groups go after This device; Activity & aud
   void win;
 });
 
-test('People & Access: "Open this device as" and the activity filter are themed selects', { skip: dom.skip }, async () => {
-  const { pane } = await mountPeople('owner');
-  assert.ok(pane.querySelector('#people-device-select').classList.contains('ui-select'));
+test('People & Access: the activity filter is a themed select', { skip: dom.skip }, async () => {
+  const { pane } = await mountPeople('admin');
   assert.ok(pane.querySelector('#people-activity-who').classList.contains('ui-select'));
 });
 
 test('People tab: every control has a label (no placeholder-only inputs)', { skip: dom.skip }, async () => {
-  const { pane } = await mountPeople('owner');
+  const { pane } = await mountPeople('admin');
   pane.querySelector('#people-add').click();
   for (const c of pane.querySelectorAll('input:not([type="hidden"]), select')) {
     const labelled = c.getAttribute('aria-label')
@@ -876,8 +618,8 @@ test('index.html: People & Access is a household (admin-only) section after Acco
   assert.match(HTML, /data-i18n="settings\.sec_people"/);
 });
 
-test('main.js: admin tabs follow canAdmin(), not merely "not Restricted"', () => {
-  assert.match(MAIN, /const canAdmin = \(\) => !state\.decoy && isAdminRole\(state\.role\);/);
+test('main.js: admin tabs follow canAdmin()', () => {
+  assert.match(MAIN, /const canAdmin = \(\) => isAdminRole\(state\.role\);/);
   // !canAdmin() hides every admin tab. OWNER_TABS is empty since Admins hold admin_system
   // (2026-10-19), and Voice left the list: a Member who holds use_voice gets it too.
   assert.match(MAIN, /b\.classList\.toggle\('hidden', !canAdmin\(\) \|\| \(OWNER_TABS\.includes\(tab\) && !isHostRole\(\)\)\)/);
@@ -901,15 +643,59 @@ test('ws.js: a 1008 close is not retried in a loop', async () => {
 
 test('sw.js: the three new modules are precached and the cache name moved on', () => {
   for (const f of ['profiles', 'signin', 'people']) assert.ok(SW.includes(`'/static/js/${f}.js'`), f);
-  assert.match(SW, /const CACHE = 'local-chat-v183'/);
+  assert.match(SW, /const CACHE = 'local-chat-v202'/);
 });
 
 test('the retired terms are gone from the strings a user reads', () => {
   const flat = JSON.stringify(EN);
   assert.doesNotMatch(flat, /Safe[- ]Mode/i);
   assert.doesNotMatch(flat, /locked \(Safe/i);
-  assert.equal(EN.role.restricted, 'Restricted');
-  assert.equal(EN.reactions.safe_label, 'Restricted');
-  assert.equal(EN.restricted.banner,
-    'The owner can see a summary of this profile\'s activity. Chats are kept on the host computer and are shared: anyone who can use the same character can read them, other profiles too, and devices that haven\'t signed in if this install lets them.');
+  assert.deepEqual([EN.role.admin, EN.role.user, EN.role.basic], ['Admin', 'User', 'Basic']);
+  for (const gone of ['owner', 'member', 'restricted']) assert.equal(EN.role[gone], undefined, `role.${gone}`);
+  for (const ns of ['restricted', 'companions', 'drop']) assert.equal(EN[ns], undefined, `the ${ns} namespace left with its screen`);
+});
+
+test('sign-in: picked() names the tile whose PIN form is up, so "Forgot PIN?" can tell who needs help', { skip: dom.skip }, async () => {
+  const win = await boot();
+  const { renderSignIn } = await import(`../static/js/signin.js?t=${Math.random()}`);
+  const host = win.document.getElementById('lock-tiles');
+  const ctl = renderSignIn(host, { profiles: PROFILES, onSubmit: async () => {} });
+  assert.equal(ctl.picked(), null);
+  host.querySelector('[data-profile="m1"]').click();
+  assert.equal(ctl.picked().id, 'm1');
+  ctl.reset();
+  assert.equal(ctl.picked(), null);
+  const MAIN = (await import('node:fs')).readFileSync(new URL('../static/js/main.js', import.meta.url), 'utf8');
+  const fn = MAIN.slice(MAIN.indexOf('function showRecover()'), MAIN.indexOf('function setPinFormAside('));
+  assert.match(fn, /const other = !!\(p && !p\.protected\);/);
+  assert.match(fn, /t\('lock\.recover_ask_admin'\)/);
+});
+
+// ------------------------------------------------------------------ 4.3 outside sign-in (INT-1 wiring)
+
+test('People tab: the Owner gets Link / Unlink sign-in per row when outside sign-in is on', { skip: dom.skip }, async () => {
+  const { pane } = await mountPeople('admin', { routes: {
+    'GET /api/oidc/links': () => [200, { enabled: true, links: [{ profile_id: 'm1', email_at_link: 'sam@example.com' }] }],
+  } });
+  const btn = (id) => pane.querySelector(`.people-row[data-person="${id}"] [data-profile="${id}"]`);
+  assert.ok(btn('o1') && btn('o1').classList.contains('oidc-link'));
+  assert.ok(btn('m1') && btn('m1').classList.contains('oidc-unlink'));
+  assert.ok(btn('a1'));
+});
+
+test('People tab: no sign-in buttons when outside sign-in is off or unreadable', { skip: dom.skip }, async () => {
+  let r = await mountPeople('admin', { routes: { 'GET /api/oidc/links': () => [200, { enabled: false, links: [] }] } });
+  assert.equal(r.pane.querySelector('.oidc-link, .oidc-unlink'), null);
+  r = await mountPeople('admin');                       // 404 -> no buttons, no error toast
+  assert.equal(r.pane.querySelector('.oidc-link, .oidc-unlink'), null);
+  assert.deepEqual(r.rec.toasts, []);
+});
+
+test('main.js wires outside sign-in: status, sign-in screen, Owner-only card, own link', () => {
+  assert.match(MAIN, /oidc: s\.oidc \|\| null,/);
+  assert.match(MAIN, /onSubmit: signInWith,\s+oidc: state\.auth\.oidc,/);
+  assert.match(MAIN, /if \(state\.auth\.protected\) renderOidcCard\(cleanup,/);
+  assert.match(MAIN, /mountOwnOidcLink\(\);/);
+  assert.match(MAIN, /isProtected: !!state\.auth\.protected/);
+  assert.match(SW, /'\/static\/js\/oidc-settings\.js'/);
 });

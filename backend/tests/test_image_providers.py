@@ -145,7 +145,7 @@ def test_minimax_status_codes_read_as_sentences(env, monkeypatch, code, needle):
 
 
 @pytest.mark.parametrize("status,needle", [(401, "rejected the API key"),
-                                           (429, "rate-limiting"), (400, "HTTP 400: bad size")])
+                                           (429, "rate-limiting"), (400, "answered: bad size")])
 def test_http_errors_read_as_sentences(env, monkeypatch, status, needle):
     _install(monkeypatch, lambda r: httpx.Response(
         status, json={"error": {"message": "bad size"}}))
@@ -288,8 +288,8 @@ def test_routes_are_operator_only(env):
                          ("get", "/api/plugins/catalog")]:
         kw = {"json": {}} if method in ("put", "post") else {}
         assert getattr(c, method)(path, **kw).status_code in (401, 403), path
-    assert main._decoy_blocked("POST", "/api/guide/seed")
-    assert main._decoy_blocked("GET", "/api/llm/image")
+    assert main._signed_out_blocked("POST", "/api/guide/seed")
+    assert main._signed_out_blocked("GET", "/api/llm/image")
 
 
 def test_the_test_button_makes_one_generation_and_stores_nothing(env, monkeypatch):
@@ -397,11 +397,18 @@ def test_health_shows_the_api_provider_without_secrets(env):
 def test_an_on_box_process_may_post_a_guide_but_not_force_one(env, monkeypatch):
     """2.3.7: an install script on the box can add the setup guide to a locked
     install over loopback; choosing `force` (a duplicate) needs a session."""
-    from app import auth, firstrun
+    from app import accounts, auth, firstrun, profiles_service
     monkeypatch.setattr(firstrun, "BOT_ID", "Atlas")      # the suite's roster
     monkeypatch.setenv("DISPATCH_FIRSTRUN", "0")          # an existing install
     auth.set_pin("4321")
     c = env()                                    # loopback, no cookie
+    # the guide goes to the main Admin's copy of the Atlas template
+    # (the suite's Atlas is an agent-kind row until here, which 012 hands to the Admin at start-up:
+    # this test wants the template, so it is made one household bot again)
+    config.upsert_bot(replace(config.get_bot("Atlas"), advisor={"providers": [], "tools": True},
+                              give_to="everyone", scope="household", owner_profile=""))
+    owner = accounts.get_protected_admin()               # set_pin made the owner
+    profiles_service.on_profile_created(owner, first_admin=True)
     assert c.post("/api/guide/seed?name=set-up-add-ons").status_code == 200
     assert c.post("/api/guide/seed?name=set-up-add-ons").status_code == 409
     assert c.post("/api/guide/seed?name=set-up-add-ons&force=true").status_code == 403

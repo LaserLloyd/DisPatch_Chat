@@ -402,10 +402,10 @@ def test_backups_and_the_bundle_are_owner_and_admin_only(world, owner):
     assert world.login(member, name="Max", pin="5555").status_code == 200
     stranger = world.client(("203.0.113.71", 42001))
     for c in (member, stranger):
-        assert c.get("/api/backups").status_code == 403
-        assert c.post("/api/backups", json={}).status_code == 403
-        assert c.post("/api/support-bundle").status_code == 403
-        assert c.delete("/api/backups/pending").status_code == 403
+        assert c.get("/api/backups").status_code in (401, 403)
+        assert c.post("/api/backups", json={}).status_code in (401, 403)
+        assert c.post("/api/support-bundle").status_code in (401, 403)
+        assert c.delete("/api/backups/pending").status_code in (401, 403)
 
 
 def test_the_bundle_download_is_a_zip_and_is_audited(world, owner):
@@ -417,24 +417,22 @@ def test_the_bundle_download_is_a_zip_and_is_audited(world, owner):
 
 
 def test_per_user_export_and_erase(world, owner):
-    mia = world.person(owner, "Mia", "restricted")
-    owner.post("/api/characters", json={"name": "Mias", "audience": "restricted", "profiles": [mia["id"]]})
+    from profiles_fixtures import add_atlas_template
+    add_atlas_template()                       # 4.2: a new profile gets its copy of the Atlas template
+    mia = world.person(owner, "Mia", "user")
     accounts.log_activity("turn", profile_id=mia["id"], subject="thread-1")
     accounts.usage_add(mia["id"], "turn", 3)
     r = owner.get(f"/api/users/{mia['id']}/export")
     assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
     doc = r.json()
-    assert doc["profile"]["name"] == "Mia" and doc["characters_limited_to_this_profile"] == ["mias"]
+    assert doc["profile"]["name"] == "Mia" and len(doc["own_characters"]) == 1   # its Atlas
     assert any(a["kind"] == "turn" for a in doc["activity"]) and doc["usage"][0]["amount"] == 3
     text = r.text
     assert "pin_hash" not in text and "password_hash" not in text
-    assert "not attributed" in doc["conversations"]
+    assert "not part of this account export" in doc["conversations"]
     erased = owner.delete(f"/api/users/{mia['id']}").json()
-    assert erased["erased"] == mia["id"] and erased["activity_rows"] >= 1 and erased["usage_rows"] == 1
+    assert erased["erased"] == mia["id"] and erased["deleted"]["bots"] == 1      # its Atlas goes with it
     assert accounts.get_profile(mia["id"]) is None
-    # Off Mia's list - but an empty list means "everyone", so the character she alone could use
-    # is left to the Owner rather than opened to every profile and every anonymous device.
-    assert config.get_bot("mias").profiles == [accounts.get_owner().id]
     assert owner.get(f"/api/users/{mia['id']}/export").status_code == 404
 
 
@@ -572,4 +570,55 @@ def test_the_docs_and_the_setting_describe_the_stored_key():
     assert "also this install's backup passphrase" in doc and "off this computer" in doc.lower()
     from app import settings_schema
     d = next(x for x in settings_schema.all_defs() if x.key == "system.backup_passphrase")
-    assert "secret store" in d.description and "keep your own copy" in d.description
+    assert "DisPatch keeps it" in d.description and "keep your own copy" in d.description
+
+
+def test_erase_is_the_same_removal_as_the_people_delete_route(world, owner):
+    """DELETE /api/users/{id} used to remove the profile and its activity rows but leave its bots,
+    chats and files behind. It now calls the one delete function POST /api/people/{id}/delete calls."""
+    import sqlite3
+
+    from app import profiles_service
+
+    def build(name):
+        prof = world.person(owner, name, "user")
+        bot = profiles_service.create_personal(prof["id"], {"name": f"{name} bot"})
+        con = sqlite3.connect(world.tmp / "chats.db")
+        con.execute("INSERT INTO threads(id,bot_id,title,created_at,updated_at,owner_profile_id) VALUES(?,?,?,?,?,?)",
+                    (f"t-{name}", bot.id, "chat", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", prof["id"]))
+        con.execute("INSERT INTO messages(id,thread_id,role,content,created_at) VALUES(?,?,?,?,?)",
+                    (f"m-{name}", f"t-{name}", "user", f"SENT-{name}-text", "2026-01-01T00:00:00+00:00"))
+        con.commit()
+        con.close()
+        return prof, bot
+
+    def left(pid, bot_id, name):
+        con = sqlite3.connect(world.tmp / "chats.db")
+        try:
+            return {"profile": accounts.get_profile(pid) is not None,
+                    "bot": any(b.id == bot_id for b in config.load_bots()),
+                    "threads": con.execute("SELECT COUNT(*) FROM threads WHERE owner_profile_id=?", (pid,)).fetchone()[0],
+                    "messages": con.execute("SELECT COUNT(*) FROM messages WHERE id=?", (f"m-{name}",)).fetchone()[0]}
+        finally:
+            con.close()
+
+    via_people, bot_a = build("Pia")
+    via_erase, bot_b = build("Erin")
+    preview = owner.get(f"/api/people/{via_people['id']}/delete/preview").json()
+    assert owner.post(f"/api/people/{via_people['id']}/delete", json={"confirm_token": preview["token"]}).status_code == 200
+    r = owner.delete(f"/api/users/{via_erase['id']}")
+    assert r.status_code == 200 and r.json()["erased"] == via_erase["id"]
+    gone = {"profile": False, "bot": False, "threads": 0, "messages": 0}
+    assert left(via_people["id"], bot_a.id, "Pia") == gone
+    assert left(via_erase["id"], bot_b.id, "Erin") == gone                       # the same, nothing left behind
+    assert r.json()["deleted"]["chats"] == preview["counts"]["chats"] == 1
+    # the rank rules are the People route's
+    world.person(owner, "Ada", "admin", password="admin-pass1")
+    admin = world.client(("203.0.113.91", 43901))
+    assert world.login(admin, name="Ada", password="admin-pass1").status_code == 200
+    people = {p["name"]: p for p in owner.get("/api/people").json()["profiles"]}
+    assert admin.delete(f"/api/users/{people['Olive']['id']}").status_code == 403    # the protected Admin
+    assert owner.delete(f"/api/users/{people['Olive']['id']}").status_code == 409    # nor by itself
+    assert admin.delete(f"/api/users/{people['Ada']['id']}").status_code == 409      # nor the profile in use
+    assert owner.delete("/api/users/nobody").status_code == 404
+    assert accounts.get_profile(people["Olive"]["id"]) is not None

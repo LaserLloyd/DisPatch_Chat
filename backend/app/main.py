@@ -65,8 +65,11 @@ from . import (
     accounts,
     advisor,
     agents_api,
+    agents_routes_api,
+    agents_schedules_api,
     agents_service,
     agents_ws,
+    api_common,
     apps_loader,
     auth,
     avatar_pool,
@@ -76,8 +79,11 @@ from . import (
     characters,
     client_links,
     config,
+    connections,
     credentials,
     dashboard_routes,
+    database,
+    ext_profile_hooks,
     extensions,
     firstrun,
     gateway_router,
@@ -86,11 +92,14 @@ from . import (
     harness_sessions,
     image_jobs,
     image_providers,
-    limits,
+    invariants,
+    kits,
     llm_api,
     localview,
     mailforge_bridge,
     migrate,
+    oidc,
+    oidc_api,
     openclaw,
     openclaw_text,
     ownership,
@@ -101,6 +110,7 @@ from . import (
     pool_guard,
     practice_bridge,
     problem,
+    profile_avatars,
     push,
     quick_actions,
     quicksetup,
@@ -109,9 +119,10 @@ from . import (
     route_policy,
     tools,
 )
+from .agents import scheduler as agent_scheduler
 from .config import AVATAR_DIR, FILES_DIR, FRONTEND_DIR, MEDIA_DIR, SETTINGS
 from .contracts import errors
-from .contracts.permissions import MACHINE_DEFAULT_SCOPES, MachineScope, Permission
+from .contracts.permissions import MACHINE_DEFAULT_SCOPES, MachineScope, Permission, Role
 from .database import Database, local_date, new_id, now_iso
 from .models import (
     MESSAGE_MAX_CHARS,
@@ -139,6 +150,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 db = Database(config.DB_PATH)
+#: The instance made at import. Its path was fixed from the data directory at IMPORT time; the
+#: lifespan re-derives it from ``config.DATA_DIR`` (see _lifespan_startup), so a process that
+#: moved the data directory afterwards - every test does - never opens the old path.
+_IMPORT_DB = db
 
 # Per-thread locks serialise agent turns; a global semaphore caps concurrent
 # subprocesses so we never overwhelm the local models.
@@ -189,24 +204,11 @@ _TEXT_MIMES = {
 UPLOAD_MAX_IMAGE = 25 * 1024 * 1024    # 25MB
 UPLOAD_MAX_VIDEO = 200 * 1024 * 1024   # 200MB
 UPLOAD_MAX_DOC = 50 * 1024 * 1024      # 50MB for documents
-# Safe-Mode availability guard: decoy (no-PIN) clients get a modest per-client
-# daily upload budget so an unauthenticated LAN/tailnet peer can't fill the
-# disk through POST /api/upload. Full sessions are unaffected. Env override is
-# for tests. In-memory by design: resets on restart, which is fine for a
-# best-effort availability cap.
-DECOY_UPLOAD_QUOTA = int(config.env("DECOY_UPLOAD_QUOTA") or (200 * 1024 * 1024))  # 200MB/day/client
-# Safe Mode may send messages, and every message to a safe bot spawns an agent
-# subprocess — a billed model turn. Without a cap an unauthenticated LAN or
-# tailnet peer can run the operator's API bill up indefinitely and fill the DB
-# with threads, while _agent_sem only caps CONCURRENCY, not rate. Same shape as
-# DECOY_UPLOAD_QUOTA: per-client, per-day, in-memory, resets on restart.
-DECOY_TURN_QUOTA = int(config.env("DECOY_TURN_QUOTA", "200"))
-DECOY_THREAD_QUOTA = int(config.env("DECOY_THREAD_QUOTA", "50"))
-# Rating a reply is cheap (no model turn) but still an unauthenticated write,
-# so it gets the same daily-budget shape as every other decoy action rather
-# than an unlimited one. Generous: a real family device rating replies all
-# day will never come close.
-DECOY_FEEDBACK_QUOTA = int(config.env("DECOY_FEEDBACK_QUOTA", "100"))
+# Machine upload guard (plumbing, not a per-profile limit - SPEC section 5): an agent or cron
+# holding machine:upload may store at most this many bytes a day through /api/upload, so a
+# looping agent cannot fill the disk. Counted in chats.db (accounts.usage_daily) under the
+# subject "machine". People have no daily limits of any kind. Env override is for tests.
+MACHINE_UPLOAD_QUOTA = int(config.env("MACHINE_UPLOAD_QUOTA") or (200 * 1024 * 1024))  # 200MB/day
 # Server-wide storage ceiling across ALL stored blobs (chat media + File
 # Server). Prevents even trusted-LAN uploaders from filling the disk over time.
 # Tunable via DISPATCH_FILES_TOTAL_MAX (bytes); 0 disables the cap.
@@ -320,11 +322,29 @@ def _warn_if_wide_open() -> None:
     account, and any other machine needs the one-time setup token printed here. With
     ``DISPATCH_ALLOW_OPEN_INSTALL=1`` the old open behaviour is back (and this says so).
     """
-    if policy.claimed():
+    # 4.3 (#18 + A1 hardening): one line with the effective posture, so the journal and
+    # the support bundle's log tail say how this process was started.
+    cfg = auth.load()
+    is_claimed = policy.claimed(cfg)
+    open_install = policy.allow_open_install()
+    log.info("security posture: claimed=%s machine_loopback_trust=%s trusted_proxies=%d "
+             "open_install=%s host_check=%s allowed_hosts=%d", is_claimed, cfg.machine_loopback_trust,
+             len(policy.trusted_proxy_specs()), open_install, policy.host_check_mode(),
+             len(cfg.allowed_hosts or []))
+    if cfg.machine_loopback_trust:
+        log.warning("machine_loopback_trust is on: any process on this computer is a machine "
+                    "caller without a key. Set machine_loopback_trust: false in security.yaml "
+                    "once your on-box scripts send the api_token.")
+    if is_claimed:
         return
     host = config.env("HOST", "127.0.0.1")
     port = config.env("PORT", "8765")
-    if policy.allow_open_install():
+    # The address a person types: DISPATCH_PUBLIC_URL, else localhost on the PUBLISHED port
+    # (DISPATCH_PUBLIC_PORT: a container maps 8765 to whatever the host chose), else ours.
+    public_url = (config.env("PUBLIC_URL", "") or "").strip().rstrip("/")
+    if not public_url:
+        public_url = f"http://localhost:{(config.env('PUBLIC_PORT', '') or '').strip() or port}"
+    if open_install:
         if host not in ("127.0.0.1", "localhost", "::1"):
             log.warning(
                 "\n"
@@ -338,12 +358,12 @@ def _warn_if_wide_open() -> None:
         "\n"
         "  ================================================================\n"
         "   DisPatch has no owner account yet.\n"
-        "   - On THIS computer: open http://localhost:%s and create it.\n"
+        "   - On THIS computer: open %s and create it.\n"
         "   - From another device: use this one-time setup token.\n"
         "         SETUP TOKEN: %s\n"
         "   Until then the network sees only the sign-in page.\n"
         "  ================================================================",
-        port, auth.setup_token())
+        public_url, auth.setup_token())
 
 
 #: Backstop for a failed startup. Tests flip it off (conftest) because a
@@ -435,9 +455,11 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # fd on the file after re-claiming would drop the new lock with it.
     _release_instance_lock(app)
     app.state.instance_lock = _claim_single_instance()
-    # Data migrations (accounts, audience, security keys), with a backup first. A
-    # failure aborts startup: better a refusal with a backup in place than a
-    # half-migrated install serving traffic.
+    # Data migrations (accounts, ownership, profiles, security keys), with a
+    # backup first. A failure aborts startup: better a refusal with a backup in
+    # place than a half-migrated install serving traffic.
+    from . import logbuffer  # 4.3 (#18): the in-memory log ring the support bundle reads
+    logbuffer.install()
     report = await asyncio.to_thread(migrate.run)
     if report.applied:
         log.info("migrated the data directory to %s: %s%s", migrate.TARGET_VERSION,
@@ -458,13 +480,18 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # folders). Marker-guarded: an already-migrated or brand-new data dir is a
     # cheap no-op, so this runs unconditionally on every start.
     await asyncio.to_thread(reactions.migrate_mood_folders)
+    if db is _IMPORT_DB and db._db is None:
+        # The migration above ran on config.DATA_DIR; the database opened here must be the
+        # same file. (A test that entered the lifespan without its own Database used to open
+        # the REAL install's chats.db here and run the schema statements on it.)
+        db.path = Path(config.DATA_DIR) / "chats.db"
     await db.connect()
-    # Safe-Mode connections get image/media stripped from every frame; a full
-    # connection whose session lapses is redacted from that moment too.
-    manager.redactor = redact_for_decoy
-    # Every socket is then narrowed to the characters ITS profile may use (3.0
+    # Every socket is narrowed to the characters ITS profile may use (3.0
     # per-profile visibility), broadcasts included - not only the roster and hello.
     manager.scoper = scope_frame_for_principal
+    # 4.0 ownership: before a frame goes out, the owner of the thread it names is cached so
+    # the scoper can send it to that owner's sockets only (and drop what it cannot attribute).
+    manager.prime = lambda frame: ownership.prime_for_frame(db, frame)
     manager.is_session_live = lambda tok: auth.get_session(tok) is not None
     # Lets the manager demote token-less "full" connections (opened while no
     # PIN existed) the moment a PIN is set. auth.load() is mtime-cached.
@@ -473,6 +500,9 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # running (those tasks come back cancelled/resumable), starts its writer and the
     # transcript-retention purge. It talks to no backend until someone dispatches a task.
     await agents_service.startup()
+    # 4.3 (#13): recurring agent schedules; a 30 s loop that only calls the normal task path.
+    _schedule_tasks[asyncio.get_running_loop()] = asyncio.create_task(
+        agent_scheduler.run_loop(), name="agent-scheduler")
     cfg = auth.load()
     log.info("DisPatch Chat started. data=%s openclaw=%s lock=%s fts=%s",
              config.DATA_DIR, SETTINGS.openclaw_bin,
@@ -533,16 +563,35 @@ async def _lifespan_startup(app: FastAPI) -> None:
     _track(asyncio.create_task(_image_job_loop()))
     # Backstop for answers every live path missed (see _gap_sweep_loop).
     _track(asyncio.create_task(_gap_sweep_loop()))
+    # 4.0: the daily maintenance task (pruning, archiving, image retention, FTS and
+    # SQLite upkeep; app/maintenance.py, WP-SCALE-OPS). This one call is all the wiring:
+    # start() schedules its own loop and must never stop the server.
+    with contextlib.suppress(Exception):
+        maintenance.start(app)
     # Advisor bots: say so about requests a restart orphaned, then keep
     # their knowledge indexes fresh. Only when an advisor is configured.
     if advisor.advisor_bots():
         with contextlib.suppress(Exception):
             await advisor.recover_requests()
         _track(asyncio.create_task(advisor.background_loop()))
-    # First run only: the two explainer threads on the default bot (never on
-    # an install that already has threads; see app/firstrun.py). Non-fatal.
+    # An install that already has threads is marked as no first run (the claim of a fresh
+    # install posts the first-run chat; see app/firstrun.py). Non-fatal.
     await asyncio.to_thread(firstrun.install_default_avatars)
+    # Counted before anything is posted: a fresh install reads as one and gets no "What's new".
+    fresh_install = await firstrun.count_threads(db) == 0
     await firstrun.seed_if_first_run(db, _deliver_assistant_text)
+    # 4.1 managed bots (app/kits.py): every copy of a kitted bot (every Atlas among them) gets
+    # its template's setup and the kit chats it has not had - copies made by the CLI or while
+    # the server was down included - and every profile its auto-clone copies. From now on a
+    # change anywhere (a new profile, a copy, a kit or a kitted bot saved) syncs at once.
+    kits.bind_server(asyncio.get_running_loop(), db, _deliver_assistant_text, _roster_frame)
+    await kits.sync(db, _deliver_assistant_text)
+    # 4.2: the ownership invariants (app/invariants.py): logged and audited, never fatal.
+    await asyncio.to_thread(invariants.run_at_start,
+                            sync_pending=bool(kits._server.get("dirty")))
+    # After an update: a "What's new" chat on every Admin's and User's Atlas copy, posted last so
+    # it sits on top of the chats the sync above delivered.
+    await firstrun.post_release_notes(db, _deliver_assistant_text, fresh=fresh_install)
     # Extensions (app/extensions.py): each one's on_startup hooks — the voice
     # add-on warms its speech models here, on a daemon thread, so the first
     # voice chat after a restart neither waits to accept nor pays the model
@@ -553,13 +602,27 @@ async def _lifespan_startup(app: FastAPI) -> None:
     await _gateway_ws_start()
 
 
+#: 4.3: the agent scheduler loop per event loop (tests run several app instances), started in
+#: lifespan after the agents service and cancelled first at shutdown.
+_schedule_tasks: dict[asyncio.AbstractEventLoop, asyncio.Task] = {}
+
+
 async def _lifespan_shutdown() -> None:
     global _shutting_down
     _shutting_down = True
+    # The schedule loop goes first: no new task may be dispatched while the rest shuts down.
+    sched = _schedule_tasks.pop(asyncio.get_running_loop(), None)
+    if sched is not None:
+        sched.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await sched
+    kits.unbind_server()
     with contextlib.suppress(Exception):
         await extensions.run_shutdown()
     with contextlib.suppress(Exception):
         await agents_service.shutdown()
+    with contextlib.suppress(Exception):
+        await maintenance.stop()
     harness.runner.remove_state_hook(_harness_state_changed)
     with contextlib.suppress(Exception):
         await harness.runner.shutdown()
@@ -587,8 +650,8 @@ async def _lifespan_shutdown() -> None:
 
 # The interactive API docs are disabled in this deployment: /openapi.json,
 # /docs and /redoc would hand a sessionless caller the complete route + model
-# inventory (harness, inject, recovery, reactions…) — exactly the unlocked
-# feature surface Safe Mode exists to hide, on a service bound to 0.0.0.0.
+# inventory (harness, inject, recovery, reactions…) — the operator surface a
+# stranger must not map, on a service bound to 0.0.0.0.
 #
 # The schema itself is still BUILT — it is served, gated, at /api/openapi.json
 # for a full session or an on-box machine (see openapi_schema below). An agent
@@ -600,6 +663,9 @@ app = FastAPI(title="DisPatch Chat", version=__version__, lifespan=lifespan,
 _route_index = policy.RouteIndex(app)
 app.include_router(people_api.router)
 app.include_router(agents_api.router)         # agents, tasks, approvals (3.0; route_policy.py declares each)
+app.include_router(agents_routes_api.router)  # 4.3 GET /api/agents/claude/routes
+app.include_router(agents_schedules_api.router)  # 4.3 agent schedules + CLI presets
+app.include_router(oidc_api.router)           # 4.3 OIDC sign-in (off until the Owner configures it)
 
 
 def _error_body(status: int, detail, exc: BaseException | None = None) -> dict:
@@ -759,9 +825,12 @@ async def media_security_headers(request: Request, call_next):
     # The drop-in theme folder is the one exception to "versioned assets": its
     # URLs carry no ?v=, so replacing the folder is the whole theme update.
     # Revalidating keeps that true — a new copy is live on the next load.
+    # The locales and the guide pictures carry no ?v= either (4.2.0 shipped new
+    # strings and a phone kept its heuristically-fresh old en.json, so every new
+    # label read as its humanized key: "Pill agent", "F all").
     if path == "/" or path in ("/static/sw.js", "/static/index.html",
                                "/manifest.webmanifest", "/static/manifest.webmanifest") \
-            or path.startswith("/static/ui-theme/"):
+            or path.startswith(("/static/ui-theme/", "/static/locales/", "/static/guide/")):
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
     # A worker file served from /static/ may only claim a scope at or below
     # /static/ unless it says otherwise. The app lives at /, so without this the
@@ -788,7 +857,7 @@ async def media_security_headers(request: Request, call_next):
 _MULTIPART_SLACK = 16 * 1024 * 1024   # boundary/header overhead headroom
 
 # POST re-pins ONE thread's avatar (full image + optional face crop); GET is
-# the browser-facing image route with its own decoy gating. Used by both the
+# the browser-facing image route with its own ownership check. Used by both the
 # upload ceiling below and the inbound machine-surface allowlist.
 _INBOUND_THREAD_AVATAR_RE = re.compile(r"^/api/threads/[^/]+/avatar$")
 
@@ -810,11 +879,12 @@ def _upload_ceiling(path: str) -> int | None:
     out at the video cap; /api/files at the File Server max. Checked against the
     declared Content-Length BEFORE FastAPI buffers, so a genuinely-oversized
     upload is rejected without spooling the body to disk/RAM at all."""
-    # /api/drop shares /api/upload's ceiling: both top out at the video cap.
-    if path in ("/api/upload", "/api/drop"):
+    if path == "/api/upload":
         return UPLOAD_MAX_VIDEO + _MULTIPART_SLACK
     if path == "/api/files":
         return FILE_UPLOAD_MAX + _MULTIPART_SLACK
+    if path == "/api/me/avatar" or re.match(r"^/api/people/[^/]+/avatar$", path):
+        return profile_avatars.MAX_BYTES + _MULTIPART_SLACK
     if re.match(r"^/api/bots/[^/]+/avatar$", path):
         return UPLOAD_MAX_IMAGE + _MULTIPART_SLACK
     # Same shape as the bot avatar upload — a full image plus an optional
@@ -858,6 +928,51 @@ async def limit_upload_body(request: Request, call_next):
     return await call_next(request)
 
 
+#: What an image the retention rule deleted answers (BUILD-PLAN-v2 §1.13.6): 410 Gone, not
+#: 404, with ``X-Image-Expired: 1`` so the client draws its "image expired" placeholder.
+EXPIRED_MEDIA_HEADER = "X-Image-Expired"
+
+
+def _expired_media_response(name: str | None) -> Response | None:
+    if not name:
+        return None
+    return JSONResponse({"detail": "This image has expired.", "expired": True}, status_code=410,
+                        headers={EXPIRED_MEDIA_HEADER: "1", "Cache-Control": "no-cache"})
+
+
+async def _expired_media_name(path: str) -> str | None:
+    """``path`` (a ``/media/<name>`` URL path, or a file path ``/api/media`` was asked for)
+    when its name is in ``media_expired``, else None. The table is keyed by the name under
+    the media store (``<name>`` of ``/media/<name>``), or by the absolute path for an image
+    kept elsewhere."""
+    p = str(path or "")
+    if p.startswith("/media/"):
+        keys = [p[len("/media/"):]]
+    else:
+        keys = [p]
+        with contextlib.suppress(OSError, RuntimeError, ValueError):
+            keys.insert(0, Path(p).resolve().relative_to(MEDIA_DIR.resolve()).as_posix())
+    from urllib.parse import unquote
+    keys = [unquote(k) for k in keys if k]
+    try:
+        return await db.media_expired_name(keys)
+    except Exception:
+        return None
+
+
+@app.middleware("http")
+async def expired_media(request: Request, call_next):
+    """A ``/media/`` file that is not there: 410 + ``X-Image-Expired`` when the retention rule
+    deleted it, the plain 404 otherwise. Runs inside the gate (added before it), so only a
+    caller allowed to read ``/media/`` ever learns that a name existed."""
+    response = await call_next(request)
+    if response.status_code == 404 and request.url.path.startswith("/media/"):
+        gone = _expired_media_response(await _expired_media_name(request.url.path))
+        if gone is not None:
+            return gone
+    return response
+
+
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
     """Resolve WHO is calling, then enforce the permission the route declares.
@@ -867,8 +982,8 @@ async def auth_gate(request: Request, call_next):
 
     1. Identify the principal: a session cookie -> that profile; else, on a route
        that has a machine surface, an agent holding the api_token (or an on-box
-       process while ``machine_loopback_trust`` is on); else a device bound to a
-       default profile; else **anonymous = Restricted** (what used to be Safe Mode).
+       process while ``machine_loopback_trust`` is on); else the lock-target default
+       profile (``policy.unsigned``); else nobody, who gets 401 ``signin_required``.
        An install with no owner and no PIN is open to this machine only, until the
        owner account exists (``POST /api/auth/setup``).
     2. Look up the route's declared requirement (``app/route_policy.py``). A route
@@ -880,7 +995,6 @@ async def auth_gate(request: Request, call_next):
     Added after media_security_headers, so it runs OUTERMOST.
     """
     request.state.session = None
-    request.state.decoy = False
     request.state.machine = False
     request.state.principal = None
     request.state.policy = None
@@ -893,7 +1007,7 @@ async def auth_gate(request: Request, call_next):
     # authenticated by the random ticket in the URL (minted by a cookie-bearing
     # call, client-bound, expiring). The route is its own lock and fails closed.
     if path.startswith((localview.TICKET_PREFIX, tools.TICKET_PREFIX)):
-        _attach_principal(request, policy.anonymous(), None)
+        _attach_principal(request, policy.nobody(), None)
         return await call_next(request)
 
     tmpl, req = _route_index.match("GET" if method == "HEAD" else method, path)
@@ -901,20 +1015,20 @@ async def auth_gate(request: Request, call_next):
 
     # ---- an installation nobody has claimed yet ---------------------------------
     if not policy.claimed(cfg):
-        if (not policy.allow_open_install()
-                and not policy.is_loopback_origin(
-                    request.client.host if request.client else "", _proxied_request(request))):
-            # Reachable from the network with no owner: the only thing a stranger
-            # may do is finish setup (with the one-time token) or read the shell.
-            _attach_principal(request, policy.anonymous(device_id), None)
+        if not policy.local_setup_of(request, method=method):
+            # Reachable from the network with no owner - or from this machine under a
+            # foreign Host name (DNS rebinding) or another site's Origin (4.3, #2): the only
+            # thing such a caller may do is finish setup (with the one-time token) or read
+            # the shell.
+            _attach_principal(request, policy.nobody(device_id), None)
             if req is not None and req.public:
                 return await call_next(request)
             if tmpl is None:
                 return await call_next(request)
             return _gate_denial(request, policy.Decision(
                 False, 403, "setup_required",
-                "This DisPatch has no owner yet. Open it on the computer it runs on, or "
-                "finish setup with the one-time setup token from the server log."),
+                "This DisPatch has no Owner yet. Open it on the computer it runs on, or "
+                "finish setup with the one-time setup code from its log."),
                 req, extra={"setup_required": True})
         _attach_principal(request, policy.open_principal(), None)
         return await call_next(request)
@@ -939,18 +1053,22 @@ async def auth_gate(request: Request, call_next):
             if early is not None:
                 return early
     if principal is None:
-        principal = policy.for_device(device_id) or policy.anonymous(device_id)
+        # 4.0 (BUILD-PLAN-v2 §1.4): an unsigned device is the lock-target default profile,
+        # or nobody. No device binding is consulted any more.
+        principal = policy.unsigned(cfg) or policy.nobody(device_id)
 
-    # ---- an install that shows nothing to a device nobody has signed in on --------
-    if (principal.kind == "anonymous" and cfg.anonymous_access == "none"
-            and tmpl is not None and not (req is not None and req.public)):
+    # ---- nobody signed in and no default profile to land on: the sign-in screen ----
+    if (principal.kind == "none" and tmpl is not None
+            and not (req is not None and req.public)):
         _attach_principal(request, principal, sess)
         return _gate_denial(request, policy.Decision(
             False, 401, "signin_required", "Sign in to continue."), req)
 
     # ---- CSRF: a cookie-carrying browser may not be driven by another origin ----
-    # (Ambient authority is the cookie. An anonymous caller has none to abuse.)
-    if (method not in _SAFE_METHODS and (sess is not None or device_id is not None)
+    # (Ambient authority is the cookie - or, on the lock-target default profile, simply
+    # being a browser on this network: another origin's page must not act as it either.)
+    if (method not in _SAFE_METHODS
+            and (sess is not None or device_id is not None or principal.via == "default")
             and _cross_origin(request)):
         _attach_principal(request, principal, sess)
         return _gate_denial(request, policy.Decision(
@@ -973,25 +1091,109 @@ async def auth_gate(request: Request, call_next):
     request.state.policy.scoped = decision.scoped
 
     # ---- item-level rules that depend on the path ---------------------------------
-    if principal.is_restricted:
-        if _gated_avatar_static(path) and not _safe_avatar_static(path):
-            return _gate_denial(request, policy.Decision(
-                False, 403, "safe_mode", policy.UNLOCK_DETAIL), req)
-        item = _restricted_item_denied(method, path)
-        if item:
-            return _gate_denial(request, policy.Decision(
-                False, 403, "safe_mode", policy.UNLOCK_DETAIL), req)
-        limited = _restricted_limit_denied(principal, req)
-        if limited is not None:
-            return _gate_denial(request, limited, req)
-    if sess is not None:
+    if principal.kind == "none" and _gated_avatar_static(path):
+        # Avatars are behind sign-in: the static mount is public for the app shell only.
+        return _gate_denial(request, policy.Decision(
+            False, 401, "signin_required", "Sign in to continue."), req)
+    if _foreign_character_item(method, path, principal):
+        return JSONResponse({"detail": "Unknown bot",
+                             "error": errors.envelope("not_found", message="Unknown bot")},
+                            status_code=404)
+    if _household_character_item_denied(method, path, principal):
+        # A household character off this profile's list (characters.may_use): its picture
+        # is refused like every other surface of it.
+        return _gate_denial(request, policy.Decision(
+            False, 403, "permission_denied", "Your profile may not use that character.",
+            required=Permission.USE_CHAT.value), req, extra={"reason": "character_not_allowed"})
+    if sess is not None and _is_use(request):
         auth.touch_session(sess.token)
-        if principal.kind == "profile" and principal.is_restricted and not req.public:
-            _note_active_time(principal)
     return await call_next(request)
 
 
+#: Requests an open tab makes on its own (polls, "who am I" checks): they are not a person
+#: using the app, so they never slide the idle window (4.3 Fable). The page marks any other
+#: background fetch with the ``X-DisPatch-Background: 1`` header. Skipping a touch can only
+#: make a session end sooner, never later.
+_NOT_USE = frozenset({("GET", "/api/auth/status"), ("GET", "/api/auth/me")})
+
+
+def _is_use(request: Request) -> bool:
+    if request.headers.get("x-dispatch-background") == "1":
+        return False
+    return (request.method.upper(), request.url.path) not in _NOT_USE
+
+
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+# ---- 4.3 fable host begin
+HOST_NOT_ALLOWED_STATUS = 421
+
+
+def _host_refusal_text(name: str) -> str:
+    shown = name or "(no name)"
+    return (f"This DisPatch does not answer to the address {shown!r}. If that is how you reach it, "
+            "add it to allowed_hosts in security.yaml (Settings > System > Network > Other "
+            "addresses for DisPatch), or set host_check: log.")
+
+
+class _HostAllowList:
+    """4.3 Fable: the DNS-rebinding guard, BEFORE auth (added after ``auth_gate``, so it runs
+    outside it) and for WebSockets too (a plain ASGI middleware sees both).
+
+    A request whose Host does not name this machine (``policy.host_allowed``) is counted and
+    logged; in ``enforce`` mode it is refused - 421 problem JSON for ``/api/*`` and ``/ws``,
+    a small HTML page for anything else, a WebSocket closed with 1008 - so a rebinding page
+    never reaches the default profile or a cookie."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        kind = scope.get("type")
+        if kind not in ("http", "websocket"):
+            return await self.app(scope, receive, send)
+        host = None
+        for k, v in scope.get("headers") or ():
+            if k == b"host":
+                host = v.decode("latin-1")
+                break
+        if policy.host_allowed(host):
+            return await self.app(scope, receive, send)
+        policy.note_unexpected_host(host)
+        if policy.host_check_mode() != "enforce":
+            return await self.app(scope, receive, send)
+        if kind == "websocket":
+            await send({"type": "websocket.close", "code": 1008, "reason": "host_not_allowed"})
+            return
+        name = policy._shown_name(host)
+        text = _host_refusal_text(name)
+        path = scope.get("path") or ""
+        if path.startswith(("/api/", "/ws")) or path in ("/api",):
+            body = problem.body(HOST_NOT_ALLOWED_STATUS, text, code="host_not_allowed") | {
+                "error": errors.envelope("host_not_allowed", message=text)}
+            resp: Response = JSONResponse(body, status_code=HOST_NOT_ALLOWED_STATUS,
+                                          media_type=problem.MEDIA_TYPE)
+        else:
+            import html as _html
+            page = ("<!doctype html><meta charset=utf-8><title>Wrong address</title>"
+                    "<body style=\"font:16px system-ui;margin:2rem;max-width:40rem\">"
+                    "<h1>Wrong address</h1><p>" + _html.escape(text) + "</p></body>")
+            resp = HTMLResponse(page, status_code=HOST_NOT_ALLOWED_STATUS)
+        resp.headers["Cache-Control"] = "no-store"
+        await resp(scope, receive, send)
+
+
+app.add_middleware(_HostAllowList)
+
+
+@app.get("/api/system/host-check")
+async def host_check_status():
+    """The Host guard's mode, the names this machine answers to and the unknown ones seen
+    since the server started (name, count, last seen) - what Settings > System > Network shows
+    so the Owner can add names before switching to ``enforce``."""
+    return JSONResponse(policy.host_check_report(), headers={"Cache-Control": "no-store"})
+# ---- 4.3 fable host end
 
 
 def _attach_principal(request: Request, principal: policy.Principal,
@@ -1000,7 +1202,6 @@ def _attach_principal(request: Request, principal: policy.Principal,
     request.state.principal = principal
     request.state.policy = policy.Policy(principal)
     request.state.session = sess
-    request.state.decoy = principal.is_restricted
     request.state.machine = principal.is_machine
 
 
@@ -1027,8 +1228,11 @@ def _opportunistic_machine(request: Request, cfg) -> policy.Principal | None:
     """For a PUBLIC route with a machine surface (health detail): recognise a
     trusted machine if there is one, never refuse a stranger."""
     key = request.headers.get("x-api-key") or _bearer(request) or ""
-    if cfg.api_token and key and auth.verify_api_token(key):
-        return policy.machine_principal("api_token", _scopes_for(cfg))
+    if key:
+        # 4.3 (#7): a key that is sent must be right; a wrong one is never "on-box trust".
+        if cfg.api_token and auth.verify_api_token(key):
+            return policy.machine_principal("api_token", _scopes_for(cfg))
+        return None
     if cfg.machine_loopback_trust and _on_box_machine(request):
         return policy.machine_principal("loopback", _scopes_for(cfg))
     return None
@@ -1041,24 +1245,31 @@ def _scopes_for(cfg) -> set[str]:
     return allowed & set(cfg.machine_scopes)
 
 
-# GET routes shared by the machine surface and a locked tab's own rendering. On a
+# GET routes shared by the machine surface and a browser tab's own rendering. On a
 # plain-http LAN origin (not a trustworthy context) a browser attaches no
-# Sec-Fetch-*/Origin to same-origin GETs, so a locked tab's reads look exactly like
-# a remote machine's; a keyless remote GET degrades to the Restricted view instead
-# of a 401. Mutations are unaffected: browsers attach Origin to every non-GET.
+# Sec-Fetch-*/Origin to same-origin GETs, so a signed-out tab's reads look exactly like
+# a remote machine's; a keyless remote GET is judged as an unsigned device (the lock-target
+# default profile, or nobody = 401) instead of an invalid key. Mutations are unaffected:
+# browsers attach Origin to every non-GET.
 _DEGRADE_GET = frozenset({"/api/reactions", "/api/bots", "/api/threads", "/api/unread",
                           "/api/extensions"})
 
-# Mutations shared the same way: a signed-out device's upload (the composer's
-# attach) must stay the Restricted upload with its daily byte quota when it
-# carries no key, as it was before the route gained a machine scope. A KEYED
-# caller is a machine (machine:upload); a keyless one is never refused here.
+# Mutations shared the same way: a keyless upload (the composer's attach on the lock-target
+# default profile) is an unsigned device's, judged by the route's attach_files permission. A
+# KEYED caller is a machine (machine:upload); a keyless one is never refused here.
 _DEGRADE_POST = frozenset({"/api/upload"})
 
 
 def _machine_principal(request: Request, cfg, req, method: str, path: str):
     """(principal, early_response) for a non-browser caller of a machine route."""
     key = request.headers.get("x-api-key") or _bearer(request) or ""
+    if key:
+        # 4.3 (#7): a PRESENTED key is judged on its own, whatever the loopback trust: a
+        # wrong one is 401, never waved through because the caller happens to be on-box.
+        if cfg.api_token and auth.verify_api_token(key):
+            return policy.machine_principal("api_token", _scopes_for(cfg)), None
+        return None, JSONResponse({"detail": "Invalid or missing API key",
+                                   "error": errors.envelope("invalid_api_key")}, status_code=401)
     # A reverse proxy in front of us (a tailnet Serve terminates TLS and forwards
     # from loopback) makes remote callers appear local. Any forwarding / Serve
     # identity header proves the request did NOT originate from an on-box process,
@@ -1067,11 +1278,9 @@ def _machine_principal(request: Request, cfg, req, method: str, path: str):
                      and not _proxied_request(request))
     if trusted_local:
         return policy.machine_principal("loopback", _scopes_for(cfg)), None
-    if cfg.api_token and auth.verify_api_token(key):
-        return policy.machine_principal("api_token", _scopes_for(cfg)), None
     if method == "GET" and (path in _DEGRADE_GET or _INBOUND_THREAD_ONE_RE.match(path)
                             or _INBOUND_THREAD_SUB_RE.match(path)):
-        return None, None                              # falls through to Restricted
+        return None, None                              # falls through to policy.unsigned
     if method == "POST" and path in _DEGRADE_POST and not key:
         return None, None                              # a signed-out device's upload
     return None, JSONResponse({"detail": "Invalid or missing API key",
@@ -1081,8 +1290,6 @@ def _machine_principal(request: Request, cfg, req, method: str, path: str):
 def _gate_denial(request: Request, decision: policy.Decision, req,
                  extra: dict | None = None) -> JSONResponse:
     body: dict[str, Any] = {"detail": decision.detail}
-    if decision.code == "safe_mode":
-        body["decoy"] = True                          # the 2.x marker the frontend keys on
     if decision.required:
         body["required_permission"] = decision.required
     body["error"] = errors.envelope(decision.code, message=decision.detail)
@@ -1119,6 +1326,17 @@ def _track(task: asyncio.Task) -> None:
 def _truncate(text: str, n: int) -> str:
     text = " ".join(text.split())
     return text if len(text) <= n else text[: n - 1].rstrip() + "…"
+
+
+_TITLE_NOISE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)|\[\[[^\]]*\]\]")
+
+
+def _title_from(text: str, n: int = 50) -> str:
+    """A chat title from the first message: pictures (``![name](/media/...)``) and inline
+    markers (``[[doc:...]]``, ``[[pic:...]]``) are not words, so they are left out; a message
+    that is nothing else falls back to the text as it was."""
+    words = " ".join(_TITLE_NOISE_RE.sub(" ", text or "").split())
+    return _truncate(words or text, n)
 
 
 _MEDIA_DIRECTIVE_RE = re.compile(r"\[\[media:([^\]|]+)(\|[^\]]*)?\]\]")
@@ -1576,8 +1794,8 @@ def _normalize_media(media: str | None) -> str | None:
 
 COOKIE_NAME = "lc_session"
 
-# Inline markdown image, e.g. ![alt](url) — stripped (with [[media:...]]) from
-# any text a decoy ("safe view") session would otherwise see.
+# Inline markdown image, e.g. ![alt](url) — stripped (with [[media:...]]) from a
+# reply quote's excerpt (_quote_excerpt).
 _IMG_MD_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 
 
@@ -1602,9 +1820,8 @@ def _quote_excerpt(content: str | None) -> str:
     """A short, media-free preview of a message for a reply quote.
 
     Media/doc directives are stripped first (see _strip_media_text) — the
-    result is stored on the QUOTING message's own metadata, so a locked
-    device rendering its quote chip needs no further lookup of the (possibly
-    unsafe-bot) original.
+    result is stored on the QUOTING message's own metadata, so a reader
+    rendering the quote chip needs no lookup of the original.
     """
     text = (_strip_media_text(content) or "").strip()
     if len(text) > _REPLY_EXCERPT_MAX:
@@ -1612,22 +1829,19 @@ def _quote_excerpt(content: str | None) -> str:
     return text
 
 
-# Inline-image URL capture (Safe-Mode upload allowlist uses the captured URL).
+# Inline-image URL capture (the typed-send filter below keeps only store-resident URLs).
 _IMG_MD_URL_RE = re.compile(r"!\[[^\]]*\]\(([^)]*)\)")
 
 
-def _decoy_keep_uploaded_media(s: str | None) -> str | None:
-    """Safe-Mode SEND filter: keep store-resident upload refs, drop local paths.
+def _keep_uploaded_media_only(s: str | None) -> str | None:
+    """Typed-SEND filter for a sender without ``admin_system``: keep store-resident upload
+    refs, drop local paths.
 
-    The composer "＋" uploads through /api/upload first, so its references always
-    point INTO the served store (/media/<uuid> for images/videos, [[doc:<id>]]
-    for files). Those are safe to deliver — they reach the agent and unlocked
-    devices, while the decoy DISPLAY still fully redacts media (deniability
-    preserved, images stay hidden in the locked view). A directive that points
-    at a local filesystem path (someone TYPING [[media:/home/secret.png]]) is
-    dropped: Safe Mode must never let an unauthenticated sender copy arbitrary
-    local files into the served store. [[doc:<id>]] refs are kept as-is.
-    """
+    The composer "＋" uploads through /api/upload first, so its references always point INTO
+    the served store (/media/<uuid> for images/videos, [[doc:<id>]] for files). A directive
+    that points at a local filesystem path (someone TYPING [[media:/home/x/secret.png]]) would
+    make the server copy that file off the host into the store - host access, which only an
+    Admin (``admin_system``) has. [[doc:<id>]] refs are kept as-is."""
     if not s:
         return s
     s = _IMG_MD_URL_RE.sub(
@@ -1637,71 +1851,31 @@ def _decoy_keep_uploaded_media(s: str | None) -> str | None:
     return s
 
 
-def _redact_message_dict(m: dict) -> dict | None:
-    """The locked-view copy of one message, or ``None`` to hide it entirely.
-
-    Locked DisPatch is a family-safe afterthought, not a second product: the
-    only hard requirement is that nothing — a prompt, a caption, a rig error,
-    a filesystem path — leaks to an unauthenticated viewer. Beyond that, the
-    cheapest correct answer for something Safe Mode has no real use for is to
-    make it not exist there, not to hand-craft a degraded version of it. An
-    image-job placeholder is exactly that case: it names its own prompt in
-    `content`, carries the prompt/caption/rig-error/workflow/seed in
-    `metadata`, and Safe Mode has no bot that can fire one today anyway (that
-    is a config flag, not a structure, so the hide cannot depend on it staying
-    true) — so it is simply not shown, at any stage of its life.
-    """
-    out = dict(m)
-    out["media_url"] = None
-    if out.get("content"):
-        out["content"] = _strip_media_text(out["content"])
-    # A reaction trace names an image. If that reaction isn't flagged safe, the
-    # locked view keeps the fact that *someone reacted* but loses which one —
-    # no name, no id, so nothing points at an image it may not fetch.
-    meta = out.get("metadata")
-    if isinstance(meta, dict) and meta.get("kind") == "reaction" and not meta.get("reaction_safe"):
-        out["metadata"] = {k: v for k, v in meta.items()
-                           if k not in ("reaction_id", "reaction_name")}
-        actor = str(meta.get("actor") or "Someone")
-        out["content"] = f"⚡ {actor} reacted"
-    elif isinstance(meta, dict) and meta.get("kind") == _IMAGE_JOB_KIND:
-        return None
-    return out
-
-
-#: The `metadata.kind` an image-job placeholder carries — hidden outright from
-#: a locked device, see `_redact_message_dict`.
+#: The `metadata.kind` an image-job placeholder carries.
 _IMAGE_JOB_KIND = "image_job"
 
 
-def _redact_thread_dict(t: dict) -> dict:
-    out = dict(t)
-    if out.get("last_message"):
-        out["last_message"] = _strip_media_text(out["last_message"])
-    # A model name is operator configuration, not family-facing — see
-    # ThreadOut.prefs. Dropped outright rather than nulled, same as every
-    # other Safe-Mode redaction here, so a locked device never learns a
-    # per-thread override exists at all.
-    out.pop("prefs", None)
-    return out
-
-
-def _safe_bot_ids() -> set[str]:
-    """Bots flagged for Safe Mode (visible there without a PIN). Cheap: the
-    bot registry is mtime-cached in config.load_bots()."""
-    return {b.id for b in config.load_bots() if b.safe}
-
-
-def _safe_avatar_files() -> set[str]:
-    """Avatar filenames belonging to safe bots. These specific files may be
-    served to a Safe-Mode (decoy) session so the locked view can render the same
-    pictures it already lists — non-safe bots' avatars stay behind the PIN."""
-    return {b.avatar for b in config.load_bots() if b.safe}
-
-
-# thread_id -> bot_id, so the (synchronous) redactor can scope broadcast frames
-# to safe bots. Populated by the async call sites before they broadcast.
+# thread_id -> bot_id, so the (synchronous) scoper can attribute a broadcast frame to its
+# character. Populated by the async call sites before they broadcast.
 _thread_bot: dict[str, str] = {}
+
+
+async def _prune_thread_bot() -> int:
+    """Forget the ``_thread_bot`` entries of threads that no longer exist. A thread deleted
+    here pops its own entry; a profile wipe or Reset (profiles_service, its own connection)
+    deletes threads without this module seeing them, so the session-purge loop calls this
+    every five minutes. One primary-key IN query per 500 cached ids."""
+    ids = list(_thread_bot)
+    gone: list[str] = []
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        cur = await db.db.execute(
+            f"SELECT id FROM threads WHERE id IN ({','.join('?' * len(chunk))})", chunk)
+        alive = {r[0] for r in await cur.fetchall()}
+        gone += [t for t in chunk if t not in alive]
+    for tid in gone:
+        _thread_bot.pop(tid, None)
+    return len(gone)
 
 
 async def _bot_of_thread(thread_id: str) -> str | None:
@@ -1714,7 +1888,7 @@ async def _bot_of_thread(thread_id: str) -> str | None:
 
 
 def _frame_bot(frame: dict) -> str | None:
-    """Best-effort bot attribution for a frame (for Safe-Mode scoping)."""
+    """Best-effort bot attribution for a frame (for per-profile character scoping)."""
     if frame.get("bot_id"):
         return frame["bot_id"]
     th = frame.get("thread")
@@ -1726,58 +1900,8 @@ def _frame_bot(frame: dict) -> str | None:
     return None
 
 
-# Every frame type a Safe-Mode connection may receive AT ALL. This list is an
-# ALLOWLIST on purpose: the redactor used to end in `return frame`, so a frame
-# type nobody had thought about was delivered verbatim. That is not theoretical
-# — `avatar_pool` shipped exactly that way and put non-safe bot ids, absolute
-# data-dir paths and rig error strings onto locked family devices. Default-deny
-# means the next new frame is silent for Safe Mode until someone decides
-# otherwise, which is the correct direction for a fail-closed tier.
-#
-# stream_start / stream_chunk / turn_status ARE here now, and the reason they
-# were not is the reason they are safe to be: a media directive straddling two
-# chunks made per-chunk stripping leak. The live transport never strips a
-# chunk — it sanitizes the gateway's CUMULATIVE text and sends the difference,
-# so a directive is whole before it is ever looked at, and a half-written one
-# is held back until it completes (see _sanitize_delta). They are bot-scoped
-# exactly like `message`: a locked device sees a safe bot's reply arrive as it
-# is typed, and learns nothing at all about any other bot.
-#
-# Deliberately NOT here, and why:
-#   progress                     raw reply text, tool args, file paths
-#   harness_state                the DeepSeek Harness pane is full-session
-#                                only — Safe Mode must not learn a job exists
-#   reaction_pool / avatar_pool  pool telemetry: batch sizes, prompts, rig
-#                                errors, absolute paths, every bot's id
-#   message_update               a message that was already delivered, rewritten
-#                                in place (an image job's placeholder becoming
-#                                the picture, or the ⚠️ line). Allowed because
-#                                it carries exactly a `message` frame's payload
-#                                and is redacted by exactly the same rules —
-#                                the bot must be safe, and the media is stripped
-#                                from the copy a locked device receives. A
-#                                locked device that legitimately saw the
-#                                placeholder must see it stop saying "pending",
-#                                or Safe Mode is where failures go to hide.
-_DECOY_FRAME_ALLOW = frozenset({
-    "hello", "bots", "locked", "ack", "pong", "error",
-    "message", "message_update", "stream_done", "message_deleted", "thinking",
-    "stream_start", "stream_chunk", "turn_status",
-    "thread_update", "thread_created", "thread_deleted", "checklist_update",
-    "threads_list", "threads", "messages", "reaction", "message_feedback",
-})
-
-
-#: Frames that must NEVER reach a Restricted / locked socket, stated explicitly even though
-#: "not in _DECOY_FRAME_ALLOW" already drops them: a task's timeline and an approval card
-#: are the agent feature, and a Restricted profile can never see, start or receive output
-#: from agents or tasks (G17). The tests assert every frame type in agents_ws.FRAME_TYPES is
-#: here and none is in the allow-list.
-_DECOY_FRAME_DENY = frozenset(agents_ws.FRAME_TYPES)
-
 #: Frames that are about ONE character (directly by ``bot_id`` or through the thread they
-#: name). Both narrowing passes below scope them: the Safe-Mode redactor to the safe set,
-#: the per-profile scoper to what the socket's profile may use.
+#: name). The per-profile scoper narrows them to what the socket's profile may use.
 _BOT_SCOPED_FRAMES = frozenset({
     "message", "message_update", "stream_done", "thread_update",
     "thread_created", "thread_deleted", "thinking", "message_deleted",
@@ -1787,147 +1911,198 @@ _BOT_SCOPED_FRAMES = frozenset({
 
 
 #: Broadcast frame types that carry an OPERATOR surface, and the permission a non-operator
-#: socket must hold to receive one. Before profiles existed every unredacted socket was the
-#: owner's; a Member socket is unredacted too (it is not Restricted), so without this it got
-#: the coding harness's job/service/model state (host control), the reaction and avatar pool
-#: telemetry (every bot's id, prompts, rig errors, absolute data-dir paths) and an agent
-#: turn's live tool calls - the very frames the Safe-Mode allow-list leaves out, for the
-#: same reasons.
+#: socket must hold to receive one. Before profiles existed every socket was the owner's;
+#: without this a User's socket got the coding harness's job/service/model state (host
+#: control), the reaction and avatar pool telemetry (every bot's id, prompts, rig errors,
+#: absolute data-dir paths) and an agent turn's live tool calls.
 _FRAME_PERMISSION = {
     "harness_state": Permission.ADMIN_SYSTEM,
     "harness_sessions": Permission.ADMIN_SYSTEM,
     "reaction_pool": Permission.MANAGE_CHARACTERS,
     "avatar_pool": Permission.MANAGE_CHARACTERS,
     "progress": Permission.DISPATCH_AGENTS,
+    # An agent task's timeline, approval cards and state: the agent feature (agents_ws also
+    # sends them to the task's owner only - this holds even for a frame forced through the
+    # global broadcast).
+    **dict.fromkeys(agents_ws.FRAME_TYPES, Permission.DISPATCH_AGENTS),
 }
+
+#: 4.3 host tier (A14): frames about host-level things (the coding harness's jobs, services and
+#: live sessions on this computer) reach only a principal that may run them (``is_host``: the
+#: protected Admin or an open install; never a second Admin, never a machine socket).
+_HOST_FRAMES = frozenset({"harness_state", "harness_sessions"})
 
 #: Frames about one character that the per-profile scoper narrows besides
 #: :data:`_BOT_SCOPED_FRAMES` (a reaction overlay names its bot; a progress item its thread).
 _PROFILE_SCOPED_EXTRA = frozenset({"reaction", "progress"})
 
 
-def scope_frame_for_principal(frame: dict, principal) -> dict | None:
-    """Per-profile character visibility on EVERY outgoing frame (3.0).
+#: Frames that are about ONE conversation (4.0 ownership). They go to the thread owner's
+#: sockets only, and one that names no thread - or a thread whose owner cannot be established
+#: (it was deleted before anyone cached it) - is DROPPED for everyone: fail closed. The set is
+#: every bot-scoped frame plus the ones that carry a thread's content or state without being
+#: about a character as such. ``tests/test_privacy_matrix.py`` walks it.
+_THREAD_FRAMES = _BOT_SCOPED_FRAMES | frozenset({
+    "reaction", "progress", "message_feedback", "messages", "notice",
+})
 
-    ``characters.may_use`` decides who sees a character: its ``audience`` and, when set,
-    its ``profiles`` list. The roster (``GET /api/bots``) and the ``hello`` frame were
-    already filtered with it; the broadcasts that follow (a Bot Manager save, an avatar
-    upload, a thread created or renamed, a reply landing) were sent to every socket
-    unfiltered, so a Member - or a Restricted profile - left off a character's list
-    learned its new name and avatar the moment the Owner edited it. Installed as
-    ``manager.scoper`` and run after the Safe-Mode redactor, per connection:
+#: Thread-attributed frames that are a neutral reply to the requesting socket itself (an ack,
+#: a validation error). A TARGETED one always reaches the requester - about someone else's
+#: thread it says exactly what it says about a thread that does not exist; broadcast, it
+#: follows the thread's owner like any other thread frame.
+_REPLY_FRAMES = frozenset({"error", "ack"})
 
-    - ``bots`` / ``hello`` lists keep only the characters this profile may use;
-    - an operator frame (:data:`_FRAME_PERMISSION`: harness, pool telemetry, agent
-      progress) is dropped unless the profile holds the permission behind it;
-    - a frame about one character (:data:`_BOT_SCOPED_FRAMES`, a ``reaction`` / ``progress``
-      item, or an ``error`` attributed to one) is dropped when the profile may not use that
-      character.
-      An UNATTRIBUTED frame passes: for a Restricted socket the redactor has already
-      failed closed on it, and a Member's unattributed frames (an ack, a plain error)
-      carry nothing about a character.
 
-    Owner, Admin, the open install and machines see everything (``may_use`` says so).
-    """
-    if principal is None or getattr(principal, "kind", "") in ("open", "machine") \
-            or getattr(principal, "is_operator", False):
-        return frame
+def _frame_owner_allows(frame: dict, principal, *, targeted: bool) -> bool:
+    """The ownership half of :func:`scope_frame_for_principal`."""
     t = frame.get("type")
-    need = _FRAME_PERMISSION.get(t)
-    if need is not None and not principal.can(need):
+    if targeted and t in _REPLY_FRAMES:
+        # A neutral reply to this socket's own request (an ack, "Thread not found"): the
+        # same answer whether the thread is someone else's or does not exist at all.
+        return True
+    tid = ownership.frame_thread_id(frame)
+    if tid is None:
+        if t == "reaction":
+            # A reaction fired at no thread ("pop it on every screen") goes to the profile
+            # that owns the bot firing it (4.2: a personal bot's owner; Bits is the protected
+            # Admin's), and a bot of nobody's is the machine's sphere, the Owner's: it reaches
+            # that profile's sockets only, never every device in the house.
+            rb = config.resolve_bot(frame.get("bot_id")) if frame.get("bot_id") else None
+            if rb is not None and characters.is_personal(rb):
+                return ownership.may_see_thread(principal, rb.owner_profile, write=True)
+            return ownership.may_see_thread(principal, None, write=True)
+        # A conversation frame that names no conversation cannot be attributed: drop it.
+        return t not in _THREAD_FRAMES
+    owner = ownership.cached_owner(tid)
+    if not ownership.is_known(owner):
+        return targeted and t in _REPLY_FRAMES
+    return ownership.may_see_thread(principal, owner, write=True)
+
+
+#: Frames that name a character's roster entry (the rail): filtered through
+#: ``characters.visible_to`` for every principal, Admins included.
+_ROSTER_FRAMES = frozenset({"hello", "bots"})
+
+
+def _frame_app_permission(t: str) -> str | None:
+    """``app:<id>:<kind>`` frames (an app's own live updates) need the app's manifest
+    permission: the Job Board's comment or state change is that app's data."""
+    if not isinstance(t, str) or not t.startswith("app:"):
         return None
-    if t in ("hello", "bots") and isinstance(frame.get("bots"), list):
+    app_id = t.split(":", 2)[1] if t.count(":") >= 2 else ""
+    la = apps_loader.get(app_id) if app_id else None
+    return la.manifest.permission if la is not None else Permission.ADMIN_SYSTEM.value
+
+
+#: Pool telemetry frames (``manage_characters``): every status object names its bot.
+_POOL_FRAMES = frozenset({"reaction_pool", "avatar_pool"})
+
+
+def _pool_bot_visible(bot_id: str | None, principal) -> bool:
+    """May ``principal`` see the pool of ``bot_id`` (4.2)? A pool belongs to its bot's
+    owner: Bits' shelf is the main Admin's, not every Admin's. A bot no longer in the roster
+    (a pool folder left on disk) is listed to nobody but an open install."""
+    b = config.resolve_bot(bot_id) if bot_id else None
+    if b is None:
+        return getattr(principal, "kind", "") == "open"
+    return characters.may_view_item(b, principal)
+
+
+def _scope_pool_frame(frame: dict, principal) -> dict | None:
+    """A ``reaction_pool`` / ``avatar_pool`` frame narrowed to the bots ``principal`` may see
+    (S2b): a profile sees the pools of the characters it may chat with (or, as a manager, the
+    templates); a frame left with no pool is dropped."""
+    if getattr(principal, "kind", "") == "open":
+        return frame
+    out = dict(frame)
+    pools = frame.get("pools")
+    if isinstance(pools, dict):
+        out["pools"] = {k: v for k, v in pools.items() if _pool_bot_visible(k, principal)}
+    one = frame.get("pool")
+    if isinstance(one, dict) and not _pool_bot_visible(one.get("bot_id"), principal):
+        out.pop("pool", None)
+    had = bool(pools) or isinstance(one, dict)
+    if had and not out.get("pools") and "pool" not in out:
+        return None                     # every pool it carried belongs to somebody else
+    return out
+
+
+def scope_frame_for_principal(frame: dict, principal, targeted: bool = False) -> dict | None:
+    """Per-profile visibility on EVERY outgoing frame (4.0 ownership + characters).
+
+    Installed as ``manager.scoper`` and run for every live connection.
+    There is no Admin short-circuit anywhere in here (Fable amendment 15):
+
+    - **no principal** (a socket that has not finished its handshake, an observer that
+      did not say who it serves): only frames about nothing in particular pass - a thread
+      frame, a roster, a character-scoped frame or an operator frame is dropped;
+    - **ownership**: a frame about one conversation (:data:`_THREAD_FRAMES`, or any frame
+      naming a ``thread_id`` / ``thread`` / ``message``) reaches only the sockets of the
+      thread's OWNER - an Admin's too only when the chat is the Admin's. A thread frame that
+      cannot be attributed is dropped (fail closed);
+    - ``bots`` / ``hello`` lists keep only what ``characters.visible_to`` lists for this
+      principal (another profile's personal character never, for anyone);
+    - an operator frame (:data:`_FRAME_PERMISSION`, an app's ``app:<id>:*`` frame) needs
+      the permission behind it;
+    - a frame about one character (:data:`_BOT_SCOPED_FRAMES`, a ``reaction`` /
+      ``progress`` item, an ``error`` attributed to one) is dropped unless
+      ``characters.may_use`` lets this principal use that character."""
+    t = frame.get("type")
+    if principal is None:
+        if (t in _THREAD_FRAMES or t in _ROSTER_FRAMES or t in _FRAME_PERMISSION
+                or t in _BOT_SCOPED_FRAMES or t in agents_ws.FRAME_TYPES
+                or _frame_app_permission(t) is not None
+                or ownership.frame_thread_id(frame) is not None or _frame_bot(frame)):
+            return None
+        return frame
+    if not _frame_owner_allows(frame, principal, targeted=targeted):
+        return None
+    kind = getattr(principal, "kind", "")
+    if kind == "open":
+        return frame
+    if t in _HOST_FRAMES and not getattr(principal, "is_host", False):
+        return None
+    if kind != "machine":
+        need = _FRAME_PERMISSION.get(t) or _frame_app_permission(t)
+        if need is not None and not principal.can(need):
+            return None
+    if t in _POOL_FRAMES:
+        return _scope_pool_frame(frame, principal)
+    if t in _ROSTER_FRAMES and isinstance(frame.get("bots"), list):
         return {**frame, "bots": [b for b in frame["bots"]
-                                  if not isinstance(b, dict)
-                                  or characters.may_use_id(b.get("id"), principal)]}
+                                  if isinstance(b, dict) and _roster_row_visible(b, principal)]}
     if t in _BOT_SCOPED_FRAMES or t in _PROFILE_SCOPED_EXTRA or t == "error":
         bot = _frame_bot(frame)
         if bot is not None and not characters.may_use_id(bot, principal):
             return None
+    if t == "error" and frame.get("detail"):
+        return _error_detail_for(frame, principal)
     return frame
 
 
-def redact_for_decoy(frame: dict):
-    """Make a frame safe for a Safe-Mode connection.
-
-    Returns a redacted copy, the frame unchanged, or ``None`` to DROP it.
-
-    - A frame type not in :data:`_DECOY_FRAME_ALLOW` is dropped outright.
-    - Frames about bots NOT flagged safe are dropped entirely — Safe Mode must
-      not even learn those conversations exist.
-    - Bot-list frames are filtered down to the safe set.
-    """
-    t = frame.get("type")
-    if t in _DECOY_FRAME_DENY or t not in _DECOY_FRAME_ALLOW:
-        return None
-
-    safe = _safe_bot_ids()
-
-    # A reaction overlay is an image pushed onto the screen, so it obeys the
-    # same rule as any other media: Safe Mode sees it only when the reaction is
-    # explicitly flagged safe AND (if it is attributed at all) it came from a
-    # safe bot's thread. Fail closed — an unflagged reaction simply doesn't
-    # exist for a locked device.
-    if t == "reaction":
-        if not frame.get("safe"):
-            return None
-        bot = _frame_bot(frame)
-        if bot is not None and bot not in safe:
-            return None
+def _error_detail_for(frame: dict, principal) -> dict:
+    """A turn error's ``detail`` names the provider's address and what it said (llm_api
+    ApiError.detail): for the Admin role to read, never a User's, a Basic profile's or the
+    shared landing's (SPEC §5: connections are the Admin's). This only ever REMOVES a field
+    (it lets nothing through that the ownership rule dropped); the short message stays."""
+    if getattr(principal, "kind", "") == "open" or getattr(principal, "role", "") == Role.ADMIN.value:
         return frame
+    return {k: v for k, v in frame.items() if k != "detail"}
 
-    if t in ("hello", "bots") and isinstance(frame.get("bots"), list):
-        return {**frame, "bots": [b for b in frame["bots"]
-                                  if isinstance(b, dict) and b.get("id") in safe]}
 
-    # Scope per-thread frames to safe bots. For content-bearing frames an
-    # unknown attribution drops the frame (safe default). Plain "error" frames
-    # are only dropped when they're attributed to an unsafe bot — validation
-    # errors with no bot context must still reach the requester.
-    if t in _BOT_SCOPED_FRAMES:
-        bot = _frame_bot(frame)
-        if bot not in safe:
-            return None
-    if t == "error":
-        bot = _frame_bot(frame)
-        if bot is not None and bot not in safe:
-            return None
-
-    if (t in ("message", "message_update", "stream_done")
-            and isinstance(frame.get("message"), dict)):
-        redacted = _redact_message_dict(frame["message"])
-        # An image-job placeholder redacts to nothing (see
-        # _redact_message_dict) — the whole frame is dropped, same as an
-        # unsafe bot's frame above, rather than delivered with a null message.
-        if redacted is None:
-            return None
-        return {**frame, "message": redacted}
-    if t in ("thread_update", "thread_created") and isinstance(frame.get("thread"), dict):
-        return {**frame, "thread": _redact_thread_dict(frame["thread"])}
-    if t in ("threads_list", "threads", "messages"):
-        key = "messages" if t == "messages" else "threads"
-        items = frame.get(key)
-        if isinstance(items, list):
-            fn = _redact_message_dict if t == "messages" else _redact_thread_dict
-            kept = []
-            for x in items:
-                if not isinstance(x, dict):
-                    kept.append(x)
-                    continue
-                r = fn(x)
-                if r is not None:      # an image-job row hides outright
-                    kept.append(r)
-            return {**frame, key: kept}
-    return frame
+def _roster_row_visible(row: dict, principal) -> bool:
+    b = config.resolve_bot(row.get("id")) if row.get("id") else None
+    if b is None:
+        # A row for a character that is not (or no longer) in config.yaml: a personal row
+        # is never trusted; a household one follows the row's own scope fields.
+        if row.get("scope") == "personal":
+            return False
+        return getattr(principal, "kind", "") == "open"
+    return characters.visible_to(b, principal)
 
 
 def _session_of(request: Request):
     return getattr(request.state, "session", None)
-
-
-def _is_decoy(request: Request) -> bool:
-    """True when this request is being served Safe Mode (no full session)."""
-    return bool(getattr(request.state, "decoy", False))
 
 
 def _browser_request(request: Request) -> bool:
@@ -1965,9 +2140,9 @@ _PROXY_MARKER_HEADERS = (
 
 
 def _ip_is_loopback(host: str) -> bool:
-    """Is this peer address this machine? (Address only — no header input.)"""
-    return bool(host) and (host in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
-                           or host.startswith("127."))
+    """Is this a loopback address? Parsed (policy.ip_is_loopback), never prefix-matched, so a
+    DNS name like ``127.0.0.1.nip.io`` is not mistaken for this machine (4.3 INT-3)."""
+    return policy.ip_is_loopback(host)
 
 
 def _browser_on_host(request: Request) -> bool:
@@ -1997,7 +2172,7 @@ def _on_box_machine(request: Request) -> bool:
     The same three-part test the machine branch of the auth gate applies:
     loopback socket, no proxy in front, and no browser fingerprint. It grants
     nothing on its own — callers use it to decide whether a response may carry
-    operator detail that a locked browser tab must not see.
+    operator detail that a browser tab must not see.
     """
     return (_loopback_socket(request) and not _proxied_request(request)
             and not _browser_request(request))
@@ -2008,15 +2183,8 @@ def _bearer(request: Request) -> str | None:
     return h[7:].strip() if h.lower().startswith("bearer ") else None
 
 
-# Path classification for the auth gate.
-# Past the gate, but NOT ungated: /api/health and /api/openapi.json both decide
-# for themselves what a given caller may see (liveness for anyone, detail for a
-# full session or an on-box machine). Listing them here only means the gate
-# does not answer on their behalf.
-_OPEN_EXACT = {"/", "/favicon.ico", "/favicon.svg", "/manifest.webmanifest",
-               "/api/health", "/api/openapi.json"}
-_OPEN_PREFIXES = ("/static/",)
-_AUTH_PREFIX = "/api/auth"
+# Which paths the auth gate lets through is declared per route in route_policy.py
+# (the gate reads that table; nothing here lists paths).
 
 
 def _gated_avatar_static(path: str) -> bool:
@@ -2034,21 +2202,13 @@ def _gated_avatar_static(path: str) -> bool:
     return any(seg.lower().startswith("avatars") for seg in path.split("/"))
 
 
-def _safe_avatar_static(path: str) -> bool:
-    """The ONE avatar shape Safe Mode may fetch: a safe bot's own file,
-    directly under the live /static/avatars/ directory — no nesting (backup
-    subdirs), no sibling directories. Everything else stays behind the PIN."""
-    if not path.startswith("/static/avatars/"):
-        return False
-    fname = path[len("/static/avatars/"):]
-    return "/" not in fname and fname in _safe_avatar_files()
 # Thread management OPENCLAW.md has always documented as available to on-box
 # agents: list/read a thread, create/rename/pin/archive/delete one, delete a
 # message, mark read, unread counts. Until 2026-08-14 only the POST-message
 # half was actually exempt — every agent following the doc's read/manage
 # examples got a 403 and flailed (same story as the avatar routes above).
-# Each route keeps its own _is_safe_mode_caller/_deny_decoy_* guard, so a
-# sessionless BROWSER still gets exactly the Safe-Mode view it always had.
+# Each route keeps its own ownership and character checks (_require_thread,
+# _require_bot_use), so a sessionless BROWSER is judged as the unsigned device it is.
 _INBOUND_THREAD_ONE_RE = re.compile(r"^/api/threads/[^/]+$")
 _INBOUND_THREAD_SUB_RE = re.compile(r"^/api/threads/[^/]+/(?:messages|read)$")
 
@@ -2063,69 +2223,130 @@ def _is_inbound(method: str, path: str) -> bool:
     return bool(req is not None and req.machine)
 
 
-def _decoy_blocked(method: str, path: str) -> bool:
-    """Would the gate refuse a signed-out (Restricted) caller this request?
-
-    Not a deny-list any more - the answer is derived from the route table
-    (``app/route_policy.py``) - but the question is still the one tests, the
-    dashboard and a curious operator ask. Scoped routes count as reachable (the
-    handler narrows the answer); a path no route matches is not blocked."""
+def _signed_out_blocked(method: str, path: str) -> bool:
+    """Would the gate refuse a signed-out caller (the lock-target default profile, else
+    nobody) this request? Derived from the route table (``app/route_policy.py``); the
+    question tests, the dashboard and a curious operator ask. Scoped routes count as
+    reachable (the handler narrows the answer); a path no route matches is not blocked."""
     _, req = _route_index.match("GET" if method.upper() == "HEAD" else method.upper(), path)
     if req is None:
         return False
-    d = policy.authorize(policy.anonymous(), req)
+    d = policy.authorize(policy.unsigned() or policy.nobody(), req)
     return not d.allowed
 
 
-#: Item-level rules a Restricted caller meets on a scoped route.
-_AVATAR_ITEM_RE = re.compile(r"^/api/bots/([^/]+)/avatar(?:/thumb|/history(?:/[^/]+)?)?$")
-_REACTION_IMAGE_RE = re.compile(r"^/api/reactions/([^/]+)/image$")
+#: A character's picture by id (``/api/bots/<id>/avatar``, its thumb and its history).
+_AVATAR_ITEM_RE = re.compile(r"^/api/bots/([^/]+)/avatar(?:/full|/thumb|/history(?:/[^/]+)?)?$")
 
 
-def _restricted_item_denied(method: str, path: str) -> bool:
-    """True when a Restricted caller asks for a SPECIFIC thing it may not have: a
-    character outside its audience, a reaction image not flagged safe."""
+def _household_character_item_denied(method: str, path: str, principal) -> bool:
+    """True when a read names the picture of a HOUSEHOLD character ``principal`` may not use
+    (``characters.may_use``: off a User's or Basic profile's list, or agent-backed without
+    ``dispatch_agents``) - by id or by its ``/static/avatars/`` file. Refused 403, as the
+    character's every other surface is. Personal characters are :func:`_foreign_character_item`'s
+    (404)."""
     if method not in ("GET", "HEAD"):
         return False
+    bot = None
     m = _AVATAR_ITEM_RE.match(path)
     if m:
-        return m.group(1) not in _safe_bot_ids()
-    m = _REACTION_IMAGE_RE.match(path)
+        bot = config.resolve_bot(m.group(1))
+    elif _gated_avatar_static(path):
+        bot = _bot_for_avatar(path)
+    return bot is not None and not characters.is_personal(bot) \
+        and not characters.may_view_item(bot, principal)
+
+
+#: Paths that name ONE character (4.0): another profile's personal character answers 404
+#: here for everyone, Admins included, before any handler runs.
+_CHARACTER_ITEM_RE = re.compile(
+    r"^/api/(?:bots|characters|avatar-pool|me/characters)/([^/]+)(?:/|$)")
+_AVATAR_STEM_SUFFIX_RE = re.compile(r"-(?:face|full|thumb)$")
+
+
+def _avatar_stem(name: str) -> str:
+    stem = name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    return _AVATAR_STEM_SUFFIX_RE.sub("", stem).lower()
+
+
+def _bot_for_avatar(path: str, *, personal: bool = False) -> config.Bot | None:
+    """The character whose avatar file ``/static/avatars/...<file>`` is, if any (only a
+    personal one with ``personal=True``)."""
+    stem = _avatar_stem(path)
+    if not stem:
+        return None
+    for b in config.load_bots():
+        if personal and not characters.is_personal(b):
+            continue
+        if b.avatar and _avatar_stem(b.avatar) == stem:
+            return b
+    return None
+
+
+def _foreign_character_item(method: str, path: str, principal) -> bool:
+    """True when ``path`` names a PERSONAL character ``principal`` may not use - by id
+    (``/api/bots/<id>...``, ``/api/characters/<id>...``) or by its avatar file
+    (``/static/avatars/...``). Answered as a 404, so its existence is not revealed.
+    ``/api/bots/all`` and ``/api/bots/order`` are lists, filtered by their handlers."""
+    m = _CHARACTER_ITEM_RE.match(path)
     if m:
-        return m.group(1) not in reactions.safe_ids()
+        bot = config.resolve_bot(m.group(1))
+        return bot is not None and characters.is_personal(bot) \
+            and not characters.may_use(bot, principal)
+    if _gated_avatar_static(path):
+        bot = _bot_for_avatar(path, personal=True)
+        return bot is not None and not characters.may_use(bot, principal)
     return False
 
 
-def _restricted_limit_denied(principal: policy.Principal, req) -> policy.Decision | None:
-    """Time limits / quiet hours of a Restricted PROFILE (not an anonymous device)."""
-    if principal.kind != "profile" or req.public or req.permission not in (
-            "use_chat", "use_voice", "manage_history"):
-        return None
-    return limits.check(principal)
-
-
-def _note_active_time(principal: policy.Principal) -> None:
-    limits.note_active(principal)
-
-
-def _deny_decoy_bot(request: Request, bot_id: str | None) -> None:
-    """403 a Safe-Mode request that targets a bot not flagged for Safe Mode."""
-    if _is_decoy(request) and bot_id not in _safe_bot_ids():
-        raise HTTPException(403, "Unlock for full access")
-    # 3.0 per-profile visibility: a character limited to some profiles is closed to the rest.
+def _require_bot_use(request: Request, bot_id: str | None, *, view: bool = False) -> None:
+    """Refuse a character this caller may not use (``characters.may_use``): 404 for another
+    profile's PERSONAL character (Admins included: its existence is private), 403 for a
+    household one left off the caller's list. An unknown id passes here: the route answers
+    its own 404, and the caller's own thread with a character since deleted stays readable
+    (ownership has already been checked on thread routes)."""
     pr = policy.of(request).principal
-    if not characters.may_use_id(bot_id, pr):
-        raise policy.denied(pr, "character")
+    bot = config.resolve_bot(bot_id) if bot_id else None
+    if bot is None or (characters.may_view_item(bot, pr) if view else characters.may_use(bot, pr)):
+        return
+    if characters.is_personal(bot):
+        raise HTTPException(404, "Unknown bot")
+    raise policy.denied(pr, "character", "Your profile may not use that character.")
 
 
-async def _deny_decoy_thread(request: Request, thread_id: str) -> None:
-    """403 when the caller may not use the character behind ``thread_id``: a Restricted caller
-    outside the safe set, and (3.0) any profile left off the character's ``profiles`` list. The
-    second half used to run only for Restricted callers, so a Member could rename, archive,
-    mark read, edit or delete messages in a thread of a character made for someone else."""
+async def _thread_access(request: Request, thread_id: str, *, write: bool = True):
+    """The thread, after both access rules, or the refusal:
+
+    * **ownership (4.0)**: 404 unless the caller owns the thread (no Admin short-circuit);
+    * **the character** (:func:`_require_bot_use`): 403 for a household one off the caller's
+      list, 404 for another profile's personal one."""
     pr = policy.of(request).principal
-    if _is_decoy(request) or not (pr.is_operator or pr.is_machine):
-        _deny_decoy_bot(request, await _bot_of_thread(thread_id))
+    thread = await ownership.require_thread(db, pr, thread_id, write=write)
+    _thread_bot.setdefault(thread.id, thread.bot_id)
+    _require_bot_use(request, thread.bot_id)
+    return thread
+
+
+async def _require_thread(request: Request, thread_id: str, *, write: bool = False):
+    """A thread route's whole check: the canonical id (case-insensitive, 404 when there is
+    none), then :func:`_thread_access`. Returns the thread."""
+    thread_id = await _canonical_thread_id(thread_id)
+    return await _thread_access(request, thread_id, write=write)
+
+
+async def _require_message(request: Request, message_id: str, *, write: bool = True):
+    """``(message, thread)`` for a message route: 404 unless the message exists AND its thread
+    passes :func:`_thread_access` (``write``: the owner only)."""
+    msg = await db.get_message(message_id)
+    if not msg:
+        raise HTTPException(404, "Message not found")
+    try:
+        thread = await _thread_access(request, msg.thread_id, write=write)
+    except HTTPException as e:
+        if e.status_code == 404:
+            raise HTTPException(404, "Message not found") from None
+        raise
+    return msg, thread
 
 
 async def _canonical_thread_id(thread_id: str) -> str:
@@ -2150,119 +2371,40 @@ async def _canonical_thread_id(thread_id: str) -> str:
     return canonical
 
 
-# Daily budgets of a Restricted caller (3.0). They used to be in-memory per-IP dicts
-# that reset on restart and lumped together every device behind one address. They
-# are now rows in chats.db (accounts.usage_daily), charged to the PROFILE when a
-# Restricted profile is signed in (or its device is bound), and to the client
-# address only for an anonymous device. The two names below are dict-shaped views
-# of today's rows, kept so tools and tests that read or clear them still work.
-_decoy_upload_used = accounts.UsageMap("upload_bytes")
-_decoy_action_used = accounts.UsageMap("action:", tuple_keys=True)
-_decoy_upload_day: str = ""        # retained for old test fixtures; unused
+#: The machine upload guard's counter subject (accounts.usage_daily): every machine caller
+#: shares one daily byte budget (MACHINE_UPLOAD_QUOTA).
+_MACHINE_UPLOAD_SUBJECT = "machine"
 
 
-def _quota_ip(headers, peer: str) -> str:
-    """The identity an anonymous device's daily budget is charged to (policy.py)."""
-    return policy.quota_ip(headers, peer)
-
-
-def _budget_subject(headers, peer: str, principal: policy.Principal | None) -> str:
-    """Who a Restricted caller's budget belongs to: its profile, else its address."""
-    if principal is not None and principal.profile_id and principal.is_restricted:
-        return principal.profile_id
-    return _quota_ip(headers, peer)
-
-
-def _request_quota_ip(request: Request) -> str:
-    """The budget subject of a request (named for the 2.x per-IP counter it replaces)."""
-    client = getattr(request, "client", None)
-    return _budget_subject(getattr(request, "headers", None) or {},
-                           client.host if client else "?",
-                           getattr(request.state, "principal", None))
-
-
-#: profile budget key (People & Profiles) for each charged kind
-_BUDGET_KEYS = {"turn": "turns", "thread": "threads", "feedback": "feedback"}
-
-
-def _budget_limit(subject: str, kind: str, default: int) -> int:
-    """The daily limit for ``kind``: the profile's own, else the install default."""
-    prof = accounts.get_profile(subject) if subject else None
-    if prof is None:
-        return default
-    b = prof.budgets or {}
-    if kind == "upload_bytes":
-        mb = b.get("upload_mb")
-        return int(mb) * 1024 * 1024 if isinstance(mb, int) else default
-    v = b.get(_BUDGET_KEYS.get(kind, ""))
-    return int(v) if isinstance(v, int) else default
-
-
-def _decoy_quota_left(request: Request) -> int | None:
-    """Bytes a Restricted caller - or a machine (machine:upload: an agent or cron
-    handing a document back) - may still upload today; None for everyone else.
-    A looping agent must not be able to fill the disk."""
-    if not (_is_decoy(request) or policy.of(request).machine):
+def _machine_quota_left(request: Request) -> int | None:
+    """Bytes a machine caller (machine:upload: an agent or cron handing a document back) may
+    still upload today; None for a person, who has no daily limit. A looping agent must not be
+    able to fill the disk."""
+    if not policy.of(request).machine:
         return None
-    subject = _request_quota_ip(request)
-    limit = _budget_limit(subject, "upload_bytes", DECOY_UPLOAD_QUOTA)
-    return max(0, limit - accounts.usage_get(subject, "upload_bytes"))
+    return max(0, MACHINE_UPLOAD_QUOTA - accounts.usage_get(_MACHINE_UPLOAD_SUBJECT, "upload_bytes"))
 
 
-def _decoy_quota_add(request: Request, n: int) -> None:
-    subject = _request_quota_ip(request)
-    accounts.usage_add(subject, "upload_bytes", n)
+def _machine_quota_add(n: int) -> None:
+    accounts.usage_add(_MACHINE_UPLOAD_SUBJECT, "upload_bytes", n)
     if n > 0:
-        accounts.log_activity("upload", profile_id=subject if accounts.get_profile(subject) else None,
-                              subject=subject, detail=f"{n} bytes")
+        accounts.log_activity("upload", profile_id=None, subject=_MACHINE_UPLOAD_SUBJECT,
+                              detail=f"{n} bytes")
 
 
-def _decoy_over_quota(request: Request) -> bool:
-    """True once this caller's SHARED running total exceeds the daily budget.
-
-    Read live (not from a per-request snapshot) so overlapping uploads all
-    contend on the same counter - closes the TOCTOU window where each request
-    read the full remaining budget before any of them committed their bytes."""
-    subject = _request_quota_ip(request)
-    return accounts.usage_get(subject, "upload_bytes") > _budget_limit(
-        subject, "upload_bytes", DECOY_UPLOAD_QUOTA)
-
-
-def _decoy_action_allowed(subject: str, action: str, limit: int) -> bool:
-    """Charge one unit of a Restricted daily action budget. False once spent."""
-    subject = subject or "?"
-    ok = accounts.usage_charge(subject, f"action:{action}", _budget_limit(subject, action, limit))
-    pid = subject if accounts.get_profile(subject) else None
-    # The activity summary the Owner sees (and the Restricted UI discloses): counts
-    # of what was done, never what was said.
-    accounts.log_activity(action if ok else "limit_hit", profile_id=pid, subject=subject,
-                          detail="" if ok else action)
-    return ok
-
-
-def _ws_client_ip(ws: WebSocket) -> str:
-    """Same budget identity as the REST path - see _budget_subject."""
-    return _budget_subject(ws.headers, ws.client.host if ws.client else "?",
-                           manager.principal_of(ws))
-
-
-def _deny_decoy_mutation(request: Request) -> None:
-    """Safe Mode is VIEW + SEND only. Destructive/management ops (delete a message
-    or thread, rename, pin, archive) require a full PIN session even for the safe
-    bots — otherwise an unauthenticated tailnet client could permanently delete or
-    rename the family's chat history through the decoy view."""
-    if _is_decoy(request):
-        raise HTTPException(403, "Unlock for full access")
+def _machine_over_quota() -> bool:
+    """True once the machines' SHARED running total exceeds the daily guard. Read live (not
+    from a per-request snapshot) so overlapping uploads all contend on the same counter."""
+    return accounts.usage_get(_MACHINE_UPLOAD_SUBJECT, "upload_bytes") > MACHINE_UPLOAD_QUOTA
 
 
 def _require_full_access(request: Request) -> None:
-    """In-handler lock for the routes the gate has already declared: anybody but a
-    Restricted caller. A second lock on the same door - the route's own declared
-    permission is the first, enforced by ``auth_gate`` - kept so a handler called
-    from anywhere but the middleware chain still refuses a Restricted caller.
-    An authenticated machine passes (on-box agents list files this way)."""
+    """In-handler lock for the routes the gate has already declared: anybody who is
+    somebody (a profile, a machine, an open install), never nobody. A second lock on the
+    same door - the route's own declared permission is the first, enforced by ``auth_gate`` -
+    kept so a handler called from anywhere but the middleware chain still fails closed."""
     pol = policy.of(request)
-    if pol.restricted:
+    if pol.principal.kind == "none":
         raise policy.denied(pol.principal, "authenticated")
 
 
@@ -2325,6 +2467,10 @@ async def _session_purge_loop() -> None:
                 auth.purge_expired()
             except Exception:
                 log.exception("session purge pass failed; loop continues")
+            try:
+                await _prune_thread_bot()
+            except Exception:
+                log.exception("thread-cache prune failed; loop continues")
             _loop_beat("session_purge", 300)
     except asyncio.CancelledError:
         _loop_beats.pop("session_purge", None)   # shutdown, not a fault
@@ -2521,6 +2667,23 @@ class _Prepared(NamedTuple):
     pic_drops: Sequence = ()
 
 
+async def _thread_owner_can(thread_id: str, permission: Permission | str) -> bool:
+    """Does the OWNER of ``thread_id`` hold ``permission``? (NULL owner = the protected
+    Admin; an open install: yes; an unknown thread or owner: no.)"""
+    if not policy.claimed():
+        return True
+    with contextlib.suppress(Exception):
+        exists, owner = await db.thread_owner_lookup(thread_id)
+        if not exists:
+            return False
+        pid = ownership.effective_owner(owner)
+        prof = accounts.get_profile(pid) if pid else None
+        if prof is None:
+            return False
+        return policy.profile_principal(prof).can(permission)
+    return False
+
+
 async def _prepare_persist(
     thread_id: str, role: str, content: str,
     media_url: str | None, metadata: dict | None, created_at: str | None,
@@ -2599,6 +2762,11 @@ async def _prepare_persist(
         # picture, and obeys the same replay rule: an old reply keeps its
         # marker stripped but must not occupy a GPU for news that has already
         # been read.
+        if "[[pic:" in content.lower() and not await _thread_owner_can(
+                thread_id, Permission.USE_IMAGES):
+            # 4.0 (BUILD-PLAN-v2 §1.2): no pictures in the chat of a profile without
+            # use_images (Basic by default) - the marker is dropped, nothing is rendered.
+            content = image_jobs.strip_pic_markers(content)
         content, pic_specs, pic_drops = await _pic_specs_from_markers(
             content, bot_id, thread_id, metadata=metadata,
             replaying=replaying and not _replay_is_fresh(created_at))
@@ -2731,9 +2899,9 @@ def _sanitize_delta(text: str) -> str:
     Delta text is raw model output. It still carries `[[media:/abs/path]]`,
     `[[doc:…]]`, `[[pic:…]]`, `:react:…:` and the gateway's internal-context
     scaffolding — every one of which the persisted copy has stripped since
-    long before streaming existed. A locked family device must never see an
-    absolute path or an internal marker in a provisional bubble that the
-    finished message would not have shown it.
+    long before streaming existed. No device may see an absolute path or an
+    internal marker in a provisional bubble that the finished message would not
+    have shown it.
 
     Applied to the CUMULATIVE text, never to a chunk: a directive split across
     two deltas is whole here, and a directive that is only half-written yet is
@@ -2880,7 +3048,7 @@ async def _persist_and_stream_message(
     msg = await db.add_message(thread_id, role, content, media_url=media_url,
                                metadata=metadata, source_id=source_id,
                                created_at=created_at)
-    bot_id = await _bot_of_thread(thread_id)   # lets the redactor scope frames
+    bot_id = await _bot_of_thread(thread_id)   # lets the scoper attribute frames
 
     is_sub = bool(metadata and metadata.get("sub"))
     # THE REAL STREAM WINS. When the gateway's live deltas already painted this
@@ -2936,13 +3104,13 @@ async def fire_reaction(
     key: str, *, actor: str, actor_kind: str = "user",
     thread_id: str | None = None, bot_id: str | None = None,
     duration_ms: int | None = None, caption: str | None = None,
-    trace: bool = True, require_safe: bool = False,
+    trace: bool = True,
 ) -> dict:
     """Resolve, rate-limit and broadcast one reaction overlay.
 
     The single chokepoint for every trigger path — the composer picker, the
     inbound API, the CLI, and `:react:<id>:` markers inside an agent reply — so
-    the enabled flag, the rate limits and the Safe-Mode rule are enforced once.
+    the enabled flag and the rate limits are enforced once.
     Raises :class:`reactions.ReactionError` (which carries an HTTP status).
 
     The reaction itself lives in the chat: when ``trace`` is set and the
@@ -2990,8 +3158,6 @@ async def fire_reaction(
             raise reactions.ReactionError(
                 "No fresh reaction images on hand right now", 503)
         raise reactions.ReactionError(f"No such reaction: {key}", 404)
-    if require_safe and not r.safe:
-        raise reactions.ReactionError("Unlock for full access", 403)
     # Prove the image is actually there before every screen in the house is told
     # to display it (a hand-deleted blob would otherwise pop an empty card).
     reactions.image_path(r)
@@ -3023,7 +3189,7 @@ async def fire_reaction(
             tmsg = await _persist_and_broadcast_message(
                 thread_id, "system", f"⚡ {actor} reacted · {r.name}",
                 metadata={"kind": "reaction", "reaction_id": r.id,
-                          "reaction_name": r.name, "reaction_safe": r.safe,
+                          "reaction_name": r.name,
                           "actor": actor, "actor_kind": actor_kind,
                           # Fired pool images are kept in spent/ for good, so
                           # every trace can pop its picture back up on click.
@@ -3042,7 +3208,6 @@ async def fire_reaction(
         "name": r.name,
         "image_url": reactions.image_url(r.id, r.file.rsplit("/", 1)[-1]),
         "duration_ms": pack.settings.clamp_duration(duration_ms or r.duration_ms),
-        "safe": r.safe,
         "actor": actor,
         "actor_kind": actor_kind,
         "caption": (caption or "").strip()[:120],
@@ -3184,7 +3349,7 @@ async def _note_reaction_refusal(thread_id: str, rid: str, reason: str) -> None:
 # ⚠️ line instead. There is no branch that leaves it saying "pending".
 #
 # See app/image_jobs.py for the rig client and the rules; this half owns the
-# message, the broadcast and the Safe-Mode scoping.
+# message, the broadcast and the per-owner frame scoping.
 # --------------------------------------------------------------------------- #
 
 #: How often the worker sweeps open jobs.
@@ -3369,7 +3534,7 @@ def _image_job_pending_text(spec: image_jobs.ImageSpec) -> str:
     """What the thread says while the render is in flight.
 
     Deliberately readable on its own: this exact string is what a No-Image-Mode
-    device and a Safe-Mode device render (they get no card), and it is what
+    device renders (it gets no card), and it is what
     lands in the thread list preview. "Generating an image…" with nothing else
     is a worse trace than one that says what of."""
     what = spec.caption or spec.prompt
@@ -3498,7 +3663,7 @@ def _image_job_meta(job_id: str, status: str, spec: image_jobs.ImageSpec,
                     *, error: str = "", progress: dict | None = None,
                     seed: int | None = None) -> dict:
     meta = {"kind": _IMAGE_JOB_KIND, "job_id": job_id, "status": status,
-            "prompt": spec.prompt[:200], "caption": spec.caption}
+            "prompt": spec.prompt[:2000], "caption": spec.caption}
     if spec.workflow:
         meta["workflow"] = spec.workflow
     if error:
@@ -3717,10 +3882,8 @@ async def _broadcast_message_update(msg: MessageOut, thread_id: str) -> None:
     """Tell open clients that an EXISTING message changed.
 
     A second `message` frame would append a duplicate bubble, so this is its
-    own type — and being its own type means it had to be added to
-    _DECOY_FRAME_ALLOW deliberately, which is the point of that list being
-    default-deny. It carries the same payload as `message` and is redacted by
-    the same rules.
+    own type. It carries the same payload as `message` and is scoped by the
+    same rules (it is in _BOT_SCOPED_FRAMES / _THREAD_FRAMES).
     """
     bot_id = await _bot_of_thread(thread_id)
     await manager.broadcast({"type": "message_update", "thread_id": thread_id,
@@ -3969,7 +4132,7 @@ async def _deliver_image_job(job: dict, data: bytes, files_rel: str) -> None:
     ``_ingest_content_media`` — the same directive rewrite every agent-sent
     picture goes through. That is not ceremony: it is what records the media
     origin, what produces the `/media/<uuid>` URL the lightbox and the dedup
-    ledger expect, and what makes No-Image Mode and Safe Mode strip this
+    ledger expect, and what makes No-Image Mode strip this
     picture by the rules they already have, with no new code on either side.
 
     Success is defined as the REWRITE happening. If the directive comes back
@@ -6719,7 +6882,7 @@ async def _resolve_doc_refs(text: str) -> str:
     # Bounds. Without them a single 64KB message packing ~1,450 repeats of one
     # [[doc:<id>]] made 1,450 sequential whole-file read_text() calls ON THE
     # EVENT LOOP and assembled a ~218MB prompt string — an unauthenticated
-    # freeze-plus-cost attack, since Safe Mode may both drop a file and send a
+    # freeze-plus-cost attack, since any profile may both drop a file and send a
     # message naming it. Cap how many refs one message may expand, expand each
     # distinct document only once, and read only what we are willing to keep.
     expanded = 0
@@ -7003,11 +7166,6 @@ class TurnOptions(NamedTuple):
                    agent reads. Never stored on the user's row.
       prefetched   a SpeculativeRun the direct backend ADOPTS instead of
                    starting a new call (voice chat's speculative start)
-      locked       the turn came over a Safe-Mode (decoy) connection. An
-                   advisor then answers without acting on any research/
-                   handoff marker (advisor.run_turn(locked=True)); a locked
-                   family device never steers an agent through an LLM-written
-                   brief. Gateway/API bots ignore it (they never dispatch).
       dispatch     False when the person whose turn it is may not run agents
                    (no dispatch_agents): an advisor then neither offers nor acts
                    on research/handoff markers (advisor.run_turn(dispatch=False))
@@ -7025,7 +7183,6 @@ class TurnOptions(NamedTuple):
     reply_to: str | None = None
     voice: Any = None
     prefetched: Any = None
-    locked: bool = False
     action: str | None = None
     dispatch: bool = True
 
@@ -7052,9 +7209,8 @@ async def _pending_feedback_lines(thread_id: str) -> list[str]:
 
     Every line is built from two closed enums (MessageFeedbackIn.vote /
     .reason) and a message id — never from caller-supplied text, which is the
-    whole point: this is reachable from a locked Safe-Mode device, and a
-    fixed template is what keeps that device from ever injecting prose into
-    what the agent reads.
+    whole point: any profile that may chat can vote, and a fixed template is
+    what keeps a vote from ever injecting prose into what the agent reads.
     """
     pending = await db.pending_feedback_messages(thread_id, limit=_FEEDBACK_NOTE_CAP)
     lines: list[str] = []
@@ -7148,6 +7304,19 @@ async def _compose_agent_text(thread_id: str, text: str,
 _ACCEPTS: dict[tuple[int, str], bool] = {}
 
 
+def _accepts(fn, name: str) -> bool:
+    """Does ``fn`` take a ``name=`` keyword (cached per function)?"""
+    key = (id(fn), name)
+    if key not in _ACCEPTS:
+        try:
+            params = inspect.signature(fn).parameters
+            _ACCEPTS[key] = name in params or any(
+                p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+        except (TypeError, ValueError):
+            _ACCEPTS[key] = False
+    return _ACCEPTS[key]
+
+
 def _direct_turn_kwargs(fn, opts: TurnOptions | None) -> dict:
     """voice= / prefetched= for advisor.run_turn / llm_api.run_api_turn, only
     when the turn carries them — an ordinary turn calls the backend exactly as
@@ -7236,6 +7405,32 @@ async def _run_agent_turn(thread_id: str, bot_id: str, text: str,
                                                 "cannot answer. Start a chat with another one."})
         return
     direct = bool(bot.api or bot.advisor)
+    if bot.is_template and ownership.protected_admin_id():
+        # 4.2 R2: nobody chats with a template - its owners chat with their linked copies.
+        # (An unclaimed install has no owner and no copies: it is one big Owner, the same
+        # exemption ``may_chat`` / thread-create give the open principal. Its chats are re-pointed
+        # at the claim, ``profiles_service._claim``.)
+        log.warning("turn on %s refused: %r is a template", thread_id, bot_id)
+        with contextlib.suppress(Exception):
+            await manager.broadcast({"type": "error", "thread_id": thread_id, "bot_id": bot_id,
+                                     "code": "template_not_chattable",
+                                     "message": "This character is a template, so nobody chats "
+                                                "with it. Open your own copy."})
+        return
+    if not direct and characters.is_personal(bot) \
+            and (not ownership.protected_admin_id()
+                 or bot.owner_profile != ownership.protected_admin_id()):
+        # 4.2 R1: an agent on the host can read anyone's chats, so an agent- or app-backed
+        # character may be personal ONLY to the protected Admin (the agent bots). The
+        # validator refuses saving one; this refuses a hand-edited config.yaml too.
+        log.warning("turn on %s refused: personal agent character %r is not the main Admin's",
+                    thread_id, bot_id)
+        with contextlib.suppress(Exception):
+            await manager.broadcast({"type": "error", "thread_id": thread_id, "bot_id": bot_id,
+                                     "code": "agent_owner_only",
+                                     "message": "This bot runs an agent, which only the "
+                                                "Owner may use."})
+        return
     # Composed ONCE, before the backends diverge, so an API bot and a gateway
     # bot are sent the same thing (bar a spoken turn's instructions, which
     # each backend gets in its own slot — see _compose_agent_text).
@@ -7258,12 +7453,18 @@ async def _run_agent_turn(thread_id: str, bot_id: str, text: str,
         kw = _direct_turn_kwargs(advisor.run_turn, opts)
         if opts.model:
             kw["model"] = opts.model
-        if opts.locked:
-            kw["locked"] = True
         if not opts.dispatch:
             kw["dispatch"] = False
         if opts.action:
             kw["query"] = text          # lookups search the typed words, not the template
+        # 4.0: whose thread this is (advisor.run_turn resolves the owner from thread_id
+        # itself, WP-ADV; this is the same answer as the caller saw it). Only passed to a
+        # run_turn that takes it (a test double may not).
+        if _accepts(advisor.run_turn, "owner_profile_id"):
+            th = None
+            with contextlib.suppress(Exception):     # a hint only: never fails the turn
+                th = await db.get_thread(thread_id)
+            kw["owner_profile_id"] = th.owner_profile_id if th is not None else None
         async with _thread_locks[thread_id]:
             _turn_holder[thread_id] = asyncio.current_task()
             _forget_thread_delivery(thread_id)
@@ -7584,11 +7785,7 @@ async def _agents_thread_info(thread_id: str) -> dict | None:
     thread = await db.get_thread(thread_id)
     if not thread:
         return None
-    bot = config.get_bot(thread.bot_id)
-    # A character a Restricted profile may chat with (audience all / restricted), or one that no
-    # longer exists, is a thread whose lines they can read: agent prompts and results never go there.
-    visible = bot is None or bot.audience in ("all", "restricted")
-    return {"bot_id": thread.bot_id, "restricted_visible": visible}
+    return {"bot_id": thread.bot_id, "owner_profile_id": thread.owner_profile_id}
 
 
 # Hand the task manager the three pieces of this module it needs. Lambdas re-resolve the
@@ -7628,7 +7825,17 @@ async def _advisor_ask_agent(agent_id: str, session_key: str, message: str,
 
 async def _advisor_threads_since(bot_id: str, since_iso: str
                                    ) -> list[tuple[str, str]]:
-    threads = await db.list_threads(bot_id, include_archived=True)
+    # 4.0: the nightly digest feeds the advisor's corpus, which every later turn of the
+    # character run for the corpus profile reads - so it is built from THAT profile's chats
+    # only (``advisor.corpus_profile``, default the protected Admin), never another one's.
+    bot = config.resolve_bot(bot_id)
+    corpus = ownership.corpus_profile_id(getattr(bot, "advisor", None) if bot else None)
+    if not corpus:
+        return []
+    owners: set[str | None] = {corpus}
+    if corpus == ownership.protected_admin_id():
+        owners.add(None)                    # NULL-owner rows are the protected Admin's
+    threads = await db.list_threads(bot_id, include_archived=True, owner_ids=owners)
     return [(t.id, t.title or "") for t in threads
             if str(t.updated_at or "") >= since_iso[:19]]
 
@@ -7663,6 +7870,8 @@ advisor.bind(advisor.Hooks(
     track=_track,
     data_dir=config.DATA_DIR,
     merge_metadata=lambda mid, patch: db.merge_message_metadata(mid, patch),
+    # 4.0 (WP-ADV): the thread owner is resolved inside advisor from the thread id.
+    get_thread=lambda tid: db.get_thread(tid),
 ))
 
 
@@ -7721,7 +7930,7 @@ async def health(request: Request):
 
     The test is the same one the auth gate's machine branch uses (loopback
     socket, no proxy header, no browser fingerprint), so nothing reachable
-    from a browser tab widens by it — a locked tab on this very box still gets
+    from a browser tab widens by it — a signed-out tab on this very box still gets
     the two-field body, because a browser stamps Sec-Fetch-*/Origin and a
     remote caller is not on loopback.
     """
@@ -7773,7 +7982,7 @@ async def health(request: Request):
         "background_loops": loops,
         "gateway_ok": await _gateway_ok(),
         # Count only — refusal details (bot names, reasons) stay in the
-        # journal and the unlocked UI.
+        # journal and the signed-in UI.
         # The window the *_24h counters below actually cover: they live in
         # memory, so they start at zero with the process.
         "counters_since": _PROCESS_STARTED_AT.isoformat(timespec="seconds"),
@@ -7830,8 +8039,8 @@ async def openapi_schema(request: Request):
 
     /openapi.json, /docs and /redoc stay disabled: on a service bound to
     0.0.0.0 they hand a stranger the whole route and model inventory
-    (harness, inject, recovery, reactions), which is precisely what Safe Mode
-    exists to hide.
+    (harness, inject, recovery, reactions), the operator surface a stranger
+    must not map.
 
     That reasoning never applied to a process on this box. An agent calling
     this API cold has to be TOLD what the routes are, and the alternative to
@@ -7886,11 +8095,6 @@ def _gateway_ws_stats() -> dict[str, Any] | None:
 # --------------------------------------------------------------------------- #
 
 
-def _request_is_https(request: Request | None) -> bool:
-    """Did this request arrive over TLS, directly or through our proxy? (policy.py)"""
-    return policy.request_is_https(request)
-
-
 def _issue_cookie_response(body: dict, persistent: bool = False,
                            user_agent: str = "",
                            request: Request | None = None,
@@ -7928,10 +8132,38 @@ def _notify_push(kind: str, thread_id: str, title: str) -> None:
     try:
         if not push.has_subscriptions():
             return
-        _track(asyncio.create_task(push.notify(kind, thread_id, title),
+        _track(asyncio.create_task(_notify_thread_owner(kind, thread_id, title),
                                    name=f"push:{kind}:{thread_id}"))
     except Exception:
         log.exception("could not schedule a push")
+
+
+async def _notify_thread_owner(kind: str, thread_id: str, title: str) -> int:
+    """4.0: a ping goes to the devices of the thread's OWNER only (push subscriptions record
+    their profile). A thread that no longer exists pings nobody."""
+    if thread_id.startswith("task:"):
+        # An agent task's ping (approval wanted, done, failed) goes to the task's owner.
+        from . import agents_store
+        row = agents_store.get_task(thread_id[5:])
+        towner = str((row or {}).get("owner") or "")
+        if not towner:
+            return 0
+        if towner == "owner":                       # dispatched while the install was open
+            towner = ownership.owner_id() or ""
+        return await push.notify(kind, thread_id, title, owner=towner or None) if towner else 0
+    if thread_id.startswith("schedule:"):
+        # 4.3: a schedule that was skipped or switched off pings the schedule's owner.
+        from .agents import schedule_store
+        srow = schedule_store.get(thread_id[9:])
+        sowner = str((srow or {}).get("owner_profile") or "")
+        return await push.notify(kind, thread_id, title, owner=sowner) if sowner else 0
+    try:
+        exists, owner = await db.thread_owner_lookup(thread_id)
+    except Exception:
+        return 0
+    if not exists:
+        return 0
+    return await push.notify(kind, thread_id, title, owner=ownership.effective_owner(owner))
 
 
 async def _newest_message_id(thread_id: str) -> str | None:
@@ -7975,25 +8207,25 @@ def _push_device_key(request: Request) -> str | None:
 
     A REMEMBERED device's token hash (so revoking the device revokes its
     pushes), or — on an install with no PIN at all — None, meaning "key it by
-    endpoint". Safe Mode, a machine caller and a plain idle-expiring session
-    are all refused: a ping about every thread is unlocked-tier state, and an
-    ordinary session dies after ten idle minutes, long before any push.
+    endpoint". A machine caller, the shared default profile (no session) and a plain
+    idle-expiring session are all refused (use_notifications is the route's permission):
+    a ping is about this profile's own chats, and an ordinary session dies after ten
+    idle minutes, long before any push.
     """
-    if getattr(request.state, "decoy", False):
-        raise HTTPException(403, "Unlock for full access")
     from urllib.parse import urlparse
     origin = request.headers.get("origin")
     if origin and urlparse(origin).netloc != request.headers.get("host", ""):
-        raise HTTPException(403, "Cross-origin request refused")
+        raise HTTPException(403, "Refused: this didn't come from DisPatch's own page. Open DisPatch at its usual "
+                                 "address and try again.")
     if not auth.load().pin_set:
         return None
     session = _session_of(request)
     if session is None:
-        raise HTTPException(403, "Unlock for full access")
+        raise HTTPException(403, "Notifications need a signed-in, remembered device.")
     if not session.persistent:
         raise HTTPException(
-            403, "Notifications need a remembered device: lock, then unlock "
-                 "with \"Remember this device\" ticked.")
+            403, "Notifications need a remembered device: sign out, then sign in "
+                 "again with \"Keep this device signed in\" ticked.")
     return auth.device_hash(session.token)
 
 
@@ -8055,43 +8287,58 @@ async def auth_status(request: Request):
     pr = policy.of(request).principal
     claimed = policy.claimed(cfg)
     sess = _session_of(request)            # middleware attaches it for /api/auth
-    # "authed" keeps its 2.x meaning: an UNLOCKED session (not Restricted).
-    authed = bool(sess) and not pr.is_restricted
+    # "authed": a profile is in use - a session, or the lock-target default profile an
+    # unsigned device lands on (it has no session). Every role counts (4.0: no Restricted tier).
+    authed = bool(sess) or pr.via == "default"
     prof = pr.profile
-    setup_required = (not claimed and not policy.allow_open_install()
-                      and not policy.is_loopback_origin(
-                          request.client.host if request.client else "", _proxied_request(request)))
+    setup_required = not claimed and not policy.local_setup_of(request, method="GET")
     return {
         "pin_set": cfg.pin_set,
         "authenticated": authed,
-        "decoy": claimed and not authed,       # Restricted (was Safe Mode) = claimed, not unlocked
         # 3.0: accounts
         "claimed": claimed,
-        "anonymous_access": cfg.anonymous_access,   # "none": a device must sign in to see anything
+        # 4.0: where a lock and an unsigned device land, and (signed in on it) whether this is
+        # that shared default profile ("profile.shared"). The sign-in popup reads both, and
+        # "notices" ([{kind: "pin_reset", by, at}], this session's) - the same as /api/auth/me.
+        "lock_target": cfg.lock_target,
+        "default_profile": (people_api.public_profile(accounts.get_profile(cfg.default_profile))
+                            if claimed and cfg.lock_target == "default_profile"
+                            and cfg.default_profile else None),
+        "notices": people_api.notices_for(pr),
         "owner_exists": accounts.has_owner(),
         "setup_required": setup_required,      # remote caller, no owner: needs the setup token
         "signed_in": bool(sess),
-        "role": pr.role if claimed else "owner",
+        "role": pr.role if claimed else Role.ADMIN.value,
+        "protected": pr.is_protected if claimed else True,
         "profile": people_api.public_profile(prof),
+        # 4.3 (#24): the sign-in screen's "Sign in with ..." button: {enabled, label}, no secret.
+        "oidc": oidc.public_info(),
         # What this caller may do (the role matrix plus its grants): the client decides
         # what to OFFER from it, the server still decides every request. ["*"] = open.
         "permissions": sorted(pr.permissions) if pr.kind != "open" else ["*"],
-        "needs_password": bool(prof and prof.role in ("owner", "admin") and not prof.has_password),
+        "needs_password": bool(prof and prof.role is Role.ADMIN and not prof.has_password),
         "profiles": people_api.lock_screen_profiles() if claimed else [],
-        "disclosure": people_api.DISCLOSURE if (claimed and pr.is_restricted) else None,
+        "disclosure": (people_api.DISCLOSURE if claimed and pr.kind == "profile"
+                       and not pr.can(Permission.VIEW_ACTIVITY) else None),
+        "disclosure_code": (people_api.DISCLOSURE_CODE if claimed and pr.kind == "profile"
+                            and not pr.can(Permission.VIEW_ACTIVITY) else None),
         "lock_timeout_seconds": cfg.lock_timeout,
+        # 4.3 Fable: the idle sign-out THIS caller's tab arms (its profile's override, else its
+        # role's session_timeout_*, else the Admin lock_timeout); 0 = no idle clock (no session,
+        # or a remembered device). lock_timeout_seconds stays the Admin setting.
+        "idle_timeout_seconds": auth.idle_timeout_seconds(sess),
         "min_pin_length": auth.MIN_PIN_LENGTH,
         # Absolute local paths — recon for an unauthenticated caller on a
-        # 0.0.0.0-bound service, and only the Security panel (unlocked) shows
+        # 0.0.0.0-bound service, and only the Security panel (an Admin's) shows
         # them. Empty strings keep the response shape stable for the client.
-        "recovery_path": str(auth.RECOVERY_PATH) if authed else "",
-        "config_path": str(auth.SECURITY_PATH) if authed else "",
+        "recovery_path": str(auth.RECOVERY_PATH) if authed and pr.is_admin else "",
+        "config_path": str(auth.SECURITY_PATH) if authed and pr.is_admin else "",
         # Remembered-device ("keep this device unlocked") feature. The days
         # value is public — the unlock overlay needs it to offer the checkbox —
-        # but the device COUNT is only revealed to an unlocked session.
+        # but the device COUNT is only revealed to a signed-in session.
         "remember_days": cfg.remember_days,
         "remembered": bool(sess and sess.persistent),
-        "trusted_devices": auth.trusted_count() if authed else 0,
+        "trusted_devices": auth.trusted_count() if authed and pr.is_admin else 0,
         # Which optional subsystems this build has switched on. The client used
         # to discover these by CALLING them and catching the 404, which works
         # but writes a failed request to the console on every boot of a default
@@ -8107,10 +8354,12 @@ async def auth_status(request: Request):
         # the client nothing: a fresh install with no agent CLI and no connected
         # provider is exactly the state where the card is the right thing to
         # show, and every other state is exactly where it is not.
-        "features": ({"harness": pr.can(Permission.ADMIN_SYSTEM) and harness_available(),
+        # harness / mail / practice are host-tier routes (4.3): only the Owner gets their
+        # buttons, so a second Admin never sees a pane that answers 403 host_owner_only.
+        "features": ({"harness": pr.is_host and harness_available(),
                       "studioforge": pr.can(Permission.MANAGE_CONNECTIONS) and studioforge_available(),
-                      "mail": pr.can(Permission.ADMIN_SYSTEM) and mail_available(),
-                      "practice": pr.can(Permission.ADMIN_SYSTEM) and practice_available(),
+                      "mail": pr.is_host and mail_available(),
+                      "practice": pr.is_host and practice_available(),
                       "tools": True,
                       # Installed add-ons in state `ok` (app/extensions.py).
                       # The shell asks GET /api/extensions only when this is
@@ -8119,8 +8368,8 @@ async def auth_status(request: Request):
                       "api_bots": config.api_bot_count(),
                       "agent": _agent_backend_available()}
                      if (authed or not claimed)
-                     # A locked device mounts add-ons too (2.3.4: voice on
-                     # the bots it can see) — the count and nothing else.
+                     # Nobody signed in (the sign-in screen) mounts add-ons too:
+                     # the count and nothing else.
                      else {"extensions": extensions.ok_count()}),
     }
 
@@ -8134,23 +8383,23 @@ async def auth_unlock(request: Request, payload: dict = Body(...)):
                              "error": errors.envelope("pin_not_set")}, status_code=400)
     owner = auth.ensure_owner_for_pin()
     pkey = owner.id if owner else "owner"
-    blocked = people_api._throttled(request, pkey)
-    if blocked is not None:
-        return blocked
-    if not auth.verify_pin(str(payload.get("pin") or "")):
-        dev, ip = people_api._client_keys(request)
-        auth.register_failure(dev, pkey, ip)
-        accounts.log_activity("login_failed", subject=ip, detail="owner pin", category="audit")
+    ok = people_api.guarded(request, "unlock", pkey,
+                            lambda: auth.verify_pin(str(payload.get("pin") or "")))
+    if isinstance(ok, JSONResponse):
+        return ok
+    if not ok:
+        accounts.log_activity("login_failed", subject=people_api._client_keys(request)[1],
+                              detail="owner pin", category="audit")
         return JSONResponse({"detail": "Incorrect PIN", "error": errors.envelope("incorrect_pin")},
                             status_code=401)
-    people_api._succeeded(request, pkey)
     # Remember-this-device is an opt-in checkbox AND the feature must be on.
     persistent = bool(payload.get("remember")) and cfg.remember_days > 0
     accounts.log_activity("login", profile_id=owner.id if owner else None,
                           subject=policy.request_quota_ip(request))
     return _issue_cookie_response(
         {"ok": True, "remembered": persistent,
-         "role": "owner", "needs_password": bool(owner and not owner.has_password)},
+         "role": Role.ADMIN.value, "protected": True,
+         "needs_password": bool(owner and not owner.has_password)},
         persistent=persistent,
         user_agent=request.headers.get("user-agent") or "",
         request=request,
@@ -8159,14 +8408,18 @@ async def auth_unlock(request: Request, payload: dict = Body(...)):
 
 @app.post("/api/auth/lock")
 async def auth_lock(request: Request):
-    # A Restricted profile locking its screen leaves the device as that profile's, not a
-    # fresh guest's (people_api.keep_device_for_restricted): the lock is no way out of its
-    # quiet hours or budgets.
-    pr = policy.of(request).principal
-    if pr.kind == "profile" and pr.is_restricted and pr.profile is not None:
-        people_api.keep_device_for_restricted(_device_id_of(request), pr.profile)
-    auth.revoke(request.cookies.get(COOKIE_NAME))
-    resp = JSONResponse({"ok": True})
+    """Lock = sign out on this device and land on the lock target (4.0, BUILD-PLAN-v2 §1.4):
+    the default profile (``lock_target: default_profile``) or the profile list. The push
+    subscription of the session being closed goes with it (a signed-out device pings nobody)."""
+    old = request.cookies.get(COOKIE_NAME)
+    if old:
+        with contextlib.suppress(Exception):
+            push.rebind(auth.device_hash(old), None, None)
+    auth.revoke(old)
+    cfg = auth.load()
+    landed = policy.unsigned(cfg)
+    resp = JSONResponse({"ok": True, "lock_target": cfg.lock_target,
+                         "landed": people_api.public_profile(landed.profile) if landed else None})
     resp.delete_cookie(COOKIE_NAME, path="/")
     return resp
 
@@ -8175,7 +8428,7 @@ async def auth_lock(request: Request):
 async def auth_remember_config(request: Request, payload: dict = Body(...)):
     """Toggle the remember-device feature (0 = off, N = sliding days).
 
-    Requires an unlocked session once a PIN exists. Enabling only makes the
+    Requires a signed-in session once a PIN exists. Enabling only makes the
     unlock screen OFFER the checkbox — becoming remembered still takes a
     correct PIN — and disabling forgets every remembered device.
     """
@@ -8196,7 +8449,8 @@ async def auth_forget_devices(request: Request):
     the calling session survives but demoted to normal idle-expiry."""
     sess = _session_of(request)
     if sess is None:
-        return JSONResponse({"detail": "Unlock for full access"}, status_code=403)
+        return JSONResponse({"detail": "Sign in first: forgetting devices keeps this session."},
+                            status_code=403)
     auth.forget_all_trusted(keep_session_token=sess.token)
     return {"ok": True, "trusted_devices": 0}
 
@@ -8222,21 +8476,31 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
     pr = policy.of(request).principal
 
     if not policy.claimed(cfg):
-        local = policy.is_loopback_origin(request.client.host if request.client else "",
-                                          _proxied_request(request))
-        trusted = local or policy.allow_open_install()
+        # 4.3 (#2): "this computer" means a loopback peer with no proxy AND a loopback Host
+        # name (a DNS-rebinding page sends its own), and no other site's Origin
+        # (policy.local_setup_request, shared with the gate and both sockets).
+        trusted = policy.local_setup_of(request)
         if not trusted:
-            # The throttle is asked BEFORE the token is compared: checked after a miss, a client
-            # past its limit was still having every guess verified (only the answer was a 429).
-            blocked = people_api._throttled(request, "setup")
-            if blocked is not None:
-                return blocked
-        if not (trusted or auth.verify_setup_token(str(payload.get("setup_token") or ""))):
-            people_api._failed(request, "setup", "setup token")
-            return JSONResponse(
-                {"detail": "Setup is only allowed from the computer DisPatch runs on, "
-                           "or with the setup token from the server log.",
-                 "error": errors.envelope("setup_forbidden")}, status_code=403)
+            # The throttle is asked BEFORE the token is compared (auth_attempts.guarded_verify).
+            token = str(payload.get("setup_token") or "")
+            ok = people_api.guarded(request, "setup", "setup",
+                                    lambda: auth.verify_setup_token(token))
+            if isinstance(ok, JSONResponse):
+                return ok
+            if not ok:
+                accounts.log_activity("login_failed", subject=people_api._client_keys(request)[1],
+                                      detail="setup token", category="audit")
+                # A loopback peer refused here addressed us by a foreign name or from another
+                # site's page: the same "setup required" answer the gate gives it elsewhere.
+                looks_local = (policy.allow_open_install() or policy.is_loopback_origin(
+                    request.client.host if request.client else "", _proxied_request(request)))
+                code = "setup_required" if looks_local and not token else "setup_forbidden"
+                return JSONResponse(
+                    {"detail": "Set up DisPatch on the computer it runs on, "
+                               "or use the setup code from its log.",
+                     "error": errors.envelope(code),
+                     **({"setup_required": True} if code == "setup_required" else {})},
+                    status_code=403)
         if not new_pin and not password:
             return JSONResponse({"detail": "Choose a PIN or a password",
                                  "error": errors.envelope("pin_too_short")}, status_code=400)
@@ -8262,7 +8526,7 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
                     owner = accounts.update_profile(stale.id, password_hash=credentials.hash_secret(password))
                 else:
                     owner = accounts.create_profile(
-                        str(payload.get("name") or "Owner")[:40] or "Owner", "owner",
+                        str(payload.get("name") or "Owner")[:40] or "Owner", Role.ADMIN, protected=True,
                         password_hash=credentials.hash_secret(password))
             if new_pin:
                 auth.set_pin(new_pin)               # mirrors onto the owner row
@@ -8272,6 +8536,10 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
         auth.burn_setup_token()
         accounts.log_activity("owner_created", profile_id=owner.id if owner else None,
                               subject=policy.request_quota_ip(request), category="audit")
+        if owner is not None:
+            # 4.0: the first Admin of a fresh install sees the household Atlas - no own copy
+            # (profiles_service decides; first_admin=True says this is that profile).
+            people_api.profile_created(owner, first_admin=True)
         return _issue_cookie_response(
             {"ok": True, "pin_set": cfg.pin_set or bool(new_pin), "claimed": True,
              "needs_password": bool(owner and not owner.has_password)},
@@ -8279,18 +8547,27 @@ async def auth_setup(request: Request, payload: dict = Body(...)):
 
     # ---- already claimed: only the Owner, with the current credential, may change it
     sess = _session_of(request)
-    if sess is None or not pr.is_owner:
-        return JSONResponse({"detail": "Unlock with your PIN first",
+    if sess is None or not pr.is_protected:
+        return JSONResponse({"detail": "Sign in as the Owner first",
                              "error": errors.envelope("unlock_first")}, status_code=403)
     owner = accounts.get_owner()
-    ok = (cfg.pin_set and auth.verify_pin(current)) or bool(
-        owner and owner.has_password and payload.get("current_password")
-        and auth.verify_profile_secret(owner, "password", str(payload.get("current_password"))))
+    # 4.3 (#3): the current-credential check is throttled like every other one.
+    ok = people_api.guarded(request, "setup", owner.id if owner else "owner", lambda: bool(
+        (cfg.pin_set and auth.verify_pin(current)) or (
+            owner and owner.has_password and payload.get("current_password")
+            and auth.verify_profile_secret(owner, "password", str(payload.get("current_password"))))))
+    if isinstance(ok, JSONResponse):
+        return ok
     if not ok:
         return JSONResponse({"detail": "Current PIN is incorrect",
                              "error": errors.envelope("current_pin_incorrect")}, status_code=403)
     if new_pin == "":
-        others = [p for p in accounts.list_profiles() if p.role != "owner"]
+        # 4.3 (#24): the Owner keeps a local credential while an outside sign-in is linked.
+        refused = oidc.local_credential_guard(owner, drop_pin=True)
+        if refused is not None:
+            return JSONResponse({"detail": str(refused), "error": errors.envelope(refused.code)},
+                                status_code=refused.status)
+        others = [p for p in accounts.list_profiles() if not p.protected]
         if others and not (owner and owner.has_password):
             return JSONResponse(
                 {"detail": "Other profiles exist; give the owner a password before removing the PIN.",
@@ -8324,16 +8601,15 @@ async def auth_recover(request: Request, payload: dict = Body(...)):
     if not cfg.pin_set:
         return JSONResponse({"detail": "No PIN is set",
                              "error": errors.envelope("pin_not_set")}, status_code=400)
-    blocked = people_api._throttled(request, "recovery")
-    if blocked is not None:
-        return blocked
-    if not auth.verify_recovery(str(payload.get("code") or "")):
-        dev, ip = people_api._client_keys(request)
-        auth.register_failure(dev, "recovery", ip)
-        accounts.log_activity("recovery_failed", subject=ip, category="audit")
+    ok = people_api.guarded(request, "recovery", "recovery",
+                            lambda: auth.verify_recovery(str(payload.get("code") or "")))
+    if isinstance(ok, JSONResponse):
+        return ok
+    if not ok:
+        accounts.log_activity("recovery_failed", subject=people_api._client_keys(request)[1],
+                              category="audit")
         return JSONResponse({"detail": "Incorrect recovery code",
                              "error": errors.envelope("incorrect_recovery_code")}, status_code=401)
-    people_api._succeeded(request, "recovery")
     new_pin = str(payload.get("new_pin") or "")
     if new_pin:
         bad = credentials.check_pin(new_pin)
@@ -8348,14 +8624,19 @@ async def auth_recover(request: Request, payload: dict = Body(...)):
                                       request=request, profile=accounts.get_owner())
     owner = accounts.get_owner()
     if (not (owner and owner.has_password)
-            and any(p.role != "owner" for p in accounts.list_profiles())):
+            and any(not p.protected for p in accounts.list_profiles())):
         # Removing the only Owner credential while other people have profiles would leave
         # an install with a household but no owner: closed to every other device ("setup
-        # required"), the Members and Restricted profiles locked out with it. 2.x could
+        # required"), every other profile locked out with it. 2.x could
         # simply drop the lock; with profiles the PIN must be replaced instead.
         return JSONResponse(
             {"detail": "Choose a new PIN: other people have profiles here, so the lock cannot simply be removed.",
              "error": errors.envelope("recovery_needs_new_pin")}, status_code=409)
+    # 4.3 (#24): removing the PIN may not leave a linked Owner with no local credential.
+    refused = oidc.local_credential_guard(owner, drop_pin=True)
+    if refused is not None:
+        return JSONResponse({"detail": str(refused), "error": errors.envelope(refused.code)},
+                            status_code=refused.status)
     auth.clear_pin()
     accounts.log_activity("recovered", subject=policy.request_quota_ip(request), category="audit")
     # On a PIN-only install clear_pin removed the Owner row too (the lock is gone);
@@ -8372,15 +8653,15 @@ async def auth_recover(request: Request, payload: dict = Body(...)):
 # All of them are configuration surface — the probe reaches out to a host the
 # operator typed, and the connect route writes an API key to disk — so they get
 # the SAME gate the dashboard uses, re-derived from `auth` rather than trusted
-# from middleware state. `/api/llm` is also in `_decoy_blocked`, which turns a
-# Safe-Mode caller away a layer earlier; neither lock depends on the other.
+# from middleware state. The route table's manage_connections turns everyone but an
+# Admin away a layer earlier; neither lock depends on the other.
 
 
 def _require_operator(request: Request) -> None:
-    """A signed-in person (Owner/Admin/Member), not a machine and not Restricted. The
-    gate already required the route's own permission; this is the second lock."""
+    """A signed-in person, not a machine and not nobody. The gate already required the
+    route's own permission (an Admin's manage_connections); this is the second lock."""
     pol = policy.of(request)
-    if pol.restricted or pol.machine:
+    if pol.machine or pol.principal.kind == "none":
         raise policy.denied(pol.principal, "authenticated")
 
 
@@ -8402,8 +8683,23 @@ _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 @app.get("/api/advisor/status", responses=problem.MACHINE)
 async def advisor_status(request: Request):
     """Each advisor's provider chain, knowledge index and recent requests."""
-    _deny_agent_route_to_browser(request)
-    return await advisor.status()
+    out = await advisor.status()
+    # 4.0: a request's brief is lifted from a conversation, so only requests made from a
+    # chat the caller may read are listed (a machine: the protected Admin's).
+    pr = policy.of(request).principal
+    rows = await asyncio.to_thread(advisor.ledger().list, limit=200)
+    readable: set[str] = set()
+    for r in rows:
+        tid = r.get("thread_id")
+        if not tid:
+            continue
+        exists, towner = await db.thread_owner_lookup(tid)
+        if exists and ownership.may_see_thread(pr, towner):
+            readable.add(str(r.get("id")))
+    for a in out.get("advisors") or []:
+        if isinstance(a.get("requests"), list):
+            a["requests"] = [q for q in a["requests"] if str(q.get("id")) in readable]
+    return out
 
 
 @app.post("/api/advisor/digest", responses=problem.MACHINE)
@@ -8413,22 +8709,34 @@ async def advisor_digest(request: Request, day: str | None = None,
 
     Run by a nightly cron on the box; idempotent unless `force`. `force`
     (rewrite an existing digest, one cloud call per advisor) is honoured for
-    a real unlocked session only: a machine caller always gets the
+    a real signed-in session only: a machine caller always gets the
     idempotent behaviour, so a loop on the machine surface cannot burn
     provider spend or churn the corpus.
     """
-    _deny_agent_route_to_browser(request)
     if day is not None and not _DAY_RE.match(day):
         raise HTTPException(422, "day must be YYYY-MM-DD")
     full = _session_of(request) is not None or not auth.load().pin_set
     return {"results": await advisor.digest(day, force=force and full)}
 
 
+async def _require_advisor_request_owned(request: Request, rid: str) -> None:
+    """4.0: a handoff card lives in one chat; only that chat's owner presses its buttons
+    (404 otherwise - the same as a request that does not exist)."""
+    req = await asyncio.to_thread(advisor.ledger().get, rid)
+    tid = (req or {}).get("thread_id")
+    if not req or not tid:
+        raise HTTPException(404, "Unknown request")
+    exists, towner = await db.thread_owner_lookup(tid)
+    if not exists or not ownership.may_see_thread(policy.of(request).principal, towner, write=True):
+        raise HTTPException(404, "Unknown request")
+
+
 @app.post("/api/advisor/requests/{rid}/send",
           dependencies=[Depends(_require_operator_session), Depends(_require_agent_handoff)])
-async def advisor_request_send(rid: str, payload: AdvisorActionIn):
-    """The handoff card's Send button. A real unlocked session only: the
+async def advisor_request_send(request: Request, rid: str, payload: AdvisorActionIn):
+    """The handoff card's Send button. A real signed-in session only: the
     machine surface must never be able to approve its own handoff."""
+    await _require_advisor_request_owned(request, rid)
     try:
         return {"ok": True, "request": await advisor.send_handoff(
             rid, message_id=payload.message_id)}
@@ -8442,7 +8750,8 @@ async def advisor_request_send(rid: str, payload: AdvisorActionIn):
 
 @app.post("/api/advisor/requests/{rid}/dismiss",
           dependencies=[Depends(_require_operator_session), Depends(_require_agent_handoff)])
-async def advisor_request_dismiss(rid: str, payload: AdvisorActionIn):
+async def advisor_request_dismiss(request: Request, rid: str, payload: AdvisorActionIn):
+    await _require_advisor_request_owned(request, rid)
     try:
         return {"ok": True, "request": await advisor.dismiss_handoff(
             rid, message_id=payload.message_id)}
@@ -8459,14 +8768,20 @@ async def llm_providers():
             "connected": [b.to_admin_dict() for b in config.load_bots() if b.api]}
 
 
-def _stored_probe_key(payload: dict) -> str:
+def _stored_probe_key(payload: dict, *, protected: bool = True) -> str:
     """The key a Test should use when the form sent none.
 
     A saved key never comes back out of the API, so re-testing a connected bot
     from the panel posts an empty `api_key`. Falls back to (1) the named
     environment variable, then (2) the stored key of the targeted bot -- only
     when the form names a bot (`target` / `bot_id`) and that bot is already on
-    the SAME provider, so a test can never borrow another provider's key."""
+    the SAME provider, so a test can never borrow another provider's key.
+
+    4.3 (#31): the probe goes to the address the FORM names. For a caller that is
+    not the protected Admin (``protected=False``; the route always says) a stored
+    key or variable is used only when the bot's entry already points at that same
+    server, so an Admin cannot read a server variable or carry a saved key to an
+    address of their choosing. ``protected`` defaults to True for server code."""
     env_name = str(payload.get("api_key_env") or "").strip()
     tid = str(payload.get("target") or payload.get("bot_id") or "").strip()
     bot = config.get_bot(tid) if tid else None
@@ -8480,11 +8795,15 @@ def _stored_probe_key(payload: dict) -> str:
     # only a name that plausibly holds a credential is read: one that ends
     # like one (OPENAI_API_KEY, GROQ_TOKEN, ...) or one a bot already stores
     # for this provider. Never DisPatch's own variables, never PATH/HOME/...
+    if not protected:
+        p = llm_api.PROVIDER_BY_ID.get(prov)
+        want = str(payload.get("base_url") or "").strip() or (p.base_url if p else "")
+        entries = [e for e in entries if connections.same_server(connections.entry_url(e), want)]
     stored_env = {str(e.get("api_key_env") or "").strip()
                   for e in entries if e.get("provider") == prov}
     if (env_name and _CREDENTIAL_ENV_RE.fullmatch(env_name)
             and not env_name.startswith("DISPATCH_")
-            and (env_name in stored_env or _CREDENTIAL_SUFFIX_RE.search(env_name))
+            and (env_name in stored_env or (protected and _CREDENTIAL_SUFFIX_RE.search(env_name)))
             and os.environ.get(env_name, "").strip()):
         return os.environ[env_name].strip()
     for e in entries:
@@ -8498,7 +8817,7 @@ _CREDENTIAL_SUFFIX_RE = re.compile(r"(?:_KEY|_TOKEN|_SECRET|_PASSWORD|_CREDENTIA
 
 
 @app.post("/api/llm/test", dependencies=[Depends(_require_operator)])
-async def llm_test(payload: dict = Body(...)):
+async def llm_test(request: Request, payload: dict = Body(...)):
     """Probe a provider and report what it can run.
 
     Takes the same body as /api/llm/connect (extra keys are ignored). Never
@@ -8506,10 +8825,12 @@ async def llm_test(payload: dict = Body(...)):
     sentence the operator can act on is the product here. Only a malformed
     request (unknown provider, non-http scheme) is a 4xx.
     """
+    protected = policy.of(request).principal.is_protected
     return await llm_api.probe(
         str(payload.get("provider") or ""),
         base_url=str(payload.get("base_url") or ""),
-        api_key=str(payload.get("api_key") or "") or _stored_probe_key(payload),
+        api_key=str(payload.get("api_key") or "") or await asyncio.to_thread(
+            _stored_probe_key, payload, protected=protected),
         model=str(payload.get("model") or ""),
     )
 
@@ -8517,7 +8838,7 @@ async def llm_test(payload: dict = Body(...)):
 # --------------------------------------------------------------------------- #
 # Image generation provider (2.3.7, app/image_providers.py)
 #
-# Under /api/llm on purpose: the prefix is already decoy-blocked, and these are
+# Under /api/llm on purpose: the prefix is already Admin-only, and these are
 # the same kind of configuration surface as Connect an AI (a key goes to disk,
 # a Test reaches a host the operator typed). Never returns a key.
 # --------------------------------------------------------------------------- #
@@ -8537,10 +8858,24 @@ async def llm_image_get():
     return _image_provider_state()
 
 
+def _image_key_rules_refusal(request: Request, payload: dict, cfg: dict) -> JSONResponse | None:
+    """4.3 (#31, INT-1): the image form may not bind a server variable or carry a saved key to
+    another server unless the caller is the protected Admin. The 403 envelope, or None."""
+    try:
+        image_providers.require_key_rules(policy.of(request).principal, payload, cfg,
+                                          image_providers.load_config())
+    except connections.ConnectionError_ as e:
+        return JSONResponse({"detail": str(e), "error": errors.envelope(e.code)}, status_code=e.status)
+    return None
+
+
 @app.put("/api/llm/image", dependencies=[Depends(_require_operator)])
-async def llm_image_put(payload: dict = Body(...)):
+async def llm_image_put(request: Request, payload: dict = Body(...)):
     try:
         cfg = image_providers.merge_submission(payload)
+        refused = _image_key_rules_refusal(request, payload, cfg)
+        if refused is not None:
+            return refused
         if cfg["provider"] == image_providers.CLAWFORGE and not _clawforge_configured():
             raise ValueError("no MCP image server is configured "
                              "(set DISPATCH_CLAWFORGE_URL and restart)")
@@ -8556,7 +8891,7 @@ async def llm_image_put(payload: dict = Body(...)):
 
 
 @app.post("/api/llm/image/test", dependencies=[Depends(_require_operator)])
-async def llm_image_test(payload: dict = Body(...)):
+async def llm_image_test(request: Request, payload: dict = Body(...)):
     """ONE small generation with the submitted (unsaved) settings.
 
     Metered on most providers: it is one picture, made only when the operator
@@ -8564,15 +8899,23 @@ async def llm_image_test(payload: dict = Body(...)):
     and is not stored anywhere."""
     try:
         cfg = image_providers.merge_submission(payload)
+        refused = _image_key_rules_refusal(request, payload, cfg)
+        if refused is not None:
+            return refused
         res = image_providers.resolve(cfg)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     except image_jobs.ImageJobError as e:
         return {"ok": False, "error": e.message}
-    spec = image_jobs.ImageSpec(
-        prompt=str(payload.get("prompt") or "").strip()[:300]
-        or "A small red paper boat on a calm blue pond, simple illustration",
-        ratio="1:1", backend="api")
+    try:
+        # ImageSpec refuses a prompt over the image hard lines (and a bad ratio) with a
+        # ValueError: that is the operator's input, a 422, not a 500.
+        spec = image_jobs.ImageSpec(
+            prompt=str(payload.get("prompt") or "").strip()[:300]
+            or "A small red paper boat on a calm blue pond, simple illustration",
+            ratio="1:1", backend="api")
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
     try:
         data = await image_providers.generate(res, spec)
     except image_jobs.ImageJobError as e:
@@ -8591,19 +8934,34 @@ async def llm_quicksetup_plans():
 
 
 @app.post("/api/llm/quicksetup", dependencies=[Depends(_require_operator)])
-async def llm_quicksetup(payload: dict = Body(...)):
+async def llm_quicksetup(request: Request, payload: dict = Body(...)):
     """"Set up everything with one provider": one key -> chat on the target bot
     (default Atlas), image generation, embeddings where real; a checklist back.
     `test: false` configures without any live call. Never returns the key."""
+    # A server environment variable as the key is the protected Admin's (4.3, #31).
     test = payload.get("test", True)
     if not isinstance(test, bool):
         raise HTTPException(422, "test must be true or false")
+    target = str(payload.get("target") or "") or llm_api.DEFAULT_DIRECT_TARGET
+    api_key_env = str(payload.get("api_key_env") or "")
+    if api_key_env.strip():
+        plan = quicksetup.PLANS.get(str(payload.get("provider") or "").strip().lower())
+        prov = llm_api.PROVIDER_BY_ID.get(plan.provider) if plan else None
+        cur = config.resolve_bot(target)
+        try:
+            connections.require_inline_key_rules(
+                policy.of(request).principal,
+                characters.first_entry(cur) if cur is not None else None,
+                provider_id=prov.id if prov else "", base_url=prov.base_url if prov else "",
+                api_key=str(payload.get("api_key") or ""), api_key_env=api_key_env)
+        except connections.ConnectionError_ as e:
+            raise api_common.fail(e.status, e.code, str(e)) from e
     try:
         out = await quicksetup.run(
             str(payload.get("provider") or ""),
             api_key=str(payload.get("api_key") or ""),
-            api_key_env=str(payload.get("api_key_env") or ""),
-            target=str(payload.get("target") or "") or llm_api.DEFAULT_DIRECT_TARGET,
+            api_key_env=api_key_env,
+            target=target,
             test=test)
     except llm_api.ApiError as e:
         raise _llm_error(e) from e
@@ -8615,7 +8973,7 @@ async def llm_quicksetup(payload: dict = Body(...)):
 
 
 @app.post("/api/llm/connect", dependencies=[Depends(_require_operator)])
-async def llm_connect(payload: dict = Body(...)):
+async def llm_connect(request: Request, payload: dict = Body(...)):
     """Connect a bot to an AI provider.
 
     `backend: "direct"` (the default) writes `advisor.providers = [entry]` and
@@ -8627,9 +8985,33 @@ async def llm_connect(payload: dict = Body(...)):
     The response never carries a key: `has_key` / `connected` only. There is no
     route anywhere that reads an API key back out.
     """
+    # 4.3 (#31): naming a server environment variable the bot does not already use
+    # for this provider and server, or re-saving it at another server without a new
+    # key (its saved key would follow), is the protected Admin's (403).
     backend = str(payload.get("backend") or "direct").strip().lower()
     if backend not in ("direct", "legacy-api"):
         raise HTTPException(422, "backend must be 'direct' or 'legacy-api'")
+    principal = policy.of(request).principal
+    prov_id = str(payload.get("provider") or "").strip()
+    prov = llm_api.PROVIDER_BY_ID.get(prov_id)
+    want_url = str(payload.get("base_url") or "").strip() or (prov.base_url if prov else "")
+    if backend == "legacy-api":
+        bid = str(payload.get("bot_id") or "").strip()
+        cur = config.get_bot(bid) if bid else None
+        cur_entry = cur.api if cur is not None and cur.api else None
+    else:
+        cur = config.resolve_bot(str(payload.get("target") or payload.get("bot_id") or "").strip()
+                                 or llm_api.DEFAULT_DIRECT_TARGET)
+        cur_entry = (characters.first_entry(cur)
+                     if cur is not None and not characters.is_personal(cur) else None)
+    try:
+        await asyncio.to_thread(
+            connections.require_inline_key_rules, principal, cur_entry,
+            provider_id=prov_id, base_url=want_url,
+            api_key=str(payload.get("api_key") or ""),
+            api_key_env=str(payload.get("api_key_env") or ""))
+    except connections.ConnectionError_ as e:
+        raise api_common.fail(e.status, e.code, str(e)) from e
     try:
         if backend == "legacy-api":
             bot = llm_api.connect(llm_api.ConnectSpec(
@@ -8650,7 +9032,7 @@ async def llm_connect(payload: dict = Body(...)):
             if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) \
                     or max_tokens < 0 or max_tokens > 1_000_000:
                 raise HTTPException(422, "max_tokens must be a whole number")
-            bot = await asyncio.to_thread(llm_api.connect_direct, llm_api.DirectConnectSpec(
+            spec = llm_api.DirectConnectSpec(
                 provider=str(payload.get("provider") or ""),
                 model=str(payload.get("model") or ""),
                 base_url=str(payload.get("base_url") or ""),
@@ -8661,19 +9043,164 @@ async def llm_connect(payload: dict = Body(...)):
                 emoji=str(payload.get("emoji") or ""),
                 persona=str(payload.get("system_prompt") or ""),
                 tools=tools, max_tokens=max_tokens,
-            ))
+            )
+            # 4.0: through a household Connection (the key in the secret store, shared by
+            # every profile's bots), the way the setup wizard and the Connections page do it.
+            # A provider no connection type speaks keeps the 3.x inline entry.
+            bot = await asyncio.to_thread(_connect_direct_via_connection, spec,
+                                          protected=principal.is_protected)
+            if bot is None:
+                bot = await asyncio.to_thread(llm_api.connect_direct, spec)
     except llm_api.ApiError as e:
         raise _llm_error(e) from e
+    except connections.ConnectionError_ as e:
+        raise api_common.fail(e.status, e.code, str(e)) from e
+    except characters.CharacterError as e:
+        raise _character_http_error(e) from e
     # Every open tab is holding the roster from before this bot existed. Push
     # the new one exactly the way the Bot Manager's own save does — the WS
-    # redactor filters that frame to safe bots per connection, so a Safe-Mode
-    # device does not learn a non-safe bot appeared.
+    # scoper filters that frame per connection (characters.visible_to), so a
+    # profile does not learn of a bot it may not use.
     await manager.broadcast(
         {"type": "bots", "bots": [b.to_dict() for b in config.load_bots()]})
     if backend == "legacy-api":
         return {"bot": bot.to_admin_dict()}
     row = _bot_row(bot)
     return {**row, "bot": row}
+
+
+def _connection_for(provider: Any, base_url: str, key: str, key_env: str,
+                    current: str | None, model: str) -> tuple[Any, bool]:
+    """``(connection, created)`` for a Connect submission: an existing household connection of
+    the same type and address that holds the same key (a pasted key is compared with each
+    stored one; an environment variable by name) - or, when the form sent no key, the bot's
+    current connection, else one that already has a key - otherwise a new one (the key goes to
+    the secret store, never config.yaml). One provider account then serves every profile."""
+    type_id = connections.TYPE_BY_PROVIDER[provider.id]
+    want = base_url.rstrip("/")
+    cands = [c for c in connections.list_all()
+             if c.type == type_id and c.base_url.rstrip("/") == want]
+    match = None
+    if key:
+        match = next((c for c in cands if connections.credential(c) == key), None)
+    elif key_env:
+        match = next((c for c in cands if c.credential_ref == "env:" + key_env), None)
+    else:
+        match = (next((c for c in cands if c.id == current), None)
+                 or next((c for c in cands if c.credential_ref), None)
+                 or (None if provider.key_required else next(iter(cands), None)))
+        if match is None and provider.key_required:
+            raise llm_api.ApiError(f"{provider.label} needs an API key",
+                                   "Paste a key, or name an environment variable that "
+                                   "holds one and make sure it is set for this process.")
+    if match is not None:
+        return match, False
+    if key_env and not connections.env_name_ok(key_env):
+        raise llm_api.ApiError("That environment variable cannot hold the key",
+                               "Name one that ends in _KEY, _TOKEN, _SECRET or _PASSWORD.")
+    # The Admin's own Connect panel has always reached any address (a local model server on
+    # this box or the LAN included), so the private-address guard is not applied here.
+    c = connections.create(type=type_id, base_url=base_url, api_key=key, api_key_env=key_env,
+                           default_model=model, allow_private=True, key_optional=bool(key_env))
+    return c, True
+
+
+def _connect_direct_via_connection(spec: llm_api.DirectConnectSpec, *,
+                                   protected: bool = False) -> config.Bot | None:
+    """``POST /api/llm/connect`` (backend ``direct``) in 4.0: find or create the household
+    Connection, then point the target bot at it (``characters.with_connection``: the first
+    provider entry is replaced, a fallback chain behind it is kept). The same checks and
+    answers as :func:`llm_api.connect_direct`; None when no connection type speaks the
+    provider (the caller keeps the inline 3.x entry). A new connection becomes the household
+    default when there is none, and every profile's own Atlas still without a connection is
+    pointed at it - the wizard's rule - so a User's bots are connected too."""
+    # 4.3 (#31) ``protected``: whether the caller is the protected Admin. Only then does a 3.x
+    # inline key follow the bot to ANOTHER server; fail-closed when not said.
+    import dataclasses as _dc
+    provider = llm_api.PROVIDER_BY_ID.get((spec.provider or "").strip())
+    if provider is None or provider.id not in connections.TYPE_BY_PROVIDER:
+        return None
+    target = (spec.target or "").strip() or llm_api.DEFAULT_DIRECT_TARGET
+    existing = config.resolve_bot(target)
+    if existing is None:
+        if not llm_api._NEW_BOT_ID_RE.match(target):
+            raise llm_api.ApiError("That bot id is not allowed",
+                                   "Use 1-32 characters from a-z, 0-9, '-' and '_'.")
+    elif characters.is_personal(existing):
+        # Somebody's own bot is theirs to set up (My bots); to this household panel it does
+        # not exist, as everywhere else an Admin looks.
+        raise characters.CharacterError("bot_not_found", "Unknown bot", 404)
+    elif not config.is_direct(existing):
+        raise llm_api.ApiError(
+            "That bot already exists and is not a direct-API bot",
+            f"{target!r} uses the {'legacy API' if existing.api else 'agent'} backend. Choose a "
+            "different name, or remove it first.")
+    base_url = llm_api.normalize_base_url(spec.base_url or provider.base_url)
+    model = (spec.model or "").strip() or (provider.models[0] if provider.models else "")
+    if not model:
+        raise llm_api.ApiError("A model is required",
+                               "Run Test connection to list the models this provider "
+                               "offers, or type the model name in.")
+    key = (spec.api_key or "").strip()
+    key_env = (spec.api_key_env or "").strip()
+    first = characters.first_entry(existing) if existing is not None else None
+    same = bool(first) and first.get("provider") == provider.id
+    if (not key and not key_env and same and not first.get("connection")
+            and (protected or connections.same_server(connections.entry_url(first), base_url))):
+        # A 3.x inline key on the same provider moves into the connection (a re-save from the
+        # panel sends no key: a saved key never comes back out of the API). To another server
+        # only for the protected Admin (llm_connect refuses that move earlier for the others).
+        key = str(first.get("api_key") or "").strip()
+        key_env = str(first.get("api_key_env") or "").strip()
+    conn, created = _connection_for(provider, base_url, key, key_env,
+                                    (first or {}).get("connection") if same else None, model)
+    raw = (spec.persona or "").strip()[:llm_api.MAX_PERSONA_CHARS]
+    try:
+        persona = personas.normalise(raw)
+    except ValueError as e:
+        raise llm_api.ApiError("That system prompt cannot be saved", str(e)) from e
+    reset = bool(raw) and not persona
+    tools_on = bool(spec.tools)
+
+    def shape(b: config.Bot) -> config.Bot:
+        hint = b.model_hint
+        b = characters.with_connection(b, conn.id, model)
+        adv = config.set_direct_tools(b.advisor, tools_on)
+        if persona:
+            adv["persona"] = persona
+        elif reset:
+            adv.pop("persona", None)
+        entry = dict(adv["providers"][0])
+        if not same:                       # another provider's tuning does not carry over
+            for k in ("max_tokens", "read_timeout_s", "extra_body"):
+                entry.pop(k, None)
+        if spec.max_tokens and int(spec.max_tokens) > 0:
+            entry["max_tokens"] = int(spec.max_tokens)
+        if provider.extra_body and "extra_body" not in entry:
+            entry["extra_body"] = dict(provider.extra_body)    # e.g. MiniMax: thinking off
+        adv["providers"] = [entry, *adv["providers"][1:]]
+        return _dc.replace(
+            b, advisor=adv,
+            name=(spec.name or "").strip() or b.name,
+            emoji=(spec.emoji or "").strip() or b.emoji or llm_api._EMOJI_BY_PROVIDER.get(provider.id, "🌍"),
+            model_hint=model if hint in ("", "Direct API") else hint)
+
+    if existing is not None:
+        bot = config.update_bot(existing.id, shape)
+    else:
+        bot = config.upsert_bot(shape(config.Bot(
+            id=target, name=(spec.name or "").strip() or target,
+            emoji=(spec.emoji or "").strip() or "🌍", model_hint="",
+            safe=False, reactions=False, advisor={"providers": [], "tools": tools_on})))
+    if created:
+        from . import profiles_service, settings_store
+        if not connections.default_id():
+            settings_store.set_many({"connections.default": conn.id})
+        try:
+            profiles_service.connect_unconnected_atlases(conn.id, model)
+        except Exception:
+            log.warning("could not connect the profiles' own Atlases", exc_info=True)
+    return bot
 
 
 # /api/bots* are the 2.x names of the character API. The work lives in app/characters.py
@@ -8687,16 +9214,15 @@ def _character_http_error(e: characters.CharacterError) -> HTTPException:
     return exc
 
 
-@app.get("/api/bots", responses=problem.SAFE_MODE)
+@app.get("/api/bots", responses=problem.FORBIDDEN)
 async def get_bots(request: Request):
     """The roster as this client is allowed to see it.
 
     Session-exempt for machines so an on-box agent gets the TRUE roster (see
-    _is_inbound). Everyone else sees the characters their audience (and, for a Member or
-    Restricted profile, the character's profile list) allows - characters.may_use."""
-    _is_safe_mode_caller(request)
+    _is_inbound). Everyone else sees the characters its profile may use and that are on
+    its rail (characters.visible_bots)."""
     bots = await asyncio.to_thread(config.load_bots)
-    return {"bots": [b.to_dict() for b in characters.visible_to(policy.of(request).principal, bots)]}
+    return {"bots": [b.to_dict() for b in characters.visible_bots(policy.of(request).principal, bots)]}
 
 
 @app.get("/api/bots/all")
@@ -8706,7 +9232,11 @@ async def get_all_bots(request: Request):
     # `voice` / `voice_rp` (which recorded person a bot speaks as, and how its
     # role-play text is read aloud) ride only on this full-access listing,
     # never on the broadcast `bots` frame.
-    return {"bots": [_bot_row(b) for b in config.load_bots()]}
+    # 4.0: household characters plus the caller's own personal ones - never another
+    # profile's personal character, Admins included.
+    pr = policy.of(request).principal
+    return {"bots": [_bot_row(b) for b in config.load_bots()
+                     if characters.may_list_manage(b, pr)]}
 
 
 def _bot_row(b: config.Bot) -> dict:
@@ -8759,11 +9289,46 @@ async def remove_bot_route(request: Request, bot_id: str):
     return {"removed": bot_id}
 
 
-async def _broadcast_roster() -> None:
+def _legacy_bots_successor(method: str, path: str) -> str | None:
+    """The /api/characters route that replaces a deprecated /api/bots one (4.3), or None."""
+    if not path.startswith("/api/bots"):
+        return None
+    rest = path[len("/api/bots"):].rstrip("/")
+    if rest == "":
+        return "/api/characters" if method == "POST" else None
+    if rest == "/personas":
+        return "/api/characters/personas"
+    if rest == "/order":
+        return "/api/characters/order"
+    seg = rest[1:]
+    if "/" not in seg and method in ("PATCH", "DELETE") and seg != "all":
+        return f"/api/characters/{seg}"
+    return None
+
+
+@app.middleware("http")
+async def legacy_bots_deprecation(request: Request, call_next):
+    """Header-only deprecation of the legacy /api/bots mutators (status and body untouched)."""
+    response = await call_next(request)
+    successor = _legacy_bots_successor(request.method, request.url.path)
+    if successor:
+        response.headers["Deprecation"] = "true"
+        response.headers["Link"] = f'<{successor}>; rel="successor-version"'
+    return response
+
+
+async def _roster_frame() -> None:
     """Tell every open tab the roster changed -- the same frame the Bot
-    Manager's own save sends (the WS redactor filters it for Safe Mode)."""
+    Manager's own save sends (the WS scoper filters it per profile)."""
     await manager.broadcast({"type": "bots",
                              "bots": [b.to_dict() for b in config.load_bots()]})
+
+
+async def _broadcast_roster() -> None:
+    """:func:`_roster_frame`, and a kit sync: an edited household bot with a kit pushes its
+    setup to the copies whose owners did not change it (app/kits.py)."""
+    await _roster_frame()
+    kits.request_sync()
 
 
 def _check_bot_field(field: str, bot_id: str, value: str) -> None:
@@ -8802,29 +9367,41 @@ def _complete_bot_order(items) -> list[dict]:
 @app.put("/api/bots/order")
 async def put_bot_order(request: Request, payload: UpdateBotOrderIn):
     _require_full_access(request)      # second lock, see _require_full_access
+    pr = policy.of(request).principal
+    for item in payload.bots:
+        known = config.resolve_bot(item.id)
+        if known is not None and characters.is_personal(known) and not characters.may_use(known, pr):
+            raise HTTPException(404, "Unknown bot")     # 4.0: another profile's character
     for item in payload.bots:
         for field in extensions.BOT_FIELDS:
             value = getattr(item, field, None)
             if value is not None:
                 await asyncio.to_thread(_check_bot_field, field, item.id, value.strip())
+        voice = (item.voice or "").strip() if item.voice is not None else ""
+        if voice:
+            # 4.0 per-profile clones: a household character speaks only household voices, a
+            # personal one also its owner's own clones (the same rule the bot editors apply).
+            known = config.resolve_bot(item.id)
+            owner = known.owner_profile if known is not None and characters.is_personal(known) else None
+            if not ext_profile_hooks.voice_allowed(voice, owner):
+                raise HTTPException(422, "That voice is not available to you.")
     bots = config.save_bot_order(_complete_bot_order(payload.bots))
     data = [b.to_dict() for b in bots]
     await manager.broadcast({"type": "bots", "bots": data})
+    kits.request_sync()
     return {"bots": [{**d, "voice": b.voice, "voice_rp": b.voice_rp}
-                     for d, b in zip(data, bots, strict=True)]}
+                     for d, b in zip(data, bots, strict=True)
+                     if characters.may_list_manage(b, pr)]}
 
 
 @app.get("/api/bots/{bot_id}/avatar", responses=problem.MACHINE)
 async def get_bot_avatar(request: Request, bot_id: str):
-    # Safe Mode may see a SAFE bot's face by design, so mark a session-less
-    # browser as decoy and then apply the per-bot rule — rather than the strict
-    # agents-only guard used on /avatar/full. Without the first call the inbound
-    # allowlist would let a locked tab read a non-safe bot's avatar.
-    _is_safe_mode_caller(request)
+    # A character the caller may use (characters.may_use): the face of one off its list is
+    # refused, like every other surface of that character.
     bot = config.resolve_bot(bot_id)
     if bot:
-        bot_id = bot.id  # canonical — the decoy gate matches safe ids exactly
-    _deny_decoy_bot(request, bot_id)
+        bot_id = bot.id  # canonical — the may_use check keys on it
+    _require_bot_use(request, bot_id, view=True)
     if not bot:
         raise HTTPException(404, "Unknown bot")
     # bot.avatar comes from config.yaml (trusted, local) — contain it anyway.
@@ -8839,18 +9416,14 @@ async def get_bot_avatar(request: Request, bot_id: str):
 async def get_bot_avatar_full(request: Request, bot_id: str):
     """Full-resolution avatar: `<stem>-full.<ext>` if present, else the regular one.
 
-    Had NO gate of its own — it relied entirely on the middleware's decoy
-    blocklist. Adding avatar routes to the inbound allowlist took that away and
-    left a locked browser tab able to fetch any bot's full-resolution face.
-    Guarded here now, where it cannot be removed by a change somewhere else.
-    Full-res is PIN-gated even for safe bots, which is why this is the strict
-    agents-yes/browser-no guard rather than the per-bot one.
+    A character the caller may use (_require_bot_use), checked here as well as at the
+    gate, where it cannot be removed by a change somewhere else.
     """
-    _deny_agent_route_to_browser(request)
     bot = config.resolve_bot(bot_id)
     if not bot:
         raise HTTPException(404, "Unknown bot")
     bot_id = bot.id
+    _require_bot_use(request, bot_id, view=True)
     base = config.AVATAR_DIR.resolve()
     # Same resolution rule the snapshotter uses (avatar_snapshots._full_sibling):
     # the face's own extension first, then stale cross-extension leftovers by
@@ -8877,21 +9450,19 @@ async def get_bot_avatar_thumb(request: Request, bot_id: str):
     """The 128×128 thumbnail: `<stem>-thumb.<ext>` if present, else the face
     downscaled on the fly.
 
-    Safe Mode may see a SAFE bot's thumbnail by design — same rule as the
-    main `/avatar` route. Thumbnail is a small image (≤6 KB), so unlike the
-    full-res the cost of leaking one is negligible and the PIN gate would
-    be more friction than protection.
+    A character the caller may use (_require_bot_use) — same rule as the main
+    `/avatar` route.
 
     Falls back to the face crop when no thumb file was ever written (the
     pre-thumb deploys have only `<stem>-face.<ext>`). Browser-side scaling
     is wasteful but not broken, and the upload path will create a real
     thumb on the next avatar change.
     """
-    _is_safe_mode_caller(request)
     bot = config.resolve_bot(bot_id)
     if not bot:
         raise HTTPException(404, "Unknown bot")
     bot_id = bot.id
+    _require_bot_use(request, bot_id, view=True)
     base = config.AVATAR_DIR.resolve()
     face_path = (config.AVATAR_DIR / bot.avatar).resolve()
     if not (face_path == base or base in face_path.parents):
@@ -9083,15 +9654,8 @@ async def upload_bot_avatar(
     corner and side length of the square), else a centered square. Works from
     the browser crop UI and from curl alike.
     """
-    # Session-exempt for ON-BOX AGENTS, still closed to a locked browser tab.
-    #
-    # _deny_decoy_mutation is wrong here now: the inbound allowlist clears
-    # request.state.decoy for a loopback caller, so that check would pass for a
-    # browser on this machine with no session — i.e. the locked tab, and any
-    # page that can reach loopback. _deny_agent_route_to_browser is the guard
-    # built for exactly this shape (agents yes, browser without a session no),
-    # and it is what the session-exempt reaction routes use.
-    _deny_agent_route_to_browser(request)
+    # Session-exempt for ON-BOX AGENTS (machine:avatars); a person needs
+    # manage_characters (the route's declared permission).
 
     bot = config.resolve_bot(bot_id)
     if not bot:
@@ -9141,6 +9705,7 @@ async def _after_avatar_change(bot_id: str) -> None:
        chat wears yesterday's picture" happens. Once a thread has a single
        message its face is frozen and this never touches it again.
     """
+    kits.request_sync()                  # a kitted bot's copies follow a new picture
     snap = await asyncio.to_thread(avatar_snapshots.snapshot_id, config.get_bot(bot_id))
     if not snap:
         return
@@ -9193,7 +9758,7 @@ async def bot_models(request: Request, bot_id: str):
     model override chip.
 
     Operator-only (see _require_operator_session): a model name is
-    configuration, not something Safe Mode or a machine caller needs to see.
+    configuration, not something a non-operator or a machine caller needs to see.
     The gateway's own list, not a guess — offering a model it will refuse is
     a worse experience than not offering it, and only the gateway knows
     which ones this agent is actually allowed to use. An API bot (Connect an
@@ -9222,7 +9787,7 @@ async def bot_models(request: Request, bot_id: str):
 
     client = _gateway_client
     if client is None or not client.connected.is_set():
-        raise HTTPException(503, "The agent gateway is not connected")
+        raise HTTPException(503, "The agents' server (OpenClaw) isn't running. Try again later.")
     try:
         raw = await client.models_list(agent_id)
     except (gateway_ws.GatewayDisconnected, TimeoutError, RuntimeError) as e:
@@ -9244,48 +9809,76 @@ async def bot_models(request: Request, bot_id: str):
 THREAD_PREVIEW_CHARS = 400
 
 
-@app.get("/api/threads", responses=problem.MACHINE)
-async def list_threads(request: Request, bot_id: str = Query(...), include_archived: bool = False):
-    # Inbound-exempt for machines; a sessionless browser stays Safe Mode.
-    _is_safe_mode_caller(request)
-    bot = config.resolve_bot(bot_id)
-    if bot:
-        bot_id = bot.id  # canonical — SQL matches bot_id case-sensitively
-    _deny_decoy_bot(request, bot_id)
-    threads = await db.list_threads(bot_id, include_archived=include_archived)
+def _thread_rows(threads) -> list[dict]:
+    """Thread-list rows as the client gets them. The last message is a PREVIEW, not the
+    message: the UI shows 80 plain-text chars, and shipping every thread's full last body made
+    a thread list ~242 KB a poll for a busy bot. The message itself is one GET away."""
     out = [t.model_dump() for t in threads]
-    # Redact BEFORE truncating: the cut can land inside a [[media:…]]
-    # directive, and a half directive no longer matches the strip regex, so
-    # a locked device would see the head of a remote URL or a local path.
-    if _is_decoy(request):
-        out = [_redact_thread_dict(t) for t in out]
     for t in out:
-        # A PREVIEW, not the message: the UI shows 80 plain-text chars, and
-        # shipping every thread's full last body made this ~242 KB a poll for
-        # a busy bot. The message itself is one GET away.
         lm = t.get("last_message")
         if lm and len(lm) > THREAD_PREVIEW_CHARS:
             t["last_message"] = lm[:THREAD_PREVIEW_CHARS] + "…"
-    return {"bot_id": bot_id, "threads": out}
+    return out
+
+
+async def _thread_page(principal, *, bot_id: str | None = None, archived: bool | None = False,
+                       cursor: str | None = None, limit: int = database.THREAD_PAGE_DEFAULT
+                       ) -> tuple[list[dict], str | None]:
+    """One page of ``principal``'s OWN threads (pinned first on page one), without the
+    threads of characters it may no longer use. A cursor that is not ours is a 400."""
+    try:
+        threads, nxt = await db.list_threads_page(
+            bot_id=bot_id, archived=archived, cursor=cursor, limit=limit, principal=principal,
+            allow_bot=None if bot_id else (lambda b: characters.may_use_id(b, principal)))
+    except database.CursorError:
+        raise HTTPException(400, "Invalid cursor") from None
+    return _thread_rows(threads), nxt
+
+
+@app.get("/api/threads", responses=problem.MACHINE)
+async def list_threads(request: Request, bot_id: str | None = None,
+                       include_archived: bool = False, archived: bool = False,
+                       cursor: str | None = Query(None, max_length=600),
+                       limit: int = Query(database.THREAD_PAGE_DEFAULT, ge=1,
+                                          le=database.THREAD_PAGE_MAX)):
+    """The caller's OWN threads, one page at a time (4.0 scale): page one is every pinned
+    thread plus the ``limit`` (default 50) most recently updated others; ``next_cursor``
+    (null at the end) fetches the next page. ``bot_id``: one character's threads (what 3.x
+    clients ask; on a small install page one is the whole 3.x answer), else every character's.
+    ``archived=1``: the Archived view. ``include_archived=1`` (3.x): both, merged."""
+    # Inbound-exempt for machines (the protected Admin's chats only).
+    pr = policy.of(request).principal
+    if bot_id:
+        bot = config.resolve_bot(bot_id)
+        if bot:
+            bot_id = bot.id  # canonical — SQL matches bot_id case-sensitively
+        _require_bot_use(request, bot_id)
+    else:
+        bot_id = None
+        policy.of(request).require(Permission.USE_CHAT)  # a page of every character: a person
+    rows, nxt = await _thread_page(pr, bot_id=bot_id,
+                                   archived=True if archived else (None if include_archived else False),
+                                   cursor=cursor, limit=limit)
+    return {"bot_id": bot_id, "threads": rows, "next_cursor": nxt}
 
 
 @app.post("/api/threads", responses=problem.MACHINE)
 async def create_thread(request: Request, payload: dict = Body(...)):
-    # Inbound-exempt for machines; a sessionless browser stays Safe Mode
-    # (decoy creation keeps its daily quota below).
-    _is_safe_mode_caller(request)
+    # Inbound-exempt for machines; a person needs a character it may use (characters.may_use).
     bot = config.resolve_bot(payload.get("bot_id"))
     if not bot:
         raise HTTPException(400, "Unknown or missing bot_id")
     bot_id = bot.id  # canonical — a lowercased id must not fork a thread
-    _deny_decoy_bot(request, bot_id)
-    # A locked device may start a conversation, but under the same daily budget
-    # the WS path charges — without this the REST endpoint was an unmetered way
-    # for a Safe-Mode caller to create unlimited threads.
-    if _is_decoy(request):
-        ip = _request_quota_ip(request)
-        if not _decoy_action_allowed(ip, "thread", DECOY_THREAD_QUOTA):
-            raise HTTPException(429, "Daily limit reached on this device")
+    pr = policy.of(request).principal
+    if bot.is_template and getattr(pr, "kind", "") != "open":
+        # 4.2 R2: nobody chats with a template. Name the caller's own copy so the client can
+        # open it (a machine's copy is the main Admin's).
+        copy = characters.copy_of(bot.id, ownership.for_principal(pr))
+        extra = {"copy_id": copy.id} if copy is not None else {}
+        return api_common.problem(
+            403, "template_not_chattable",
+            "That's a household bot. Chat with your own copy of it.", **extra)
+    _require_bot_use(request, bot_id)
     title = payload.get("title")
     thread = await db.create_thread(
         bot_id=bot_id, title=title if isinstance(title, str) else None,
@@ -9300,14 +9893,8 @@ async def create_thread(request: Request, payload: dict = Body(...)):
 
 @app.get("/api/threads/{thread_id}", responses=problem.MACHINE)
 async def get_thread(request: Request, thread_id: str):
-    _is_safe_mode_caller(request)
-    thread_id = await _canonical_thread_id(thread_id)
-    thread = await db.get_thread(thread_id)
-    if not thread:
-        raise HTTPException(404, "Thread not found")
-    _deny_decoy_bot(request, thread.bot_id)
-    data = thread.model_dump()
-    return _redact_thread_dict(data) if _is_decoy(request) else data
+    thread = await _require_thread(request, thread_id)
+    return thread.model_dump()
 
 
 @app.get("/api/bots/{bot_id}/avatar/history")
@@ -9320,16 +9907,15 @@ async def bot_avatar_history(request: Request, bot_id: str):
     thread that started under it, so "the one from last Tuesday" resolves to
     something concrete.
     """
-    # Mark a session-less BROWSER as Safe Mode before the bot check, or the
-    # inbound exemption would let a locked tab read a non-safe bot's history.
-    _is_safe_mode_caller(request)
     bot = config.resolve_bot(bot_id)
     if bot:
-        bot_id = bot.id  # canonical — snapshots and the decoy gate key on it
-    _deny_decoy_bot(request, bot_id)
+        bot_id = bot.id  # canonical — snapshots and the may_use check key on it
+    _require_bot_use(request, bot_id)
     if not bot:
         raise HTTPException(404, "Unknown bot")
-    threads = await db.all_threads(include_archived=True)
+    # 4.0: built from the caller's OWN threads - how many chats somebody else started, and
+    # when, is their activity, not the character's.
+    threads = await db.all_threads(include_archived=True, principal=policy.of(request).principal)
     items = avatar_snapshots.history(bot_id, threads)
     return {"bot_id": bot_id, "avatars": [
         {**e, "url": f"/api/bots/{bot_id}/avatar/history/{e['id']}"} for e in items]}
@@ -9351,28 +9937,21 @@ async def bot_avatar_history_image(request: Request, bot_id: str, snapshot_id: s
     id — including one only a non-safe bot ever wore — be fetched by naming a
     safe bot in the URL.
     """
-    _is_safe_mode_caller(request)
     bot = config.resolve_bot(bot_id)
     if bot:
         bot_id = bot.id                    # canonical, as the sibling list route
-    _deny_decoy_bot(request, bot_id)
+    _require_bot_use(request, bot_id)
     if not bot:
         raise HTTPException(404, "Unknown bot")
-    threads = await db.all_threads(include_archived=True)
+    threads = await db.all_threads(include_archived=True, principal=policy.of(request).principal)
     if snapshot_id not in {e["id"] for e in avatar_snapshots.history(bot_id, threads)}:
         raise HTTPException(404, "No such avatar snapshot")
     full_path = avatar_snapshots.path_for_full(snapshot_id) if full else None
-    if full:
-        # Full resolution is PIN-gated even for safe bots, the same as
-        # get_bot_avatar_full and the thread ?full=1 route. This route is on the
-        # inbound allowlist, so the middleware blocklist is skipped and this
-        # inline guard is the only thing withholding a safe bot's untouched
-        # original from a locked device. (Without it, Safe Mode could pull
-        # full-res past avatars via the history list — thumbnails only is the
-        # rule, uniformly.)
-        _deny_agent_route_to_browser(request)
     path = full_path or avatar_snapshots.path_for(snapshot_id)
     if not path:
+        gone = await _expired_snapshot_response(snapshot_id)
+        if gone is not None:
+            return gone
         raise HTTPException(404, "No such avatar snapshot")
     if full and full_path is None:
         # Serving the FACE because this snapshot has no full half — not
@@ -9392,7 +9971,6 @@ async def restore_bot_avatar(request: Request, bot_id: str, payload: dict = Body
     from having uploaded that image — including the broadcast that refreshes
     every connected device.
     """
-    _deny_agent_route_to_browser(request)
     bot = config.resolve_bot(bot_id)
     if not bot:
         raise HTTPException(404, "Unknown bot")
@@ -9456,24 +10034,16 @@ async def get_thread_avatar(request: Request, thread_id: str, full: bool = False
     Served BY THREAD, not by snapshot hash, and that is the security design
     rather than a convenience. Snapshots are content-addressed, so the id says
     nothing about which bot it belongs to — a hash-keyed route would have had to
-    reverse-map it to decide whether a Safe-Mode session may see it, and the
-    obvious "any thread references it" answer leaks a non-safe bot's face the
-    moment one safe bot ever shared the same picture. Going through the thread
-    means the existing _deny_decoy_bot rule applies unchanged: if you may not
-    see the thread, you may not see its avatar.
+    reverse-map it to decide who may see it, and the obvious "any thread references
+    it" answer leaks one character's face the moment another ever shared the same
+    picture. Going through the thread means ownership and _require_bot_use apply
+    unchanged: if you may not see the thread, you may not see its avatar.
 
     Immutable by construction (the filename IS the hash of the bytes), so it is
     safe to cache hard.
     """
-    thread_id = await _canonical_thread_id(thread_id)
-    thread = await db.get_thread(thread_id)
-    if not thread:
-        raise HTTPException(404, "Thread not found")
-    _deny_decoy_bot(request, thread.bot_id)
-    if full:
-        # Full resolution is PIN-gated even for safe bots, same as
-        # /api/bots/<id>/avatar/full — Safe Mode sees thumbnails only.
-        _deny_agent_route_to_browser(request)
+    thread = await _require_thread(request, thread_id)
+    thread_id = thread.id
     full_path = avatar_snapshots.path_for_full(thread.avatar_snapshot or "") if full else None
     path = full_path or avatar_snapshots.path_for(thread.avatar_snapshot or "")
     if not path:
@@ -9490,6 +10060,9 @@ async def get_thread_avatar(request: Request, thread_id: str, full: bool = False
         # per thread, so the store's state reaches the journal and /api/health
         # instead of only the eye of whoever happens to open that chat.
         if thread.avatar_snapshot:
+            gone = await _expired_snapshot_response(thread.avatar_snapshot)
+            if gone is not None:
+                return gone                       # retired on purpose, not lost
             _note_missing_snapshot(thread_id, thread.avatar_snapshot)
         raise HTTPException(404, "No avatar snapshot for this thread")
     if full and full_path is None:
@@ -9523,11 +10096,8 @@ async def pin_thread_avatar(
     thumbnail and its lightbox are the same picture by construction, and the
     thread's avatar URL changes with the pin (cache-busted by snapshot hash).
     """
-    _deny_agent_route_to_browser(request)
-    thread_id = await _canonical_thread_id(thread_id)
-    thread = await db.get_thread(thread_id)
-    if not thread:
-        raise HTTPException(404, "Thread not found")
+    thread = await _require_thread(request, thread_id, write=True)
+    thread_id = thread.id
 
     if file is not None:
         ctype = (file.content_type or "").lower()
@@ -9596,13 +10166,10 @@ async def get_message_mood_face(request: Request, message_id: str):
     this route never writes to the thread's own avatar_snapshot; the thread
     keeps the face it was born under regardless of any reply's mood.
 
-    Gated exactly like GET /api/threads/{id}/avatar: full-session sees any
-    bot, Safe Mode only a safe bot's own thread (_deny_decoy_thread).
+    Gated exactly like GET /api/threads/{id}/avatar: the caller's own thread, with a
+    character it may use (_thread_access).
     """
-    msg = await db.get_message(message_id)
-    if not msg:
-        raise HTTPException(404, "Message not found")
-    await _deny_decoy_thread(request, msg.thread_id)
+    msg, _thread = await _require_message(request, message_id, write=False)
     mood = (msg.metadata or {}).get("mood") if isinstance(msg.metadata, dict) else None
     if not mood:
         raise HTTPException(404, "This message has no mood")
@@ -9624,19 +10191,16 @@ async def get_message_mood_face(request: Request, message_id: str):
 
 @app.get("/api/threads/{thread_id}/messages", responses=problem.MACHINE)
 async def get_messages(request: Request, thread_id: str,
-                       limit: int = Query(200, ge=1, le=500),
-                       before_id: str | None = None):
-    _is_safe_mode_caller(request)
-    thread_id = await _canonical_thread_id(thread_id)
-    thread = await db.get_thread(thread_id)
-    if not thread:
-        raise HTTPException(404, "Thread not found")
-    _deny_decoy_bot(request, thread.bot_id)
-    msgs, has_more = await db.list_messages(thread_id, limit=limit, before_id=before_id)
+                       limit: int = Query(100, ge=1, le=500),
+                       before_id: str | None = Query(None, max_length=200),
+                       before: str | None = Query(None, max_length=200)):
+    """The newest ``limit`` messages (default 100), oldest first; ``before`` (or the 3.x name
+    ``before_id``: a message id of this thread) pages further back, ``has_more`` says whether
+    there is more. A keyset read on ``(created_at, rowid)`` - the same cost on page 1 and 500."""
+    thread = await _require_thread(request, thread_id)
+    thread_id = thread.id
+    msgs, has_more = await db.list_messages(thread_id, limit=limit, before_id=before or before_id)
     out = [m.model_dump() for m in msgs]
-    if _is_decoy(request):
-        # An image-job placeholder hides outright — see _redact_message_dict.
-        out = [r for m in out if (r := _redact_message_dict(m)) is not None]
     return {
         "thread_id": thread_id,
         "messages": out,
@@ -9654,10 +10218,8 @@ _THREAD_PREF_VALUE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,199}")
 
 @app.patch("/api/threads/{thread_id}", responses=problem.MACHINE)
 async def patch_thread(request: Request, thread_id: str, payload: dict = Body(...)):
-    _is_safe_mode_caller(request)
-    _deny_decoy_mutation(request)
     thread_id = await _canonical_thread_id(thread_id)
-    await _deny_decoy_thread(request, thread_id)
+    await _thread_access(request, thread_id)
     if not await db.get_thread(thread_id):
         raise HTTPException(404, "Thread not found")
     # Every field is gated and validated BEFORE any is written, so a request
@@ -9668,6 +10230,14 @@ async def patch_thread(request: Request, thread_id: str, payload: dict = Body(..
         title = (payload.get("title") or "").strip()
         if not title:
             raise HTTPException(400, "title required")
+    archived: bool | None = None
+    if "archived" in payload:
+        # Archive / "Move back" from the Archived view. The thread is the caller's own
+        # (_thread_access above: 404 for anyone else's), and the same permission as the
+        # DELETE that archives it.
+        if not isinstance(payload["archived"], bool):
+            raise HTTPException(400, "archived must be true or false")
+        archived = payload["archived"]
     prefs_patch: dict | None = None
     if "prefs" in payload:
         # Operator configuration, not thread housekeeping — see
@@ -9715,6 +10285,8 @@ async def patch_thread(request: Request, thread_id: str, payload: dict = Body(..
         await db.rename_thread(thread_id, title[:120])
     if "pinned" in payload:
         await db.pin_thread(thread_id, bool(payload["pinned"]))
+    if archived is not None:
+        await db.set_archived(thread_id, archived)
     if prefs_patch is not None:
         await db.update_thread_prefs(thread_id, prefs_patch)
     await _broadcast_thread_update(thread_id)
@@ -9725,22 +10297,12 @@ async def patch_thread(request: Request, thread_id: str, payload: dict = Body(..
 async def mark_read(request: Request, thread_id: str):
     """Mark a thread read (clears its unread indicator on every device).
 
-    THE MISSING `_deny_decoy_mutation` HERE IS DELIBERATE — every sibling
-    route (patch, delete, archive) has one, so its absence looks like an
-    oversight and has been "fixed" by review more than once.
-
-    Safe Mode is view + send, and this endpoint is the *view* half writing
-    down that the view happened: the locked tab calls it when a family member
-    opens a thread on the tablet, and denying it would leave a dot that never
-    clears on exactly the devices the tier exists for. The blast radius is one
-    boolean on a thread the caller is already allowed to READ — Safe Mode's
-    bot gate still applies through `_deny_decoy_thread` below, so a locked
-    caller can no more clear a non-safe bot's dot than see it. Nothing is
-    created, renamed, deleted or sent.
+    ``use_chat``, not ``manage_history``: this is the *view* half writing down that the
+    view happened, on a thread the caller owns (_thread_access). Nothing is created,
+    renamed, deleted or sent.
     """
-    _is_safe_mode_caller(request)
     thread_id = await _canonical_thread_id(thread_id)
-    await _deny_decoy_thread(request, thread_id)
+    await _thread_access(request, thread_id)
     if not await db.get_thread(thread_id):
         raise HTTPException(404, "Thread not found")
     await db.mark_thread_read(thread_id)
@@ -9765,7 +10327,7 @@ async def _abort_thread_turn(thread_id: str) -> dict:
                 return {"ok": True, "thread_id": thread_id, "run_id": None}
     client = _gateway_client
     if client is None or not client.connected.is_set():
-        raise HTTPException(503, "The agent gateway is not connected")
+        raise HTTPException(503, "The agents' server (OpenClaw) isn't running. Try again later.")
     # The OpenClaw seat, not the DisPatch identity: a bot with `agent:` (e.g.
     # jobboard -> scout) runs its turns under the agent's session key.
     bot = config.get_bot(thread.bot_id)
@@ -9784,26 +10346,18 @@ async def _abort_thread_turn(thread_id: str) -> dict:
 
 @app.post("/api/threads/{thread_id}/abort", responses=problem.MACHINE)
 async def abort_turn(request: Request, thread_id: str):
-    """Stop a turn in flight.
-
-    A MUTATION, and gated like every other one: Safe Mode may view and send,
-    never cancel. A locked tablet that could abort a turn could silence any
-    conversation in the house.
-    """
-    _deny_decoy_mutation(request)
+    """Stop a turn in flight: ``manage_history`` (the route's permission), on the
+    caller's own thread."""
     _require_full_access(request)
-    thread_id = await _canonical_thread_id(thread_id)
-    return await _abort_thread_turn(thread_id)
+    thread = await _require_thread(request, thread_id, write=True)
+    return await _abort_thread_turn(thread.id)
 
 
 @app.get("/api/unread", responses=problem.MACHINE)
 async def unread_summary(request: Request):
     """Threads with unread bot messages, across all bots (for sidebar dots)."""
-    _is_safe_mode_caller(request)
-    unread = await db.unread_summary()
-    if _is_decoy(request):
-        safe = _safe_bot_ids()
-        unread = [u for u in unread if u.get("bot_id") in safe]
+    # 4.0: the caller's OWN chats only (the sidebar dots of nobody else's conversations).
+    unread = await db.unread_summary(principal=policy.of(request).principal)
     # Per-profile visibility: a thread id of a character made for someone else is not listed.
     pr = policy.of(request).principal
     unread = [u for u in unread if characters.may_use_id(u.get("bot_id"), pr)]
@@ -9812,12 +10366,7 @@ async def unread_summary(request: Request):
 
 @app.delete("/api/messages/{message_id}", responses=problem.MACHINE)
 async def delete_message_endpoint(request: Request, message_id: str):
-    _is_safe_mode_caller(request)
-    _deny_decoy_mutation(request)
-    msg = await db.get_message(message_id)
-    if not msg:
-        raise HTTPException(404, "Message not found")
-    await _deny_decoy_thread(request, msg.thread_id)
+    msg, _thread = await _require_message(request, message_id)
     thread = await db.get_thread(msg.thread_id)
     if thread and thread.status == "thinking":
         raise HTTPException(409, "Cannot delete messages while a reply is in progress")
@@ -9882,17 +10431,10 @@ async def edit_message_endpoint(request: Request, message_id: str,
                                 payload: dict = Body(...)):
     """Rewrite a message's text, or take it out of the model's context.
 
-    Full session only. Safe Mode is VIEW + SEND, and editing the transcript is
-    neither — `_deny_decoy_mutation` is the same gate the sibling delete and
-    checklist routes carry, stated here because a locked tablet rewriting what
-    somebody said is the worst version of this feature.
+    ``manage_history`` (the route's permission) on the caller's own thread, the same
+    gate the sibling delete and checklist routes carry.
     """
-    _is_safe_mode_caller(request)
-    _deny_decoy_mutation(request)
-    msg = await db.get_message(message_id)
-    if not msg:
-        raise HTTPException(404, "Message not found")
-    await _deny_decoy_thread(request, msg.thread_id)
+    msg, _thread = await _require_message(request, message_id)
     thread = await db.get_thread(msg.thread_id)
     if thread and thread.status == "thinking":
         # Same rule as delete: the turn in flight is reading these rows.
@@ -9938,15 +10480,9 @@ async def update_message_checklist(request: Request, message_id: str,
     The frontend renders a ```checklist fenced table as an interactive widget;
     this is where its checked rows are stored, on the message itself, so the
     state survives a reload and reaches every other device via the broadcast
-    below. Full-session only — Safe Mode is VIEW + SEND, so a locked device
-    sees the checkboxes but cannot change them (_deny_decoy_mutation).
+    below. ``manage_history`` (the route's permission) on the caller's own thread.
     """
-    _is_safe_mode_caller(request)
-    _deny_decoy_mutation(request)
-    msg = await db.get_message(message_id)
-    if not msg:
-        raise HTTPException(404, "Message not found")
-    await _deny_decoy_thread(request, msg.thread_id)
+    msg, _thread = await _require_message(request, message_id)
     if not _CHECKLIST_FENCE_RE.search(msg.content or ""):
         raise HTTPException(400, "Message is not a checklist")
 
@@ -10021,7 +10557,7 @@ async def update_message_checklist(request: Request, message_id: str,
     stored.setdefault("checked", [])
     meta["checklist"] = stored
     await db.update_message_metadata(message_id, meta)
-    bot_id = await _bot_of_thread(msg.thread_id)   # lets the redactor scope frames
+    bot_id = await _bot_of_thread(msg.thread_id)   # lets the scoper attribute frames
     await manager.broadcast({
         "type": "checklist_update",
         "thread_id": msg.thread_id,
@@ -10032,45 +10568,32 @@ async def update_message_checklist(request: Request, message_id: str,
     return {"ok": True, "message_id": message_id, "checklist": stored}
 
 
-@app.post("/api/messages/{message_id}/feedback",
-          responses={**problem.MACHINE, **problem.RATE_LIMITED})
+@app.post("/api/messages/{message_id}/feedback", responses=problem.MACHINE)
 async def message_feedback(request: Request, message_id: str,
                            payload: MessageFeedbackIn):
     """Rate one of the bot's own replies: thumbs up/down, optional reason.
 
     FEATURE 28. `vote` and `reason` are closed Pydantic Literals
-    (MessageFeedbackIn) — that is the entire security property. This route is
-    reachable from a locked Safe-Mode device, and the vote it records is later
-    quoted back into the agent's own prompt (_compose_agent_text /
+    (MessageFeedbackIn) — that is the entire security property. The vote it
+    records is later quoted back into the agent's own prompt (_compose_agent_text /
     _pending_feedback_lines): nothing free-text ever reaches that quote,
     because nothing free-text is accepted here.
 
     The vote is stored `pending: true` and surfaces on the thread's NEXT turn
     as a fixed-template line, then marked delivered so it is never repeated.
 
-    Tier: allowed in Safe Mode for SAFE bots (the family is exactly who rates
-    a reply) — _deny_decoy_thread scopes it the same way every other
-    thread-scoped decoy-readable route does — and rate-limited by the same
-    daily-budget mechanism as every other decoy action (DECOY_FEEDBACK_QUOTA).
+    ``use_chat`` on the caller's own thread (_require_message -> _thread_access).
     """
-    _is_safe_mode_caller(request)
-    msg = await db.get_message(message_id)
-    if not msg:
-        raise HTTPException(404, "Message not found")
-    await _deny_decoy_thread(request, msg.thread_id)
+    msg, _thread = await _require_message(request, message_id)
     if msg.role != "assistant" or bool((msg.metadata or {}).get("sub")):
         raise HTTPException(
             400, "Feedback only applies to one of the bot's own replies")
-    if _is_decoy(request):
-        ip = _request_quota_ip(request)
-        if not _decoy_action_allowed(ip, "feedback", DECOY_FEEDBACK_QUOTA):
-            raise HTTPException(429, "Daily limit reached on this device")
     note = {"vote": payload.vote, "reason": payload.reason,
             "at": now_iso(), "pending": True}
     updated = await db.merge_message_metadata(message_id, {"feedback": note})
     if updated is None:
         raise HTTPException(404, "Message not found")
-    bot_id = await _bot_of_thread(msg.thread_id)   # lets the redactor scope frames
+    bot_id = await _bot_of_thread(msg.thread_id)   # lets the scoper attribute frames
     await manager.broadcast({
         "type": "message_feedback",
         "thread_id": msg.thread_id,
@@ -10083,13 +10606,10 @@ async def message_feedback(request: Request, message_id: str,
 
 @app.delete("/api/threads/{thread_id}", responses=problem.MACHINE)
 async def delete_thread(request: Request, thread_id: str, hard: bool = False):
-    _is_safe_mode_caller(request)
-    _deny_decoy_mutation(request)
-    thread_id = await _canonical_thread_id(thread_id)
-    thread = await db.get_thread(thread_id)
-    if not thread:
-        raise HTTPException(404, "Thread not found")
-    _deny_decoy_bot(request, thread.bot_id)
+    # Ownership caches the owner before the row goes, so the thread_deleted frame below can
+    # still be attributed (and sent to the owner's other devices only).
+    thread = await _require_thread(request, thread_id, write=True)
+    thread_id = thread.id
     if hard:
         # Same reasoning as deleting one placeholder, one level up: the rows
         # go with the messages, so read them first and withdraw the renders
@@ -10135,9 +10655,9 @@ async def _stream_upload(
     - Writes to a temp `.part`, fsyncs, then os.replace()s into place, so a crash
       mid-write never leaves a torn blob under the final (listed) name.
     - Enforces the per-file `max_size` (413), the server-wide storage cap (507),
-      and — when `quota` and the request is a decoy — the daily per-client byte
-      budget (429) using shared LIVE accounting with refund-on-failure (so
-      concurrent decoy uploads can't each spend the full budget).
+      and — when `quota` and the caller is a MACHINE — the 200 MB/day machine upload
+      guard (429) using shared LIVE accounting with refund-on-failure (so concurrent
+      machine uploads can't each spend the full budget). People have no daily limit.
     Returns bytes written; cleans up the partial and refunds quota on any error.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -10152,10 +10672,9 @@ async def _stream_upload(
         if remaining_total <= 0:
             raise HTTPException(507, "Storage limit reached — free space or delete files")
 
-    is_decoy = bool(quota and request is not None
-                    and _decoy_quota_left(request) is not None)
-    if is_decoy and _decoy_quota_left(request) <= 0:
-        raise HTTPException(429, "Daily upload limit reached — try again tomorrow or unlock")
+    metered = bool(quota and request is not None and _machine_quota_left(request) is not None)
+    if metered and _machine_quota_left(request) <= 0:
+        raise HTTPException(429, "Daily machine upload limit reached — try again tomorrow")
 
     size = 0
     charged = 0
@@ -10172,7 +10691,7 @@ async def _stream_upload(
         #
         # Per-chunk to_thread costs a thread hop against a 1MB write, which is
         # the right trade; keeping the loop's shape matters more, because the
-        # size ceiling and the decoy byte budget are enforced INSIDE it and
+        # size ceiling and the machine byte guard are enforced INSIDE it and
         # must still be able to abort mid-file.
         with part.open("wb") as f:
             while chunk := await file.read(1 << 20):
@@ -10182,11 +10701,11 @@ async def _stream_upload(
                     raise HTTPException(413, f"File too large (max {max_size // (1024*1024)}MB)")
                 if remaining_total is not None and size > remaining_total:
                     raise HTTPException(507, "Storage limit reached — free space or delete files")
-                if is_decoy:
-                    _decoy_quota_add(request, n)     # charge the SHARED live counter
+                if metered:
+                    _machine_quota_add(n)            # charge the SHARED live counter
                     charged += n
-                    if _decoy_over_quota(request):
-                        raise HTTPException(429, "Daily upload limit reached — try again tomorrow or unlock")
+                    if _machine_over_quota():
+                        raise HTTPException(429, "Daily machine upload limit reached — try again tomorrow")
                 await asyncio.to_thread(f.write, chunk)
 
             def _sync_to_disk() -> None:
@@ -10206,10 +10725,10 @@ async def _stream_upload(
         # most are neither: Starlette raises ClientDisconnect when a phone
         # walks out of range mid-upload, and a cancelled request raises
         # CancelledError. Both left the .part file on disk forever AND left the
-        # decoy's daily byte budget charged for an upload that never landed.
+        # machine's daily byte guard charged for an upload that never landed.
         if not published:
-            if is_decoy and charged:
-                _decoy_quota_add(request, -charged)  # refund the failed upload
+            if metered and charged:
+                _machine_quota_add(-charged)         # refund the failed upload
             with contextlib.suppress(OSError):
                 part.unlink(missing_ok=True)
     return size
@@ -10217,12 +10736,12 @@ async def _stream_upload(
 
 @app.post("/api/upload", responses={**problem.MACHINE, **problem.TOO_LARGE})
 async def upload_media(request: Request, file: UploadFile = File(...)):
-    """Upload a file for chat sharing.
+    """Upload a file for chat sharing (``attach_files``; a machine: ``machine:upload``).
 
     Raster images and videos are stored inline for in-bubble rendering; every
-    other file type (documents, archives, binaries — anything) is stored via the
-    File Server and shared as a download link, so the composer "＋" accepts any
-    file from the unlocked side.
+    other file type (documents, archives, binaries — anything) is stored as a
+    ``source='chat'`` file owned by the uploader and shared as a download link, so
+    the composer "＋" accepts any file.
     """
     ctype = (file.content_type or "").lower()
     if ctype in ("", "application/octet-stream"):
@@ -10236,8 +10755,7 @@ async def upload_media(request: Request, file: UploadFile = File(...)):
     is_doc = not is_image and not is_video
 
     # Files → store via File Server (so they get DB records + download URLs).
-    # Safe Mode may send uploads, but on a daily per-client byte budget
-    # (availability guard — see DECOY_UPLOAD_QUOTA). Full sessions: no quota.
+    # A machine is metered by the daily byte guard (MACHINE_UPLOAD_QUOTA); people are not.
     if is_doc:
         orig = (Path(file.filename or "file").name or "file")[:255]
         doc_suffix = Path(orig).suffix.lower()[:16]
@@ -10264,135 +10782,37 @@ async def upload_media(request: Request, file: UploadFile = File(...)):
             "kind": "video" if is_video else "image"}
 
 
-def _fmt_bytes(n: int) -> str:
-    """Human-readable size for the drop notice (1023 B, 2.3 MB, 1.1 GB)."""
-    size = float(n)
-    for unit in ("B", "KB", "MB"):
-        if size < 1024:
-            return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
-        size /= 1024
-    return f"{size:.1f} GB"
-
-
-def _drop_notice_bot() -> str | None:
-    """Default bot whose daily thread receives drop notices: the first visible
-    safe bot in sidebar order. None when no bot is flagged safe."""
-    for b in config.load_bots():
-        if b.safe:
-            return b.id
-    return None
-
-
-async def _resolve_drop_thread(request: Request, thread_id: str | None):
-    """Pick the thread a drop notice lands in.
-
-    A caller may name a thread (the chat open on their device). A Safe-Mode
-    caller may only name a SAFE bot's thread — anything else silently falls back
-    to the default, so an unauthenticated LAN peer can never write into a
-    conversation it isn't allowed to see. Returns (thread, created) or None when
-    no safe bot exists to receive the notice.
-    """
-    if thread_id:
-        thread = await db.get_thread(thread_id)
-        if thread and not (_is_decoy(request) and thread.bot_id not in _safe_bot_ids()):
-            return thread, False
-    bot_id = _drop_notice_bot()
-    if not bot_id:
-        return None
-    # The shared daily thread (the Owner's id), exactly as before 4.0: a per-profile
-    # drop thread arrives with the inject/daily `profile` round.
-    return await db.find_or_create_daily_thread(bot_id, date=local_date(),
-                                                owner=ownership.owner_id())
-
-
-@app.post("/api/drop")
-async def drop_file(
-    request: Request,
-    file: UploadFile = File(...),
-    thread_id: str | None = Form(None),
-):
-    """One-way file drop — the only upload path a LOCKED device gets on its own.
-
-    Deliberately reachable in Safe Mode (it is NOT in `_decoy_blocked`): a family
-    device can push a file to the box without a PIN. Everything about it is
-    one-way:
-
-    - Bytes land in the File Server store tagged `source="fileserver"`, so
-      `_block_fileserver_read` bars the sender from ever pulling one back even
-      if the `/api/files*` path gate were to change.
-    - The notice posted into chat is TEXT ONLY (no `media_url`), and its
-      `[[doc:...]]` link is stripped by `_strip_media_text` for Safe-Mode
-      viewers — the sender sees that their file arrived and its name, an
-      unlocked viewer gets the download link.
-    - Decoy uploads spend the same daily per-client byte budget as
-      `/api/upload` (`DECOY_UPLOAD_QUOTA`), so this can't be used to fill the
-      disk.
-
-    The upload is reported as successful once the bytes are safely stored; a
-    failure to post the chat notice is logged and surfaced as `notice: false`
-    rather than losing a file the sender was told had failed.
-    """
-    orig = (Path(file.filename or "file").name or "file")[:255]
-    ctype = (file.content_type or "").lower()
-    if ctype in ("", "application/octet-stream"):
-        ctype = (mimetypes.guess_type(orig)[0] or "").lower()
-    # Same per-type ceilings as /api/upload so a phone can drop a video, but
-    # everything is stored as a File Server blob regardless of type — a drop is
-    # never inline chat media.
-    if ctype.startswith("image/") and ctype != "image/svg+xml":
-        cap, kind = UPLOAD_MAX_IMAGE, "image"
-    elif ctype.startswith("video/"):
-        cap, kind = UPLOAD_MAX_VIDEO, "video"
-    else:
-        cap, kind = UPLOAD_MAX_DOC, "document"
-
-    stored = f"{uuid.uuid4().hex}{Path(orig).suffix.lower()[:16]}"
-    size = await _stream_upload(file, FILES_DIR, stored,
-                               max_size=cap, request=request, quota=True)
-    rec = await db.add_file(orig, stored, size, ctype or None, source="fileserver",
-                            owner_profile_id=ownership.for_request(request))
-
-    # Bytes are safe from here on — a notice failure must not fail the drop.
-    posted_thread: str | None = None
-    try:
-        resolved = await _resolve_drop_thread(request, thread_id)
-        if resolved:
-            thread, created = resolved
-            if created:
-                await manager.broadcast(
-                    {"type": "thread_created", "thread": thread.model_dump()})
-            origin = request.client.host if request.client else "an unknown device"
-            # Line 1 survives Safe-Mode redaction (the sender sees their file
-            # arrived); line 2 is the download link, which does not.
-            content = (f"📎 **{orig}** · {_fmt_bytes(size)} · dropped from {origin}\n\n"
-                       f"[[doc:{rec['id']}|Download {orig}]]")
-            await _persist_and_broadcast_message(
-                thread.id, "system", content, metadata={"kind": "drop"})
-            await _broadcast_thread_update(thread.id)
-            posted_thread = thread.id
-    except Exception:
-        log.exception("drop: file %s stored but chat notice failed", rec["id"])
-
-    return {"id": rec["id"], "name": orig, "size": size, "kind": kind,
-            "thread_id": posted_thread, "notice": posted_thread is not None}
-
-
 @app.get("/api/media")
 async def serve_media(request: Request, path: str = Query(...)):
-    """Serve a local image/video file, but only from allow-listed base directories."""
+    """Serve a local image/video file, but only from allow-listed base directories.
+
+    The media store is every signed-in role's (``use_chat``: the same files `/media/`
+    serves). The agents' own media folders hold what agent bots produced, so they need
+    ``dispatch_agents`` (Admins always)."""
     _require_full_access(request)      # second lock, see _require_full_access
+    # One answer (404) for everything that is not served, whether it exists or not: a 403 for
+    # an existing file outside the bases would tell any profile which host paths exist.
+    bases = _allowed_media_bases()
+    if not policy.of(request).can(Permission.DISPATCH_AGENTS):
+        store = MEDIA_DIR.resolve()
+        bases = [b for b in bases if b == store]
+
+    def served(p: Path) -> bool:
+        return p.suffix.lower() in MEDIA_EXTS and any(p == b or b in p.parents for b in bases)
+    try:
+        lexical = Path(path).resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(404, "Not found") from None
+    if not served(lexical):
+        raise HTTPException(404, "Not found")
     try:
         candidate = Path(path).resolve(strict=True)
     except (OSError, RuntimeError):
-        raise HTTPException(404, "Not found")
-    if candidate.suffix.lower() not in MEDIA_EXTS:
-        raise HTTPException(403, "Forbidden")
-    if not any(
-        candidate == base or base in candidate.parents
-        for base in _allowed_media_bases()
-    ):
-        raise HTTPException(403, "Forbidden")
-    if not candidate.is_file():
+        gone = _expired_media_response(await _expired_media_name(path))
+        if gone is not None:
+            return gone
+        raise HTTPException(404, "Not found") from None
+    if not served(candidate) or not candidate.is_file():
         raise HTTPException(404, "Not found")
     return FileResponse(candidate)
 
@@ -10414,7 +10834,7 @@ def _safe_file_path(stored_name: str) -> Path | None:
 
 @app.post("/api/files")
 async def file_upload(request: Request, file: UploadFile = File(...)):
-    """Upload any file type to the File Server."""
+    """Upload any file type to the File Server (``files_upload``), owned by the uploader."""
     _require_full_access(request)      # second lock, see _require_full_access
     orig = (Path(file.filename or "file").name or "file")[:255]
     suffix = Path(orig).suffix.lower()[:16]
@@ -10428,28 +10848,42 @@ async def file_upload(request: Request, file: UploadFile = File(...)):
 
 @app.get("/api/files", responses=problem.MACHINE)
 async def file_list(request: Request):
+    """The caller's OWN files (``files_read``; 4.0 per owner). A machine lists the
+    protected Admin's (its sphere), an open install everything."""
     _require_full_access(request)      # see _require_full_access: second lock
-    return {"files": await db.list_files()}
+    owners = ownership.readable_owner_ids(policy.of(request).principal)
+    return {"files": await db.list_files(owner_ids=owners)}
 
 
-# File Server uploads (source='fileserver') are full-access only: a locked
-# (Safe-Mode) session can neither list nor read them — the auth gate already
-# bars /api/files* for decoy sessions, and this guard is defence-in-depth so a
-# decoy can never pull a blob even if that gate changes. An UNLOCKED session
-# gets full view + download. On-box agents still consume them straight off disk
-# (FILES_DIR). Chat attachments (source='chat') stay readable for everyone so
-# posted media keeps rendering.
-def _block_fileserver_read(request: Request, rec: dict) -> None:
-    if _is_decoy(request) and (rec.get("source") or "chat") == "fileserver":
-        raise HTTPException(403, "Unlock for full access")
+async def _file_access(request: Request, file_id: str, *, delete: bool = False) -> dict:
+    """The file record, after the 4.0 File Server rules, or the refusal (BUILD-PLAN-v2 §1.11):
+
+    * **ownership**: another profile's file is a 404 for everyone, Admins included (its
+      existence is private) - ``ownership.may_see_thread`` semantics: a file with no owner is
+      the protected Admin's, a machine's sphere is the protected Admin's;
+    * **a File Server file** (``source='fileserver'``): listing, downloading and deleting it
+      need ``files_read`` (Users and Admins; a Basic profile uploads only) - 403;
+    * **a chat attachment** (``source='chat'``): its owner downloads it (it renders in their
+      chat) with ``use_chat``; deleting it needs ``manage_history`` - 403."""
+    pr = policy.of(request).principal
+    rec = await db.get_file(file_id)
+    if not rec:
+        raise HTTPException(404, "File not found")
+    owner = await db.file_owner(file_id)
+    if not ownership.may_see_thread(pr, owner, write=True):
+        raise HTTPException(404, "File not found")
+    if (rec.get("source") or "chat") == "fileserver":
+        need = Permission.FILES_READ
+    else:
+        need = Permission.MANAGE_HISTORY if delete else Permission.USE_CHAT
+    if not pr.can(need):
+        raise policy.denied(pr, need)
+    return rec
 
 
 @app.get("/api/files/{file_id}/download")
 async def file_download(file_id: str, request: Request):
-    rec = await db.get_file(file_id)
-    if not rec:
-        raise HTTPException(404, "File not found")
-    _block_fileserver_read(request, rec)
+    rec = await _file_access(request, file_id)
     p = _safe_file_path(rec["stored_name"])
     if not p:
         raise HTTPException(404, "Blob missing")
@@ -10459,10 +10893,7 @@ async def file_download(file_id: str, request: Request):
 @app.get("/api/files/{file_id}/raw")
 async def file_raw(file_id: str, request: Request):
     """Inline serving for previews (images, videos, and text documents)."""
-    rec = await db.get_file(file_id)
-    if not rec:
-        raise HTTPException(404, "File not found")
-    _block_fileserver_read(request, rec)
+    rec = await _file_access(request, file_id)
     mime = rec.get("mime") or ""
     p = _safe_file_path(rec["stored_name"])
     if not p:
@@ -10479,6 +10910,7 @@ async def file_raw(file_id: str, request: Request):
 @app.delete("/api/files/{file_id}")
 async def file_delete(file_id: str, request: Request):
     _require_full_access(request)
+    await _file_access(request, file_id, delete=True)
     rec = await db.delete_file(file_id)
     if not rec:
         raise HTTPException(404, "File not found")
@@ -10490,11 +10922,11 @@ async def file_delete(file_id: str, request: Request):
 
 @app.post("/api/files/wipe")
 async def file_wipe(request: Request, payload: dict = Body(...)):
-    """Delete every file uploaded at or before `before` (ISO timestamp).
+    """Delete every one of the CALLER'S OWN File Server files uploaded at or before
+    `before` (ISO timestamp; ``files_read``, 4.0 per owner).
 
-    Powers the per-day "delete this and previous files" buttons. The sharpest
-    route in the app to leave on a prefix tuple alone — one call empties the
-    File Server — so it re-derives the gate itself.
+    Powers the per-day "delete this and previous files" buttons of the caller's own list:
+    nobody's files but the caller's are touched, Admins included.
     """
     _require_full_access(request)
     cutoff = payload.get("before")
@@ -10507,7 +10939,8 @@ async def file_wipe(request: Request, payload: dict = Body(...)):
         datetime.fromisoformat(cutoff.replace("Z", "+00:00"))
     except ValueError:
         raise HTTPException(400, "before must be an ISO-8601 timestamp")
-    removed = await db.delete_files_before(cutoff)
+    removed = await db.delete_files_before(
+        cutoff, owner_ids=ownership.readable_owner_ids(policy.of(request).principal))
     for rec in removed:
         p = _safe_file_path(rec["stored_name"])
         if p:
@@ -10525,58 +10958,84 @@ async def file_wipe(request: Request, payload: dict = Body(...)):
 # --------------------------------------------------------------------------- #
 
 
+def _reaction_rel_names(r) -> list[str]:
+    """Where a reaction's image lives, as a data-folder-relative name (``reactions/spent/
+    <mood>/<file>``, ``reactions/moods-<bot>/<mood>/<file>``): the key the image-retention rule
+    writes to ``media_expired``. Empty when the stored reference is not a valid one."""
+    try:
+        rel = reactions._check_file(r.file)
+    except Exception:
+        return []
+    parts = rel.split("/")
+    try:
+        if parts[0].startswith(reactions._MOODS_PREFIX):
+            base = Path(config.DATA_DIR) / "reactions" / parts[0]
+        else:
+            base = reactions._root_dir(parts[0])
+        full = (base / "/".join(parts[1:])).resolve()
+        return [full.relative_to(Path(config.DATA_DIR).resolve()).as_posix()]
+    except Exception:
+        return []
+
+
+async def _expired_snapshot_response(snapshot_id: str) -> Response | None:
+    """410 for a thread-avatar snapshot the retention rule retired (``avatar-snapshots/<id>``)."""
+    if not snapshot_id or "/" in snapshot_id or ".." in snapshot_id:
+        return None
+    return _expired_media_response(await db.media_expired_name([f"avatar-snapshots/{snapshot_id}"]))
+
+
 def _raise_for_reaction_error(e: reactions.ReactionError) -> None:
     raise HTTPException(e.status, e.message)
 
 
-def _is_safe_mode_caller(request: Request) -> bool:
-    """Is this caller Restricted (what 2.x called Safe Mode)? The gate decides it once:
-    a browser tab with no session is anonymous = Restricted even on loopback, a
-    machine is not."""
-    return _is_decoy(request)
-
-
-def _deny_agent_route_to_browser(request: Request) -> None:
-    """Full-access gate for a session-exempt route: agents yes, locked tab no."""
-    if _is_safe_mode_caller(request):
-        raise HTTPException(403, "Unlock for full access")
-
-
-@app.get("/api/reactions", responses=problem.SAFE_MODE)
+@app.get("/api/reactions", responses=problem.MACHINE)
 async def reactions_list(request: Request):
-    """The pack as this client is allowed to see it.
+    """The pack as this client is allowed to see it: the whole pack for every role
+    (4.0), the management affordances and the pool's detail only with ``manage_characters``.
 
-    Safe Mode gets only the reactions flagged `safe` and no management
-    affordances — the same shape the Bot Manager uses for safe bots.
-
-    Session-exempt for machines (see _INBOUND_REACTION) so `dispatch-react
-    --list` and on-box agents get the TRUE pack + pool + reaction_bots — but a
-    browser tab with no session is Safe Mode even on loopback, same as fire.
-    """
-    decoy = _is_safe_mode_caller(request)
+    Session-exempt for machines (see _INBOUND_REACTION) so `dispatch-react --list` and
+    on-box agents get the TRUE pack + pool + reaction_bots."""
+    pol = policy.of(request)
+    manager_view = pol.machine or pol.can(Permission.MANAGE_CHARACTERS)
     pack = reactions.load()
-    items = reactions.list_for(decoy=decoy)
-    # Curation (upload / edit / delete) is full-session only — a tokenless
-    # machine caller reading this list could NOT actually curate, so don't
-    # claim it can. Generation IS session-exempt, so that one stays capability-
-    # based. With no PIN configured the app is fully open (original behaviour).
-    can_manage = (not decoy) and (_session_of(request) is not None
-                                  or not auth.load().pin_set)
+    pr = pol.principal
+    # 4.2: the pool half lists only the shelves of the bots this caller may see; a machine is
+    # the protected Admin's sphere (characters.may_use's machine rule).
+    items = reactions.list_for(allow_bot=lambda bid: _pool_bot_visible(bid, pr))
     return {
         "reactions": items,
         "settings": pack.settings.to_dict(),
         "categories": sorted({r["category"] for r in items}),
-        "can_manage": can_manage,
-        "can_generate": (not decoy) and reactions.image_cli_available(),
-        # Management detail (prompts, rig errors, batch size) stays behind the PIN;
-        # a locked device only needs to know whether a draw is currently possible.
-        "pool": (reactions.pool_status() if not decoy
+        # Curation (upload / edit / delete) needs a person holding manage_characters - a
+        # machine reading this list could NOT curate, so it is not told it can.
+        "can_manage": (not pol.machine) and pol.can(Permission.MANAGE_CHARACTERS),
+        "can_generate": manager_view and reactions.image_cli_available(),
+        # Management detail (prompts, rig errors, batch size) is the manager's; everyone
+        # else only needs to know whether a draw is currently possible.
+        "pool": (reactions.pool_status() if manager_view
                  else {"remaining": reactions.pool_status()["remaining"]}),
         # Which bots may fire reactions — drives the picker's "off for this bot"
-        # notice, and mirrors the server-side gate in fire_reaction().
+        # notice, and mirrors the server-side gate in fire_reaction(). Only the
+        # characters this caller may use (characters.may_use).
         "reaction_bots": [b.id for b in config.load_bots() if b.reactions
-                          and (b.safe or not decoy)],
+                          and characters.may_use(b, pr)],
     }
+
+
+def _require_pool_bot(request: Request, bot_id: str | None) -> None:
+    """404 for the pool of a character the caller may not see (S2b): a pool, its prompt bank
+    and its refill belong to the bot's owner, whichever Admin holds ``manage_characters``.
+    A machine is the protected Admin's sphere and is not narrowed here."""
+    pol = policy.of(request)
+    if pol.machine:
+        return
+    try:
+        bid = reactions.resolve_bot_id(bot_id)
+    except Exception:
+        return                                   # the route's own validation answers
+    if not _pool_bot_visible(bid, pol.principal):
+        raise HTTPException(404, "Unknown bot")
 
 
 @app.get("/api/reactions/pool")
@@ -10584,17 +11043,17 @@ async def reaction_pool_status(request: Request, bot_id: str = Query("")):
     """One bot's pool. Omitting `bot_id` reports the DEFAULT reaction bot's —
     the status object names the bot it describes, so a caller that omitted it
     still knows what it got."""
-    _deny_agent_route_to_browser(request)
+    _require_pool_bot(request, bot_id)
     return {"pool": reactions.pool_status(bot_id)}
 
 
 @app.put("/api/reactions/pool")
 async def reaction_pool_config(request: Request, payload: ReactionSettingsIn):
-    _deny_agent_route_to_browser(request)
     try:
         bot_id = payload.target_bot()
     except ValueError as e:
         raise HTTPException(400, str(e))
+    _require_pool_bot(request, bot_id)
     try:
         cfg = reactions.pool_update_config(payload.values, bot_id)
     except reactions.ReactionError as e:
@@ -10602,7 +11061,7 @@ async def reaction_pool_config(request: Request, payload: ReactionSettingsIn):
     except (TypeError, ValueError):
         raise HTTPException(400, "Invalid pool settings")
     _nudge_reaction_pool()
-    return {"pool": {**cfg.to_dict(), **reactions.pool_status(bot_id)}}
+    return {"pool": {**cfg.public(), **reactions.pool_status(bot_id)}}
 
 
 @app.get("/api/reactions/prompts")
@@ -10613,7 +11072,7 @@ async def reaction_prompts_get(request: Request, bot_id: str = Query("")):
     Per bot: `bot_id` selects whose bank, and only the default reaction bot has
     one materialised for it — a companion's comes back empty until it is
     written (PUT with the same `bot_id`)."""
-    _deny_agent_route_to_browser(request)
+    _require_pool_bot(request, bot_id)
     return {"prompts": reactions.bank_load(bot_id),
             "on_hand": reactions.pool_categories(bot_id),
             "path": str(reactions.bank_path(bot_id)),
@@ -10625,9 +11084,9 @@ async def reaction_prompts_put(request: Request, payload: dict = Body(...)):
     """Replace the prompt bank. Takes the same shape GET returns (either the
     whole body or a bare `prompts` object). Applies to the NEXT refill —
     existing images are left alone."""
-    _deny_agent_route_to_browser(request)
     body = payload.get("prompts") if isinstance(payload.get("prompts"), dict) else payload
     bot_id = str(payload.get("bot_id") or "")
+    _require_pool_bot(request, bot_id)
     try:
         bank = reactions.bank_save(body, bot_id=bot_id)
     except reactions.ReactionError as e:
@@ -10648,7 +11107,7 @@ async def reaction_pool_refill(request: Request, replace: bool = Query(False),
     the response returns immediately; `reaction_pool` broadcasts tick the
     manager panel as images land.
     """
-    _deny_agent_route_to_browser(request)
+    _require_pool_bot(request, bot_id)
     if not reactions.image_cli_available():
         raise HTTPException(503, "Image CLI not available on this box")
     # A named-but-unknown bot must 404 rather than quietly refill (or REPLACE,
@@ -10686,7 +11145,6 @@ def _raise_for_pool_error(e: avatar_pool.PoolError) -> None:
 async def avatar_pool_status(request: Request):
     """Every pool-enabled bot's shelf. Same machine surface as the reaction
     pool (the watchdog CLI reads this); a sessionless browser is refused."""
-    _deny_agent_route_to_browser(request)
     pools = {}
     for bid in avatar_pool.enabled_bots():
         with contextlib.suppress(Exception):
@@ -10696,7 +11154,6 @@ async def avatar_pool_status(request: Request):
 
 @app.put("/api/avatar-pool/{bot_id}")
 async def avatar_pool_config(request: Request, bot_id: str, payload: dict = Body(...)):
-    _deny_agent_route_to_browser(request)
     values = payload.get("values") if isinstance(payload.get("values"), dict) else payload
     try:
         cfg = avatar_pool.update_config(values, bot_id)
@@ -10712,7 +11169,6 @@ async def avatar_pool_config(request: Request, bot_id: str, payload: dict = Body
 async def avatar_pool_prompts_get(request: Request, bot_id: str):
     """The avatar prompt bank — what the nightly top-up generates. Like the
     reaction bank this is deliberately DATA an on-box agent may rewrite."""
-    _deny_agent_route_to_browser(request)
     try:
         return {"prompts": avatar_pool.bank_load(bot_id),
                 "path": str(avatar_pool.bank_path(bot_id)),
@@ -10723,7 +11179,6 @@ async def avatar_pool_prompts_get(request: Request, bot_id: str):
 
 @app.put("/api/avatar-pool/{bot_id}/prompts")
 async def avatar_pool_prompts_put(request: Request, bot_id: str, payload: dict = Body(...)):
-    _deny_agent_route_to_browser(request)
     # Same check the refill route makes: a bank written for a bot with no
     # avatar pool is a file nothing will ever read, and the 200 makes a typo
     # look like it worked.
@@ -10744,7 +11199,6 @@ async def avatar_pool_refill(request: Request, bot_id: str):
     """Kick a refill now. A pair is two rig calls, so the work happens in a
     background task (under the shared pool lock) and the response returns
     immediately; `avatar_pool` broadcasts tick the panel as pairs land."""
-    _deny_agent_route_to_browser(request)
     if not reactions.image_cli_available():
         raise HTTPException(503, "Image CLI not available on this box")
     if bot_id not in avatar_pool.enabled_bots():
@@ -10770,12 +11224,9 @@ async def reactions_fire(request: Request, payload: FireReactionIn):
     key — the same inbound rules as /api/inject. Browsers have no fire
     control: reactions belong to the bots (the composer button was removed
     for good on 2026-08-01), so the only in-app caller left is the Reaction
-    Manager's Test button, which fires as the enabled reaction bot.
+    Manager's Test button, which fires as the enabled reaction bot. The route is
+    machine-only (machine:reactions); a person is refused at the gate (agents_only).
     """
-    # A locked device gets no fire path at all — not even safe cards.
-    if _is_safe_mode_caller(request):
-        raise HTTPException(403, "Unlock for full access")
-
     # A bad thread id must refuse loudly. The trace persist downstream
     # swallows its own failures (a fire mustn't die halfway), so without this
     # check a typo'd thread returned ok:true while the trace silently
@@ -10789,6 +11240,11 @@ async def reactions_fire(request: Request, payload: FireReactionIn):
     if payload.thread_id:
         canonical_fire_tid = await db.resolve_thread_id(payload.thread_id)
         if canonical_fire_tid is None:
+            raise HTTPException(404, "Unknown thread")
+        # 4.0: into a thread the caller may write (a machine: the Owner's).
+        exists, towner = await db.thread_owner_lookup(canonical_fire_tid)
+        if not exists or not ownership.may_see_thread(policy.of(request).principal, towner,
+                                                      write=True):
             raise HTTPException(404, "Unknown thread")
         payload.thread_id = canonical_fire_tid
 
@@ -10810,9 +11266,9 @@ async def reactions_fire(request: Request, payload: FireReactionIn):
             thread_id=payload.thread_id,
             bot_id=bot.id if bot else payload.bot_id,
             duration_ms=payload.duration_ms, caption=payload.caption,
-            # Safe-Mode callers were already refused above; who *sees* the
-            # overlay is decided per connection by the WS frame filter.
-            trace=payload.trace, require_safe=False,
+            # A machine-only route (the gate refuses a person); who *sees* the
+            # overlay is decided per connection by the WS frame scoper.
+            trace=payload.trace,
         )
     except reactions.ReactionError as e:
         _raise_for_reaction_error(e)
@@ -10824,22 +11280,23 @@ async def reactions_fire(request: Request, payload: FireReactionIn):
 async def image_job_create(request: Request, payload: ImageJobIn):
     """Ask for a picture. Returns in milliseconds; the picture arrives later.
 
-    The gate is the reaction fire's gate, for the same reasons: a locked device
-    gets no path at all, an unknown thread refuses loudly rather than
-    succeeding into nowhere, and the bot must have the capability switched on.
+    ``use_images`` (a person) or ``machine:image_jobs``; an unknown thread refuses
+    loudly rather than succeeding into nowhere, the caller must own the thread, and
+    the bot must have the capability switched on.
     The one addition is that the bot has to be the thread's OWN bot — the
     placeholder is persisted as an assistant message and will be attributed to
     whoever owns the thread regardless, so accepting a mismatch would let one
     bot put a picture in another's conversation under that bot's name.
     """
     if not _image_jobs_configured():
-        raise HTTPException(503, "Image generation isn't configured")
-    # A locked device has no fire path at all — same rule as reactions.
-    if _is_safe_mode_caller(request):
-        raise HTTPException(403, "Unlock for full access")
+        raise HTTPException(503, "Picture making isn't set up (Settings → AI & Connections → Image generation)")
 
     canonical = await db.resolve_thread_id(payload.thread_id)
     if canonical is None:
+        raise HTTPException(404, "Unknown thread")
+    # 4.0: a picture lands in the thread as a message - the caller must own it.
+    exists, towner = await db.thread_owner_lookup(canonical)
+    if not exists or not ownership.may_see_thread(policy.of(request).principal, towner, write=True):
         raise HTTPException(404, "Unknown thread")
 
     # Explicit, not the model's own default: this route always has a
@@ -10907,11 +11364,13 @@ async def image_job_create(request: Request, payload: ImageJobIn):
 
 @app.get("/api/image-jobs/{job_id}", responses=problem.MACHINE)
 async def image_job_status(request: Request, job_id: str):
-    """One job's state. Machine-facing, same gate as creating one."""
-    if _is_safe_mode_caller(request):
-        raise HTTPException(403, "Unlock for full access")
+    """One job's state. Machine-facing, same gate as creating one (``use_images``)."""
     job = await db.get_image_job(job_id)
     if job is None:
+        raise HTTPException(404, "Unknown image job")
+    # 4.0: a job is part of its thread (its prompt is that conversation's) - owner only.
+    exists, towner = await db.thread_owner_lookup(job["thread_id"])
+    if not exists or not ownership.may_see_thread(policy.of(request).principal, towner, write=True):
         raise HTTPException(404, "Unknown image job")
     spec = _image_job_spec(job)
     # The callback token is deliberately absent: this route is readable by any
@@ -10941,13 +11400,15 @@ async def image_job_callback(request: Request, job_id: str):
     the image server. That is why this route is exempt from the api_token check
     the rest of the machine surface uses (see the auth middleware): the caller
     is a LAN peer, holding a capability scoped to one job, that expires with
-    the job. A browser never reaches here — a locked tab gets Safe Mode's 403.
+    the job. Only the rig calls it: a browser-shaped request is refused before the
+    token is looked at (a page holding a leaked token is not the rig).
 
     The sweep is unchanged and still runs on its own cadence. A callback only
     makes a terminal transition arrive sooner; a callback that never comes is
     the case the sweep has always covered.
     """
-    _deny_agent_route_to_browser(request)
+    if _browser_request(request):
+        raise HTTPException(403, "Only the image server calls this")
     job = await db.get_image_job(job_id)
     if job is None:
         raise HTTPException(404, "Unknown image job")
@@ -10980,11 +11441,19 @@ async def reaction_image(rid: str, request: Request):
     r = reactions.get_for_display(rid)
     if r is None:
         raise HTTPException(404, "Not found")
-    if _is_decoy(request) and not r.safe:
-        raise HTTPException(403, "Unlock for full access")
+    # A ready shelf image names its pool's bot; a fired (spent) one the bot that fired it
+    # (4.3, recorded at the fire). A spent image fired before 4.3 names nobody and is served
+    # as before (its id is random).
+    owner_bot = reactions.pool_owner(r) or reactions.spent_owner(r)
+    if owner_bot is not None and not policy.of(request).machine \
+            and not _pool_bot_visible(owner_bot, policy.of(request).principal):
+        raise HTTPException(404, "Not found")      # another profile's bot's picture
     try:
         path = reactions.image_path(r)
     except reactions.ReactionError as e:
+        gone = _expired_media_response(await db.media_expired_name(_reaction_rel_names(r)))
+        if gone is not None:
+            return gone
         _raise_for_reaction_error(e)
     # Blobs are content-addressed by a uuid suffix, so a reaction's image URL
     # only changes when the reaction does — BUT hand-edited registries (e.g. a
@@ -11005,7 +11474,6 @@ async def reaction_upload(
     duration_ms: int = Form(0),
 ):
     """Add an image to the pack. `aliases` is comma/space separated."""
-    _deny_decoy_mutation(request)
     data = await file.read(reactions.UPLOAD_MAX + 1)
     if len(data) > reactions.UPLOAD_MAX:
         raise HTTPException(
@@ -11044,7 +11512,6 @@ async def reaction_upload(
 @app.post("/api/reactions/generate")
 async def reaction_generate(request: Request, payload: GenerateReactionIn):
     """Mint a new reaction image on the configured image host via the image CLI."""
-    _deny_agent_route_to_browser(request)
     try:
         # Blocking subprocess with a multi-minute ceiling (cold model load) —
         # off the event loop, or every other client stalls behind it.
@@ -11060,7 +11527,6 @@ async def reaction_generate(request: Request, payload: GenerateReactionIn):
 
 @app.patch("/api/reactions/{rid}")
 async def reaction_patch(rid: str, request: Request, payload: ReactionPatchIn):
-    _deny_decoy_mutation(request)
     try:
         r = reactions.update(rid, **payload.model_dump(exclude_unset=True))
     except reactions.ReactionError as e:
@@ -11070,7 +11536,6 @@ async def reaction_patch(rid: str, request: Request, payload: ReactionPatchIn):
 
 @app.delete("/api/reactions/{rid}")
 async def reaction_delete(rid: str, request: Request):
-    _deny_decoy_mutation(request)
     try:
         reactions.remove(rid)
     except reactions.ReactionError as e:
@@ -11080,7 +11545,6 @@ async def reaction_delete(rid: str, request: Request):
 
 @app.put("/api/reactions/settings")
 async def reaction_settings(request: Request, payload: ReactionSettingsIn):
-    _deny_agent_route_to_browser(request)
     try:
         st = reactions.update_settings(payload.values)
     except (reactions.ReactionError, TypeError, ValueError) as e:
@@ -11093,10 +11557,9 @@ async def reaction_settings(request: Request, payload: ReactionSettingsIn):
 @app.post("/api/reactions/reseed")
 async def reaction_reseed(request: Request):
     """Re-render the built-in starter cards (uploads are left untouched)."""
-    _deny_decoy_mutation(request)
     written = await asyncio.to_thread(reactions.seed_starter_pack, True)
     return {"ok": True, "written": written,
-            "reactions": reactions.list_for(decoy=False)}
+            "reactions": reactions.list_for()}
 
 
 #: Metadata keys only the server may write. An `advisor_handoff` stamp is what
@@ -11115,6 +11578,29 @@ def _inbound_metadata(meta: Any) -> dict:
             if not (isinstance(k, str) and k.startswith(_SERVER_ONLY_META_PREFIXES))}
 
 
+def _machine_target_bot(raw_id: str | None):
+    """The bot a machine route (``/api/inject`` by ``bot_id``, ``/api/daily``) posts to, by id
+    (4.2). Machine posts land in the protected Admin's chats, so: a TEMPLATE id resolves to the
+    Admin's linked copy of it (none: 409 ``template_has_no_copy``); another profile's personal
+    bot is refused like an unknown id. An agent bot's id is its own (Bits, Doxy... keep their
+    daily threads under unchanged ids). Returns ``(bot, None)`` or ``(None, JSONResponse)``."""
+    bot = config.resolve_bot(raw_id)
+    if not bot:
+        raise HTTPException(400, "Unknown bot_id")
+    if bot.is_template:
+        copy = characters.resolve_for_machine(bot)
+        if copy is None:
+            return None, api_common.problem(
+                409, "template_has_no_copy",
+                "That's a household bot and the Owner has no copy of it.",
+                template_id=bot.id)
+        return copy, None
+    own = ownership.owner_id()
+    if characters.is_personal(bot) and (not own or bot.owner_profile != own):
+        raise HTTPException(400, "Unknown bot_id")
+    return bot, None
+
+
 @app.post("/api/inject", responses=problem.MACHINE)
 async def inject_message(request: Request, payload: InjectIn):
     """Push a message into the chat from OpenClaw (proactive / scheduled).
@@ -11122,12 +11608,17 @@ async def inject_message(request: Request, payload: InjectIn):
     Used by OpenClaw cron/timers, e.g. a morning briefing into a daily thread.
     Resolves the target thread, persists, and broadcasts to all clients.
 
-    Session-exempt for MACHINES (see _is_inbound) — but a browser tab with no
-    session is Safe Mode even on loopback, same as the reaction routes: this
-    box's own idle-locked tab must not be able to write into any thread (or
-    fire `:react:` markers) via the machine-to-machine bypass.
+    Session-exempt for MACHINES (see _is_inbound) — a browser tab is judged as
+    the person it is (the gate never hands a browser the machine bypass): this
+    box's own signed-out tab must not be able to write into any thread (or fire
+    `:react:` markers) via the machine-to-machine bypass.
     """
-    _deny_agent_route_to_browser(request)
+    pr = policy.of(request).principal
+    source_id = f"inject:{payload.delivery_key}" if payload.delivery_key else None
+    if source_id:
+        dup = await _inject_duplicate(pr, source_id, payload.thread_id)
+        if dup is not None:
+            return dup
     thread: ThreadOut | None = None
     created = False
     if payload.thread_id:
@@ -11138,15 +11629,19 @@ async def inject_message(request: Request, payload: InjectIn):
         # paths must too.
         canonical = await db.resolve_thread_id(payload.thread_id)
         thread = await db.get_thread(canonical) if canonical else None
-        if not thread:
+        # 4.0 (BUILD-PLAN-v2 §1.7): a machine WRITES into any existing thread (a run's
+        # result lands in the chat that asked for it) but READS only the protected Admin's;
+        # anyone else only into a thread they own. The reply echoes nothing of the thread.
+        if not thread or (not pr.is_machine and not ownership.may_see_thread(
+                pr, thread.owner_profile_id, write=True)):
             raise HTTPException(404, "thread_id not found")
     elif payload.bot_id:
         # Case-forgiving for the same reason thread_id is: agents echo the
         # gateway's lowercased ids. The CANONICAL id must be what creates the
         # thread, or `daily-scout-…` forks off `daily-Scout-…`.
-        bot = config.resolve_bot(payload.bot_id)
-        if not bot:
-            raise HTTPException(400, "Unknown bot_id")
+        bot, refused = _machine_target_bot(payload.bot_id)
+        if refused is not None:
+            return refused
         # Machine posts land in the Owner's daily thread (the cron-compatible id).
         thread, created = await db.find_or_create_daily_thread(
             bot.id, date=payload.date, title=payload.title, owner=ownership.owner_id()
@@ -11157,16 +11652,25 @@ async def inject_message(request: Request, payload: InjectIn):
     if created:
         await manager.broadcast({"type": "thread_created", "thread": thread.model_dump()})
 
-    msg = await _persist_and_broadcast_message(
-        thread.id, payload.role, payload.content,
-        media_url=_normalize_media(payload.media_url),
-        # Stamp the ROUTE, not the payload. This is what lets the reaction (and
-        # any future image) autopilot tell a machine post from a bot's own
-        # conversational reply -- see the origin gate in _prepare_persist. A
-        # caller cannot spoof its way out of it by omitting metadata, and a
-        # caller that sets its own `origin` is overridden here on purpose.
-        metadata={**_inbound_metadata(payload.metadata), "origin": "inject"},
-    )
+    content = await _hand_over_attachments(pr, thread, payload.content)
+    try:
+        msg = await _persist_and_broadcast_message(
+            thread.id, payload.role, content,
+            media_url=_normalize_media(payload.media_url),
+            # Stamp the ROUTE, not the payload. This is what lets the reaction (and
+            # any future image) autopilot tell a machine post from a bot's own
+            # conversational reply -- see the origin gate in _prepare_persist. A
+            # caller cannot spoof its way out of it by omitting metadata, and a
+            # caller that sets its own `origin` is overridden here on purpose.
+            metadata={**_inbound_metadata(payload.metadata), "origin": "inject"},
+            source_id=source_id,
+        )
+    except sqlite3.IntegrityError:
+        # The same delivery_key raced in a moment earlier (the unique source_id index).
+        dup = await _inject_duplicate(pr, source_id, payload.thread_id) if source_id else None
+        if dup is not None:
+            return dup
+        raise
     await _broadcast_thread_update(thread.id)
     if payload.notify and msg.content:
         # A machine post the family should hear about (a morning brief). The
@@ -11174,7 +11678,76 @@ async def inject_message(request: Request, payload: InjectIn):
         title = (payload.notify if isinstance(payload.notify, str)
                  else f"{_bot_display_name(thread.bot_id)} posted")
         _notify_push("post", thread.id, title)
-    return {"thread_id": thread.id, "created": created, "message": msg.model_dump()}
+    return {"thread_id": thread.id, "created": created, "message": msg.model_dump(),
+            "duplicate": False}
+
+
+async def _hand_over_attachments(principal, thread: ThreadOut, content: str) -> str:
+    """A file a MACHINE attaches (``[[doc:<id>]]``) into another profile's thread becomes
+    that profile's: the chat attachment is copied (row and bytes) into the thread owner's own
+    store and the reference is rewritten to the copy, so the owner can download it (a file is
+    otherwise only its owner's - ``_file_access``). The original stays the protected Admin's
+    (the machine's sphere), so one upload can be handed to several profiles.
+
+    Only for a machine, only into a thread the protected Admin does not own, and only for a
+    file inside the machine's own sphere (a chat attachment; never a File Server file and
+    never another profile's file: a machine cannot read those, so it cannot hand them on)."""
+    if not getattr(principal, "is_machine", False) or not content or "[[doc:" not in content:
+        return content
+    towner = thread.owner_profile_id
+    if not towner or towner == ownership.protected_admin_id():
+        return content
+    copies: dict[str, str] = {}
+    for m in _DOC_REF_RE.finditer(content):
+        fid = m.group(1).strip()
+        if fid in copies:
+            continue
+        rec = await db.get_file(fid)
+        if not rec or (rec.get("source") or "chat") == "fileserver":
+            continue
+        if not ownership.may_see_thread(principal, await db.file_owner(fid)):
+            continue
+        src = _safe_file_path(rec["stored_name"])
+        if src is None:
+            continue
+        stored = f"{uuid.uuid4().hex}{src.suffix.lower()[:16]}"
+        await asyncio.to_thread(shutil.copyfile, src, FILES_DIR / stored)
+        new = await db.add_file(rec["name"], stored, int(rec.get("size") or 0), rec.get("mime"),
+                                source="chat", owner_profile_id=towner)
+        copies[fid] = new["id"]
+    if not copies:
+        return content
+
+    def _swap(m: re.Match) -> str:
+        fid = m.group(1).strip()
+        if fid not in copies:
+            return m.group(0)
+        label = m.group(2)
+        return f"[[doc:{copies[fid]}|{label}]]" if label is not None else f"[[doc:{copies[fid]}]]"
+    return _DOC_REF_RE.sub(_swap, content)
+
+
+async def _inject_duplicate(principal, source_id: str,
+                            wanted_thread: str | None = None) -> dict | JSONResponse | None:
+    """The reply to an inject whose ``delivery_key`` was already delivered: the first
+    message, ``duplicate: true``. When that message sits in a thread the caller may not read
+    (a machine's run result in a User's chat, §1.7): still ``duplicate: true`` if the caller
+    named that very thread, but with no message (nothing of the thread is echoed); 409 when it
+    named another thread or none (the key is someone else's delivery)."""
+    prior = await db.message_by_source_id(source_id)
+    if prior is None:
+        return None
+    exists, towner = await db.thread_owner_lookup(prior.thread_id)
+    if exists and not ownership.may_see_thread(principal, towner) and wanted_thread \
+            and wanted_thread.lower() == prior.thread_id.lower():
+        return {"thread_id": prior.thread_id, "created": False, "message": None, "duplicate": True}
+    if not exists or not ownership.may_see_thread(principal, towner):
+        return JSONResponse({"detail": "That delivery_key was already used.",
+                             "error": errors.envelope("conflict",
+                                                      message="That delivery_key was already used.")},
+                            status_code=409)
+    return {"thread_id": prior.thread_id, "created": False, "message": prior.model_dump(),
+            "duplicate": True}
 
 
 @app.post("/api/daily", responses=problem.MACHINE)
@@ -11183,10 +11756,9 @@ async def ensure_daily_thread(request: Request, payload: DailyThreadIn):
 
     Session-exempt for machines; a sessionless browser is refused (see
     inject_message)."""
-    _deny_agent_route_to_browser(request)
-    bot = config.resolve_bot(payload.bot_id)
-    if not bot:
-        raise HTTPException(400, "Unknown bot_id")
+    bot, refused = _machine_target_bot(payload.bot_id)
+    if refused is not None:
+        return refused
     thread, created = await db.find_or_create_daily_thread(
         bot.id, date=payload.date or local_date(), title=payload.title,
         owner=ownership.owner_id(),
@@ -11281,7 +11853,7 @@ async def _prune_avatar_snapshots() -> None:
 
 
 def _bot_allows_quick_actions(bot_id: str | None) -> bool:
-    """False when the bot opted out with `quick_actions: false` (the kids' bots)."""
+    """False when the bot opted out with `quick_actions: false`."""
     bot = config.get_bot(bot_id) if bot_id else None
     return bot is None or bot.quick_actions
 
@@ -11289,7 +11861,7 @@ def _bot_allows_quick_actions(bot_id: str | None) -> bool:
 @app.get("/api/quick-actions")
 async def get_quick_actions():
     """The quick actions in use (defaults + `<data>/quick-actions.yaml`), in
-    display order. Public, Safe Mode included: they are only prompt templates."""
+    display order. Public: they are only prompt templates."""
     return {"actions": quick_actions.views()}
 
 
@@ -11299,25 +11871,28 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
 
     Session-exempt for machines; a sessionless browser is refused (see
     inject_message). The frontend never POSTs here — it sends over WS."""
-    _deny_agent_route_to_browser(request)
     # Case-insensitive, same reason as /api/inject: a lowercased session-key id
     # must still hit its mixed-case thread row.
     canonical = await db.resolve_thread_id(thread_id)
     if not canonical:
         raise HTTPException(404, "Thread not found")
     thread_id = canonical
+    # 4.0: only into a thread the caller owns (a machine: the Owner's). A thread somebody
+    # else owns is a 404, the same as one that does not exist.
+    owned = await ownership.require_thread(db, policy.of(request).principal, thread_id, write=True)
     role = payload.get("role", "assistant")
     if role not in ("assistant", "user", "system"):
         role = "assistant"
     pr = policy.of(request).principal
-    if not (pr.is_machine or pr.is_operator):
-        # 3.0: use_chat lets a Member reach this agent route. It must not become a way to
-        # write into a thread of a character made for someone else, or to put words in a
-        # character's (or the system's) mouth: that is the agents' and the Owner's job.
-        _deny_decoy_bot(request, await _bot_of_thread(thread_id))
-        if role != "user":
+    if not pr.is_machine:
+        # use_chat lets a person reach this agent route. It must not become a way to write
+        # into a thread of a character they may not use (every role, Admins included: 4.0),
+        # or - for anyone but an Admin - to put words in a character's (or the system's)
+        # mouth: that is the agents' job.
+        _require_bot_use(request, owned.bot_id)
+        if role != "user" and not pr.is_admin:
             raise policy.denied(pr, Permission.MANAGE_AGENTS,
-                                "Only an agent, the Owner or an Admin may post as a character or the system.")
+                                "Only an agent or an Admin may post as a character or the system.")
     # `text` accepted as an alias for the same reason InjectIn takes it: with a
     # silent "" default the caller's mistake persisted an empty bubble.
     #
@@ -11363,17 +11938,28 @@ async def post_message_rest(request: Request, thread_id: str, payload: dict = Bo
 
 # --------------------------------------------------------------------------- #
 # REST: search · export · transcript bridge · disaster recovery
-# (full-session only — _decoy_blocked bars these for Safe-Mode connections)
+# (signed-in only; search and export read the caller's own chats)
 # --------------------------------------------------------------------------- #
 
 
 @app.get("/api/search")
 async def search_messages(request: Request, q: str = Query(...),
                           bot_id: str | None = None, limit: int = 60):
-    """Full-text search across every thread's messages (FTS5, LIKE fallback)."""
-    _require_full_access(request)      # reads every thread, Safe-Mode-unredacted
+    """Full-text search across the CALLER'S OWN conversations (FTS5, LIKE fallback).
+
+    4.0: every role searches its own chats, and only those - Admins included (before 4.0
+    this read every thread in the house), Basic profiles too (their chats are theirs)."""
+    policy.of(request).require(Permission.USE_CHAT)     # second lock: nobody / a machine
+    pr = policy.of(request).principal
+    if bot_id:
+        bot = config.resolve_bot(bot_id)
+        if bot is not None:
+            bot_id = bot.id
+        _require_bot_use(request, bot_id)
     bot_ids = [bot_id] if bot_id else None
-    results = await db.search_messages(q, bot_ids=bot_ids, limit=limit)
+    results = await db.search_messages(q, bot_ids=bot_ids, limit=limit, principal=pr)
+    # A character made for other profiles is not searched either (characters.may_use).
+    results = [r for r in results if characters.may_use_id(r.get("bot_id"), pr)]
     return {"query": q, "results": results, "fts": db.fts_ok}
 
 
@@ -11432,15 +12018,23 @@ async def export_all(
     request: Request, format: str = Query("json"),
     bot_id: str | None = None, thread_id: str | None = None,
 ):
-    """Export all messages (or one bot / one thread) as JSON, Markdown, or HTML.
+    """Export YOUR messages (or one bot / one thread of yours) as JSON, Markdown, or HTML.
 
-    The user's 'retrieve ALL messages' guarantee: a single action that dumps the
-    full conversation history into an open, human-readable + re-importable file.
+    The 'retrieve ALL my messages' guarantee: a single action that dumps the caller's whole
+    conversation history into an open, human-readable + re-importable file. 4.0: own
+    threads only, for everyone - the full dump of every profile's chats is the encrypted
+    backup (Settings > System > Backups, admin_system), not this route.
     """
-    _require_full_access(request)      # dumps EVERY thread, unredacted
-    threads = await db.all_threads(include_archived=True)
+    # 4.0: every role exports its own history (manage_history), Basic profiles included.
+    policy.of(request).require(Permission.MANAGE_HISTORY)   # second lock: nobody / a machine
+    threads = await db.all_threads(include_archived=True,
+                                   principal=policy.of(request).principal)
     if thread_id:
         threads = [t for t in threads if t.id == thread_id]
+        if not threads:
+            # INT-1: one named thread that is not the caller's answers like a missing one (404),
+            # the same as every other by-id thread route.
+            raise HTTPException(404, "Thread not found")
     elif bot_id:
         threads = [t for t in threads if t.bot_id == bot_id]
     bundle = []
@@ -11481,7 +12075,9 @@ async def recover_transcript(request: Request, payload: dict = Body(...)):
     _require_full_access(request)
     if payload.get("all"):
         total, scanned = 0, 0
-        for t in await db.all_threads(include_archived=True):
+        # 4.0: the caller's own threads (a transcript is that conversation's content).
+        for t in await db.all_threads(include_archived=True,
+                                      principal=policy.of(request).principal):
             scanned += 1
             with contextlib.suppress(Exception):
                 total += await _import_transcript_messages(
@@ -11490,13 +12086,28 @@ async def recover_transcript(request: Request, payload: dict = Body(...)):
     thread_id = payload.get("thread_id")
     if not thread_id:
         raise HTTPException(400, "thread_id (or all:true) required")
-    t = await db.get_thread(thread_id)
-    if not t:
-        raise HTTPException(404, "Thread not found")
+    t = await _require_thread(request, thread_id, write=True)
+    thread_id = t.id
     n = await _import_transcript_messages(thread_id, t.bot_id, mark_followup=True)
     if n:
         await _broadcast_thread_update(thread_id)
     return {"ok": True, "thread_id": thread_id, "recovered": n}
+
+
+async def _owns_thread(principal, thread_id: str) -> bool:
+    exists, owner = await db.thread_owner_lookup(thread_id)
+    return exists and ownership.may_see_thread(principal, owner, write=True)
+
+
+async def _require_session_key_owned(request: Request, session_key: str) -> None:
+    """An agent session named ``agent:<seat>:<thread>`` IS that DisPatch thread's
+    conversation: reading or importing it needs the thread (404 otherwise, 4.0). A session
+    DisPatch never made (cron, main, a subagent) names no thread and stays an agent matter."""
+    key = str(session_key or "")
+    tid = key.split(":", 2)[2] if key.count(":") >= 2 else None
+    real = await db.resolve_thread_id(tid) if tid else None
+    if real and not await _owns_thread(policy.of(request).principal, real):
+        raise HTTPException(404, "No transcript for that session")
 
 
 @app.get("/api/openclaw/sessions")
@@ -11510,6 +12121,8 @@ async def openclaw_sessions(request: Request, bot_id: str = Query(...)):
         raise HTTPException(400, "Unknown bot_id")
     bot_id = bot.id
     sessions = openclaw.list_agent_sessions(bot_id)
+    pr = policy.of(request).principal
+    kept = []
     # Flag which sessions correspond to an existing DisPatch thread.
     for s in sessions:
         key = s["session_key"]
@@ -11518,9 +12131,12 @@ async def openclaw_sessions(request: Request, bot_id: str = Query(...)):
         # mixed-case bots' daily threads all show as "not in DisPatch" and
         # invite a duplicate import.
         real_tid = await db.resolve_thread_id(tid) if tid else None
+        if real_tid and not await _owns_thread(pr, real_tid):
+            continue        # 4.0: the session of somebody else's chat is not listed
         s["thread_id"] = real_tid or tid
         s["in_dispatch"] = bool(real_tid)
-    return {"bot_id": bot_id, "sessions": sessions}
+        kept.append(s)
+    return {"bot_id": bot_id, "sessions": kept}
 
 
 @app.get("/api/openclaw/transcript")
@@ -11538,11 +12154,13 @@ async def openclaw_transcript(
     bot_id = bot.id
     in_db: set[str] = set()
     if thread_id:
+        thread_id = (await _require_thread(request, thread_id, write=True)).id
         session_key = openclaw.session_key_for(bot_id, thread_id)
         msgs = await db.dump_messages(thread_id)
         in_db = {_canon_msg(m.content or "") for m in msgs if m.role == "assistant"}
     if not session_key:
         raise HTTPException(400, "thread_id or session_key required")
+    await _require_session_key_owned(request, session_key)
     path = openclaw.resolve_session_file(bot_id, session_key)
     if path is None:
         return {"bot_id": bot_id, "session_key": session_key, "items": [],
@@ -11571,6 +12189,7 @@ async def openclaw_import_session(request: Request, payload: dict = Body(...)):
     session_key = payload.get("session_key")
     if not session_key:
         raise HTTPException(400, "session_key required")
+    await _require_session_key_owned(request, session_key)
     path = openclaw.resolve_session_file(bot_id, session_key)
     if path is None:
         raise HTTPException(404, "No transcript for that session")
@@ -12127,7 +12746,7 @@ tools.set_builtin_probes({
 # --------------------------------------------------------------------------- #
 # DeepSeek Harness (dsh): `dsh web` service control + default model + headless
 # jobs. A headless job is code execution, so
-# every surface (status included) is FULL-SESSION ONLY; Safe Mode gets 403.
+# every surface (status included) is the operator's (use_tools:harness).
 # --------------------------------------------------------------------------- #
 
 
@@ -12136,7 +12755,6 @@ def _require_harness(request: Request) -> None:
         raise HTTPException(404, "Harness disabled")
     if not policy.claimed():
         raise HTTPException(403, _NO_PIN_MSG)
-    _deny_decoy_mutation(request)
 
 
 def _raise_for_harness_error(e: Exception):
@@ -12409,13 +13027,12 @@ _sf_probe_lock = asyncio.Lock()
 def _require_studioforge(request: Request) -> None:
     """404 when the feature is off or unconfigured (an install that was never
     told the panel's address must not even admit the route exists), 403 with no
-    PIN, 403 for a Safe-Mode session. Mirrors _require_harness."""
+    PIN (the route's use_tools:studioforge decides who). Mirrors _require_harness."""
     if (not SETTINGS.studioforge_enabled or not SETTINGS.studioforge_url
             or _builtin_off("studioforge")):
         raise HTTPException(404, "StudioForge panel disabled")
     if not policy.claimed():
         raise HTTPException(403, _NO_PIN_MSG)
-    _deny_decoy_mutation(request)
 
 
 def _framable(headers) -> bool:
@@ -12499,13 +13116,12 @@ async def studioforge_status(request: Request):
 
 def _require_mail(request: Request) -> None:
     """404 when the feature is off (no MailForge UI runtime files found and
-    not forced on), 403 with no PIN, 403 for a Safe-Mode session. Mirrors
-    _require_harness/_require_studioforge."""
+    not forced on), 403 with no PIN (the route's use_tools:mail decides who).
+    Mirrors _require_harness/_require_studioforge."""
     if not SETTINGS.mail_enabled or _builtin_off("mail"):
         raise HTTPException(404, "Emails panel disabled")
     if not policy.claimed():
         raise HTTPException(403, _NO_PIN_MSG)
-    _deny_decoy_mutation(request)
 
 
 @app.get("/api/mail/status")
@@ -12541,12 +13157,11 @@ async def mail_status(request: Request):
 
 def _require_practice(request: Request) -> None:
     """404 when the feature is off (no PIN file found and not forced on), 403
-    with no PIN, 403 for a Safe-Mode session. Mirrors _require_harness."""
+    with no PIN (the route's use_tools:practice decides who). Mirrors _require_harness."""
     if not SETTINGS.practice_enabled or _builtin_off("practice"):
         raise HTTPException(404, "Clients panel disabled")
     if not policy.claimed():
         raise HTTPException(403, _NO_PIN_MSG)
-    _deny_decoy_mutation(request)
 
 
 _PRACTICE_PATH_RE = re.compile(r"\A[A-Za-z0-9._/-]{0,256}\Z")
@@ -12615,20 +13230,29 @@ async def practice_links_put(client_id: str, request: Request):
 
 
 async def _ws_bot_allowed(ws: WebSocket, bot_id: str | None, *, dispatch: bool = False) -> bool:
-    """False (with an error frame) when a Restricted connection targets a character
-    outside its audience - or, with ``dispatch=True`` (a turn is about to run), when a
-    signed-in profile without ``dispatch_agents`` targets a character whose turns run
-    an AGENT on the host (the OpenClaw backend; a direct provider is just chat).
-
-    A Restricted turn is never a dispatch: it runs LOCKED (no tools, no hand-off)."""
-    if manager.conn_decoy(ws) and bot_id not in _safe_bot_ids():
-        await manager.send(ws, {"type": "error", "message": "Unlock for full access"})
+    """False (with an error frame) when the connection's profile may not use the character
+    (``characters.may_use``: off its household list, another profile's personal one) - or,
+    with ``dispatch=True`` (a turn is about to run), when a profile without
+    ``dispatch_agents`` targets a character whose turns run an AGENT on the host (the
+    OpenClaw backend; a direct provider is just chat)."""
+    # 4.0 characters.may_use: the same rule as the roster. A turn needs a character that
+    # exists; reading / archiving the socket's own thread of a deleted one does not.
+    bot_row = config.resolve_bot(bot_id) if bot_id else None
+    pr_ws = manager.principal_of(ws)
+    if (dispatch and bot_row is not None and characters.is_agent_backed(bot_row)
+            and not characters.is_personal(bot_row) and pr_ws is not None
+            and not pr_ws.can(Permission.DISPATCH_AGENTS)):
+        # The one thing missing is the agents permission: say so (the client offers nothing
+        # to retry), the same frame extensions.may_dispatch's refusal sends below.
+        msg = extensions.DISPATCH_REFUSED
+        await manager.send(ws, {"type": "error", "code": "permission_denied", "message": msg,
+                                "error": errors.envelope("permission_denied", message=msg),
+                                "required_permission": "dispatch_agents"})
         return False
-    # 3.0 per-profile visibility (characters.may_use): the same character list the roster shows.
-    if not characters.may_use_id(bot_id, manager.principal_of(ws)):
-        await manager.send(ws, {"type": "error", "message": "Unlock for full access"
-                                if manager.conn_decoy(ws) else
-                                "Your profile may not use that character."})
+    if (bot_row is None and dispatch) or (
+            bot_row is not None and not characters.may_use(bot_row, pr_ws)):
+        await manager.send(ws, {"type": "error",
+                                "message": "Your profile may not use that character."})
         return False
     if dispatch:
         pr = manager.principal_of(ws)
@@ -12640,6 +13264,24 @@ async def _ws_bot_allowed(ws: WebSocket, bot_id: str | None, *, dispatch: bool =
                                     "required_permission": "dispatch_agents"})
             return False
     return True
+
+
+async def _ws_thread(ws: WebSocket, thread_id: str | None, *, write: bool = True,
+                     quiet: bool = False):
+    """The thread, when this socket's person owns it (4.0 ownership), else None after a
+    neutral "Thread not found" error frame - word for word what a thread that does not exist
+    answers, so a socket learns nothing from an id it does not own. Every /ws action that
+    names a thread goes through here; the character rule (``_ws_bot_allowed``) runs after it."""
+    thread = await db.get_thread(thread_id) if isinstance(thread_id, str) and thread_id else None
+    if thread is not None:
+        ownership.remember(thread.id, thread.owner_profile_id)
+        if not ownership.may_see_thread(manager.principal_of(ws), thread.owner_profile_id,
+                                        write=write):
+            thread = None
+    if thread is None and not quiet:
+        await manager.send(ws, {"type": "error", "thread_id": thread_id,
+                                "message": "Thread not found"})
+    return thread
 
 
 # Recently persisted client_msg_ids (WS send-ack protocol). A reconnecting
@@ -12679,8 +13321,7 @@ def _ack_mark(client_msg_id: str, **fields: Any) -> None:
 async def _ack(ws: WebSocket, client_msg_id: str | None,
                status: str = "ok", reason: str | None = None) -> None:
     """Ack a 'send' on the ORIGINATING connection. No client_msg_id (an old
-    client) ⇒ no ack — backwards compatible. Reasons must stay short + neutral:
-    decoy connections receive these frames too."""
+    client) ⇒ no ack — backwards compatible. Reasons must stay short + neutral."""
     if not client_msg_id:
         return
     frame: dict = {"type": "ack", "client_msg_id": client_msg_id, "status": status}
@@ -12692,15 +13333,13 @@ async def _ack(ws: WebSocket, client_msg_id: str | None,
 def _turn_for_socket(ws: WebSocket, thread_id: str, bot_id: str, text: str,
                      action: str | None = None):
     """run_agent_turn for a turn a socket asked for with no options of its
-    own (a retry, a resend): a Safe-Mode socket's turn runs locked, and a
-    quick action (the id stored on the row) is carried along; any other plain
-    socket calls the three-argument form exactly as before."""
-    locked = manager.conn_decoy(ws)
+    own (a retry, a resend): a quick action (the id stored on the row) and the
+    caller's dispatch_agents are carried along; any other plain socket calls the
+    three-argument form exactly as before."""
     dispatch = extensions.caller_may_dispatch(manager.principal_of(ws))
-    if locked or action or not dispatch:
+    if action or not dispatch:
         return run_agent_turn(thread_id, bot_id, text,
-                              TurnOptions(locked=locked, action=action or None,
-                                          dispatch=dispatch))
+                              TurnOptions(action=action or None, dispatch=dispatch))
     return run_agent_turn(thread_id, bot_id, text)
 
 
@@ -12731,7 +13370,10 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         if not seen.get("scheduled") and seen.get("thread_id"):
             # Stored but never dispatched (see _ACK_SEEN). Finish the job
             # rather than confirming a turn that was never started - after the
-            # same gate a fresh send passes (the id is the client's own string).
+            # same gate a fresh send passes (the id is the client's own string,
+            # so the thread must be THIS socket's person's, 4.0).
+            if await _ws_thread(ws, seen.get("thread_id"), quiet=True) is None:
+                return
             if not await _ws_bot_allowed(ws, seen.get("bot_id"), dispatch=True):
                 return
             log.warning("resend of %s: the message was stored but its turn "
@@ -12759,10 +13401,8 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
                                 "message": "Message too long (max 64KB)."})
         await _ack(ws, cmid, "rejected", "Message too long")
         return
-    thread = await db.get_thread(thread_id)
+    thread = await _ws_thread(ws, thread_id)        # 4.0: the sender's own thread only
     if not thread:
-        await manager.send(ws, {"type": "error", "thread_id": thread_id,
-                                "message": "Thread not found"})
         await _ack(ws, cmid, "rejected", "Thread not found")
         return
     if not await _ws_bot_allowed(ws, thread.bot_id, dispatch=True):
@@ -12770,7 +13410,7 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         return
 
     # Quick action: an id the server knows (and the operator has not hidden).
-    # Allowed in Safe Mode too - an action is only text around the message.
+    # Every role (use_chat) - an action is only text around the message.
     action_def = None
     action_raw = data.get("action")
     if action_raw not in (None, "") and not _bot_allows_quick_actions(thread.bot_id):
@@ -12787,9 +13427,7 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     # FEATURE 5 (quote/reply). An id that names no row, or one in ANOTHER
     # thread, is silently ignored rather than rejecting the whole send — same
     # "forgiving of a stale/garbled quote" treatment a bad media path gets.
-    # Allowed in Safe Mode on purpose: a locked device may already send, and
-    # everything it can name here is a message in the same safe-bot thread it
-    # is already allowed to read.
+    # Everything it can name here is a message in the caller's own thread.
     reply_target: MessageOut | None = None
     reply_to_raw = data.get("reply_to")
     if isinstance(reply_to_raw, str) and reply_to_raw.strip():
@@ -12797,19 +13435,12 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         if candidate is not None and candidate.thread_id == thread_id:
             reply_target = candidate
 
-    if manager.conn_decoy(ws):
-        if not _decoy_action_allowed(_ws_client_ip(ws), "turn", DECOY_TURN_QUOTA):
-            await manager.send(ws, {"type": "error", "thread_id": thread_id,
-                                    "message": "Daily message limit reached — "
-                                               "try again tomorrow or unlock."})
-            await _ack(ws, cmid, "rejected", "Daily limit reached")
-            return
-        # Safe Mode CAN attach uploads (the "＋" button) but must never ingest a
-        # local path: keep store-resident refs (/media/<uuid>, [[doc:<id>]]) so
-        # they reach the agent + unlocked devices, drop anything pointing at a
-        # local file. The decoy DISPLAY still fully redacts media, so what's sent
-        # here stays invisible in the locked view (images stay hidden).
-        text = (_decoy_keep_uploaded_media(text) or "").strip()
+    sender = manager.principal_of(ws)
+    if sender is None or not sender.is_host:
+        # Copying a file off the host is host access (4.3 host tier: the Owner): everyone else keeps
+        # store-resident refs (/media/<uuid>, [[doc:<id>]] - what the "＋" upload made) and
+        # loses any directive pointing at a local path (_keep_uploaded_media_only).
+        text = (_keep_uploaded_media_only(text) or "").strip()
         if not text:
             await _ack(ws, cmid, "rejected", "Message could not be sent")
             return
@@ -12830,8 +13461,8 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
             await _ack(ws, cmid, "rejected", "Empty message")
             return
     # The excerpt is computed and stored NOW, on the QUOTING message, so a
-    # locked device rendering its own quote chip later needs no lookup of the
-    # (possibly unsafe-bot) original — see _quote_excerpt.
+    # device rendering the quote chip later needs no lookup of the original
+    # — see _quote_excerpt.
     user_metadata = None
     if reply_target is not None:
         user_metadata = {
@@ -12861,7 +13492,7 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     if cmid:
         _ack_mark(cmid, thread_id=thread_id, bot_id=thread.bot_id, text=text,
                   action=action_def.id if action_def else None)
-    await db.set_title_if_empty(thread_id, _truncate(text, 50))
+    await db.set_title_if_empty(thread_id, _title_from(text))
     msg_frame = {"type": "message", "thread_id": thread_id, "bot_id": thread.bot_id,
                  "message": user_msg.model_dump()}
     if cmid:
@@ -12886,8 +13517,7 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
     # single task preserves exactly the ordering the previous straight-line
     # code had, while giving the reader loop back immediately.
     # Read now, not inside the task: the socket may be gone by the time the
-    # turn starts, and a Safe-Mode send must run its turn locked (TurnOptions).
-    locked = manager.conn_decoy(ws)
+    # turn starts.
     dispatch = extensions.caller_may_dispatch(manager.principal_of(ws))
 
     async def _publish_then_run() -> None:
@@ -12914,12 +13544,11 @@ async def _handle_send(ws: WebSocket, data: dict) -> None:
         # quote calls run_agent_turn exactly as it always has (three args,
         # opts defaulting on the far side) so nothing about the ordinary send
         # path changes shape.
-        if reply_target is not None or locked or action_def is not None or not dispatch:
+        if reply_target is not None or action_def is not None or not dispatch:
             await run_agent_turn(thread_id, thread.bot_id, text,
                                  TurnOptions(user_msg_id=user_msg.id,
                                             reply_to=(reply_target.id
                                                       if reply_target else None),
-                                            locked=locked,
                                             action=(action_def.id
                                                     if action_def else None),
                                             dispatch=dispatch))
@@ -12939,12 +13568,6 @@ async def _handle_create_thread(ws: WebSocket, data: dict) -> None:
         return
     if not await _ws_bot_allowed(ws, bot_id):
         return
-    if manager.conn_decoy(ws) and not _decoy_action_allowed(
-            _ws_client_ip(ws), "thread", DECOY_THREAD_QUOTA):
-        await manager.send(ws, {"type": "error",
-                                "message": "Daily chat limit reached — "
-                                           "try again tomorrow or unlock."})
-        return
     thread = await db.create_thread(
         bot_id=bot_id, avatar_from_pool=True,
         owner_profile_id=ownership.for_principal(manager.principal_of(ws)))
@@ -12961,10 +13584,20 @@ async def _handle_get_threads(ws: WebSocket, data: dict) -> None:
         return
     if not await _ws_bot_allowed(ws, bot_id):
         return
-    threads = await db.list_threads(bot_id)
+    # 4.0: the socket's person's OWN chats with this character.
+    # Paged like GET /api/threads (4.0 scale): page one unless the frame names a cursor.
+    try:
+        limit = max(1, min(database.THREAD_PAGE_MAX, int(data.get("limit") or database.THREAD_PAGE_DEFAULT)))
+    except (TypeError, ValueError):
+        limit = database.THREAD_PAGE_DEFAULT
+    cursor = data.get("cursor") if isinstance(data.get("cursor"), str) else None
+    try:
+        rows, nxt = await _thread_page(manager.principal_of(ws), bot_id=bot_id, cursor=cursor,
+                                       limit=limit)
+    except HTTPException:
+        return                                   # a cursor that is not ours
     await manager.send(ws, {
-        "type": "threads_list", "bot_id": bot_id,
-        "threads": [t.model_dump() for t in threads],
+        "type": "threads_list", "bot_id": bot_id, "threads": rows, "next_cursor": nxt,
     })
 
 
@@ -12972,9 +13605,13 @@ async def _handle_get_messages(ws: WebSocket, data: dict) -> None:
     thread_id = data.get("thread_id")
     if not thread_id:
         return
-    # Every connection, not only a Restricted one: a Member left off a character's
-    # profile list may not read its threads by id either (characters.may_use).
-    if not await _ws_bot_allowed(ws, await _bot_of_thread(thread_id)):
+    # 4.0: the socket's person's own thread.
+    thread = await _ws_thread(ws, thread_id)
+    if thread is None:
+        return
+    # A profile whose household list leaves a character out may not read its
+    # threads by id either (characters.may_use).
+    if not await _ws_bot_allowed(ws, thread.bot_id):
         return
     try:
         limit = max(1, min(500, int(data.get("limit") or 200)))
@@ -12995,12 +13632,12 @@ async def _handle_archive(ws: WebSocket, data: dict) -> None:
     thread_id = data.get("thread_id")
     if not thread_id:
         return
-    # Archiving is a mutation — Safe Mode is view + send only, so a decoy
-    # connection may not archive even a safe bot's thread.
-    if manager.conn_decoy(ws):
-        await manager.send(ws, {"type": "error", "message": "Unlock for full access"})
+    # Archiving is a mutation: manage_history (WS_ACTION_PERMISSIONS, checked before any
+    # handler runs) on the caller's own thread (_ws_thread).
+    thread = await _ws_thread(ws, thread_id)
+    if thread is None:
         return
-    bot_id = await _bot_of_thread(thread_id)
+    bot_id = thread.bot_id
     if not await _ws_bot_allowed(ws, bot_id):
         return
     await db.archive_thread(thread_id)
@@ -13299,21 +13936,15 @@ async def _regenerate_turn_inner(thread_id: str, bot_id: str,
 
 
 async def _handle_regenerate(ws: WebSocket, data: dict) -> None:
-    """Rewind the session and ask the last question again. Unlocked only.
+    """Rewind the session and ask the last question again.
 
-    Safe Mode deliberately does NOT reach this, and `retry` deliberately still
-    does. Regenerate deletes rows and rewrites an agent's session, and a locked
-    tablet must not be able to do either — but asking again is something the
-    family has been able to do all along, so nothing is taken away from them.
+    ``manage_history`` (WS_ACTION_PERMISSIONS): regenerate deletes rows and rewrites an
+    agent's session; `retry` (asking again in the same session) needs only ``use_chat``.
     """
     thread_id = data.get("thread_id")
     if not thread_id:
         return
-    if manager.conn_decoy(ws):
-        await manager.send(ws, {"type": "error", "thread_id": thread_id,
-                                "message": "Unlock for full access"})
-        return
-    thread = await db.get_thread(thread_id)
+    thread = await _ws_thread(ws, thread_id)
     if not thread:
         return
     if thread.status == "thinking" or thread_id in _regen_inflight:
@@ -13346,10 +13977,6 @@ async def _handle_edit_rerun(ws: WebSocket, data: dict) -> None:
     content = data.get("content")
     if not thread_id or not message_id or not isinstance(content, str):
         return
-    if manager.conn_decoy(ws):
-        await manager.send(ws, {"type": "error", "thread_id": thread_id,
-                                "message": "Unlock for full access"})
-        return
     content = content.strip()
     if not content:
         await manager.send(ws, {"type": "error", "thread_id": thread_id,
@@ -13360,7 +13987,7 @@ async def _handle_edit_rerun(ws: WebSocket, data: dict) -> None:
                                 "message": f"Message is too long (max "
                                            f"{MESSAGE_MAX_CHARS} characters)"})
         return
-    thread = await db.get_thread(thread_id)
+    thread = await _ws_thread(ws, thread_id)
     if not thread:
         return
     if thread.status == "thinking" or thread_id in _regen_inflight:
@@ -13394,7 +14021,7 @@ async def _handle_retry(ws: WebSocket, data: dict) -> None:
     thread_id = data.get("thread_id")
     if not thread_id:
         return
-    thread = await db.get_thread(thread_id)
+    thread = await _ws_thread(ws, thread_id)
     if not thread or thread.status == "thinking":
         return
     if not await _ws_bot_allowed(ws, thread.bot_id, dispatch=True):
@@ -13404,30 +14031,18 @@ async def _handle_retry(ws: WebSocket, data: dict) -> None:
         await manager.send(ws, {"type": "error", "thread_id": thread_id,
                                 "message": "No message to retry"})
         return
-    # A retry costs exactly what a send costs — one model turn — so it is
-    # charged to the same Safe-Mode daily quota. Without this a locked tab
-    # could loop `retry` for unlimited turns while `send` stayed capped.
-    if manager.conn_decoy(ws) and not _decoy_action_allowed(
-            _ws_client_ip(ws), "turn", DECOY_TURN_QUOTA):
-        await manager.send(ws, {"type": "error", "thread_id": thread_id,
-                                "message": "Daily message limit reached — "
-                                           "try again tomorrow or unlock."})
-        return
     _track(asyncio.create_task(_turn_for_socket(
         ws, thread_id, thread.bot_id, last_user.content,
         _action_of(last_user.metadata))))
 
 
 async def _handle_abort(ws: WebSocket, data: dict) -> None:
-    """Stop the turn a thread is waiting on. Unlocked connections only."""
+    """Stop the turn a thread is waiting on: ``manage_history`` (WS_ACTION_PERMISSIONS,
+    the WebSocket's equivalent of the HTTP gate) on the caller's own thread."""
     thread_id = data.get("thread_id")
     if not thread_id:
         return
-    if manager.conn_decoy(ws):
-        # The same rule as every other mutation, stated here because a
-        # WebSocket never passes through the HTTP middleware that enforces it.
-        await manager.send(ws, {"type": "error", "thread_id": thread_id,
-                                "message": "Unlock for full access"})
+    if await _ws_thread(ws, thread_id) is None:
         return
     try:
         result = await _abort_thread_turn(thread_id)
@@ -13451,8 +14066,8 @@ WS_HANDLERS = {
     "archive_thread": _handle_archive,
     "retry": _handle_retry,
     # `retry` and `regenerate` are two different things and both are kept.
-    # retry re-asks inside the session the family already has (Safe Mode can
-    # do it, quota-charged); regenerate rewinds and replaces (unlocked only).
+    # retry re-asks inside the session the caller already has (use_chat);
+    # regenerate rewinds and replaces (manage_history).
     "regenerate": _handle_regenerate,
     "edit_rerun": _handle_edit_rerun,
 }
@@ -13476,18 +14091,18 @@ async def websocket_endpoint(ws: WebSocket):
             await ws.close(code=1008)
             return
     # HTTP middleware doesn't run for the websocket scope, so the same principal
-    # resolution happens here: a session -> that profile; else the device's default
-    # profile; else anonymous = Restricted. An install nobody has claimed is open
-    # to this machine only (see auth_gate).
+    # resolution happens here: a session -> that profile; else the lock-target default
+    # profile (policy.unsigned); else the socket is closed (sign in first). An install
+    # nobody has claimed is open to this machine only (see auth_gate).
     cfg = auth.load()
     session = None
     claimed = policy.claimed(cfg)
     dev_tok = ws.cookies.get(policy.DEVICE_COOKIE)
     device_id = auth.device_hash(dev_tok) if dev_tok and 16 <= len(dev_tok) <= 128 else None
     if not claimed:
-        local = policy.is_loopback_origin(ws.client.host if ws.client else "",
-                                          any(ws.headers.get(h) for h in policy.PROXY_MARKER_HEADERS))
-        if not (local or policy.allow_open_install()):
+        # 4.3 (#2): this machine by a loopback Host name (or an opted-in open install),
+        # never another site's page - the predicate the HTTP gate uses.
+        if not policy.local_setup_of(ws, method="WS"):
             await ws.close(code=1008)        # nobody owns this install yet: finish setup first
             return
         principal = policy.open_principal()
@@ -13496,36 +14111,39 @@ async def websocket_endpoint(ws: WebSocket):
         principal = policy.for_session(session, device_id)
         if principal is None:
             session = None
-            principal = policy.for_device(device_id) or policy.anonymous(device_id)
-            if principal.kind == "anonymous" and cfg.anonymous_access == "none":
-                await ws.close(code=1008)      # sign in first
+            # 4.0: the lock-target default profile, or nobody (sign in first).
+            principal = policy.unsigned(cfg)
+            if principal is None:
+                await ws.close(code=1008)
                 return
-    decoy = principal.is_restricted
-    await manager.connect(ws, decoy=decoy, token=(session.token if session else None),
-                          principal=principal)
+    await manager.connect(ws, token=(session.token if session else None), principal=principal)
     try:
-        bots = config.load_bots()
-        if decoy:
-            bots = [b for b in bots if b.safe]
-        bots = characters.visible_to(principal, bots)      # per-profile character visibility
+        bots = characters.visible_bots(principal, config.load_bots())   # this profile's rail
+        # 4.0 scale: the first page of this profile's OWN threads (every character, pinned
+        # first) and the cursor for the next one - never all of them. Best effort: a failure
+        # here leaves the client to ask GET /api/threads.
+        try:
+            first, next_cursor = await _thread_page(principal)
+        except Exception:
+            log.warning("hello: the first thread page failed", exc_info=True)
+            first, next_cursor = [], None
         await ws.send_json({
             "type": "hello",
             "bots": [b.to_dict() for b in bots],
-            "decoy": decoy,
             "role": principal.role,
             "profile": people_api.public_profile(principal.profile),
+            "threads": first,
+            "next_cursor": next_cursor,
         })
         while True:
             data = await ws.receive_json()
             mtype = data.get("type")
-            current = principal                  # the profile as it is NOW (its budgets too)
-            # A full session that idle-expires drops to Safe Mode: tell the
-            # client so it reconnects (as a Safe-Mode connection). A ping is NOT
+            # A session that idle-expires ends the socket: tell the client so it
+            # reconnects (as whoever an unsigned device is now). A ping is NOT
             # activity (so idle genuinely expires); real actions slide the window.
             if session is not None:
                 live = auth.get_session(session.token)
                 fresh = policy.for_session(live, device_id) if live is not None else None
-                current = fresh or principal
                 if fresh is None:
                     with contextlib.suppress(Exception):
                         await ws.send_json({"type": "locked"})
@@ -13533,43 +14151,43 @@ async def websocket_endpoint(ws: WebSocket):
                 if fresh.role != principal.role or fresh.permissions != principal.permissions:
                     principal = fresh            # a role / grant change applies at once
                     manager.set_principal(ws, principal)
-                    decoy = principal.is_restricted
                 if mtype != "ping":
                     auth.touch_session(session.token)
             elif principal.kind == "open" and policy.claimed():
                 # A token-less open connection (opened before the install was
-                # claimed) and an owner exists now - nudge the client to reconnect.
+                # claimed) and an owner exists now - make the client reconnect.
+                # INT-1: NOT with a "locked" frame: the tab that just claimed the
+                # install holds the new Admin's cookie, and the client answers
+                # "locked" by POSTing /api/auth/lock - which signed the first Admin
+                # out at the first ping after setup. A plain close (1012) makes the
+                # client reconnect, and the handshake then decides who it is.
                 with contextlib.suppress(Exception):
-                    await ws.send_json({"type": "locked"})
+                    await ws.close(code=1012)
                 break
-            elif device_id is not None and principal.kind in ("profile", "anonymous"):
-                # A device bound to a default profile (the kitchen tablet) has no session to
-                # re-read, so the profile was a snapshot from the handshake: quiet hours or a
-                # budget the Owner set afterwards, disabling the profile or re-binding the
-                # device never reached a socket that stays open for days. Resolve it again.
-                fresh = policy.for_device(device_id) or policy.anonymous(device_id)
-                current = fresh
-                if (fresh.kind != principal.kind or fresh.profile_id != principal.profile_id
-                        or fresh.role != principal.role or fresh.permissions != principal.permissions):
+            elif principal.via == "default":
+                # The lock-target default profile has no session to re-read, so the profile
+                # was a snapshot from the handshake: the lock target changing, the profile
+                # being disabled or edited never reached a socket that stays open for days.
+                # Resolve it again; a different answer (or none) ends the socket.
+                fresh = policy.unsigned()
+                if fresh is None or fresh.profile_id != principal.profile_id:
+                    with contextlib.suppress(Exception):
+                        await ws.send_json({"type": "locked"})
+                    break
+                if fresh.role != principal.role or fresh.permissions != principal.permissions:
                     principal = fresh
                     manager.set_principal(ws, principal)
-                    decoy = principal.is_restricted
             if mtype == "ping":
                 await manager.send(ws, {"type": "pong"})
+                continue
+            if mtype == "active":
+                # 4.3 Fable: the page says a person is using it (reading, scrolling) without
+                # sending anything. The touch above (any non-ping frame) is the whole point.
                 continue
             handler = WS_HANDLERS.get(mtype)
             if handler:
                 ws_req = route_policy.ws_action_requirement(mtype) or policy.Requirement()
                 verdict = policy.authorize(principal, ws_req)
-                if verdict.allowed and current.kind == "profile" and current.is_restricted:
-                    # A Restricted profile's quiet hours and minutes per day hold on the socket
-                    # too - the chat itself runs here, so a gate on HTTP alone left both
-                    # unenforced (and the minutes uncounted) for anyone already connected.
-                    limited = _restricted_limit_denied(current, ws_req)
-                    if limited is not None:
-                        verdict = limited
-                    elif not ws_req.public:
-                        _note_active_time(current)
                 if not verdict.allowed:
                     await manager.send(ws, {
                         "type": "error", "thread_id": data.get("thread_id"),
@@ -13578,8 +14196,8 @@ async def websocket_endpoint(ws: WebSocket):
                         "client_msg_id": data.get("client_msg_id")})
                     continue
                 # One bad statement must not tear down the whole connection:
-                # log, send a NEUTRAL error frame (no exception detail — decoy
-                # connections see these frames) and keep the receive loop alive.
+                # log, send a NEUTRAL error frame (no exception detail) and keep the
+                # receive loop alive.
                 try:
                     await handler(ws, data)
                 except WebSocketDisconnect:
@@ -13623,11 +14241,9 @@ def _ws_already_gone(ws: WebSocket, exc: BaseException) -> bool:
 # as DisPatch Voice. The host itself is generic; below is the part only main
 # can do: a turn submitted, speculated, aborted or annotated on an extension's
 # behalf goes through exactly the persist / broadcast / run_agent_turn path a
-# typed message takes. The host's gate refuses a cross-origin page and, for a
-# locked device, any thread it cannot see (a non-`safe` bot's) before anything
-# here can run; a turn for a thread a locked device's socket is on runs LOCKED
-# (TurnOptions.locked, extensions.turn_locked), exactly like a typed Safe-Mode
-# send, and never adopts a speculative run (those are built unlocked).
+# typed message takes. The host's gate refuses a cross-origin page and any
+# thread the caller does not own (or whose character it may not use) before
+# anything here can run; every turn asks characters.may_use for the thread owner.
 # --------------------------------------------------------------------------- #
 
 
@@ -13674,6 +14290,22 @@ async def _discard_run(run: Any) -> None:
         log.exception("ext: discarding a speculative run failed")
 
 
+def _thread_owner_may_use(thread) -> bool:
+    """May the thread's OWNER use its character (``characters.may_use``)? An extension turn
+    is told no caller; its socket's person is the thread owner (the socket's ownership
+    check), so the owner is who the character rule is asked about. An open install: yes."""
+    bot = config.get_bot(thread.bot_id)
+    if bot is None:
+        return False
+    if not policy.claimed():
+        return True
+    owner = ownership.effective_owner(thread.owner_profile_id)
+    prof = accounts.get_profile(owner) if owner else None
+    if prof is None or prof.disabled:
+        return False
+    return characters.may_use(bot, policy.profile_principal(prof))
+
+
 async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
                            instructions: Any = None, thinking: str | None = None,
                            metadata: dict | None = None, prefetched: Any = None) -> str | None:
@@ -13685,6 +14317,15 @@ async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
     thread = await db.get_thread(thread_id)
     if not thread:
         raise ValueError("thread not found")
+    if not _thread_owner_may_use(thread):
+        # 4.0 (BUILD-PLAN-v2 §1.2): every turn entry point asks characters.may_use for the
+        # thread's owner (the socket's person by construction).
+        if prefetched is not None:
+            await _discard_run(prefetched)
+        bot_now = config.get_bot(thread.bot_id)
+        if bot_now is not None and characters.is_agent_backed(bot_now):
+            raise PermissionError(extensions.DISPATCH_REFUSED)
+        raise PermissionError("Your profile may not use that character.")
     text = _clean_spoken_text(text)
     if not text:
         if prefetched is not None:
@@ -13722,52 +14363,13 @@ async def _ext_submit_turn(ext_id: str, thread_id: str, text: str, *,
             await _discard_run(adopted)
         log.info("ext %s: turn on %s refused - the caller may not run agents", ext_id, thread_id)
         raise PermissionError(extensions.DISPATCH_REFUSED)
-    locked = extensions.turn_locked(thread_id)
-    if locked:
-        log.info("ext %s: locked turn on %s (a locked device's socket)", ext_id, thread_id)
-        # Decided BEFORE the row is persisted, like a Safe-Mode send on the
-        # main /ws (_handle_send): the thread's bot must still be one a locked
-        # device may see, and the turn is charged to that device's daily
-        # Safe-Mode budget (_decoy_action_allowed, the same "turn" action
-        # and DECOY_TURN_QUOTA). Refused = no row, no turn, the extension's
-        # submit raises (the voice add-on tells the listener it could not
-        # send). The budget is spent only while a locked socket is OPEN on
-        # the thread (extensions.locked_client_ip); a turn in the grace
-        # window after it closed runs locked but charges nobody.
-        bot = config.get_bot(thread.bot_id)
-        if not extensions.locked_may_see(bot):
-            if adopted is not None:
-                await _discard_run(adopted)
-            raise PermissionError("Unlock for full access")
-        ip = extensions.locked_client_ip(thread_id)
-        kid = accounts.get_profile(ip) if ip is not None else None
-        if kid is not None and kid.role == "restricted":
-            # The socket belongs to a Restricted PROFILE (extensions.thread_websocket_endpoint):
-            # its quiet hours and minutes hold for a spoken turn exactly as for a typed one.
-            limited = limits.check(policy.profile_principal(kid))
-            if limited is not None:
-                if adopted is not None:
-                    await _discard_run(adopted)
-                raise PermissionError(limited.detail)
-        if ip is not None and not _decoy_action_allowed(ip, "turn", DECOY_TURN_QUOTA):
-            if adopted is not None:
-                await _discard_run(adopted)
-            log.info("ext %s: locked turn on %s refused — the daily Safe-Mode "
-                     "message limit is spent", ext_id, thread_id)
-            raise PermissionError("Daily message limit reached — try again tomorrow or unlock.")
     meta = dict(metadata) if isinstance(metadata, dict) else {ext_id: True}
     user_msg = await db.add_message(thread_id, "user", text, metadata=meta or None)
-    await db.set_title_if_empty(thread_id, _truncate(text, 50))
+    await db.set_title_if_empty(thread_id, _title_from(text))
     frame = {"type": "message", "thread_id": thread_id, "bot_id": thread.bot_id,
              "message": user_msg.model_dump()}
-    if locked and adopted is not None:
-        # Never reached in practice (_ext_speculate_turn refuses a locked
-        # thread), but a run built unlocked must never answer a locked turn.
-        await _discard_run(adopted)
-        adopted = None
     turn_opts = TurnOptions(user_msg_id=user_msg.id, voice=instructions,
                             thinking=thinking or None, prefetched=adopted,
-                            locked=locked,
                             # A caller without dispatch_agents has a socket on this thread:
                             # an advisor's research/handoff markers are not acted on.
                             dispatch=not extensions.turn_dispatch_refused(thread_id))
@@ -13803,7 +14405,7 @@ async def _ext_speculate_turn(thread_id: str, text: str, *, instructions: Any = 
     bot = config.get_bot(thread.bot_id) if thread else None
     backend = extensions.bot_backend_of(bot)
     if (bot is None or backend not in ("advisor", "api") or _turn_running(thread_id)
-            or extensions.turn_locked(thread_id)):
+            or not _thread_owner_may_use(thread)):
         return None
     old = _speculations.pop(thread_id, None)
     if old is not None:
@@ -14011,7 +14613,6 @@ EXT_HOOKS = extensions.Hooks(
     replies_after=lambda *a, **kw: _ext_replies_after(*a, **kw),
     note_heard=lambda *a, **kw: _ext_note_heard(*a, **kw),
     counters=lambda: dict(_ext_counters),
-    client_ip=_ws_client_ip,
 )
 # Discovery + handshake + setup; never raises (a broken add-on is a state in
 # GET /api/extensions and in Settings → Voice, not a failed boot).
@@ -14084,13 +14685,13 @@ MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 # dependency, so it does not rely on auth_gate having run).
 app.include_router(dashboard_routes.router)
 # Local Viewer: /local/file/* + /api/local/*. The router carries its own
-# full-access gate (localview._require_full_access), and _decoy_blocked bars
+# full-access gate (localview._require_full_access), and _signed_out_blocked bars
 # the prefixes one layer earlier — both, deliberately.
 app.include_router(localview.router)
 # Tools: /api/tools* + /tools/<id>/* (static pages from <DATA_DIR>/tools.yaml).
-# Each handler decides operator vs Safe Mode itself (a decoy may see only
-# `safe: true` tools); _decoy_blocked bars refresh + the write path one layer
-# earlier; /tools/_t/ frame tickets pass the auth gate and are their own lock.
+# Each handler decides operator vs use_tools holder itself; the route table bars
+# refresh + the write path one layer earlier (manage_plugins); /tools/_t/ frame
+# tickets pass the auth gate and are their own lock.
 app.include_router(tools.router)
 app.include_router(plugins_api.router)   # Settings -> Plugins (operator only)
 
@@ -14099,6 +14700,8 @@ from . import (  # noqa: E402  (one line per router)
     backup_api,
     characters_api,
     connections_api,
+    invariants_api,
+    kits_api,
     settings_api,
     wizard_api,
 )
@@ -14106,8 +14709,24 @@ from . import (  # noqa: E402  (one line per router)
 app.include_router(settings_api.router)
 app.include_router(connections_api.router)
 app.include_router(characters_api.router)
+app.include_router(kits_api.router)       # 4.1 managed bots (route_policy.py declares each)
+app.include_router(invariants_api.router)  # 4.2 data invariants (GET /api/health/invariants)
 app.include_router(wizard_api.router)
 app.include_router(backup_api.router)
+
+# 4.0 chat-first profiles: profile lifecycle (WP-PROF), AI build (WP-AIB) and maintenance
+# (WP-SCALE-OPS). Foundation included each router once, empty; the packages add routes to
+# them (and declare each in route_policy.py) without editing this file.
+from . import (  # noqa: E402  (one line per router)
+    bot_builder_api,
+    maintenance,
+    maintenance_api,
+    profiles_api,
+)
+
+app.include_router(profiles_api.router)
+app.include_router(bot_builder_api.router)
+app.include_router(maintenance_api.router)
 
 # --------------------------------------------------------------------------- #
 # "Works with DisPatch" (2.3.7): app/catalog.yaml + live status, and posting a
@@ -14116,7 +14735,9 @@ app.include_router(backup_api.router)
 
 
 def _probe_chat(_: str) -> tuple[str, str]:
-    bots = config.load_bots()
+    # Household bots only: the catalog names them to Admins, and a profile's own bots are
+    # nobody else's business (INT-1, privacy matrix).
+    bots = [b for b in config.load_bots() if not characters.is_personal(b)]
     direct = [b for b in bots if config.is_direct(b) and config.direct_connected(b)]
     legacy = [b for b in bots if b.api]
     if direct or legacy:
@@ -14189,7 +14810,7 @@ def _probe_voice_rig(_: str) -> tuple[str, str]:
 def _probe_infoforge(_: str) -> tuple[str, str]:
     have = shutil.which("infoforge") is not None
     using = [b.name for b in config.load_bots()
-             if isinstance((b.advisor or {}).get("lookup"), dict)]
+             if not characters.is_personal(b) and isinstance((b.advisor or {}).get("lookup"), dict)]
     if have and using:
         return "connected", ", ".join(using[:3])
     if have:
@@ -14244,11 +14865,13 @@ async def guide_seed(request: Request, name: str, force: bool = False):
     if not machine:
         _require_operator(request)
     elif force:
-        raise HTTPException(403, "force needs an unlocked session")
+        raise HTTPException(403, "force needs a signed-in session")
     if name not in firstrun.GUIDES:
         raise HTTPException(404, "Unknown guide")
     try:
-        tid = await firstrun.seed_one(db, _deliver_assistant_text, name, force=force)
+        # In the caller's own chats, on the Atlas that talks to them (a machine: the main Admin).
+        tid = await firstrun.seed_one(db, _deliver_assistant_text, name, force=force,
+                                      profile_id=None if machine else policy.of(request).principal.profile_id)
     except firstrun.GuideExists:
         raise HTTPException(409, "That guide is already in your chats") from None
     except KeyError:
@@ -14324,8 +14947,8 @@ app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 # BEFORE /static, and that order is the whole trick: Starlette matches mounts in
 # order, so this claims /static/avatars/* and the general mount never sees it.
 # Avatars therefore serve from the DATA directory while keeping the URL they
-# have always had -- no frontend change, no config migration, and the Safe-Mode
-# path checks (which match on a path segment starting "avatars") are untouched.
+# have always had -- no frontend change, no config migration, and the gate's
+# avatar checks (which match on a path segment starting "avatars") are untouched.
 AVATAR_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static/avatars", StaticFiles(directory=str(AVATAR_DIR)), name="avatars")
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static")

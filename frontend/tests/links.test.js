@@ -181,7 +181,7 @@ domTest('rail: an http(s) tab link is an <a> that opens a new tab', () => {
   addLink({ label: 'Panel', url: 'https://example.com/panel' });
   withDom((doc) => {
     const rail = doc.querySelector('#rail');
-    renderLinkRail(rail, { decoy: false, openViewer: () => {} });
+    renderLinkRail(rail, { openViewer: () => {} });
     const btns = rail.querySelectorAll('.link-btn');
     assert.equal(btns.length, 1);
     assert.equal(btns[0].tagName, 'A');
@@ -197,7 +197,7 @@ domTest('rail: a local path is a button that calls openViewer({path})', () => {
   withDom((doc) => {
     const rail = doc.querySelector('#rail');
     const calls = [];
-    renderLinkRail(rail, { decoy: false, openViewer: (a) => calls.push(a) });
+    renderLinkRail(rail, { openViewer: (a) => calls.push(a) });
     const btn = rail.querySelector('.link-btn');
     assert.equal(btn.tagName, 'BUTTON');
     assert.equal(btn.getAttribute('type'), 'button');
@@ -213,7 +213,7 @@ domTest('rail: a viewer-mode URL is a button that calls openViewer({url})', () =
   withDom((doc) => {
     const rail = doc.querySelector('#rail');
     const calls = [];
-    renderLinkRail(rail, { decoy: false, openViewer: (a) => calls.push(a) });
+    renderLinkRail(rail, { openViewer: (a) => calls.push(a) });
     const btn = rail.querySelector('.link-btn');
     assert.equal(btn.tagName, 'BUTTON');
     btn.dispatchEvent(new doc.defaultView.Event('click'));
@@ -227,7 +227,7 @@ domTest('rail: with no openViewer, a viewer URL falls back to <a> and a path is 
   addLink({ label: 'Report', url: '~/reports/x.md' });
   withDom((doc) => {
     const rail = doc.querySelector('#rail');
-    renderLinkRail(rail, { decoy: false });
+    renderLinkRail(rail, {});
     const btns = [...rail.querySelectorAll('.link-btn')];
     assert.equal(btns.length, 1);
     assert.equal(btns[0].tagName, 'A');
@@ -241,12 +241,13 @@ domTest('rail: Safe Mode renders nothing, and a rebuild replaces wholesale', () 
   addLink({ label: 'Report', url: '~/x.md' });
   withDom((doc) => {
     const rail = doc.querySelector('#rail');
-    renderLinkRail(rail, { decoy: false, openViewer: () => {} });
+    renderLinkRail(rail, { openViewer: () => {} });
     assert.equal(rail.querySelectorAll('.link-btn').length, 2);
-    renderLinkRail(rail, { decoy: false, openViewer: () => {} });
+    renderLinkRail(rail, { openViewer: () => {} });
     assert.equal(rail.querySelectorAll('.link-btn').length, 2);
+    // 4.0: the 3.x `decoy` option is gone; passing it changes nothing.
     renderLinkRail(rail, { decoy: true, openViewer: () => {} });
-    assert.equal(rail.querySelectorAll('.link-btn').length, 0);
+    assert.equal(rail.querySelectorAll('.link-btn').length, 2);
     assert.ok(rail.querySelector('#manage-bots'));
   });
 });

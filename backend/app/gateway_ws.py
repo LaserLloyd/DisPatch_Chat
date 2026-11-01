@@ -23,7 +23,7 @@ WHAT THIS MODULE IS AND IS NOT
 ------------------------------
 It is a transport: connect, authenticate, subscribe, hand frames to a callback,
 reconnect, and never lose its place. It deliberately knows nothing about
-sanitizers, reaction markers, Safe Mode or threads — that is product behaviour
+sanitizers, reaction markers, access rules or threads — that is product behaviour
 and it stays in the delivery funnel, unchanged, so this migration cannot
 quietly alter what a message means.
 
@@ -32,8 +32,8 @@ TWO HAZARDS THIS MODULE OWNS
 1. TRUNCATION. ``session.message`` projects text through an 8000-character cap
    with no config knob, appending a truncation marker. The CLI path DisPatch
    used before had no such cap, so a naive switch starts silently cutting long
-   replies mid-sentence — no error, no log, and the person who notices is a
-   family member. Any projected body ending in the marker is refetched in full
+   replies mid-sentence — no error, no log, and the person who notices is the
+   reader. Any projected body ending in the marker is refetched in full
    by id before it goes anywhere near the chat.
 
 2. LOSS. The event is sent best-effort (``dropIfSlow``) and carries no

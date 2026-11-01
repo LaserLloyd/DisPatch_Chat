@@ -1,7 +1,7 @@
 """The thread-websocket gate the host owns (app/extensions.py, CONTRACTS §B.1
-rule 3 and rule 9): Origin==Host → the thread exists → an unlocked session, or
-(since 2.3.4) a locked device on a thread it can see — a `safe` bot's, its
-turns stamped locked like a typed Safe-Mode send → max_total →
+rule 3 and rule 9): Origin==Host → the thread exists → a session (or the
+lock-target default profile) that owns the thread and may use its character →
+max_total →
 per-session slots → the extension's handler. Refusals 1–3 close
 1008 BEFORE accept; "busy" and "nothing provides this" are accept-then-1013
 for authorised callers only. Plus the uvicorn frame cap the live unit runs
@@ -69,37 +69,23 @@ def test_unknown_thread_is_refused(ext_env):
     assert KNOBS.sockets == []
 
 
-def test_a_safe_bots_thread_from_an_unlocked_device(ext_env):
+def test_a_household_bots_thread_from_a_signed_in_device(ext_env):
     c, _ = ext_env
     install()
-    tid = thread_for(c, "alpha")                      # a Safe-Mode bot
+    tid = thread_for(c, "alpha")
     unlock(c)
     KNOBS.handler_mode = "hold"
     with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
         ws.receive_text()
         assert _live(ws) is True
     sock = KNOBS.sockets[-1]
-    assert sock.thread.id == tid and sock.bot.safe is True and sock.locked is False
+    assert sock.thread.id == tid and sock.bot.id == "alpha"
+    assert not hasattr(sock, "locked") and not hasattr(sock.bot, "safe")      # 4.0: no Safe Mode
 
 
 # --------------------------------------------------------------------------- #
-# Locked devices (2.3.4): the threads a locked device can see (`safe` bots),
-# every turn locked
+# Signed-out devices
 # --------------------------------------------------------------------------- #
-
-
-def test_a_locked_device_reaches_a_safe_bots_thread(ext_env):
-    c, _ = ext_env
-    KNOBS.handler_mode = "hold"
-    install()
-    tid = thread_for(c, "alpha")
-    lock(c)
-    with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
-        ready = json.loads(ws.receive_text())
-        assert ready["token"] is False and ready["locked"] is True
-        assert _live(ws) is True
-    sock = KNOBS.sockets[-1]
-    assert sock.locked is True and sock.token is None and sock.bot.safe is True
 
 
 def test_a_locked_device_is_still_refused_on_a_non_safe_bots_thread(ext_env):
@@ -138,111 +124,17 @@ def _set_bot(bot_id: str, **fields) -> None:
     config._invalidate_bots_cache()
 
 
-def test_a_locked_device_is_refused_on_a_hidden_safe_bots_thread(ext_env):
-    """The threads a locked device may use are the ones its chat list shows:
-    a `safe` bot that is LISTED (main._safe_bot_ids — the main /ws refuses a
-    Safe-Mode send to a hidden bot's thread, so does the extension gate)."""
+def test_a_signed_out_device_is_refused_on_a_hidden_bots_thread(ext_env):
+    """A hidden bot's thread opens for its signed-in owner; a signed-out device is nobody."""
     c, _ = ext_env
     install()
     unlock(c)
     _add_bot("ghost", safe=True, visible=False)
     tid = thread_for(c, "ghost")
     with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
-        ws.receive_text()                       # unlocked: a hidden bot is fine
+        ws.receive_text()                       # signed in: a hidden bot is fine
     lock(c)
     refused(c, f"/ws/voice/{tid}", headers=ORIGIN)
-
-
-def test_a_locked_socket_ends_when_its_bot_is_hidden(ext_env):
-    c, _ = ext_env
-    KNOBS.handler_mode = "hold"
-    install()
-    tid = thread_for(c, "alpha")
-    lock(c)
-    with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
-        ws.receive_text()
-        assert _live(ws) is True
-        _set_bot("alpha", visible=False)
-        assert _live(ws) is False
-
-
-def test_a_locked_sockets_turns_spend_the_safe_mode_daily_budget(ext_env, monkeypatch):
-    """A turn from a locked device's extension socket is a Safe-Mode send:
-    it is charged to the same daily budget as one typed on the main /ws
-    (DECOY_TURN_QUOTA per client ip, the "turn" action), and refused the same
-    way once it is spent — the add-on's submit raises, nothing is persisted,
-    no turn runs. An unlocked socket on another thread is never charged."""
-    from app import extensions, main
-    c, _ = ext_env
-    monkeypatch.setattr(main, "DECOY_TURN_QUOTA", 2)
-    main._decoy_action_used.clear()
-    KNOBS.handler_mode = "submit"
-    install()
-    tid = thread_for(c, "alpha")
-    other = thread_for(c, "main")
-    lock(c)
-    with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
-        ws.receive_text()
-        ws.send_text("one")
-        assert json.loads(ws.receive_text())["id"]
-        ws.send_text("two")
-        assert json.loads(ws.receive_text())["id"]
-        with pytest.raises(PermissionError, match="Daily message limit"):
-            c.portal.call(lambda: KNOBS.ctx.submit_turn(tid, "three"))
-        assert extensions.locked_client_ip(tid) is not None
-    assert _turn_opts(c, 2).locked is True
-    assert len(c.turns) == 2
-    rows = c.get(f"/api/threads/{tid}/messages").json()
-    rows = rows.get("messages", rows) if isinstance(rows, dict) else rows
-    assert [m["content"] for m in rows if m["role"] == "user"] == ["one", "two"]
-    # The locked socket is gone: the grace window still runs turns locked
-    # but charges no budget (nobody to charge), so a hang-up commit lands.
-    assert extensions.locked_client_ip(tid) is None
-    c.portal.call(lambda: KNOBS.ctx.submit_turn(tid, "on hang-up"))
-    assert _turn_opts(c, 3).locked is True
-    # An unlocked device on another thread is not a Safe-Mode caller.
-    extensions._locked_threads.clear()
-    unlock(c)
-    with c.websocket_connect(f"/ws/voice/{other}", headers=ORIGIN) as ws:
-        ws.receive_text()
-        ws.send_text("four")
-        assert json.loads(ws.receive_text())["id"]
-    assert _turn_opts(c, 4).locked is False
-
-
-def test_a_locked_turn_is_refused_once_its_bot_may_not_be_seen(ext_env):
-    """Belt and braces under the add-on's own session_live check: a turn for
-    a thread a locked socket holds is refused by the host itself when the
-    bot has stopped being safe (or listed) meanwhile."""
-    c, _ = ext_env
-    KNOBS.handler_mode = "hold"
-    install()
-    tid = thread_for(c, "alpha")
-    lock(c)
-    with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
-        ws.receive_text()
-        _set_bot("alpha", safe=False)
-        with pytest.raises(PermissionError):
-            c.portal.call(lambda: KNOBS.ctx.submit_turn(tid, "still here?"))
-    assert len(c.turns) == 0
-
-
-def test_a_locked_socket_ends_when_its_bot_stops_being_safe(ext_env):
-    c, _ = ext_env
-    KNOBS.handler_mode = "hold"
-    install()
-    tid = thread_for(c, "alpha")
-    lock(c)
-    with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
-        ws.receive_text()
-        assert _live(ws) is True
-        doc = yaml.safe_load(config.CONFIG_PATH.read_text())
-        for b in doc["bots"]:
-            if b["id"] == "alpha":
-                b["safe"] = False
-        config.CONFIG_PATH.write_text(yaml.safe_dump(doc))
-        config._invalidate_bots_cache()
-        assert _live(ws) is False
 
 
 def _turn_opts(c, n):
@@ -251,92 +143,6 @@ def _turn_opts(c, n):
             break
         c.portal.call(asyncio.sleep, 0.01)
     return c.turns[n - 1][3]
-
-
-def test_every_turn_from_a_locked_socket_runs_locked(ext_env):
-    """The add-on never says whether its socket is locked: the HOST stamps
-    TurnOptions(locked=True) on every turn submitted for it — exactly what a
-    typed Safe-Mode send gets."""
-    c, _ = ext_env
-    KNOBS.handler_mode = "submit"
-    install()
-    tid = thread_for(c, "alpha")
-    lock(c)
-    with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
-        ws.receive_text()
-        ws.send_text("what is the weather")
-        assert json.loads(ws.receive_text())["id"]
-    opts = _turn_opts(c, 1)
-    assert opts is not None and opts.locked is True
-    # The same thread from an unlocked device, once the locked socket's grace
-    # window has passed, runs unlocked as before.
-    from app import extensions
-    extensions._locked_threads.clear()
-    unlock(c)
-    with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
-        ws.receive_text()
-        ws.send_text("and tomorrow")
-        assert json.loads(ws.receive_text())["id"]
-    opts = _turn_opts(c, 2)
-    assert opts is not None and opts.locked is False
-
-
-def test_a_turn_submitted_just_after_the_locked_socket_closed_still_runs_locked(ext_env):
-    """A spoken turn the add-on commits on hang-up lands after the socket is
-    gone: the host keeps the thread marked locked for a grace window."""
-    c, _ = ext_env
-    KNOBS.handler_mode = "hold"
-    install()
-    tid = thread_for(c, "alpha")
-    lock(c)
-    with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
-        ws.receive_text()
-    c.portal.call(lambda: KNOBS.ctx.submit_turn(tid, "one more thing"))
-    assert _turn_opts(c, 1).locked is True
-
-
-def test_no_speculative_start_for_a_locked_socket(ext_env, monkeypatch):
-    """A speculative run is built unlocked (full tool list, no locked rules):
-    a locked socket never gets one, so nothing unlocked is ever adopted."""
-    from app import advisor, main
-    c, _ = ext_env
-    doc = yaml.safe_load(config.CONFIG_PATH.read_text())
-    doc["bots"].append({"id": "sage", "name": "Sage", "order": 21, "safe": True,
-                        "advisor": {"providers": [{"provider": "openai",
-                                                   "base_url": "http://127.0.0.1:9/v1",
-                                                   "model": "m"}]}})
-    config.CONFIG_PATH.write_text(yaml.safe_dump(doc))
-    config._invalidate_bots_cache()
-    started = []
-
-    class Run:
-        text, done, head_id, prompt_chars = "", False, None, 0
-
-        async def discard(self):
-            self.done = True
-
-    async def spec(thread_id, bot_id, text, **kw):
-        started.append(text)
-        return Run()
-
-    monkeypatch.setattr(advisor, "speculate", spec)
-    KNOBS.handler_mode = "submit"
-    install()
-    tid = thread_for(c, "sage")
-    unlock(c)
-    with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
-        ws.receive_text()
-        ws.send_text("spec:hello")
-        assert json.loads(ws.receive_text()) == {"spec": True}
-    main._speculations.clear()
-    from app import extensions
-    extensions._locked_threads.clear()
-    lock(c)
-    with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
-        ws.receive_text()
-        ws.send_text("spec:hello again")
-        assert json.loads(ws.receive_text()) == {"spec": False}
-    assert started == ["hello"]
 
 
 def test_unclaimed_name_runs_the_gate_then_1013(ext_env):
@@ -362,12 +168,11 @@ def test_gated_socket_reaches_the_handler_with_a_bot_view(ext_env):
     unlock(c)
     with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
         ready = json.loads(ws.receive_text())
-        assert ready == {"type": "ready", "bot": "main", "backend": "gateway", "token": True,
-                         "locked": False}
+        assert ready == {"type": "ready", "bot": "main", "backend": "gateway", "token": True}
         ws.send_text("hi")
         assert ws.receive_text() == "echo:hi"
     sock = KNOBS.sockets[0]
-    assert sock.thread.id == tid and sock.bot.safe is False
+    assert sock.thread.id == tid and sock.bot.id == "main"
     assert not hasattr(sock.bot, "api")
 
 
@@ -520,26 +325,6 @@ def test_session_live_false_when_the_thread_is_deleted(ext_env):
         ws.receive_text()
         assert _live(ws) is True
         assert c.delete(f"/api/threads/{tid}").status_code == 200
-        assert _live(ws) is False
-
-
-def test_session_live_stays_true_when_the_bot_turns_safe(ext_env):
-    """Marking the bot `safe` mid-call widens who may chat with it; it does not
-    end an unlocked device's socket (2.3.1). Removing the bot still does."""
-    c, _ = ext_env
-    KNOBS.handler_mode = "hold"
-    install()
-    tid = thread_for(c)
-    with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
-        ws.receive_text()
-        assert _live(ws) is True
-        bots = c.get("/api/bots/all").json()["bots"]
-        items = [{"id": b["id"], "order": i, "safe": (True if b["id"] == "main" else None)}
-                 for i, b in enumerate(bots)]
-        assert c.put("/api/bots/order", json={"bots": items}).status_code == 200
-        assert config.get_bot("main").safe is True
-        assert _live(ws) is True
-        assert c.delete("/api/bots/main").status_code == 200
         assert _live(ws) is False
 
 

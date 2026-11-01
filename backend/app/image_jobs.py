@@ -54,7 +54,7 @@ reported so that day is visible rather than mysterious.
 This module is pure: no FastAPI, no database, no broadcasting. It knows how to
 talk to the rig and how to tell a real image from an error page. The routes,
 the placeholder message and the worker loop compose it in main.py, which is
-where the HTTP error mapping and the Safe-Mode rules already live.
+where the HTTP error mapping and the image guard already live.
 
 CONFIGURATION
 -------------
@@ -83,7 +83,7 @@ from typing import Any, ClassVar
 
 import httpx
 
-from . import openclaw_text
+from . import image_guard, openclaw_text
 
 log = logging.getLogger("local-chat.image_jobs")
 
@@ -355,7 +355,7 @@ class RigReadiness:
         """The health-safe half: the verdict, the closed-vocabulary reason and
         its age. `detail` is deliberately NOT here — it is a free sentence
         written by the rig and has been seen to name the rig's own ComfyUI
-        URL, and /api/health is readable by a locked device. It goes to the
+        URL, and /api/health is readable by every signed-in profile. It goes to the
         journal instead, which is where the rest of this module's specifics
         already live."""
         return {"can_render": self.can_render, "reason": self.reason,
@@ -1193,6 +1193,11 @@ class ImageSpec:
             raise ValueError("prompt is required")
         if len(self.prompt) > MAX_PROMPT_CHARS:
             raise ValueError(f"prompt is longer than {MAX_PROMPT_CHARS} characters")
+        # The two hard lines (adult-only; no sexual imagery of real people).
+        # Here, so the inline marker, the REST route, a spec re-read off a
+        # queued row and the Image Studio all share one rule. Raises
+        # ImageGuardError, a ValueError with a user-facing message.
+        image_guard.check_prompt(self.prompt)
         self.workflow = (self.workflow or "").strip()[:80]
         self.negative = (self.negative or "").strip()[:MAX_PROMPT_CHARS]
         # Square brackets are REMOVED from the caption, not rejected, and it
@@ -1349,7 +1354,7 @@ TERMINAL_STATES = (DONE, FAILED, CANCELLED)
 # Same shape (and the same reasoning) as the reaction fire-failure counter:
 # /api/health exposes the COUNT so an operator watching the box can see image
 # jobs failing without the prompts, rig errors and bot names leaking into a
-# route a locked device can reach. The details stay in the journal.
+# route every signed-in profile can reach. The details stay in the journal.
 # --------------------------------------------------------------------------- #
 
 _FAILURES: list[dict] = []
@@ -1461,8 +1466,8 @@ def extract_pic_markers(content: str) -> tuple[str, list[tuple[str, str]]]:
     A marker that never closes is a different animal and is removed EVERYWHERE
     (see :data:`_PIC_REMNANT_RE`): it renders nothing, it is never
     documentation, and leaving it produced the worst outcome available —
-    `here you go [[pic:a blue teapot` sitting in the family thread, on the
-    locked tablets too, with no picture.
+    `here you go [[pic:a blue teapot` sitting in the thread, on every
+    screen, with no picture.
     """
     if not content or not _PIC_HINT_RE.search(content):
         return content, []

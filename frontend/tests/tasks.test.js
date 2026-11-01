@@ -50,7 +50,7 @@ async function boot() {
     }
     return { ok: false, status: 404, json: async () => ({}), headers: new win.Headers() };
   };
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   return win;
 }
@@ -60,7 +60,7 @@ async function boot() {
 // tasks.js pulls in i18n and the DOM helpers, so it is imported only after a DOM exists.
 async function loadTasks() {
   const win = await boot();
-  return { win, Tasks: await import('../static/js/tasks.js?v=1') };
+  return { win, Tasks: await import('../static/js/tasks.js?v=4') };
 }
 
 test('slug and @mention parsing', { skip: dom.skip }, async () => {
@@ -90,7 +90,7 @@ test('the list query leaves empty filters out', { skip: dom.skip }, async () => 
     { state: 'failed', agent_id: 'a1', profile: 'p', since: '2026-10-01', limit: 100 });
 });
 
-test('what a profile is offered follows /api/auth/me, and a Restricted one nothing', { skip: dom.skip }, async () => {
+test('what a profile is offered follows /api/auth/me alone', { skip: dom.skip }, async () => {
   const { Tasks } = await loadTasks();
   const owner = Tasks.accessFrom({ role: 'owner', permissions: ['*'], restricted: false });
   assert.deepEqual(owner, { dispatch: true, approve: true, manage: true, operator: true });
@@ -98,14 +98,14 @@ test('what a profile is offered follows /api/auth/me, and a Restricted one nothi
   assert.deepEqual(member, { dispatch: true, approve: false, manage: false, operator: false });
   const plain = Tasks.accessFrom({ role: 'member', permissions: ['use_chat'], restricted: false });
   assert.equal(plain.dispatch, false);
-  const kid = Tasks.accessFrom({ role: 'restricted', permissions: ['use_chat', 'dispatch_agents', '*'], restricted: true });
-  assert.deepEqual(kid, { dispatch: false, approve: false, manage: false, operator: false });
+  const basic = Tasks.accessFrom({ role: 'basic', permissions: ['use_chat'] });
+  assert.deepEqual(basic, { dispatch: false, approve: false, manage: false, operator: false });
   assert.deepEqual(Tasks.accessFrom(null), Tasks.NO_ACCESS);
 });
 
 test('the timeline model builds a tree from parent ids and merges tool results', { skip: dom.skip }, async () => {
   await boot();
-  const C = await import('../static/js/task_card.js?v=1');
+  const C = await import('../static/js/task_card.js?v=4');
   const evs = [
     { seq: 0, type: 'status', state: 'queued' },
     { seq: 1, type: 'status', state: 'running' },
@@ -145,10 +145,10 @@ test('the timeline model builds a tree from parent ids and merges tool results',
 
 test('costs are always labelled as estimates', { skip: dom.skip }, async () => {
   await boot();
-  const C = await import('../static/js/task_card.js?v=1');
+  const C = await import('../static/js/task_card.js?v=4');
   assert.equal(C.costLabel({ cost_usd: 0.0123 }), 'about $0.0123 (estimate)');
   assert.equal(C.costLabel({ cost_usd: 1.5 }), 'about $1.50 (estimate)');
-  assert.equal(C.costLabel({ cost_usd: null, tokens: 1200 }), `Tokens: ${(1200).toLocaleString()} (estimate)`);
+  assert.equal(C.costLabel({ cost_usd: null, tokens: 1200 }), `Usage: ${(1200).toLocaleString()} tokens (estimate)`);
   assert.equal(C.costLabel({ cost_usd: null, tokens: 0 }), '');
   assert.equal(C.durationLabel(75), '1 min 15 s');
   assert.equal(C.durationLabel(null), '');
@@ -192,14 +192,26 @@ test('the agent form round-trips and keeps what the form does not show', async (
   const b2 = A.formToBody(f);
   assert.deepEqual(b2.published_to, ['*']);
   assert.equal(b2.spec.budget.max_wall_clock_s, 300);
-  assert.deepEqual(b2.spec.backend_options, { keep: 1, agent_id: 'lead' });
+  // 4.3 review: options belong to one backend, so a switch starts from none
+  assert.deepEqual(b2.spec.backend_options, { agent_id: 'lead' });
+  // ...and a field cleared on the same backend is dropped, not kept from before
+  const oc = A.specToForm({ id: 'ag_2', name: 'Seat', published_to: [],
+    spec: { backend: 'openclaw', backend_options: { agent_id: 'old-seat', keep: 1 } } });
+  assert.equal(oc.seat, 'old-seat');
+  oc.seat = '';
+  assert.deepEqual(A.formToBody(oc).spec.backend_options, { keep: 1 });
+  const mg = A.specToForm({ id: 'ag_3', name: 'M', published_to: [],
+    spec: { backend: 'openclaw', backend_options: { agent_id: 'old-seat' } } });
+  mg.backend = 'managed'; mg.managed_env = 'env_1';
+  assert.deepEqual(A.formToBody(mg).spec.backend_options, { environment_id: 'env_1' },
+    'an OpenClaw seat never becomes a Managed agent id');
 });
 
 // ------------------------------------------------------------------ approval cards
 
 test('an approval card offers "for this task" only when the server does, and answers through onAnswer', { skip: dom.skip }, async () => {
   const win = await boot();
-  const { approvalCardEl } = await import('../static/js/approval_card.js?v=1');
+  const { approvalCardEl } = await import('../static/js/approval_card.js?v=4');
   const answers = [];
   const onAnswer = async (d, s) => { answers.push([d, s]); };
   const destructive = approvalCardEl({ request_id: 'r1', tool: 'Bash', args_summary: '{"command": "rm -rf x"}', scopes: ['once'] }, { onAnswer });
@@ -226,7 +238,7 @@ test('an approval card offers "for this task" only when the server does, and ans
 
 test('someone who may not approve sees the request but no buttons', { skip: dom.skip }, async () => {
   await boot();
-  const { approvalCardEl } = await import('../static/js/approval_card.js?v=1');
+  const { approvalCardEl } = await import('../static/js/approval_card.js?v=4');
   const card = approvalCardEl({ request_id: 'r3', tool: 'Bash', scopes: ['once'] }, { canAnswer: false });
   assert.equal(card.querySelector('button'), null);
   assert.match(card.textContent, /Waiting for someone who can approve agent actions/);
@@ -234,7 +246,7 @@ test('someone who may not approve sees the request but no buttons', { skip: dom.
 
 test('a failed answer re-enables the buttons and says why', { skip: dom.skip }, async () => {
   await boot();
-  const { approvalCardEl } = await import('../static/js/approval_card.js?v=1');
+  const { approvalCardEl } = await import('../static/js/approval_card.js?v=4');
   const card = approvalCardEl({ request_id: 'r4', tool: 'Bash', scopes: ['once'] },
     { onAnswer: async () => { throw Object.assign(new Error('gone'), { userMessage: 'That approval request is not pending any more.' }); } });
   card.querySelector('[data-act="allow-once"]').click();
@@ -260,7 +272,7 @@ function fakeApi(over = {}) {
     agentsAvailable: rec('agentsAvailable', { agents: [
       { id: 'a1', name: 'Helper', backend: 'openclaw', backend_label: 'OpenClaw', available: true, data_leaves_host: false, description: 'helps' },
       { id: 'a2', name: 'Code Reviewer', backend: 'claude_sdk', backend_label: 'Claude Agent', available: true, data_leaves_host: true },
-    ], budget: { usd_per_day: 2, spent_today_usd: 0.5 } }),
+    ] }),
     tasks: rec('tasks', (q) => ({ tasks: [TASK(), TASK({ id: 't2', agent_name: 'Other', state: 'awaiting_approval', pending_approval_count: 1 })]
       .filter((x) => !q || !q.state || x.state === q.state) })),
     task: rec('task', (id) => ({ task: TASK({ id }), approvals: [] })),
@@ -283,7 +295,7 @@ function fakeApi(over = {}) {
 
 test('the task card shows the timeline, the estimate, and live frames; a gap asks for what was missed', { skip: dom.skip }, async () => {
   const win = await boot();
-  const C = await import('../static/js/task_card.js?v=1');
+  const C = await import('../static/js/task_card.js?v=4');
   const api = fakeApi();
   const card = C.createTaskCard({ api, canApprove: true, showOwner: true, toast() {}, confirm: async () => true });
   win.document.body.append(card.el);
@@ -292,7 +304,7 @@ test('the task card shows the timeline, the estimate, and live frames; a gap ask
   await tick(5);
   const head = card.el.querySelector('.task-head').textContent;
   assert.match(head, /Helper/); assert.match(head, /OpenClaw/); assert.match(head, /Running/);
-  assert.match(head, /Sam/); assert.match(head, /about \$0\.02 \(estimate\)/); assert.match(head, /Turns: 2/);
+  assert.match(head, /Sam/); assert.match(head, /about \$0\.02 \(estimate\)/); assert.match(head, /Steps: 2/);
   assert.equal(card.el.querySelector('.task-text').textContent, 'hi there');
   assert.equal(card.el.querySelector('.task-tool-name').textContent, 'Read');
   assert.equal(card.el.querySelector('.task-timeline').getAttribute('role'), 'log');
@@ -320,7 +332,7 @@ test('the task card shows the timeline, the estimate, and live frames; a gap ask
 
 test('Stop, steer, Resume and End are real buttons that call the right routes', { skip: dom.skip }, async () => {
   const win = await boot();
-  const C = await import('../static/js/task_card.js?v=1');
+  const C = await import('../static/js/task_card.js?v=4');
   const api = fakeApi();
   const asked = [];
   const card = C.createTaskCard({ api, canApprove: true, toast() {}, confirm: async (m, o) => { asked.push([m, o]); return true; } });
@@ -328,7 +340,7 @@ test('Stop, steer, Resume and End are real buttons that call the right routes', 
   card.load(TASK({ state: 'running', last_seq: -1 }), [], []);
   await tick(5);
   const labels = () => [...card.el.querySelectorAll('.task-controls button')].map((b) => b.textContent);
-  assert.deepEqual(labels(), ['Stop', 'Steer', 'End task']);
+  assert.deepEqual(labels(), ['Stop', 'Send a note', 'End task']);
   card.el.querySelector('.task-stop').click();
   card.el.querySelector('.task-steer-input').value = '  go left  ';
   card.el.querySelector('.task-steer .btn').click();
@@ -353,7 +365,7 @@ test('Stop, steer, Resume and End are real buttons that call the right routes', 
 
 test('live frames do not rebuild the controls: focus and a half-typed steer message survive', { skip: dom.skip }, async () => {
   const win = await boot();
-  const C = await import('../static/js/task_card.js?v=1');
+  const C = await import('../static/js/task_card.js?v=4');
   const card = C.createTaskCard({ api: fakeApi(), canApprove: true, toast() {}, confirm: async () => true });
   win.document.body.append(card.el);
   card.load(TASK({ state: 'running', last_seq: -1 }), [], []);
@@ -374,7 +386,7 @@ test('live frames do not rebuild the controls: focus and a half-typed steer mess
 
 test('a hand-off card waiting for Send shows Send / Dismiss only to someone who may approve', { skip: dom.skip }, async () => {
   const win = await boot();
-  const C = await import('../static/js/task_card.js?v=1');
+  const C = await import('../static/js/task_card.js?v=4');
   const api = fakeApi();
   for (const [canApprove, want] of [[true, ['Send', 'Dismiss']], [false, []]]) {
     const card = C.createTaskCard({ api, canApprove, toast() {}, confirm: async () => true });
@@ -388,7 +400,7 @@ test('a hand-off card waiting for Send shows Send / Dismiss only to someone who 
 
 test('agent and tool text is rendered as text, never as markup', { skip: dom.skip }, async () => {
   const win = await boot();
-  const C = await import('../static/js/task_card.js?v=1');
+  const C = await import('../static/js/task_card.js?v=4');
   const card = C.createTaskCard({ api: fakeApi(), canApprove: true, toast() {} });
   win.document.body.append(card.el);
   card.load(TASK(), [
@@ -476,11 +488,11 @@ test('Assign task: the dialog posts the origin thread, tells where the prompt go
   const dlg = win.document.getElementById('assign-backdrop');
   const select = dlg.querySelector('#assign-agent');
   assert.deepEqual([...select.options].map((o) => o.text), ['Helper · OpenClaw', 'Code Reviewer · Claude Agent']);
-  assert.match(dlg.querySelector('#assign-hint').textContent, /runs on this machine/);
+  assert.match(dlg.querySelector('#assign-hint').textContent, /runs on the DisPatch computer/);
   select.value = 'a2';
   select.dispatchEvent(new win.Event('change'));
   assert.match(dlg.querySelector('#assign-hint').textContent, /sent to Claude Agent's service/);
-  assert.match(dlg.textContent, /about \$0\.50 of your \$2\.00 limit/);
+  assert.doesNotMatch(dlg.textContent, /limit/, '4.0: no per-profile agent budget line');
   dlg.querySelector('#assign-prompt').value = 'review the diff';
   fail = Object.assign(new Error('x'), { userMessage: "This agent's budget for today is used up.", fix: 'Try tomorrow.' });
   dlg.querySelector('form').dispatchEvent(new win.Event('submit', { cancelable: true }));
@@ -557,7 +569,6 @@ const AGENTS_DATA = (over = {}) => ({
   ] },
   creds: { route: 'api_key', routes: ['api_key', 'bedrock', 'google', 'foundry'], api_key_set: false, api_key_source: null, provider_env: null },
   settings: { unified_dispatch: false, unified_dispatch_from_env: false, retention_days: 30, max_concurrent: 4 },
-  budgets: { budgets: { p1: { usd_per_day: 1 } } },
   usage: { day: '2026-10-18', estimate: true, spend: [{ day: '2026-10-18', kind: 'agent', subject: 'ag1', usd: 0.0123, tokens: 10, turns: 1, tasks: 1 }] },
   secrets: { secrets: [{ name: 'STUDIOFORGE_MCP_KEY_RO', set: false }] },
   ...over,
@@ -570,11 +581,11 @@ function agentsApi(data = AGENTS_DATA()) {
     calls,
     agents: rec('agents', data.agents), agentBackends: rec('agentBackends', data.backends),
     claudeCredentials: rec('claudeCredentials', data.creds), agentSettings: rec('agentSettings', data.settings),
-    agentProfileBudgets: rec('agentProfileBudgets', data.budgets), agentUsage: rec('agentUsage', data.usage),
+    agentUsage: rec('agentUsage', data.usage),
     agentSecrets: rec('agentSecrets', data.secrets),
     saveClaudeCredentials: rec('saveClaudeCredentials', {}), clearClaudeKey: rec('clearClaudeKey', {}),
     agentCreate: rec('agentCreate', {}), agentSave: rec('agentSave', {}), agentDelete: rec('agentDelete', {}),
-    saveAgentSettings: rec('saveAgentSettings', {}), saveAgentProfileBudget: rec('saveAgentProfileBudget', {}),
+    saveAgentSettings: rec('saveAgentSettings', {}),
     saveAgentSecret: rec('saveAgentSecret', {}), deleteAgentSecret: rec('deleteAgentSecret', {}),
     purgeAgentTasks: rec('purgeAgentTasks', { purged: 2 }),
   };
@@ -595,9 +606,9 @@ test('Agents settings: backends are named "OpenClaw" and "Claude Agent", with wh
   const { host } = await mountAgents(true);
   const rows = [...host.querySelectorAll('.agents-backend')];
   assert.deepEqual(rows.map((r) => r.querySelector('strong').textContent), ['OpenClaw', 'Claude Agent']);
-  assert.match(rows[0].textContent, /Ready/); assert.match(rows[0].textContent, /same machine/); assert.match(rows[0].textContent, /stay on this machine/);
+  assert.match(rows[0].textContent, /Ready/); assert.match(rows[0].textContent, /must run on the DisPatch computer/); assert.match(rows[0].textContent, /stay on this computer/);
   assert.match(rows[1].textContent, /Needs setup/); assert.match(rows[1].textContent, /needs an Anthropic API key/);
-  assert.match(rows[1].textContent, /prompts leave this machine/);
+  assert.match(rows[1].textContent, /your instructions leave this computer/);
   const text = host.textContent;
   assert.doesNotMatch(text, /claude\.ai|oauth/i);
   assert.match(text, /Signing in with a Claude subscription is not supported/);
@@ -628,8 +639,8 @@ test('Agents: only the Owner can switch on host-level powers; an Admin sees them
     const form = host.querySelector('.agents-form');
     const trust = [...form.querySelectorAll('.agents-check')].find((c) => /Trust the repository/.test(c.textContent));
     assert.equal(trust.querySelector('input').disabled, disabled);
-    assert.match(trust.textContent, /hooks will run with this agent's privileges/);
-    const addMcp = [...form.querySelectorAll('button')].find((b) => b.textContent === 'Add MCP server');
+    assert.match(trust.textContent, /scripts inside the repository will run with this agent's permissions/);
+    const addMcp = [...form.querySelectorAll('button')].find((b) => b.textContent === 'Add tool server');
     addMcp.click();
     const stdio = [...form.querySelectorAll('.agents-mcp-row select option')].find((o) => o.value === 'stdio');
     assert.equal(stdio.disabled, disabled);
@@ -667,11 +678,12 @@ test('Agents: limits, retention and the unified-dispatch switch (off by default)
   [...lim.querySelectorAll('button')].find((b) => b.textContent === 'Save').click();
   await tick(10);
   assert.deepEqual(api.calls.find((c) => c[0] === 'saveAgentSettings')[1], { retention_days: 30, max_concurrent: 4, unified_dispatch: true });
-  [...lim.querySelectorAll('button')].find((b) => b.textContent === 'Delete old transcripts now').click();
+  [...lim.querySelectorAll('button')].find((b) => b.textContent === 'Delete old task records now').click();
   await tick(10);
-  assert.ok(rec.toasts.some(([m]) => /Transcripts removed: 2/.test(m)));
+  assert.ok(rec.toasts.some(([m]) => /Task records deleted: 2/.test(m)));
   assert.match(lim.textContent, /about \$0\.0123 across 1 tasks/);
-  assert.equal([...lim.querySelectorAll('.agents-profile-budget legend')].length, 1, 'a Restricted profile has no agent limits to set');
+  assert.equal(lim.querySelector('.agents-profile-budget'), null, '4.0: no per-profile agent budgets');
+  assert.ok(!api.calls.some((c) => /ProfileBudget/.test(c[0])));
 });
 
 test('Agents: MCP secrets show a name and whether it is set - never a value', { skip: dom.skip }, async () => {
@@ -690,7 +702,7 @@ test('Agents: MCP secrets show a name and whether it is set - never a value', { 
 test('api.js carries the agent, task and approval calls with the routes the server declares', () => {
   for (const fn of ['agentsAvailable', 'agents', 'agentCreate', 'agentSave', 'agentDelete', 'agentBackends',
     'claudeCredentials', 'saveClaudeCredentials', 'clearClaudeKey', 'agentSecrets', 'saveAgentSecret',
-    'deleteAgentSecret', 'agentSettings', 'saveAgentSettings', 'agentProfileBudgets', 'saveAgentProfileBudget',
+    'deleteAgentSecret', 'agentSettings', 'saveAgentSettings',
     'agentUsage', 'purgeAgentTasks', 'tasks', 'task', 'taskEvents', 'createTask', 'taskSend', 'taskInterrupt',
     'taskResume', 'taskCancel', 'taskRelease', 'taskDismiss', 'answerApproval']) {
     assert.match(API_SRC, new RegExp(`^\\s{2}${fn}:`, 'm'), fn);
@@ -700,7 +712,7 @@ test('api.js carries the agent, task and approval calls with the routes the serv
 });
 
 test('main.js routes task frames, intercepts @mentions before sending, and mounts the pane', () => {
-  assert.match(MAIN, /import \{ createTasksUi \} from '\.\/tasks\.js\?v=1'/);
+  assert.match(MAIN, /import \{ createTasksUi \} from '\.\/tasks\.js\?v=6'/);
   assert.match(MAIN, /import \{ mountAgentsSettings \} from '\.\/agents\.js\?v=\d+'/);
   assert.match(MAIN, /data\.type\.startsWith\('task\.'\)\) \{ tasksUi\.onFrame\(data\); return; \}/);
   const send = MAIN.slice(MAIN.indexOf('function sendMessage()'));
@@ -718,7 +730,7 @@ test('index.html: the rail button, the thread-menu item, the Agents subsection, 
   assert.match(HTML, /id="thread-menu-assign" hidden/);
   assert.match(HTML, /<details class="settings-sub" id="cxn-agents" data-anchor="agents">/);
   assert.match(HTML, /id="cxn-agents-host"/);
-  assert.match(HTML, /\/static\/tasks\.css\?v=1/);
+  assert.match(HTML, /\/static\/tasks\.css\?v=4/);
 });
 
 test('sw.js precaches the new modules and stylesheet', () => {
@@ -734,4 +746,47 @@ test('no UI string uses a forbidden product label; the verbs are Assign task / S
   assert.equal(EN.agents.connect, 'Connect');
   assert.equal(EN.agents.route_google, 'Google Cloud');
   assert.doesNotMatch(JSON.stringify(EN.agents), /subscription login/i);
+});
+
+// ------------------------------------------------------------------ 4.3 Fable review (chat agent)
+
+test('Fable 12: an empty Tasks page says how to start; "No tasks match." only when a filter is set', { skip: dom.skip }, async () => {
+  const { win, Tasks } = await loadTasks();
+  const api = fakeApi({ tasks: async (q) => { api.calls.push(['tasks', q]); return { tasks: [] }; } });
+  const ui = Tasks.createTasksUi({ api, navButton: win.document.getElementById('tasks-btn'), isDecoy: () => false, toast() {}, confirm: async () => true });
+  await ui.refreshAccess();
+  await ui.openPage();
+  await tick(5);
+  const dlg = win.document.getElementById('tasks-backdrop');
+  const empty = dlg.querySelector('.tasks-empty');
+  assert.equal(empty.hidden, false);
+  assert.equal(empty.textContent, 'No tasks yet. Use Assign task to give an agent a job.');
+  const state = dlg.querySelector('#tasks-f-state');
+  state.value = 'failed';
+  state.dispatchEvent(new win.Event('change', { bubbles: true }));
+  await tick(5);
+  assert.equal(dlg.querySelector('.tasks-empty').textContent, 'No tasks match.');
+  assert.equal(EN.tasks.assign_none, 'No agent is shared with you yet. Ask an Admin.');
+});
+
+test('Fable 12: the Schedules dialog points back to the agent limits in Settings', { skip: dom.skip }, async () => {
+  const { win, Tasks } = await loadTasks();
+  const calls = [];
+  const rec = (name, ret) => async (...a) => { calls.push([name, ...a]); return ret; };
+  const api = {
+    me: rec('me', { role: 'admin', protected: false, permissions: ['dispatch_agents', 'manage_agents'] }),
+    agentsAvailable: rec('agentsAvailable', { agents: [{ id: 'ag1', name: 'Researcher', available: true }] }),
+    agents: rec('agents', { agents: [], profiles: [] }), tasks: rec('tasks', { tasks: [] }),
+    agentSettings: rec('agentSettings', {}), agentSchedules: rec('agentSchedules', { schedules: [], limits: {} }),
+  };
+  const opened = [];
+  const ui = Tasks.createTasksUi({ api, navButton: win.document.getElementById('tasks-btn'), toast() {}, confirm: async () => true, openSettings: (tgt) => opened.push(tgt) });
+  await ui.refreshAccess();
+  await ui.openSchedules();
+  await tick(5);
+  const link = win.document.querySelector('#sched-backdrop .sched-limits-link');
+  assert.ok(link, 'a link to the limits');
+  assert.equal(link.textContent, 'Agent limits are in Settings → AI & Connections → Agents');
+  link.click();
+  assert.deepEqual(opened, ['connections#agents']);
 });

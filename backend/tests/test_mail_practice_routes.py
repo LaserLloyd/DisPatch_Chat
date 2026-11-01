@@ -55,7 +55,7 @@ def _unlock(client: TestClient, pin: str = "1234") -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Locked / Safe Mode gating — the load-bearing requirement for both tabs.
+# Signed-out gating — the load-bearing requirement for both tabs.
 # --------------------------------------------------------------------------- #
 
 
@@ -67,7 +67,7 @@ def test_mail_status_403_no_pin(route_client):
 def test_mail_status_403_locked(route_client):
     auth.set_pin("1234")
     r = route_client.get("/api/mail/status")
-    assert r.status_code == 403
+    assert r.status_code in (401, 403)
 
 
 def test_practice_proxy_403_no_pin(route_client):
@@ -78,7 +78,7 @@ def test_practice_proxy_403_no_pin(route_client):
 def test_practice_proxy_403_locked(route_client):
     auth.set_pin("1234")
     r = route_client.get("/api/practice/board")
-    assert r.status_code == 403
+    assert r.status_code in (401, 403)
 
 
 def test_mail_and_practice_404_when_disabled(route_client, monkeypatch):
@@ -88,16 +88,16 @@ def test_mail_and_practice_404_when_disabled(route_client, monkeypatch):
     assert route_client.get("/api/practice/board").status_code == 404
 
 
-def test_decoy_blocked_prefixes_cover_mail_and_practice():
-    assert main._decoy_blocked("GET", "/api/mail/status") is True
-    assert main._decoy_blocked("GET", "/api/practice/board") is True
-    assert main._decoy_blocked("POST", "/api/practice/clients/c1/actions/build") is True
+def test_signed_out_blocked_prefixes_cover_mail_and_practice():
+    assert main._signed_out_blocked("GET", "/api/mail/status") is True
+    assert main._signed_out_blocked("GET", "/api/practice/board") is True
+    assert main._signed_out_blocked("POST", "/api/practice/clients/c1/actions/build") is True
     # The DisPatch-local "site links" overlay is a sibling feature under a
     # sibling path, not literally /api/practice/* — it must be covered by the
-    # SAME belt-and-braces prefix, or a decoy session could read/write it even
-    # though _require_practice's own _deny_decoy_mutation also blocks it.
-    assert main._decoy_blocked("GET", "/api/practice-links/c1") is True
-    assert main._decoy_blocked("PUT", "/api/practice-links/c1") is True
+    # SAME belt-and-braces prefix, or a signed-out session could read/write it
+    # (the route's own use_tools:practice requirement is the second layer).
+    assert main._signed_out_blocked("GET", "/api/practice-links/c1") is True
+    assert main._signed_out_blocked("PUT", "/api/practice-links/c1") is True
 
 
 # --------------------------------------------------------------------------- #
@@ -330,8 +330,8 @@ def test_practice_links_403_no_pin(route_client):
 
 def test_practice_links_403_locked(route_client):
     auth.set_pin("1234")
-    assert route_client.get("/api/practice-links/c1").status_code == 403
-    assert route_client.put("/api/practice-links/c1", json={}).status_code == 403
+    assert route_client.get("/api/practice-links/c1").status_code in (401, 403)
+    assert route_client.put("/api/practice-links/c1", json={}).status_code in (401, 403)
 
 
 def test_practice_links_404_when_disabled(route_client, monkeypatch):

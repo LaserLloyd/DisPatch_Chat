@@ -42,6 +42,10 @@ services:
         # --build-context voice-src=<dir> --build-arg VOICE_SRC=local` (docs/voice.md).
         VOICE: ${VOICE:-0}
         VOICE_REF: ${VOICE_REF:-refs/heads/main}
+        # 1 = include the Claude Agent backend (claude-agent-sdk, which bundles the
+        # `claude` CLI; about 300 MB more image). Needed only for agents of type
+        # "Claude Agent" (Settings -> Agents); the API key is set in the app.
+        AGENTS_CLAUDE: ${AGENTS_CLAUDE:-0}
     container_name: dispatch
     hostname: dispatch
 
@@ -78,11 +82,12 @@ services:
       #   127.0.0.1           this host only; use this when Caddy fronts it
       - "${BIND_ADDR:-0.0.0.0}:${HOST_PORT:-8765}:8765"
     #
-    # ⚠ Do NOT use `network_mode: host`. The app grants unauthenticated access
-    # to its machine-to-machine endpoints when the peer address is loopback.
-    # In bridge mode nothing outside can ever present as 127.0.0.1, so that
-    # exemption is safe. On the host network, anything on the box — including
-    # another container you gave host networking to — can.
+    # ⚠ Do NOT use `network_mode: host`. With `machine_loopback_trust: true` in
+    # security.yaml (an install upgraded from before 4.3 keeps it), a keyless
+    # caller whose peer address is loopback counts as a machine; an install nobody
+    # has claimed yet also answers loopback browsers. In bridge mode nothing outside
+    # can present as 127.0.0.1. On the host network, anything on the box —
+    # including another container you gave host networking to — can.
 
     # -----------------------------------------------------------------------
     #  Configuration
@@ -105,6 +110,23 @@ services:
       LOCAL_CHAT_DATA_DIR: /data
       LOCAL_CHAT_HOST: 0.0.0.0
       LOCAL_CHAT_PORT: 8765
+      # HOME on the data volume, so a read-only root still lets the voice add-on keep
+      # its rig token and the Claude Agent SDK its ~/.claude (the image sets the same;
+      # stated here for images built before 4.3). The entrypoint creates it if missing.
+      HOME: /data/home
+      # The port people reach the app on, for the setup banner ("open
+      # http://localhost:<port>"): the container itself always listens on 8765.
+      # DISPATCH_PUBLIC_URL in .env, when set, wins over this.
+      DISPATCH_PUBLIC_PORT: ${HOST_PORT:-8765}
+      # Forwarded headers (X-Forwarded-For / -Proto) are believed only from a peer in
+      # this list: the optional Caddy service below, at its fixed address on this
+      # project's network (see `networks:` at the bottom). That keeps per-client
+      # sign-in throttles and Secure cookies working behind Caddy. Deliberately NOT
+      # the whole subnet: the bridge gateway is in it, and published-port traffic can
+      # arrive from the gateway (rootless podman's port forwarder, Docker's userland
+      # proxy), so trusting it would let any client forge its address. Without the
+      # proxy profile nothing holds this address and nothing is trusted.
+      DISPATCH_TRUSTED_PROXIES: ${DISPATCH_NET_PREFIX:-172.29.87}.10/32
 
     # RUN_AS=0:0 lets the entrypoint chown the data directory to PUID:PGID and
     # then drop privileges — the escape hatch for a bind mount owned by a UID
@@ -144,10 +166,21 @@ services:
       # the data directory as its own route instead, which keeps the URL and
       # removes the requirement for Docker Engine 26+ / Compose v2.26+.
 
-    # ⚠ Do NOT mount /tmp as tmpfs here. Uploads spool through TMPDIR before
-    # reaching the blob store and the per-file ceiling is 4 GiB — on tmpfs
-    # that is a 4 GiB RAM allocation, and on a Pi that is the OOM killer. The
-    # image points TMPDIR at /data/tmp for exactly this reason.
+    # -----------------------------------------------------------------------
+    #  Read-only root
+    # -----------------------------------------------------------------------
+    # Nothing stateful lives in the image: chats.db (+ WAL), avatars, uploads,
+    # config.yaml, backups/, the upload spool (TMPDIR=/data/tmp) and HOME
+    # (/data/home) are all on the data volume, so a read-only root costs
+    # nothing and makes any stray write fail loudly instead of vanishing on
+    # the next `up`.
+    read_only: true
+    # A SMALL /tmp, only for libraries that hard-code /tmp. Uploads do NOT go
+    # here: they spool through TMPDIR (/data/tmp, real disk) and the per-file
+    # ceiling is 4 GiB, which on a big tmpfs would be a 4 GiB RAM allocation
+    # and on a Pi the OOM killer. Keep TMPDIR on /data; keep this one small.
+    tmpfs:
+      - /tmp:size=64m
 
     # -----------------------------------------------------------------------
     #  Health
@@ -222,6 +255,11 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp"     # HTTP/3
+    # A fixed address on the project network: the app trusts X-Forwarded-For /
+    # -Proto from exactly this address (DISPATCH_TRUSTED_PROXIES above).
+    networks:
+      default:
+        ipv4_address: ${DISPATCH_NET_PREFIX:-172.29.87}.10
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
       ACME_EMAIL: ${ACME_EMAIL:-}
@@ -243,6 +281,21 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+
+# The project network, with its subnet declared so the Caddy service can have a
+# fixed address that the app trusts for forwarded headers. Containers that get an
+# address automatically draw from the upper half (ip_range), so nothing else can
+# ever be handed Caddy's .10. If 172.29.87.0/24 collides with a network you  # scrub-ok: the compose project's own private subnet, not a real LAN
+# already have ("Pool overlaps"), set DISPATCH_NET_PREFIX in .env (three octets,
+# e.g. 172.30.42); everything below and DISPATCH_TRUSTED_PROXIES follow it.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${DISPATCH_NET_PREFIX:-172.29.87}.0/24
+          ip_range: ${DISPATCH_NET_PREFIX:-172.29.87}.128/25
+          gateway: ${DISPATCH_NET_PREFIX:-172.29.87}.1
 
 
 volumes:

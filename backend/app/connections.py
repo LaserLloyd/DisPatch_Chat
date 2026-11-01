@@ -262,7 +262,7 @@ class Connection:
             return "env"
         return "none"
 
-    def public(self, in_use_by: list[str] | None = None) -> dict:
+    def public(self, in_use_by: list[str] | None = None, in_use_personal: int = 0) -> dict:
         kind = self.credential_kind()
         return {
             "id": self.id, "name": self.name, "type": self.type, "type_label": self.ctype.label,
@@ -273,8 +273,23 @@ class Connection:
             "default_model": self.default_model, "models": list(self.models),
             "models_checked_at": self.models_checked_at, "last_test": dict(self.last_test),
             "created": self.created, "updated": self.updated,
-            "in_use_by": list(in_use_by or []),
+            "in_use_by": list(in_use_by or []), "in_use_personal": int(in_use_personal),
         }
+
+
+def neutral_labels(conns: list[Connection]) -> dict[str, str]:
+    """A label per connection that says only what kind it is: the type label, plus a number when
+    there is more than one of that type ("OpenAI-compatible server 2"), in creation order. This is
+    what non-Admins see: an Admin-chosen or auto-made name may carry an address or an account."""
+    by_type: dict[str, list[Connection]] = {}
+    for c in conns:
+        by_type.setdefault(c.type, []).append(c)
+    out: dict[str, str] = {}
+    for rows in by_type.values():
+        rows.sort(key=lambda c: (c.created or "", c.id))
+        for i, c in enumerate(rows, 1):
+            out[c.id] = c.ctype.label + (f" {i}" if len(rows) > 1 else "")
+    return out
 
 
 def _row(r: sqlite3.Row) -> Connection:
@@ -476,6 +491,121 @@ def _secret_name(conn_id: str) -> str:
     return f"connection.{conn_id}"
 
 
+def key_fingerprint(key: str) -> str:
+    """A short one-way fingerprint of a key ("" for none), for matching two references to the
+    same account. Never shown anywhere: the invariant report says ids, not fingerprints."""
+    key = (key or "").strip()
+    if not key:
+        return ""
+    import hashlib
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+def env_of(c: Connection | None) -> str:
+    """The environment variable ``c`` reads its key from ("" when it reads none)."""
+    if c is not None and c.credential_ref.startswith("env:"):
+        return c.credential_ref[4:]
+    return ""
+
+
+# --------------------------------------------------------------------------- #
+# Host-level key rules (4.3, #31): only the protected Admin binds a server variable
+# --------------------------------------------------------------------------- #
+
+ENV_KEY_OWNER_ONLY = ("Only the Owner can use a key stored on the DisPatch computer "
+                      "for a connection.")
+KEY_MOVE_OWNER_ONLY = ("This connection keeps its saved key, so only the Owner can change its address. "
+                       "Paste the key again (or remove it) to change the address yourself.")
+
+
+def _protected(principal: Any) -> bool:
+    # Duck-typed (policy.Principal) and fail-closed: no principal is not the protected Admin.
+    return bool(getattr(principal, "is_protected", False))
+
+
+def require_env_binding(principal: Any, old: str | None, new: str | None) -> None:
+    """Naming an environment variable of THIS process as a key hands its value to whatever
+    server the key is sent to, so a new or changed ``api_key_env`` needs the protected Admin.
+    Keeping the variable the record already names (``new == old``: a rename, a model change, a
+    re-save of the same form) stays every Admin's. Raises ConnectionError_
+    ``env_key_owner_only`` (403)."""
+    new_name = (new or "").strip()
+    if not new_name or new_name == (old or "").strip() or _protected(principal):
+        return
+    raise ConnectionError_("env_key_owner_only", ENV_KEY_OWNER_ONLY, 403)
+
+
+def origin_key(url: str) -> tuple[str, str, int | None]:
+    """(scheme, host, port) with the default port filled in: the server a key would reach."""
+    try:
+        p = urlparse((url or "").strip())
+        port = p.port
+    except ValueError:
+        return ("", "", None)
+    scheme = (p.scheme or "").lower()
+    if port is None:
+        port = {"http": 80, "https": 443}.get(scheme)
+    return (scheme, (p.hostname or "").lower().rstrip("."), port)
+
+
+def same_server(a: str, b: str) -> bool:
+    """Do ``a`` and ``b`` reach the same server (scheme, host and port)? A key may follow a
+    path change on one server, never a move to another host, port or scheme."""
+    ka, kb = origin_key(a), origin_key(b)
+    return bool(ka[1]) and ka == kb
+
+
+def moves_key(existing: Connection, changes: dict[str, Any]) -> bool:
+    """Would this PATCH send ``existing``'s saved credential (stored or environment) to a
+    different server? False when it brings a new key or clears it."""
+    if "base_url" not in changes or not existing.credential_ref:
+        return False
+    if str(changes.get("api_key") or "").strip() or changes.get("clear_key"):
+        return False
+    new = str(changes.get("base_url") or existing.ctype.base_url)
+    return not same_server(new, existing.base_url)
+
+
+def entry_url(entry: dict | None) -> str:
+    """The server a provider entry (an ``api`` / ``advisor.providers`` dict) talks to: its
+    connection's address, else its inline ``base_url``, else the provider's default."""
+    if not entry:
+        return ""
+    ref = str(entry.get("connection") or "").strip()
+    c = get(ref) if ref else None
+    if c is not None:
+        return c.base_url
+    from . import llm_api
+    prov = llm_api.PROVIDER_BY_ID.get(str(entry.get("provider") or ""))
+    return str(entry.get("base_url") or (prov.base_url if prov else "")).strip().rstrip("/")
+
+
+def entry_env(entry: dict | None) -> str:
+    """The environment variable a provider entry reads its key from (its connection's, else its
+    inline ``api_key_env``)."""
+    if not entry:
+        return ""
+    ref = str(entry.get("connection") or "").strip()
+    return env_of(get(ref) if ref else None) or str(entry.get("api_key_env") or "").strip()
+
+
+def require_inline_key_rules(principal: Any, entry: dict | None, *, provider_id: str, base_url: str,
+                             api_key: str = "", api_key_env: str = "") -> None:
+    """The #31 rules for the legacy "Connect an AI" paths (``/api/llm/connect``,
+    ``/api/llm/quicksetup``), which write a bot's provider entry and on a re-save carry its
+    saved key over: (1) a variable that ``entry`` does not already name for the same provider
+    and server needs the protected Admin; (2) a re-save that sends no key but points the same
+    provider at ANOTHER server would carry the entry's inline key (or variable) there, so it
+    needs the protected Admin too. Raises ConnectionError_ (403)."""
+    same = bool(entry) and str(entry.get("provider") or "") == provider_id
+    here = same and same_server(entry_url(entry), base_url)
+    require_env_binding(principal, entry_env(entry) if here else "", api_key_env)
+    if (same and not here and not (api_key or "").strip() and not (api_key_env or "").strip()
+            and (str(entry.get("api_key") or "").strip() or str(entry.get("api_key_env") or "").strip())
+            and not _protected(principal)):
+        raise ConnectionError_("permission_denied", KEY_MOVE_OWNER_ONLY, 403)
+
+
 # --------------------------------------------------------------------------- #
 # Create / update / delete
 # --------------------------------------------------------------------------- #
@@ -528,7 +658,10 @@ def create(*, type: str, name: str = "", base_url: str = "", api_key: str = "",
         if get(cid) is not None:
             raise ConnectionError_("connection_exists", f"A connection with the id {cid!r} already exists.", 409)
     else:
-        cid = new_id(ct.id if not name else name)
+        # The id is built from the TYPE, never from the name: a non-Admin sees connection ids
+        # (/api/me/backends, a personal bot's backend) and an Admin's name may carry an address
+        # or an account, which neutral_labels() keeps from them.
+        cid = new_id(ct.id)
     ref = ""
     key = (api_key or "").strip()
     env_name = (api_key_env or "").strip()
@@ -604,11 +737,13 @@ def delete(conn_id: str) -> None:
     c = get(conn_id)
     if c is None:
         raise ConnectionError_("connection_not_found", "Unknown connection", 404)
-    users = used_by(conn_id)
-    if users:
+    household, personal = usage(conn_id)
+    if household or personal:
+        names = {b.id: b.name or b.id for b in config.load_bots()}
+        who = [names.get(i, i) for i in household] + ([f"{personal} personal bot(s)"] if personal else [])
         raise ConnectionError_(
             "connection_in_use",
-            f"{c.name} is used by {', '.join(users)}. Point those characters at another connection first.", 409)
+            f"{c.name} is used by {', '.join(who)}. Point those characters at another connection first.", 409)
     if c.credential_ref.startswith("secret:"):
         secret_store.delete(c.credential_ref[7:])
     with _lock, connect() as con:
@@ -627,15 +762,28 @@ def blocks_of(entry: dict) -> list[dict]:
     return out
 
 
-def used_by(conn_id: str) -> list[str]:
-    """Ids of the characters whose provider entries refer to ``conn_id``."""
-    users = []
+def _users(conn_id: str) -> list:
+    out = []
     for b in config.load_bots():
         entries = ([b.api] if b.api else []) + [
             p for p in (b.advisor or {}).get("providers") or [] if isinstance(p, dict)]
         if any(str(e.get("connection") or "") == conn_id for e in entries):
-            users.append(b.id)
-    return users
+            out.append(b)
+    return out
+
+
+def used_by(conn_id: str) -> list[str]:
+    """Ids of the characters whose provider entries refer to ``conn_id``."""
+    return [b.id for b in _users(conn_id)]
+
+
+def usage(conn_id: str) -> tuple[list[str], int]:
+    """What the Admin's Connections page may say about who uses ``conn_id``: the ids of the
+    household characters (the page names them), and only a COUNT of personal bots (they
+    belong to other profiles; their names and ids are not the Admin's to read)."""
+    users = _users(conn_id)
+    return ([b.id for b in users if b.scope != "personal"],
+            sum(1 for b in users if b.scope == "personal"))
 
 
 # --------------------------------------------------------------------------- #
@@ -1079,16 +1227,31 @@ def _signature(provider_id: str, block: dict) -> tuple[str, str, str]:
     key = str(block.get("api_key") or "").strip()
     env_name = str(block.get("api_key_env") or "").strip()
     if key:
-        import hashlib
-        return provider_id, base, "k:" + hashlib.sha256(key.encode()).hexdigest()[:16]
+        return provider_id, base, "k:" + key_fingerprint(key)
     return provider_id, base, ("e:" + env_name) if env_name else ""
+
+
+def _existing_signatures(c: Connection) -> list[tuple[str, str, str]]:
+    """The signatures an inline block may match ``c`` by: type + address + the key reference
+    (an env name), and for a stored secret type + address + the key's fingerprint, so a re-run
+    after a crash between "connection created" and "roster written" (the block still holds its
+    key) reuses the connection instead of making a second one with the same key (4.3, N-14)."""
+    base = c.base_url.rstrip("/")
+    prov = c.ctype.provider
+    if c.credential_ref.startswith("secret:"):
+        # (prov, base, "") as before 4.3: a key-less block on the same server shares it.
+        fp = key_fingerprint(credential(c))
+        return ([(prov, base, "k:" + fp)] if fp else []) + [(prov, base, "")]
+    env_name = env_of(c)
+    return [(prov, base, ("e:" + env_name) if env_name else "")]
 
 
 def adopt_inline(roster: list[dict], *, dry_run: bool = False) -> AdoptPlan:
     """Give every inline provider block in ``roster`` (raw config.yaml entries) a connection.
 
-    Idempotent: a block that already has ``connection`` is left alone; a second block with the
-    same provider, address and key reuses the first one's connection. The API key moves into the
+    Idempotent: a block that already has ``connection`` is left alone; a block with the same
+    provider, address and key as an existing connection (a stored key is compared by its
+    fingerprint) or as an earlier block reuses that connection. The API key moves into the
     secret store (read back before it is removed from the file); ``provider`` / ``base_url`` /
     ``model`` and everything else stay inline and readable. ``roster`` is edited in place and the
     caller writes it. With ``dry_run`` nothing is created and nothing is edited."""
@@ -1096,10 +1259,10 @@ def adopt_inline(roster: list[dict], *, dry_run: bool = False) -> AdoptPlan:
     plan = AdoptPlan()
     sigs: dict[tuple[str, str, str], str] = {}
     for c in (list_all_ro() if dry_run else list_all()):
-        # Existing connections are matched on type + address + key reference only when the
-        # reference is an env name or no key (a stored secret cannot be fingerprint-matched).
-        env_name = c.credential_ref[4:] if c.credential_ref.startswith("env:") else ""
-        sigs[(c.ctype.provider, c.base_url.rstrip("/"), ("e:" + env_name) if env_name else "")] = c.id
+        # Existing connections are matched on type + address + key: an env name, no key, or the
+        # fingerprint of a stored secret. The first (oldest) connection wins.
+        for sig in _existing_signatures(c):
+            sigs.setdefault(sig, c.id)
     planned: dict[tuple[str, str, str], str] = {}
     for entry in roster:
         for block in blocks_of(entry):
@@ -1114,7 +1277,10 @@ def adopt_inline(roster: list[dict], *, dry_run: bool = False) -> AdoptPlan:
             cid = sigs.get(sig) or planned.get(sig)
             if cid is None:
                 ct = TYPES[TYPE_BY_PROVIDER[pid]]
-                label = ct.label + (f" ({sig[1].split('//')[-1]})" if ct.editable_base_url else "")
+                # Never derive a name from the address: names reach non-Admin screens.
+                n_same = sum(1 for c in list_all_ro() if c.type == ct.id) + sum(
+                    1 for s in planned if TYPE_BY_PROVIDER.get(s[0]) == ct.id)
+                label = ct.label + (f" {n_same + 1}" if n_same else "")
                 if dry_run:
                     cid = "<new>"
                     planned[sig] = cid

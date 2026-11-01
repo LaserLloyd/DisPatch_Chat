@@ -10,10 +10,10 @@ with no entry (fail closed).
 Reading an entry::
 
     ("POST", "/api/bots", R(MANAGE_CHARACTERS))
-        needs the manage_characters permission (Owner, Admin; or a profile granted it)
+        needs the manage_characters permission (Admins, or a profile granted it)
     ("GET",  "/api/bots", R(USE_CHAT, scoped=True, machine=[BOTS_READ]))
-        any role that can chat; a Restricted caller is let through but the handler
-        narrows the list to audience=restricted|all characters. A machine holding the
+        any role that can chat; a caller is let through but the handler narrows the
+        list to the characters ``characters.may_use`` allows it. A machine holding the
         machine:bots_read scope may call it too.
     ("GET",  "/", public("the app shell"))
         the explicit PUBLIC marker - no credential, and the note says why.
@@ -23,6 +23,8 @@ role holds is the matrix there.
 """
 
 from __future__ import annotations
+
+import re
 
 from .contracts.permissions import MachineScope as M
 from .contracts.permissions import Permission as P
@@ -43,10 +45,12 @@ def _r(methods: str | tuple[str, ...], path: str, req: Requirement) -> None:
 # --------------------------------------------------------------------------- #
 _r("GET", "/", public("the app shell; carries no data"))
 _r("GET", "/api/health", Requirement(public=True, machine=(M.HEALTH_DETAIL.value,),
-   note="liveness for anyone; the handler adds detail only for Owner/Admin or a machine holding machine:health_detail"))
+   note="liveness for anyone; the handler adds detail only for an Admin or a machine holding machine:health_detail"))
+_r("GET", "/api/health/invariants", _R(P.ADMIN_SYSTEM, machine=[M.HEALTH],
+   note="the 4.2 data invariants (I1-I8): ids and counts only, never a name or a chat"))
 _r("GET", "/api/quick-actions", public("static list of built-in prompt shortcuts"))
 _r("GET", "/api/auth/status", public("the lock screen needs it; detail is added only for a signed-in caller"))
-_r("GET", "/api/auth/me", public("who am I, what may I do - answers Restricted too"))
+_r("GET", "/api/auth/me", public("who am I, what may I do - answers every caller"))
 _r("POST", "/api/auth/unlock", public("credential check; throttled per device, profile and address"))
 _r("POST", "/api/auth/login", public("credential check; throttled per device, profile and address"))
 _r("POST", "/api/auth/switch", public("quick profile switch; stepping up needs the target's credential"))
@@ -64,10 +68,10 @@ _r("GET", "/tools/_t/{ticket}/{rel:path}", public("capability URL: the random, e
 # --------------------------------------------------------------------------- #
 _r("POST", "/api/auth/remember-config", _R(P.MANAGE_SETTINGS))
 _r("POST", "/api/auth/forget-devices", _R(P.MANAGE_SETTINGS))
-_r("POST", "/api/auth/password", _R(P.MANAGE_SETTINGS, note="YOUR password: only the Owner and Admins have one"))
-_r("POST", "/api/auth/pin", _R(P.USE_CHAT, note="YOUR OWN PIN (a Member or an Admin; current credential required, throttled); the Owner's is the install PIN"))
-_r("POST", "/api/auth/api-token", _R(P.MANAGE_SETTINGS, note="the Owner and Admins (checked in the handler); shown once"))
-_r("GET", "/api/auth/api-token", _R(P.MANAGE_SETTINGS, note="reports whether a token exists; never the token"))
+_r("POST", "/api/auth/password", _R(P.MANAGE_SETTINGS, note="YOUR password: only Admins have one"))
+_r("POST", "/api/auth/pin", _R(P.USE_CHAT, note="YOUR OWN PIN (a User, Basic or Admin profile; current credential required, throttled); the main Admin's is the install PIN"))
+_r("POST", "/api/auth/api-token", _R(P.MANAGE_SETTINGS, host=True, note="the Owner only: rotating the key or changing machine trust/scopes decides who reaches DisPatch without a credential; the new key is shown once"))
+_r("GET", "/api/auth/api-token", _R(P.MANAGE_SETTINGS, note="every Admin: reports whether a token exists, trust and scopes; never the token"))
 
 # People & profiles
 _r("GET", "/api/people", _R(P.MANAGE_USERS))
@@ -79,31 +83,28 @@ _r("DELETE", "/api/people/{profile_id}/pin", _R(P.MANAGE_USERS))
 _r("POST", "/api/people/{profile_id}/password", _R(P.MANAGE_USERS))
 _r("POST", "/api/people/{profile_id}/sign-out", _R(P.MANAGE_USERS))
 _r("GET", "/api/people/devices", _R(P.MANAGE_USERS))
-_r("PUT", "/api/people/devices/this", _R(P.MANAGE_USERS, note="binds the CALLING device"))
 _r("DELETE", "/api/people/devices/{device_id}", _R(P.MANAGE_USERS))
 _r("GET", "/api/people/activity", _R(P.VIEW_ACTIVITY))
 _r("GET", "/api/people/audit", _R(P.VIEW_ACTIVITY))
-_r("GET", "/api/me/activity", _R(P.USE_CHAT, note="a profile's own summary - the disclosure the Restricted UI shows"))
 
 # Web Push
 _r(("POST", "DELETE"), "/api/push/subscribe", _R(P.USE_NOTIFICATIONS))
 _r("GET", "/api/push/vapid", _R(P.USE_NOTIFICATIONS))
 
 # --------------------------------------------------------------------------- #
-# Chat (Restricted can do these, narrowed to the characters it may see)
+# Chat (every role; narrowed to the characters the caller may use and its own chats)
 # --------------------------------------------------------------------------- #
 _r("GET", "/api/bots", _R(P.USE_CHAT, scoped=True, machine=[M.BOTS_READ]))
 _r("GET", "/api/threads", _R(P.USE_CHAT, scoped=True, machine=[M.THREADS]))
-_r("POST", "/api/threads", _R(P.USE_CHAT, machine=[M.THREADS], note="daily thread quota for Restricted"))
+_r("POST", "/api/threads", _R(P.USE_CHAT, machine=[M.THREADS], note="a character the caller may use (characters.may_use)"))
 _r("GET", "/api/threads/{thread_id}", _R(P.USE_CHAT, scoped=True, machine=[M.THREADS]))
 _r("GET", "/api/threads/{thread_id}/messages", _R(P.USE_CHAT, scoped=True, machine=[M.THREADS]))
 _r("POST", "/api/threads/{thread_id}/messages", _R(P.USE_CHAT, machine=[M.THREADS]))
 _r("POST", "/api/threads/{thread_id}/read", _R(P.USE_CHAT, machine=[M.THREADS]))
 _r("GET", "/api/unread", _R(P.USE_CHAT, scoped=True, machine=[M.THREADS]))
-_r("POST", "/api/messages/{message_id}/feedback", _R(P.USE_CHAT, note="daily feedback quota for Restricted"))
+_r("POST", "/api/messages/{message_id}/feedback", _R(P.USE_CHAT, note="a message in the caller's own chat"))
 _r("GET", "/api/messages/{message_id}/mood-face", _R(P.USE_CHAT, scoped=True))
-_r("POST", "/api/upload", _R(P.USE_CHAT, machine=[M.UPLOAD], note="daily byte quota for Restricted"))
-_r("POST", "/api/drop", _R(P.USE_CHAT, note="daily byte quota for Restricted"))
+_r("POST", "/api/upload", _R(P.ATTACH_FILES, machine=[M.UPLOAD], note="a chat attachment; a machine has a 200 MB/day byte guard"))
 _r("GET", "/api/threads/{thread_id}/avatar", _R(P.USE_CHAT, scoped=True))
 _r("GET", "/api/bots/{bot_id}/avatar", _R(P.USE_CHAT, scoped=True, machine=[M.AVATARS]))
 _r("GET", "/api/bots/{bot_id}/avatar/thumb", _R(P.USE_CHAT, scoped=True, machine=[M.AVATARS]))
@@ -123,28 +124,31 @@ _r("PATCH", "/api/messages/{message_id}", _R(P.MANAGE_HISTORY))
 _r("PATCH", "/api/messages/{message_id}/checklist", _R(P.MANAGE_HISTORY))
 
 # Images and media
-_r("GET", "/api/bots/{bot_id}/avatar/full", _R(P.USE_IMAGES, machine=[M.AVATARS]))
-_r("GET", "/api/media", _R(P.USE_IMAGES))
+_r("GET", "/api/bots/{bot_id}/avatar/full", _R(P.USE_CHAT, machine=[M.AVATARS], note="a character the caller may use"))
+_r("GET", "/api/media", _R(P.USE_CHAT, note="the media store for everyone; agent media folders need dispatch_agents"))
 _r("POST", "/api/image-jobs", _R(P.USE_IMAGES, machine=[M.IMAGE_JOBS]))
 _r("GET", "/api/image-jobs/{job_id}", _R(P.USE_IMAGES, machine=[M.IMAGE_JOBS]))
 
-# File server (upload-only drop box, plus listing for on-box agents)
-_r("GET", "/api/files", _R(P.USE_TOOLS, machine=[M.FILES_LIST]))
-_r("POST", "/api/files", _R(P.USE_TOOLS))
-_r("GET", "/api/files/{file_id}/download", _R(P.USE_TOOLS))
-_r("GET", "/api/files/{file_id}/raw", _R(P.USE_TOOLS))
-_r("DELETE", "/api/files/{file_id}", _R(P.USE_TOOLS))
-_r("POST", "/api/files/wipe", _R(P.ADMIN_SYSTEM, note="deletes the whole File Server"))
+# File server (4.0: per owner). Upload: files_upload (every role). List, download and delete
+# File Server files: files_read and the file's owner (Users and Admins; a Basic profile uploads
+# only). A chat attachment (source='chat') is its owner's to download or delete with use_chat /
+# manage_history. A machine lists the protected Admin's files only.
+_r("GET", "/api/files", _R(P.FILES_READ, machine=[M.FILES_LIST], note="the caller's own files"))
+_r("POST", "/api/files", _R(P.FILES_UPLOAD))
+_r("GET", "/api/files/{file_id}/download", _R(P.USE_CHAT, note="owner only; a File Server file also needs files_read"))
+_r("GET", "/api/files/{file_id}/raw", _R(P.USE_CHAT, note="owner only; a File Server file also needs files_read"))
+_r("DELETE", "/api/files/{file_id}", _R(P.USE_CHAT, note="owner only; files_read (File Server) or manage_history (chat attachment)"))
+_r("POST", "/api/files/wipe", _R(P.FILES_READ, note="deletes the caller's OWN File Server files up to a date"))
 
 # Tools, apps, plugins
-_r("GET", "/api/tools", _R(P.USE_TOOLS, scoped=True, note="Restricted sees only tools flagged safe"))
+_r("GET", "/api/tools", _R(P.USE_TOOLS, scoped=True, note="lists only the panels the caller's use_tools:<id> grants name"))
 _r("GET", "/api/tools/{tool_id}/status", _R(P.USE_TOOLS, scoped=True))
 _r("PUT", "/api/tools", _R(P.MANAGE_PLUGINS))
 _r("POST", "/api/tools/{tool_id}/refresh", _R(P.MANAGE_PLUGINS))
 _r("GET", "/tools/{tool_id}", _R(P.USE_TOOLS, scoped=True))
 _r("GET", "/tools/{tool_id}/{rel:path}", _R(P.USE_TOOLS, scoped=True))
-_r("GET", "/apps/{app_id}", _R(P.USE_TOOLS, scoped=True, note="per-app permission and safe flag from its manifest"))
-_r("GET", "/apps/{app_id}/{rel:path}", _R(P.USE_TOOLS, scoped=True, note="per-app permission and safe flag from its manifest"))
+_r("GET", "/apps/{app_id}", _R(P.USE_TOOLS, scoped=True, note="per-app permission from its manifest"))
+_r("GET", "/apps/{app_id}/{rel:path}", _R(P.USE_TOOLS, scoped=True, note="per-app permission from its manifest"))
 _r("GET", "/api/plugins", _R(P.MANAGE_PLUGINS))
 _r("GET", "/api/plugins/catalog", _R(P.MANAGE_PLUGINS))
 _r("PUT", "/api/plugins/extensions/{ext_id}", _R(P.MANAGE_PLUGINS))
@@ -206,13 +210,16 @@ _r("GET", "/api/advisor/status", _R(P.MANAGE_AGENTS, machine=[M.ADVISOR]))
 _r("POST", "/api/advisor/digest", _R(P.MANAGE_AGENTS, machine=[M.ADVISOR]))
 _r("POST", "/api/advisor/requests/{rid}/send", _R(P.APPROVE_AGENT_ACTIONS, note="the human Send button; a machine may never press it"))
 _r("POST", "/api/advisor/requests/{rid}/dismiss", _R(P.APPROVE_AGENT_ACTIONS))
-_r("GET", "/api/openclaw/sessions", _R(P.MANAGE_AGENTS))
-_r("GET", "/api/openclaw/transcript", _R(P.MANAGE_AGENTS))
-_r("POST", "/api/openclaw/import", _R(P.MANAGE_AGENTS))
+# 4.3 Fable (the owner's decision): these list / read the host's OpenClaw session stores outside the data
+# folder, exactly like /api/recover/transcript: the same host-tier row (the Owner only).
+for _m, _path in (("GET", "/api/openclaw/sessions"), ("GET", "/api/openclaw/transcript"),
+                  ("POST", "/api/openclaw/import")):
+    _r(_m, _path, _R(P.ADMIN_SYSTEM, host=True,
+       note="reads OpenClaw session stores outside the data folder (the caller's own threads only)"))
 
-# Agents and tasks (W11b). A Restricted profile can never hold dispatch_agents
-# (RESTRICTED_NEVER), and none of these is `scoped`, so every one answers 403 to it -
-# listing included. A task or agent you may not see is a 404, decided in the handler.
+# Agents and tasks (W11b). dispatch_agents is Admin-only unless an Admin grants it to a User
+# or Basic profile (4.0 ROLE_GRANTABLE; never the lock-target profile), and none of these is
+# `scoped`, so every one answers 403 to anyone without it - listing included. A task or agent you may not see is a 404, decided in the handler.
 for _methods, _path in (
     ("GET", "/api/agents"), ("POST", "/api/agents"), ("PATCH", "/api/agents/{agent_id}"),
     ("DELETE", "/api/agents/{agent_id}"), ("GET", "/api/agents/backends"),
@@ -220,40 +227,40 @@ for _methods, _path in (
     ("DELETE", "/api/agents/credentials/claude"), ("GET", "/api/agents/secrets"),
     ("PUT", "/api/agents/secrets/{name}"), ("DELETE", "/api/agents/secrets/{name}"),
     ("GET", "/api/agents/settings"), ("PUT", "/api/agents/settings"),
-    ("GET", "/api/agents/profile-budgets"), ("PUT", "/api/agents/profile-budgets/{profile_id}"),
     ("GET", "/api/agents/usage"), ("POST", "/api/agents/retention/purge"),
 ):
-    _r(_methods, _path, _R(P.MANAGE_AGENTS, note="define agents, credentials, budgets, retention (write-only secrets)"))
-_r("GET", "/api/agents/available", _R(P.DISPATCH_AGENTS, note="only agents published to the caller's profile (an Owner/Admin sees all)"))
+    _r(_methods, _path, _R(P.MANAGE_AGENTS, note="define agents, credentials, agent budgets, retention (write-only secrets)"))
+_r("GET", "/api/agents/available", _R(P.DISPATCH_AGENTS, note="only agents published to the caller's profile (an Admin sees all)"))
 for _methods, _path in (
     ("POST", "/api/tasks"), ("GET", "/api/tasks"), ("GET", "/api/tasks/{task_id}"),
     ("GET", "/api/tasks/{task_id}/events"), ("POST", "/api/tasks/{task_id}/send"),
     ("POST", "/api/tasks/{task_id}/interrupt"), ("POST", "/api/tasks/{task_id}/resume"),
     ("POST", "/api/tasks/{task_id}/cancel"),
 ):
-    _r(_methods, _path, _R(P.DISPATCH_AGENTS, note="own tasks; an Owner/Admin sees everyone's"))
+    _r(_methods, _path, _R(P.DISPATCH_AGENTS, note="own tasks; an Admin sees everyone's"))
 _r("POST", "/api/tasks/{task_id}/release", _R(P.APPROVE_AGENT_ACTIONS, note="the human Send for a held handoff; a machine may never press it"))
 _r("POST", "/api/tasks/{task_id}/dismiss", _R(P.APPROVE_AGENT_ACTIONS))
 _r("POST", "/api/approvals/{request_id}", _R(P.APPROVE_AGENT_ACTIONS, note="allow or deny one tool call; destructive tools are asked every time"))
 
 # --------------------------------------------------------------------------- #
-# Settings / system / host control (Owner and Admins: admin_system)
+# Settings / system / host control (Admins: admin_system)
 # --------------------------------------------------------------------------- #
 _r("GET", "/api/openapi.json", _R(P.MANAGE_SETTINGS, machine=[M.OPENAPI]))
 _r("POST", "/api/guide/seed", _R(P.MANAGE_SETTINGS, machine=[M.GUIDE_SEED]))
-_r("GET", "/api/search", _R(P.VIEW_ACTIVITY, note="searches every conversation"))
-_r("GET", "/api/export", _R(P.ADMIN_SYSTEM, note="dumps all history"))
-_r("POST", "/api/recover/transcript", _R(P.ADMIN_SYSTEM))
+_r("GET", "/api/search", _R(P.USE_CHAT, note="the caller's OWN conversations (4.0), every role"))
+_r("GET", "/api/export", _R(P.MANAGE_HISTORY, note="the caller's OWN history (4.0); every profile's chats are only in the encrypted backup"))
+_r("POST", "/api/recover/transcript", _R(P.ADMIN_SYSTEM, host=True,
+   note="reads OpenClaw session stores outside the data folder (the caller's own threads only)"))
 for _path in ("/api/dashboard", "/api/dashboard/deep", "/api/dashboard/logs"):
     _r("GET", _path, _R(P.ADMIN_SYSTEM))
-_r("GET", "/api/local/roots", _R(P.ADMIN_SYSTEM, note="reads arbitrary bytes off the host"))
-_r("GET", "/api/local/stat", _R(P.ADMIN_SYSTEM))
-_r("GET", "/api/local/ls", _R(P.ADMIN_SYSTEM))
-_r("PUT", "/api/local/config", _R(P.ADMIN_SYSTEM))
-_r("GET", "/local/file/{path:path}", _R(P.ADMIN_SYSTEM))
-_r("GET", "/api/mail/status", _R(P.ADMIN_SYSTEM, note="its launch URL carries MailForge's one-time key"))
-_r(("GET", "POST"), "/api/practice/{path:path}", _R(P.ADMIN_SYSTEM, note="same-origin proxy onto the practice box"))
-_r(("GET", "PUT"), "/api/practice-links/{client_id}", _R(P.ADMIN_SYSTEM))
+_r("GET", "/api/local/roots", _R(P.ADMIN_SYSTEM, host=True, note="reads arbitrary bytes off the host"))
+_r("GET", "/api/local/stat", _R(P.ADMIN_SYSTEM, host=True, note="the local file viewer"))
+_r("GET", "/api/local/ls", _R(P.ADMIN_SYSTEM, host=True, note="the local file viewer"))
+_r("PUT", "/api/local/config", _R(P.ADMIN_SYSTEM, host=True, note="names the host folders the viewer serves"))
+_r("GET", "/local/file/{path:path}", _R(P.ADMIN_SYSTEM, host=True, note="a file off the host"))
+_r("GET", "/api/mail/status", _R(P.ADMIN_SYSTEM, host=True, note="its launch URL carries MailForge's one-time key"))
+_r(("GET", "POST"), "/api/practice/{path:path}", _R(P.ADMIN_SYSTEM, host=True, note="same-origin proxy onto the practice box"))
+_r(("GET", "PUT"), "/api/practice-links/{client_id}", _R(P.ADMIN_SYSTEM, host=True, note="the practice box's client links"))
 for _methods, _path in (
     ("GET", "/api/harness/status"), ("POST", "/api/harness/start"), ("POST", "/api/harness/stop"),
     ("POST", "/api/harness/restart"), ("GET", "/api/harness/models"), ("POST", "/api/harness/model"),
@@ -262,7 +269,7 @@ for _methods, _path in (
     ("POST", "/api/harness/sessions"), ("GET", "/api/harness/sessions/{sid}"),
     ("POST", "/api/harness/sessions/{sid}/stop"), ("POST", "/api/harness/sessions/{sid}/dismiss"),
 ):
-    _r(_methods, _path, _R(P.ADMIN_SYSTEM, note="code execution on the host"))
+    _r(_methods, _path, _R(P.ADMIN_SYSTEM, host=True, note="code execution on the host"))
 
 # --------------------------------------------------------------------------- #
 # W5: settings store, connections, characters, packs, wizard, backups
@@ -279,18 +286,30 @@ for _path, _m in (
 ):
     _r(_m, _path, _R(P.MANAGE_CONNECTIONS))
 _r("GET", "/api/characters", _R(P.USE_CHAT, scoped=True, machine=[M.BOTS_READ],
-                                note="the characters this caller may talk to (audience and profile list)"))
+                                note="the characters this caller may talk to (household list, own personal characters)"))
 for _path, _m in (
     ("/api/characters/all", "GET"), ("/api/characters/personas", "GET"), ("/api/characters/order", "PUT"),
-    ("/api/characters", "POST"), ("/api/characters/{character_id}", ("GET", "PATCH", "DELETE")),
+    ("/api/characters", "POST"), ("/api/characters/{character_id}", ("GET", "DELETE")),
+    ("/api/characters/{character_id}/delete-preview", "GET"),
     ("/api/starter-packs", "GET"), ("/api/starter-packs/{pack_id}/install", "POST"),
+    ("/api/starter-packs/{pack_id}/pictures/{character_id}", "GET"),
 ):
     _r(_m, _path, _R(P.MANAGE_CHARACTERS))
+# 4.2 Characters page (app/characters_api.py -> app/characters_manage.py)
+_r("GET", "/api/characters/manage", _R(P.USE_CHAT, scoped=True,
+   note="the caller's own rows (Mine); Household rows (templates) only with manage_characters; copies are numbers per profile"))
+_r("PATCH", "/api/characters/{character_id}", _R(P.CREATE_CHARACTERS, scoped=True,
+   note="one edit route, a per-kind allowlist: a template needs manage_characters, an own bot or copy its owner holding create_characters, an agent bot the protected Admin; anyone else's bot is 404"))
+_r("GET", "/api/characters/{character_id}/give-to/preview", _R(P.MANAGE_CHARACTERS, note="profile ids only, numbers-only notes; mints a token"))
+_r("PUT", "/api/characters/{character_id}/give-to", _R(P.MANAGE_CHARACTERS, note="needs the preview's token; ticks add copies, unticks detach or delete unused ones"))
+_r("POST", "/api/characters/{character_id}/stop-sharing/preview", _R(P.MANAGE_CHARACTERS, note="profile ids only; mints a token"))
+_r("POST", "/api/characters/{character_id}/stop-sharing", _R(P.MANAGE_CHARACTERS, note="needs the preview's token; every copy becomes its owner's own bot, no chat is lost"))
+_r("POST", "/api/me/characters/{bot_id}/share", _R(P.MANAGE_CHARACTERS, note="an Admin shares one of its OWN direct bots (a new template; the original becomes its copy); agent bots and other people's bots refused"))
 _r("GET", "/api/wizard", public("answers only whether a first-run wizard is needed until the caller holds manage_settings"))
 _r("POST", "/api/wizard/detect", _R(P.MANAGE_CONNECTIONS))
 _r("POST", "/api/wizard/connection", _R(P.MANAGE_CONNECTIONS))
 _r("POST", "/api/wizard/family", _R(P.MANAGE_USERS))
-_r("POST", "/api/wizard/network", _R(P.ADMIN_SYSTEM, note="network exposure is host control: the Owner's and the Admins'"))
+_r("POST", "/api/wizard/network", _R(P.ADMIN_SYSTEM, note="network exposure is host control: the Admins'"))
 for _path in ("/api/wizard/step/{step}", "/api/wizard/finish"):
     _r("POST", _path, _R(P.MANAGE_SETTINGS))
 for _path, _m in (
@@ -300,19 +319,126 @@ for _path, _m in (
     ("/api/support-bundle", "POST"),
 ):
     _r(_m, _path, _R(P.ADMIN_SYSTEM))
-_r("GET", "/api/users/{profile_id}/export", _R(P.MANAGE_USERS, note="the Owner and Admins may export anyone; the Owner's own export is the Owner's"))
+_r("GET", "/api/users/{profile_id}/export", _R(P.MANAGE_USERS, note="Admins may export anyone; the main Admin's own export is the main Admin's"))
 _r("DELETE", "/api/users/{profile_id}", _R(P.MANAGE_USERS, note="same rank rules as /api/people"))
 _r("GET", "/api/plugins/manifests", _R(P.MANAGE_PLUGINS))
 _r("GET", "/api/settings/defaults", public("default theme / language / avatar style for a device that has not signed in; no secrets"))
+
+# --------------------------------------------------------------------------- #
+# 4.0 chat-first profiles (BUILD-PLAN-v2). One section per package, so wave packages
+# add their routes here with ``_r(...)`` without touching another package's lines.
+# A route taking a thread / message / bot / profile id must ALSO be listed in
+# OWNER_SCOPED once WP-CORE has ported it (tests/test_route_table.py).
+# --------------------------------------------------------------------------- #
+
+# ---- WP-PROF: profile lifecycle (app/profiles_api.py): reset, my characters, export, copies
+_r(("GET",), "/api/me/reset/preview", _R(P.MANAGE_HISTORY, note="counts only, for the caller's own profile"))
+_r(("POST",), "/api/me/reset", _R(P.MANAGE_HISTORY, note="Reset to default for the caller's own profile; every role, the default profile included"))
+_r(("GET", "POST"), "/api/me/characters", _R(P.CREATE_CHARACTERS, note="the caller's own bots"))
+_r(("GET", "PATCH", "DELETE"), "/api/me/characters/{bot_id}", _R(P.CREATE_CHARACTERS, note="the caller's own bot; anyone else's is 404"))
+_r("GET", "/api/me/characters/{bot_id}/delete-preview", _R(P.CREATE_CHARACTERS, note="counts only (chats, agent, kept_by_reset) for the caller's own bot; anyone else's is 404"))
+_r(("POST",), "/api/me/characters/{bot_id}/avatar", _R(P.CREATE_CHARACTERS, note="the caller's own bot"))
+_r(("POST",), "/api/me/characters/{bot_id}/reset", _R(P.CREATE_CHARACTERS, note="the caller's own copy of a managed bot; anyone else's is 404"))
+_r(("GET",), "/api/me/export", _R(P.MANAGE_HISTORY, note="the caller's own chats and bot setup"))
+_r(("GET",), "/api/me/personas", _R(P.CREATE_CHARACTERS, note="the personality presets (shipped content) for the owner's bot editor"))
+_r(("GET",), "/api/me/backends", _R(P.CREATE_CHARACTERS, note="ids and names of the connections the caller's own bots may use; never a key or URL; empty without choose_backend"))
+_r(("POST",), "/api/characters/{bot_id}/clone", _R(P.CREATE_CHARACTERS, note="a household bot into the caller's own profile; agent bots refused"))
+_r(("POST",), "/api/characters/{bot_id}/clone-to/{profile_id}", _R(P.MANAGE_USERS, note="an Admin copies setup into a profile; chats are never copied"))
+# ---- 4.1 managed bots (app/kits_api.py): a household bot's kit (setup + chats pushed to copies)
+_r(("GET", "PUT", "DELETE"), "/api/characters/{character_id}/kit", _R(P.MANAGE_CHARACTERS, note="a household bot's kit; the copy count is a number, no other profile's bot or chat is read"))
+_r(("POST",), "/api/characters/{character_id}/kit/push", _R(P.MANAGE_CHARACTERS, note="sync every copy now; posts the kit chats each copy has not had, in its owner's chats"))
+_r(("POST",), "/api/people/{profile_id}/reset", _R(P.MANAGE_USERS, note="counts only; the protected Admin only by itself"))
+_r(("GET",), "/api/people/{profile_id}/reset/preview", _R(P.MANAGE_USERS, note="counts only"))
+_r(("GET",), "/api/people/{profile_id}/role/preview", _R(P.MANAGE_USERS, note="counts only"))
+_r(("POST",), "/api/people/{profile_id}/role", _R(P.MANAGE_USERS, note="to Basic deletes the profile's bots and chats after a confirm token"))
+_r(("PUT",), "/api/people/{profile_id}/household-bots", _R(P.MANAGE_USERS, note="which household bots a profile may use"))
+_r(("PUT",), "/api/people/{profile_id}/backends", _R(P.MANAGE_USERS, note="which connections a profile's own bots may run on"))
+_r(("GET",), "/api/people/{profile_id}/delete/preview", _R(P.MANAGE_USERS, note="counts only"))
+_r(("POST",), "/api/people/{profile_id}/delete", _R(P.MANAGE_USERS, note="deletes the profile and its content after a confirm token"))
+
+# ---- WP-AVATAR: profile pictures (app/people_api.py)
+_r(("POST", "DELETE"), "/api/me/avatar", _R(P.USE_CHAT, note="the caller's OWN profile picture, on any profile (the shared default one included, 2026-10-24); a GIF or short video is stored as a small looping WebP"))
+_r(("POST", "DELETE"), "/api/people/{profile_id}/avatar", _R(P.MANAGE_USERS, note="an Admin sets or removes a profile's picture; same rank and lock-target rules as PATCH"))
+_r("GET", "/api/profile-avatars/{name}", public("profile pictures are visible to everyone who uses this DisPatch, the sign-in screen included, by design; the name is a strict pattern with the content hash"))
+
+# ---- WP-AIB: AI build (app/bot_builder_api.py): POST /api/me/characters/draft
+_r("POST", "/api/me/characters/draft", _R(P.CREATE_CHARACTERS,
+   note="AI build: a draft bot from a description; nothing is saved or logged"))
+
+# ---- WP-SCALE-OPS: maintenance, storage, retention (app/maintenance_api.py), all P.ADMIN_SYSTEM
+for _path, _m in (
+    ("/api/maintenance/status", "GET"), ("/api/maintenance/storage", "GET"),
+    ("/api/maintenance/storage/refresh", "POST"), ("/api/maintenance/run", "POST"),
+    ("/api/maintenance/images/preview", "GET"), ("/api/maintenance/retention", ("GET", "PUT")),
+    ("/api/maintenance/images/restore", "POST"),
+):
+    _r(_m, _path, _R(P.ADMIN_SYSTEM, note="host control: storage, retention and the daily maintenance task"))
+_r(("GET", "PUT"), "/api/me/archive", _R(P.MANAGE_HISTORY, note="the caller's OWN 'archive chats older than N months' value; nobody can set another profile's"))
+
+
+# --------------------------------------------------------------------------- #
+# 4.3 rows (one anchor pair per work package; add rows only between your own anchors)
+# --------------------------------------------------------------------------- #
+# ---- 4.3 A1 begin
+# ---- 4.3 A1 end
+
+# ---- 4.3 A4 begin
+_r("POST", "/api/backups/recovery-key/reveal", _R(P.ADMIN_SYSTEM, host=True, note=(
+    "the protected Admin only (host tier; the handler checks it too), after re-entering the PIN or "
+    "password through auth_attempts.guarded_verify; audited backup.reveal_key; answered no-store; "
+    "a passphrase a person chose is never shown (404 no_generated_key)")))
+# ---- 4.3 A4 end
+
+# ---- 4.3 A7 begin
+_r("GET", "/api/agents/claude/routes", _R(P.MANAGE_AGENTS, note="which Claude auth routes can authenticate: env variable NAMES only, never a value"))
+# ---- 4.3 A7 end
+
+# ---- 4.3 A8 begin
+# Agent schedules (#13): a profile's OWN schedules (someone else's id is a 404, decided in the
+# handler); an Admin holding manage_agents also sees every schedule and may switch one off or
+# delete it, never change what it asks or where it posts (agents_schedules_api).
+for _methods, _path in (
+    (("GET", "POST"), "/api/agents/schedules"),
+    (("PATCH", "DELETE"), "/api/agents/schedules/{schedule_id}"),
+):
+    _r(_methods, _path, _R(P.DISPATCH_AGENTS, note="own schedules; an Admin may only switch another's off or delete it"))
+# CLI presets are host code (the command lines the CLI backend may run): protected Admin only.
+_r(("GET", "PUT"), "/api/agents/cli-presets", _R(P.MANAGE_AGENTS, host=True,
+   note="the command lines a CLI agent may run - host code; the handler also requires the protected Admin"))
+# ---- 4.3 A8 end
+
+# ---- 4.3 A13 begin
+# OIDC sign-in (app/oidc_api.py). start/callback are browser navigations to and from the
+# provider: no session can be required (the provider's redirect back is cross-site, so the
+# Strict session cookie is not sent); the single-use state record + PKCE + nonce are the
+# credential, and only an existing link signs in.
+_r("GET", "/api/oidc/start", public("begins an outside sign-in (or, with link=, a link for the caller's own signed-in session - checked in the handler); off until the protected Admin configures it"))
+_r("GET", "/api/oidc/callback", public("the provider's redirect back: the single-use state record (Lax __Host- cookie), PKCE and nonce are the credential; only an existing link signs in; throttled like a PIN"))
+_r(("GET", "PUT"), "/api/oidc/config", _R(P.ADMIN_SYSTEM, host=True, note="who may sign in is host-level: the protected Admin only (checked in the handler until A14); the client secret goes to the secret store and is never returned"))
+_r("GET", "/api/oidc/links", _R(P.USE_CHAT, note="the caller's own sign-in link; the protected Admin sees every profile's (signed-in session required)"))
+_r("DELETE", "/api/oidc/links/{profile_id}", _R(P.USE_CHAT, note="unlink: the profile itself or the protected Admin; anyone else gets 404"))
+# ---- 4.3 A13 end
+
+# ---- 4.3 A14 begin
+# ---- 4.3 A14 end
+
+# ---- 4.3 F1a begin
+_r("PUT", "/api/me/characters/order", _R(P.USE_CHAT, scoped=True,
+   note="the caller's own personal bots only, in the roster slots they already hold; anyone else's id (or a template) is 404; no machine scope"))
+# ---- 4.3 F1a end
+
+# ---- 4.3 fable host
+_r("GET", "/api/system/host-check", _R(P.ADMIN_SYSTEM, host=True,
+   note="the Host guard's mode, this computer's names and addresses, and the unknown names seen; host tier like the settings that change it"))
 
 # --------------------------------------------------------------------------- #
 # Mounts (static trees) and dynamic prefixes
 # --------------------------------------------------------------------------- #
 #: (prefix, requirement) for ``Mount`` routes - first match wins.
 MOUNTS: list[tuple[str, Requirement]] = [
-    ("/static/avatars", public("avatar files; the gate itself narrows to audience=restricted|all characters for a Restricted caller")),
+    ("/static/avatars", public("avatar files; the gate itself refuses a character the caller may not use (characters.may_use)")),
     ("/static", public("the app's own JS/CSS/icons; carries no user data")),
-    ("/media", _R(P.USE_IMAGES, note="chat media")),
+    ("/media", _R(P.USE_CHAT, note="chat media (photos a profile attached, pictures in its chats)")),
 ]
 
 #: WebSocket routes: template -> Requirement for the handshake. Individual
@@ -325,9 +451,9 @@ WS_ROUTES: dict[str, Requirement] = {
 #: Every action on ``/ws`` and the permission it needs. ``ping`` is liveness.
 WS_ACTION_PERMISSIONS: dict[str, Requirement] = {
     "ping": public("liveness"),
-    "send": _R(P.USE_CHAT, note="quota-charged for Restricted"),
-    "retry": _R(P.USE_CHAT, note="quota-charged for Restricted"),
-    "create_thread": _R(P.USE_CHAT, note="quota-charged for Restricted"),
+    "send": _R(P.USE_CHAT, note="a character the caller may use, in its own chat"),
+    "retry": _R(P.USE_CHAT, note="a character the caller may use, in its own chat"),
+    "create_thread": _R(P.USE_CHAT, note="a character the caller may use"),
     "get_threads": _R(P.USE_CHAT, scoped=True),
     "get_messages": _R(P.USE_CHAT, scoped=True),
     "abort": _R(P.MANAGE_HISTORY),
@@ -335,6 +461,190 @@ WS_ACTION_PERMISSIONS: dict[str, Requirement] = {
     "regenerate": _R(P.MANAGE_HISTORY),
     "edit_rerun": _R(P.MANAGE_HISTORY),
 }
+
+# --------------------------------------------------------------------------- #
+# 4.0 ownership: what each path parameter names, and so which owner check runs
+# --------------------------------------------------------------------------- #
+#: path template -> ``thread`` | ``message`` | ``character`` | ``file`` | ``task`` |
+#: ``none: <why>``. EVERY parameterised route is listed (``tests/test_route_table.py``), so a
+#: new ``/{thing_id}`` route cannot ship without somebody saying whose thing it is.
+#:
+#: thread / message / task: enforced (``app/ownership.py``; tasks: ``agents_ws.may_see_task``)
+#: - a resource of somebody else's is a 404. ``character``: ``characters.may_use`` - another
+#: profile's PERSONAL character is a 404 for everyone, Admins included (the gate's
+#: ``_foreign_character_item``); a household one off the caller's list is the route's 403.
+#: ``file``: the File Server / chat attachment's owner (``main._file_access``), 404 otherwise.
+#: ``none``: the parameter is not a per-profile resource, and the reason says why.
+_NONE_ADMIN = "none: profile administration (manage_users, people_api rank rules)"
+OWNER_SCOPED: dict[str, str] = {
+    "/api/threads/{thread_id}": "thread",
+    "/api/threads/{thread_id}/messages": "thread",
+    "/api/threads/{thread_id}/read": "thread",
+    "/api/threads/{thread_id}/abort": "thread",
+    "/api/threads/{thread_id}/avatar": "thread",
+    "/ws/{name}/{thread_id}": "thread",
+    "/api/advisor/requests/{rid}/send": "thread",
+    "/api/advisor/requests/{rid}/dismiss": "thread",
+    "/api/image-jobs/{job_id}": "thread",
+    "/api/image-jobs/{job_id}/callback": "none: the rig's per-job token is the credential and nothing is returned",
+    "/api/messages/{message_id}": "message",
+    "/api/messages/{message_id}/checklist": "message",
+    "/api/messages/{message_id}/feedback": "message",
+    "/api/messages/{message_id}/mood-face": "message",
+    "/api/tasks/{task_id}": "task",
+    "/api/tasks/{task_id}/events": "task",
+    "/api/tasks/{task_id}/send": "task",
+    "/api/tasks/{task_id}/interrupt": "task",
+    "/api/tasks/{task_id}/resume": "task",
+    "/api/tasks/{task_id}/cancel": "task",
+    "/api/tasks/{task_id}/release": "task",
+    "/api/tasks/{task_id}/dismiss": "task",
+    "/api/approvals/{request_id}": "task",
+    "/api/bots/{bot_id}": "character",
+    "/api/bots/{bot_id}/avatar": "character",
+    "/api/bots/{bot_id}/avatar/full": "character",
+    "/api/bots/{bot_id}/avatar/thumb": "character",
+    "/api/bots/{bot_id}/avatar/history": "character",
+    "/api/bots/{bot_id}/avatar/history/{snapshot_id}": "character",
+    "/api/bots/{bot_id}/avatar/restore": "character",
+    "/api/bots/{bot_id}/models": "character",
+    "/api/characters/{character_id}": "character",
+    "/api/avatar-pool/{bot_id}": "character",
+    "/api/avatar-pool/{bot_id}/prompts": "character",
+    "/api/avatar-pool/{bot_id}/refill": "character",
+    "/api/files/{file_id}": "file",
+    "/api/files/{file_id}/download": "file",
+    "/api/files/{file_id}/raw": "file",
+    "/api/reactions/{rid}": "none: the household reaction library (manage_characters)",
+    "/api/reactions/{rid}/image": "none: a household reaction card (every signed-in role)",
+    "/api/agents/{agent_id}": "none: an agent definition is household configuration (manage_agents)",
+    "/api/agents/secrets/{name}": "none: write-only household secret (manage_agents)",
+    "/api/people/{profile_id}": _NONE_ADMIN,
+    "/api/people/{profile_id}/pin": _NONE_ADMIN,
+    "/api/people/{profile_id}/password": _NONE_ADMIN,
+    "/api/people/{profile_id}/sign-out": _NONE_ADMIN,
+    "/api/people/devices/{device_id}": _NONE_ADMIN,
+    "/api/users/{profile_id}": _NONE_ADMIN,
+    "/api/users/{profile_id}/export": "none: account metadata only (no chats), manage_users; the own-data export is /api/me/export (WP-PROF)",
+    "/api/connections/{connection_id}": "none: household configuration (manage_connections)",
+    "/api/connections/{connection_id}/test": "none: household configuration (manage_connections)",
+    "/api/backups/{backup_id}": "none: host control (admin_system); a backup holds every profile's chats, stated in docs/security.md",
+    "/api/backups/{backup_id}/verify": "none: host control (admin_system)",
+    "/api/backups/{backup_id}/restore": "none: host control (admin_system)",
+    "/api/harness/jobs/{job_id}": "none: host control (admin_system: the coding harness)",
+    "/api/harness/sessions/{sid}": "none: host control (admin_system: the coding harness)",
+    "/api/harness/sessions/{sid}/stop": "none: host control (admin_system: the coding harness)",
+    "/api/harness/sessions/{sid}/dismiss": "none: host control (admin_system: the coding harness)",
+    "/api/plugins/extensions/{ext_id}": "none: household plugin switch (manage_plugins)",
+    "/api/practice/{path:path}": "none: host control (admin_system proxy)",
+    "/api/practice-links/{client_id}": "none: host control (admin_system)",
+    "/api/starter-packs/{pack_id}/install": "none: household characters (manage_characters)",
+    "/api/starter-packs/{pack_id}/pictures/{character_id}": "none: a pack's shipped picture, not a household character yet (manage_characters)",
+    "/api/tools/{tool_id}/refresh": "none: household tool (manage_plugins)",
+    "/api/tools/{tool_id}/status": "none: household tool status (use_tools)",
+    "/api/wizard/step/{step}": "none: first-run settings (manage_settings)",
+    "/apps/{app_id}": "none: an app's static page (its manifest permission)",
+    "/apps/{app_id}/{rel:path}": "none: an app's static files (its manifest permission)",
+    "/ext/{ext_id}/{rel:path}": "none: an add-on's public frontend files",
+    "/tools/{tool_id}": "none: a tool panel page (use_tools)",
+    "/tools/{tool_id}/{rel:path}": "none: a tool panel's files (use_tools)",
+    "/tools/_t/{ticket}/{rel:path}": "none: a capability URL (the ticket is the credential)",
+    "/local/view/{ticket}/{rel:path}": "none: a capability URL (the ticket is the credential)",
+    "/local/file/{path:path}": "none: host control (admin_system: files off the host)",
+    # WP-PROF (profiles_api.py / characters_api.py), declared at INT-1.
+    "/api/me/characters/{bot_id}": "character",
+    "/api/me/characters/{bot_id}/avatar": "character",
+    "/api/me/characters/{bot_id}/reset": "character",
+    "/api/me/characters/{bot_id}/delete-preview": "character",
+    "/api/characters/{character_id}/kit": "none: household characters only (manage_characters); copies are counted, never read",
+    "/api/characters/{character_id}/kit/push": "none: household characters only (manage_characters); posts into each copy's owner's chats through the assistant funnel",
+    "/api/me/characters/{bot_id}/share": "character",
+    "/api/characters/{character_id}/give-to": "none: templates only (manage_characters); numbers only",
+    "/api/characters/{character_id}/give-to/preview": "none: templates only (manage_characters); numbers only",
+    "/api/characters/{character_id}/stop-sharing": "none: templates only (manage_characters); numbers only",
+    "/api/characters/{character_id}/stop-sharing/preview": "none: templates only (manage_characters); numbers only",
+    "/api/characters/{bot_id}/clone": "character",
+    "/api/characters/{bot_id}/clone-to/{profile_id}": "character",
+    "/api/characters/{character_id}/delete-preview": "none: household characters only, numbers only (manage_characters)",
+    "/api/people/{profile_id}/reset": _NONE_ADMIN,
+    "/api/people/{profile_id}/reset/preview": _NONE_ADMIN,
+    "/api/people/{profile_id}/role": _NONE_ADMIN,
+    "/api/people/{profile_id}/role/preview": _NONE_ADMIN,
+    "/api/people/{profile_id}/household-bots": _NONE_ADMIN,
+    "/api/people/{profile_id}/backends": _NONE_ADMIN,
+    "/api/people/{profile_id}/delete": _NONE_ADMIN,
+    "/api/people/{profile_id}/delete/preview": _NONE_ADMIN,
+    "/api/people/{profile_id}/avatar": _NONE_ADMIN,
+    "/api/profile-avatars/{name}": "none: a public profile picture file (pictures are visible to all users by design)",
+    # Unparameterised routes that read or write conversations: listed so routes.json says so.
+    "/api/threads": "thread",
+    "/api/unread": "thread",
+    "/api/search": "thread",
+    "/api/export": "thread",
+    "/api/inject": "thread",
+    "/api/daily": "none: the main Admin's daily thread (a machine's sphere)",
+    "/api/reactions/fire": "thread",
+    "/api/image-jobs": "thread",
+    "/api/recover/transcript": "thread",
+    "/api/openclaw/sessions": "thread",
+    "/api/openclaw/transcript": "thread",
+    "/api/openclaw/import": "thread",
+    # ---- 4.3 A1 owner begin
+    # ---- 4.3 A1 owner end
+    # ---- 4.3 A4 owner begin
+    # ---- 4.3 A4 owner end
+    # ---- 4.3 A7 owner begin
+    # ---- 4.3 A7 owner end
+    # ---- 4.3 A8 owner begin
+    "/api/agents/schedules": "none: the caller's own schedules (owner_profile), checked in agents_schedules_api",
+    "/api/agents/schedules/{schedule_id}": "none: a schedule row, owner_profile checked in the handler (another's is a 404; an Admin may only switch it off or delete it)",
+    # ---- 4.3 A8 owner end
+    # ---- 4.3 A13 owner begin
+    "/api/oidc/links/{profile_id}": "none: a profile's own sign-in link; the handler lets only that profile or the protected Admin through (404 otherwise)",
+    # ---- 4.3 A13 owner end
+    # ---- 4.3 A14 owner begin
+    # ---- 4.3 A14 owner end
+    # ---- 4.3 F1a owner begin
+    # ---- 4.3 F1a owner end
+}
+#: App routes (mounted at runtime from ``apps/<id>``): prefix -> owner_scoped.
+OWNER_SCOPED_PREFIXES: dict[str, str] = {
+    "/api/apps/jobboard/": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
+    "/api/jobs/": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
+    "/api/apps/imagestudio/": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+}
+
+
+def owner_scoped_for(template: str) -> str:
+    """What :data:`OWNER_SCOPED` says about ``template`` ("" = undeclared)."""
+    hit = OWNER_SCOPED.get(template)
+    if hit:
+        return hit
+    for pre, val in OWNER_SCOPED_PREFIXES.items():
+        if template.startswith(pre):
+            return val
+    return ""
+
+
+#: Every /ws action that names a thread checks its owner (main._ws_thread); the list is the
+#: caller's own (get_threads); a new thread is stamped with its creator (create_thread).
+WS_ACTION_OWNER_SCOPED: dict[str, str] = {
+    "send": "thread", "retry": "thread", "abort": "thread", "archive_thread": "thread",
+    "regenerate": "thread", "edit_rerun": "thread", "get_messages": "thread",
+    "get_threads": "thread", "create_thread": "none: the new thread is stamped with its creator",
+    "ping": "none: liveness",
+}
+
+from dataclasses import replace as _replace  # noqa: E402
+
+ROUTES[:] = [(ms, p, _replace(req, owner_scoped=owner_scoped_for(p)) if owner_scoped_for(p) else req)
+             for ms, p, req in ROUTES]
+for _t, _req in list(WS_ROUTES.items()):
+    if owner_scoped_for(_t):
+        WS_ROUTES[_t] = _replace(_req, owner_scoped=owner_scoped_for(_t))
+for _a, _req in list(WS_ACTION_PERMISSIONS.items()):
+    if _a in WS_ACTION_OWNER_SCOPED:
+        WS_ACTION_PERMISSIONS[_a] = _replace(_req, owner_scoped=WS_ACTION_OWNER_SCOPED[_a])
 
 _BY_KEY: dict[tuple[str, str], Requirement] = {}
 for _ms, _p, _req in ROUTES:
@@ -352,14 +662,13 @@ _EXTENSION_REQ = _R(P.MANAGE_PLUGINS, note="an installed add-on's operator API (
 
 #: The add-on routes a USER of voice chat reads (2026-10-19, the owner: "Members should have
 #: voice"): what the call screen and Settings -> Voice draw from - the status (on/off, ready, the
-#: voice list), a voice's sample, the cloned-voice list. ``use_voice`` = Member, Admin, Owner. A
-#: Restricted caller holds use_voice for its locked voice socket but not these (``not_restricted``): a
-#: locked device reads the add-on's ``locked_status`` in /api/extensions instead. Everything else under an add-on's prefix - the switch
+#: voice list), a voice's sample, the cloned-voice list. ``use_voice`` = every role by default
+#: (an Admin may switch it off per profile). Everything else under an add-on's prefix - the switch
 #: and server settings (PATCH /settings), cloning, the lab, the rig, model downloads - is voice
 #: ADMINISTRATION and stays ``manage_plugins``.
-_EXTENSION_USE_REQ = _R(P.USE_VOICE, not_restricted=True, note=(
-    "a voice user's read (Member, Admin, Owner; not a Restricted caller, whose locked device reads "
-    "locked_status in /api/extensions). The add-on's other routes are manage_plugins"))
+_EXTENSION_USE_REQ = _R(P.USE_VOICE, note=(
+    "a voice user's read (every role that holds use_voice). The add-on's other routes are "
+    "manage_plugins"))
 EXTENSION_USE_ROUTES: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/api/voice/status"),
     ("GET", "/api/voice/preview"),
@@ -367,11 +676,50 @@ EXTENSION_USE_ROUTES: frozenset[tuple[str, str]] = frozenset({
 })
 
 
+#: 4.0 per-profile voice clones (BUILD-PLAN-v2 §1.12): the add-on enforces ownership inside
+#: its routes; the host gate is coarse. Only while an add-on has declared owned clones
+#: (``ext_profile_hooks.voice_owned_clones_active``) - with an add-on that has not (1.5.0)
+#: the table above applies and every clone route stays Admin-only.
+_EXTENSION_OWNED_USE_REQ = _R(P.USE_VOICE, note=(
+    "voice reads: the add-on lists household voices plus the caller's own clones and serves a "
+    "clone's recordings to its owner only"))
+_EXTENSION_VOICE_LAB_REQ = _R(P.VOICE_LAB, note=(
+    "create / rename / delete / try a line of the caller's own cloned voice (the add-on "
+    "answers 404 to a non-owner)"))
+_VOICE_PROFILE_ONE_RE = re.compile(r"^/api/voice/profiles/[^/]+$")
+_VOICE_PROFILE_FILE_RE = re.compile(r"^/api/voice/profiles/[^/]+/files/.+$")
+_VOICE_PROFILE_SAY_RE = re.compile(r"^/api/voice/profiles/[^/]+/say$")
+
+
+def _owned_voice_requirement(m: str, p: str) -> Requirement | None:
+    if m == "GET" and (p in ("/api/voice/status", "/api/voice/preview", "/api/voice/profiles")
+                       or (_VOICE_PROFILE_ONE_RE.match(p) and p != "/api/voice/profiles/analyse")
+                       or _VOICE_PROFILE_FILE_RE.match(p)):
+        return _EXTENSION_OWNED_USE_REQ
+    if m == "POST" and (p in ("/api/voice/profiles", "/api/voice/profiles/analyse")
+                        or _VOICE_PROFILE_SAY_RE.match(p)):
+        return _EXTENSION_VOICE_LAB_REQ
+    if m in ("PATCH", "DELETE") and _VOICE_PROFILE_ONE_RE.match(p) \
+            and p != "/api/voice/profiles/analyse":
+        return _EXTENSION_VOICE_LAB_REQ
+    return None
+
+
 def extension_requirement(method: str, path: str) -> Requirement:
-    """What one request on an add-on's own routes needs: ``use_voice`` for the reads listed in
-    EXTENSION_USE_ROUTES, ``manage_plugins`` for the rest."""
-    m = method.upper()
-    if (("GET" if m == "HEAD" else m), path.rstrip("/") or "/") in EXTENSION_USE_ROUTES:
+    """What one request on an add-on's own routes needs. While an add-on has declared
+    per-profile clones: ``use_voice`` for the voice reads (status, preview, the voice list,
+    one voice and its recordings) and ``voice_lab`` for creating and changing one's own
+    clones; ``manage_plugins`` (Admin) for everything else. Otherwise the shared-voice table:
+    ``use_voice`` for the reads in EXTENSION_USE_ROUTES, ``manage_plugins`` for the rest."""
+    from . import ext_profile_hooks
+    m = "GET" if method.upper() == "HEAD" else method.upper()
+    p = path.rstrip("/") or "/"
+    if ext_profile_hooks.voice_owned_clones_active():
+        hit = _owned_voice_requirement(m, p)
+        if hit is not None:
+            return hit
+        return _EXTENSION_REQ
+    if (m, p) in EXTENSION_USE_ROUTES:
         return _EXTENSION_USE_REQ
     return _EXTENSION_REQ
 
@@ -380,7 +728,17 @@ def extension_document() -> dict:
     """routes.json's view of the add-on prefixes (registered at runtime, so not in ``routes``)."""
     return {"default": _EXTENSION_REQ.describe(),
             "use": [{"method": m, "path": p, "requirement": _EXTENSION_USE_REQ.describe()}
-                    for m, p in sorted(EXTENSION_USE_ROUTES)]}
+                    for m, p in sorted(EXTENSION_USE_ROUTES)],
+            # 4.0: the table while an add-on declares per-profile clones
+            "owned_clones": {
+                "use_voice": ["GET /api/voice/status", "GET /api/voice/preview",
+                              "GET /api/voice/profiles", "GET /api/voice/profiles/{pid}",
+                              "GET /api/voice/profiles/{pid}/files/{name}"],
+                "voice_lab": ["POST /api/voice/profiles", "POST /api/voice/profiles/analyse",
+                              "PATCH /api/voice/profiles/{pid}", "DELETE /api/voice/profiles/{pid}",
+                              "POST /api/voice/profiles/{pid}/say"],
+                "use_requirement": _EXTENSION_OWNED_USE_REQ.describe(),
+                "voice_lab_requirement": _EXTENSION_VOICE_LAB_REQ.describe()}}
 
 
 def declared() -> dict[tuple[str, str], Requirement]:
@@ -397,18 +755,27 @@ def requirement_for(method: str, template: str | None, path: str) -> Requirement
     if hit is not None:
         # Per-app static pages carry the manifest's permission, not the generic one.
         if template.startswith("/apps/"):
-            return apps_loader.requirement_for(method, path) or hit
+            app_req = apps_loader.requirement_for(method, path)
+            if app_req is None:
+                return hit
+            # ...and keep the declared owner_scoped decision (routes.json publishes it).
+            return _replace(app_req, owner_scoped=hit.owner_scoped) if hit.owner_scoped and \
+                not app_req.owner_scoped else app_req
         return hit
     if template.startswith(("/ws",)):
         return WS_ROUTES.get(template)
     if extensions.owns_path(path):
         return extension_requirement(method, path)
-    return apps_loader.requirement_for(method, path)
+    req = apps_loader.requirement_for(method, path)
+    if req is not None and not req.owner_scoped and owner_scoped_for(template):
+        req = _replace(req, owner_scoped=owner_scoped_for(template))
+    return req
 
 
 def requirement_for_unmatched(method: str, path: str) -> Requirement | None:
     """For a path no route matches: app-shaped paths carry the app requirement, so a
-    Restricted caller is refused (403) instead of told which apps exist (404)."""
+    caller without the app's permission is refused (403) instead of told which apps exist
+    (404)."""
     from . import apps_loader, extensions
     if extensions.owns_path(path):
         return _EXTENSION_REQ

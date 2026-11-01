@@ -1,13 +1,15 @@
 # Backups, restore, the support bundle, and your data
 
-Three kinds of backup sit side by side in `<data>/backups/` and are listed together in **Settings -> System ->
-Backups** (and `GET /api/backups`). All of it is host control (`admin_system`): the **Owner's and the Admins'**.
+Four kinds of backup sit side by side in `<data>/backups/` and are listed together in **Settings -> System ->
+Backups** (and `GET /api/backups`). All of it is host control (`admin_system`): the **Admins'**. Showing the
+generated recovery key again is the Owner's alone (see below).
 
 | Kind | What | Made by |
 |---|---|---|
-| **Encrypted archive** (`archives/dispatch-<time>.dpbk`) | Everything you need on a new computer: a consistent copy of `chats.db`, the roster and settings files, avatars, the reaction pack, the connection API keys, and (if asked) pictures and files | **Back up now**, or the schedule |
+| **Encrypted archive** (`archives/dispatch-<time>.dpbk`) | Everything you need on a new computer: a consistent copy of `chats.db`, the roster and settings files, avatars, the reaction pack, every stored key (see below), and (if asked) pictures and files | **Back up now**, or the schedule |
 | **Snapshot** (`chats-<time>.db`) | The rotating, plain SQLite copy of the database | DisPatch, every 6 hours (`system.backup_interval`, `system.backup_keep`) |
 | **Before upgrade** (`<new version>-<time>/`, e.g. `3.0.0-20261018-065040`) | The files a migration is about to change (`chats.db`, `config.yaml`, `security.yaml`, `trusted-devices.yaml`, `push-subscriptions.json`, `apps-data/imagestudio/images.jsonl`); written only when a step is pending | `uv run python -m app.migrate`, and the server on start; the newest 5 are kept |
+| **Before restore** (`pre-restore-<time>/`) | What a restore is about to replace, `agents/secrets.json` included | A restore, just before it applies; the nightly maintenance keeps the newest 3 (never the newest one). Not deletable from Settings, and never counted as a pre-upgrade copy (4.3) |
 
 ## Encrypted archives
 
@@ -34,6 +36,16 @@ types nothing both need it. That has three consequences:
   (Settings -> System -> Backups) if you want to restore on another computer. A new passphrase applies to new archives;
   an older archive still needs the one it was made with. A passphrase typed into *Back up now* is never saved.
 
+**Show recovery key** (4.3): Settings -> System -> Backups, **the Owner only**, after typing the Owner's PIN or
+password again (throttled like a sign-in, audited as `backup.reveal_key`), shows a key DisPatch generated, in a
+dialog with Copy (`POST /api/backups/recovery-key/reveal`). A passphrase you chose yourself is never shown (404
+`no_generated_key`). The log line of a scheduled archive that made a new key points here.
+
+**What is inside (4.3).** Every secret either store holds travels in the archive's `secrets.json`, each name once:
+connection keys, secret settings, the agents' Anthropic key, gateway token, `MCP_*` and `STUDIOFORGE_*` secrets,
+and anything a later feature stores (the outside sign-in client secret, for example). The archive's own passphrase
+is never inside it.
+
 **The schedule**: turn on `system.encrypted_backup_enabled` (off by default). DisPatch checks every ten minutes and
 writes one when the last is older than `system.encrypted_backup_interval_hours` (24), keeping the newest
 `system.encrypted_backup_keep` (7). `system.encrypted_backup_include_media` adds the media and File Server folders.
@@ -52,14 +64,27 @@ Offline, with DisPatch stopped:
 python -m app.backups --data-dir /path/to/data restore dispatch-20261018-120000.dpbk --passphrase-file pass.txt
 ```
 
-`POST /api/backups/{id}/verify` decrypts and checks an archive without restoring it. Connection keys inside an
-archive go back into the secret store on restore, so a restore onto a new computer keeps your connections working.
+`POST /api/backups/{id}/verify` decrypts and checks an archive without restoring it.
+
+**Keys on restore (4.3).** Each key in the archive goes back to the store that reads it (agent secrets to the agents'
+store, everything else to the secret store), so a restore onto a new computer keeps your connections and agents
+working. A key the restore could not put back, or one the restored data refers to that nobody holds, is listed as
+**`re_enter`**: in the restore answer, in the start-up log, and under Backups ("The last restore could not put back these keys") until it is
+entered again.
+
+**Before-restore copies.** Before a restore replaces anything it copies the current data, `agents/secrets.json`
+included, to `backups/pre-restore-<time>/`. These are their own kind (**Before restore**).
+
+**Pre-upgrade copies (4.3).** The copy a migration makes also holds `agents/secrets.json` and records whether it
+existed (`secrets-state.json`). `python -m app.migrate --restore <dir>` puts it back, or removes it when the copy
+recorded that there was none (a copy made before 4.3 recorded nothing and leaves it alone).
 
 ## Support bundle
 
 `POST /api/support-bundle` (Settings -> System -> *Download support bundle*) returns a zip for a bug report: versions,
-every setting (secrets masked), connection and character summaries, the profiles' roles, the list of backups and the
-end of the log. It **never** contains conversations, uploads or files, API keys, tokens, PINs, passwords, cookies,
+every setting (secrets masked), connection and character summaries, the profiles' roles, the list of backups, agent
+limits and reservations, and the end of the log (`log-tail.txt`: the log file when one is configured, else the last
+2,000 lines kept in memory, redacted the same way). It **never** contains conversations, uploads or files, API keys, tokens, PINs, passwords, cookies,
 the backup passphrase or recovery keys; credential-shaped text in the log is removed, and **character prompts are left
 out unless you tick *Include character prompts***. Read it before you share it; the scrubbing is automatic, you know
 your data best.
@@ -68,11 +93,12 @@ your data best.
 
 `GET /api/users/{profile_id}/export` returns everything DisPatch holds about one profile as JSON: the profile
 (never a PIN or password hash), its devices and sessions, daily usage, its activity rows and the admin actions taken
-on it, and the characters limited to it. `DELETE /api/users/{profile_id}` erases the profile and what is attached to
-it (its activity, usage, sessions, device bindings and its place in character visibility lists); the Owner cannot be
-erased, an Admin cannot touch another Admin, and nobody erases the profile they are using.
+on it, and the household characters it may use. `DELETE /api/users/{profile_id}` erases the profile's activity, usage,
+sessions and devices (it does not delete the profile's bots or chats: the People screen's delete does that, after
+naming the counts); the first Admin cannot be erased, an Admin cannot touch another Admin, and nobody erases the
+profile they are using.
 
-**Conversations are shared by the household in this version and are not attributed to one profile**, so they are not
-part of a per-profile export; use the History export (`GET /api/export`) for the conversations.
+A profile's own chats and bot setup are exported by that profile (Settings → You → Account → Download my chats,
+`GET /api/me/export`); an Admin cannot read them. The History export (`GET /api/export`) is host control.
 
 Everything that changes data here writes an audit row (who, what, which profile - never the data).

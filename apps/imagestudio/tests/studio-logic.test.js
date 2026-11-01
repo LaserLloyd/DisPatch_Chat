@@ -4,17 +4,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   PROMPT_MAX, isGenerateShortcut, shortcutLabel, promptStatus, canGenerate, clampCount, parseSeed,
-  buildRequest, cropRect, defaultCropPos, galleryItems, isMetered,
-  SORTS, normalizeSort, sortRows, clearFromHere,
+  buildRequest, cropRect, defaultCropPos, galleryItems, galleryInfo, isMetered,
+  SORTS, normalizeSort, sortRows, clearFromHere, DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata,
 } from '../static/studio-logic.js';
 
 const key = (over = {}) => ({ key: 'Enter', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, isComposing: false, ...over });
 
-test('Ctrl+Enter and Cmd+Enter generate; plain, Shift, Alt and IME Enter do not', () => {
+test('Shift+Enter, Ctrl+Enter and Cmd+Enter generate; plain, Alt and IME Enter do not', () => {
   assert.equal(isGenerateShortcut(key({ ctrlKey: true })), true);
   assert.equal(isGenerateShortcut(key({ metaKey: true })), true);
   assert.equal(isGenerateShortcut(key()), false, 'plain Enter is a newline');
-  assert.equal(isGenerateShortcut(key({ shiftKey: true })), false);
+  assert.equal(isGenerateShortcut(key({ shiftKey: true })), true);
+  assert.equal(isGenerateShortcut(key({ shiftKey: true, isComposing: true })), false);
+  assert.equal(isGenerateShortcut(key({ shiftKey: true, altKey: true })), false);
   assert.equal(isGenerateShortcut(key({ ctrlKey: true, altKey: true })), false);
   assert.equal(isGenerateShortcut(key({ ctrlKey: true, isComposing: true })), false, 'an IME candidate confirm');
   assert.equal(isGenerateShortcut(key({ key: 'a', ctrlKey: true })), false);
@@ -100,8 +102,10 @@ test('only a provider with a price note is called metered', () => {
 test('the grid sorts oldest first by default or newest first, without touching the input', () => {
   const rows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
   assert.deepEqual(SORTS, ['oldest', 'newest']);
-  assert.equal(normalizeSort(null), 'oldest');
-  assert.equal(normalizeSort('junk'), 'oldest');
+  assert.equal(normalizeSort(null), 'newest', 'no saved preference = newest first');
+  assert.equal(normalizeSort(undefined), 'newest');
+  assert.equal(normalizeSort('junk'), 'newest');
+  assert.equal(normalizeSort('oldest'), 'oldest', 'a saved preference still wins');
   assert.equal(normalizeSort('newest'), 'newest');
   assert.deepEqual(sortRows(rows, 'oldest').map((r) => r.id), ['a', 'b', 'c']);
   assert.deepEqual(sortRows(rows, 'newest').map((r) => r.id), ['c', 'b', 'a']);
@@ -115,4 +119,32 @@ test('"clear from here down" is the picture and everything after it in the shown
   assert.deepEqual(clearFromHere(rows, 'b', 'newest'), ['b', 'a']);
   assert.deepEqual(clearFromHere(rows, 'd', 'newest'), ['d', 'c', 'b', 'a']);
   assert.deepEqual(clearFromHere(rows, 'zz', 'oldest'), []);
+});
+
+test('delete scopes: all, hour, day; junk falls back to the narrowest sensible one', () => {
+  assert.deepEqual(DELETE_SCOPES, ['hour', 'day', 'all']);
+  assert.equal(normalizeScope('day'), 'day');
+  assert.equal(normalizeScope('week'), 'hour');
+  assert.equal(normalizeScope(null), 'hour');
+});
+
+test('the delete confirmation key follows the scope and singular/plural', () => {
+  assert.equal(deleteConfirmKey('hour', 14), 'delete.confirm_hour');
+  assert.equal(deleteConfirmKey('hour', 1), 'delete.confirm_hour_one');
+  assert.equal(deleteConfirmKey('day', 2), 'delete.confirm_day');
+  assert.equal(deleteConfirmKey('all', 1), 'delete.confirm_all_one');
+  assert.equal(deleteConfirmKey('bogus', 3), 'delete.confirm_hour');
+});
+
+test('Details say when the provider optimizer may have rewritten the prompt', () => {
+  const base = { id: 'a', url: '/media/a.png', prompt: 'typed', provider: 'minimax', model: 'image-01' };
+  assert.equal(galleryInfo(base).model, 'minimax · image-01');
+  assert.equal(galleryInfo({ ...base, optimizer: true }).model, 'minimax · image-01 · optimizer on');
+  assert.equal(galleryInfo({ ...base, optimizer: true }).prompt, 'typed', 'the typed prompt is what is shown and copied');
+});
+
+test('sendMetadata carries the prompt, model, seed and the optimizer flag into the chat record', () => {
+  const r = { id: 'i1', prompt: 'a fox', provider: 'minimax', model: 'image-01', seed: 7, optimizer: true };
+  assert.deepEqual(sendMetadata(r), { source: 'image-studio', image_id: 'i1', prompt: 'a fox', model: 'minimax · image-01', seed: 7, optimizer: true });
+  assert.ok(!('optimizer' in sendMetadata({ ...r, optimizer: false })));
 });

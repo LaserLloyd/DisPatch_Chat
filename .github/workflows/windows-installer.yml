@@ -1,0 +1,202 @@
+# =============================================================================
+#  Windows installer: build it, install it, prove it starts, upload it
+# =============================================================================
+#  Builds packaging/windows/dispatch.iss with Inno Setup on windows-latest,
+#  installs the result silently as a normal per-user install, waits for
+#  /api/health, checks that it listens on 127.0.0.1 only, stops it, uninstalls
+#  it and checks the data folder survived. The installer is uploaded as a
+#  workflow artifact. Nothing is published: no release, no upload anywhere else.
+#
+#  Runs on demand (Actions -> Windows installer -> Run workflow) and on version
+#  tags. Never on every push: a Windows build takes several minutes of a
+#  Windows runner and is only interesting for a release.
+# =============================================================================
+name: Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-installer-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The uv bundled into the installer. Exact version: the installer ships this
+  # binary to users, so a bump is a deliberate change. Keep it in step with the
+  # uv that resolved backend/uv.lock.
+  UV_VERSION: "0.12.0"
+  APP_PORT: "8765"
+
+jobs:
+  installer:
+    name: Build and smoke-test the installer
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      # Action majors are kept in step with ci.yml and docker-publish.yml.
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        # Exact version, as in ci.yml (setup-uv publishes no moving major tags).
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Lockfile matches pyproject.toml
+        # The installer runs `uv sync --frozen`, which trusts uv.lock as is. This
+        # is the check that makes that safe: a stale lock fails here, not on a
+        # user's machine.
+        working-directory: backend
+        run: uv lock --check
+
+      - name: App version
+        id: version
+        run: |
+          $m = Select-String -Path backend/app/__init__.py -Pattern '^__version__\s*=\s*"([^"]+)"'
+          if (-not $m) { throw "no __version__ in backend/app/__init__.py" }
+          $v = $m.Matches[0].Groups[1].Value
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$v") {
+            throw "tag $env:GITHUB_REF_NAME does not match the app version $v"
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "DisPatch $v"
+
+      - name: Stage uv.exe and its licences
+        run: |
+          $dest = "packaging/windows/build"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $uv = (Get-Command uv).Source
+          Copy-Item $uv "$dest/uv.exe"
+          $got = (& "$dest/uv.exe" --version)
+          if ($got -notmatch [regex]::Escape($env:UV_VERSION)) { throw "staged uv is '$got', expected $env:UV_VERSION" }
+          foreach ($l in 'LICENSE-MIT', 'LICENSE-APACHE') {
+            Invoke-WebRequest -UseBasicParsing -OutFile "$dest/uv-$l" `
+              -Uri "https://raw.githubusercontent.com/astral-sh/uv/$env:UV_VERSION/$l"
+          }
+          Get-ChildItem $dest
+
+      - name: Check launcher.ps1 parses (Windows PowerShell 5.1 and pwsh)
+        run: |
+          $check = @'
+          $errs = $null; $tokens = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'packaging/windows/launcher.ps1'), [ref]$tokens, [ref]$errs) | Out-Null
+          if ($errs.Count) { $errs | ForEach-Object { Write-Host $_ }; exit 1 }
+          Write-Host "parse OK ($($PSVersionTable.PSVersion))"
+          '@
+          $f = Join-Path $env:RUNNER_TEMP 'parse-check.ps1'
+          Set-Content -Path $f -Value $check -Encoding UTF8
+          pwsh -NoProfile -File $f
+          if ($LASTEXITCODE) { exit 1 }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File $f
+          if ($LASTEXITCODE) { exit 1 }
+
+      - name: Install Inno Setup if the image lacks it
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+            if ($LASTEXITCODE) { throw "choco install innosetup failed" }
+          }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          "ISCC=$iscc" >> $env:GITHUB_ENV
+
+      - name: Build the installer
+        working-directory: packaging/windows
+        run: |
+          & $env:ISCC "/DAppVersion=${{ steps.version.outputs.version }}" dispatch.iss
+          if ($LASTEXITCODE) { throw "iscc failed ($LASTEXITCODE)" }
+          Get-ChildItem Output
+
+      - name: Install silently (per user)
+        run: |
+          $setup = Get-ChildItem packaging/windows/Output/DisPatch-Setup-*.exe | Select-Object -First 1
+          $log = Join-Path $env:RUNNER_TEMP 'install.log'
+          $p = Start-Process -FilePath $setup.FullName -Wait -PassThru -ArgumentList @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/LOG=`"$log`"")
+          if ($p.ExitCode) { throw "installer exit code $($p.ExitCode)" }
+          if (-not (Select-String -Path $log -SimpleMatch 'DisPatch setup finished: OK' -Quiet)) {
+            Get-Content $log -Tail 60
+            throw "the installer's Setup step did not finish OK"
+          }
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\DisPatch'
+          foreach ($f in 'launcher.ps1', 'bin\uv.exe', 'backend\.venv\Scripts\python.exe') {
+            if (-not (Test-Path (Join-Path $app $f))) { throw "missing after install: $f" }
+          }
+          $cfg = Get-Content (Join-Path $env:LOCALAPPDATA 'DisPatch\launcher.json') -Raw | ConvertFrom-Json
+          if ($cfg.host -ne '127.0.0.1') { throw "default listen address is '$($cfg.host)', expected 127.0.0.1" }
+
+      - name: Start it and wait for /api/health
+        run: |
+          $launcher = Join-Path $env:LOCALAPPDATA 'Programs\DisPatch\launcher.ps1'
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $launcher -Action Start
+          if ($LASTEXITCODE) { throw "launcher Start exit code $LASTEXITCODE" }
+          $deadline = (Get-Date).AddSeconds(120)
+          $body = $null
+          while ((Get-Date) -lt $deadline) {
+            try { $body = Invoke-RestMethod "http://127.0.0.1:$env:APP_PORT/api/health" -TimeoutSec 3; break } catch { Start-Sleep 2 }
+          }
+          if (-not $body) { throw "/api/health never answered" }
+          $body | ConvertTo-Json -Depth 4
+          if (@('ok', 'degraded') -notcontains $body.status) { throw "health status '$($body.status)'" }
+          $listen = @(Get-NetTCPConnection -State Listen -LocalPort $env:APP_PORT)
+          $listen | Format-Table LocalAddress, LocalPort, OwningProcess
+          $wide = @($listen | Where-Object { $_.LocalAddress -ne '127.0.0.1' })
+          if ($wide.Count) { throw "listening beyond 127.0.0.1: $($wide.LocalAddress -join ', ')" }
+          if (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'DisPatch\data\chats.db'))) { throw "no chats.db in the data folder" }
+
+      - name: Stop it
+        run: |
+          $launcher = Join-Path $env:LOCALAPPDATA 'Programs\DisPatch\launcher.ps1'
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $launcher -Action Stop
+          if ($LASTEXITCODE) { throw "launcher Stop exit code $LASTEXITCODE" }
+          Start-Sleep 2
+          if (@(Get-NetTCPConnection -State Listen -LocalPort $env:APP_PORT -ErrorAction SilentlyContinue).Count) {
+            throw "still listening after Stop"
+          }
+
+      - name: Uninstall silently; the data folder must stay
+        run: |
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\DisPatch'
+          $unins = Join-Path $app 'unins000.exe'
+          Start-Process -FilePath $unins -Wait -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' | Out-Null
+          # The uninstaller hands over to a copy of itself and returns at once.
+          $deadline = (Get-Date).AddSeconds(180)
+          while ((Test-Path $unins) -and (Get-Date) -lt $deadline) { Start-Sleep 2 }
+          if (Test-Path $unins) { throw "uninstall did not finish" }
+          if (Test-Path (Join-Path $app 'backend')) { throw "program files left behind" }
+          if (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'DisPatch\data\chats.db'))) { throw "uninstall removed the user's data" }
+          if (Get-ScheduledTask -TaskPath '\DisPatch\' -ErrorAction SilentlyContinue) { throw "scheduled task left behind" }
+          Write-Host "uninstalled; data kept"
+
+      - name: Collect logs
+        if: always()
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'installer-logs'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item (Join-Path $env:RUNNER_TEMP 'install.log') $out -ErrorAction SilentlyContinue
+          Copy-Item (Join-Path $env:LOCALAPPDATA 'DisPatch\logs\*') $out -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: DisPatch-Setup-${{ steps.version.outputs.version }}
+          path: packaging/windows/Output/DisPatch-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: installer-logs
+          path: ${{ runner.temp }}/installer-logs
+          if-no-files-found: ignore
+          retention-days: 7

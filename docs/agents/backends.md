@@ -206,11 +206,16 @@ Behaviour:
 - **Approvals.** The worker forwards every `can_use_tool` call to the parent, which
   decides (`decide_permission`): not allowlisted -> deny; `auto` -> allow; otherwise
   `approval_request`, then the answer travels back to the worker. A pending request
-  can wait indefinitely; interrupt, cancel and budget stops deny it.
-- **Policy for every call** belongs in a `PreToolUse` hook, not `can_use_tool`
-  (auto-approved tools never reach the callback - F5, §5 item 8). The adapter does
-  not add path-scoping hooks yet; the workspace sandbox and the allowlist are the
-  boundary today.
+  is denied after `agents.approval_timeout_s` (default 1800 s, recorded `expired`);
+  interrupt, cancel and budget stops deny it too.
+- **Policy for every call (4.3)** lives in `agents/tool_policy.py`:
+  `decide(tool, input, ws_root, bash_allow)`, one pure function used by the worker's
+  `PreToolUse` hook (which sees every call, auto-approved tools included - F5, §5 item 8)
+  and by the parent's `decide_permission`. The hook never answers "allow" (that would
+  skip `can_use_tool`); it answers deny, ask, or the keep-alive. Paths outside the
+  workspace are denied with a reason; Bash runs unasked only on a whole-command match of
+  `approval_policy.bash_allow`. Details: [security.md](security.md#2-permissions-and-approvals).
+  A worker started without a policy block (an older parent) applies the strictest one.
 - **Cost** comes from `ResultMessage.total_cost_usd`, labelled an estimate; the
   adapter re-checks it against 100% of the cap because the SDK can overshoot (R-COST).
   `error_max_budget_usd` and `error_max_turns` become `budget_exceeded`.
@@ -236,10 +241,56 @@ Message shapes in the tests are *derived from the documentation* (F6e, R-SESS,
 R-COST); no recorded real run exists because no API key was available. The first live
 run must be diffed against `tests/agents/agent_fakes.py`.
 
-### Claude Managed Agents, hosted - milestone M2 (not implemented)
+### Provider routes
 
-Facts the M2 adapter must respect (all VERIFIED in RESEARCH.md; the feature is in
-beta and must be opt-in behind a flag, §5 item 20):
+The Claude Agent can reach Claude through the Anthropic API key (the default) or through a
+cloud provider. Since 4.3 each cloud route forwards a fixed list of variable names from the
+**server's environment** into the worker, and refuses to start with `auth_failed`, naming
+what is missing, when a required one is absent. `GET /api/agents/claude/routes`
+(`manage_agents`) answers `{current, routes: [{route, available, missing}]}`, and the
+Settings picker greys out a route this computer cannot use.
+
+**Unverified live:** no cloud credentials were available when this was built; every route
+was tested with fake environments only. The names come from the provider pages of the
+Claude documentation (Amazon Bedrock, Google Vertex AI, Microsoft Foundry, environment
+variables), read on 2026-10-31.
+
+| route (UI) | required | forwarded when set |
+|---|---|---|
+| Amazon Bedrock (`bedrock`) | `AWS_REGION` or `AWS_DEFAULT_REGION`; and one of `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`, `AWS_BEARER_TOKEN_BEDROCK`, `AWS_PROFILE` + `AWS_CONFIG_FILE`, `AWS_PROFILE` + `AWS_SHARED_CREDENTIALS_FILE`, `CLAUDE_CODE_SKIP_BEDROCK_AUTH` | `AWS_SESSION_TOKEN`, `ANTHROPIC_BEDROCK_BASE_URL`, `ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION`, `ANTHROPIC_BEDROCK_REGION_PREFIX`, `CLAUDE_CODE_SKIP_AWS_CRED_CACHE`, model pins |
+| Google Cloud (`google`, Vertex AI) | `ANTHROPIC_VERTEX_PROJECT_ID`; and `GOOGLE_APPLICATION_CREDENTIALS` or `CLAUDE_CODE_SKIP_VERTEX_AUTH` | `CLOUD_ML_REGION`, `ANTHROPIC_VERTEX_BASE_URL`, `VERTEX_REGION_CLAUDE_*`, model pins |
+| Microsoft Foundry (`foundry`) | `ANTHROPIC_FOUNDRY_RESOURCE` or `ANTHROPIC_FOUNDRY_BASE_URL`; and one of `ANTHROPIC_FOUNDRY_API_KEY`, `ANTHROPIC_FOUNDRY_AUTH_TOKEN`, `CLAUDE_CODE_SKIP_FOUNDRY_AUTH` | model pins |
+
+Model pins are `ANTHROPIC_MODEL` and `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`.
+
+This is stricter than the provider documentation on purpose. The worker's `HOME` is
+private, so `~/.aws`, gcloud application-default credentials and `az login` are invisible
+to it; the documented implicit fallbacks (a profile's region, `us-east-1`, ADC, the Azure
+CLI chain, EC2/ECS instance roles) do not work and are not offered. Never forwarded:
+`ANTHROPIC_API_KEY`, `DISPATCH_*`, OAuth tokens, `HOME`, `PATH`, `CLAUDE_CONFIG_DIR`.
+Forwarded values travel over the worker's stdin (`secret_env`), not argv, and those whose
+name contains KEY, SECRET, TOKEN or PASSWORD are registered with the redactor.
+
+A missing API key or route credential is reported before a missing SDK. Inside a container
+the message says to rebuild with `--build-arg AGENTS_CLAUDE=1`.
+
+### Claude Managed Agents, hosted (`managed_adapter`, 4.3: off by default, not verified live)
+
+Built in 4.3 against the documented API and tested only with recorded, synthetic event
+streams; **not verified against the live service**. Switch: `agents.managed.enabled`
+(default off). The API key is the stored Anthropic key. The DisPatch agent names a remote
+agent and environment created in the Console: `backend_options = {agent_id,
+environment_id, agent_version?}`; DisPatch never creates, archives or deletes remote agents,
+environments or sessions. One task is one session; a tool call the remote side parks for a
+decision becomes an approval card when the tool is in the agent's allow-list, otherwise it is
+denied; a USD cap on the task becomes the session's budget (`max_list_cost`, an integer
+string in cents). `session.usage.list_cost` is read as cents, the documented unit ("the amount
+an integer string in minor units - cents", Managed Agents reference); an undocumented decimal
+amount is read as dollars, so an unexpected shape over-counts and stops a run early rather
+than under-counting. Confirm once with a real key before relying on the caps.
+
+Facts the adapter respects (VERIFIED in RESEARCH.md; the feature is in beta and opt-in
+behind a flag, §5 item 20):
 
 - Beta header `managed-agents-2026-04-01` (set by the official SDK); concepts Agent,
   Environment, Session, Events; SSE stream; steer and `user.interrupt` (F7a, R-MA4).
@@ -257,11 +308,19 @@ beta and must be opt-in behind a flag, §5 item 20):
   worker-served custom tools (F7d). Scheduled deployments run on Anthropic's
   infrastructure (R-MA3).
 
-### Generic CLI agent (`cli_adapter.py`) - milestone M3 (stub)
+### Generic CLI agent (`cli_adapter.py`, 4.3)
 
-`GenericCliBackend.start_task` raises `NotImplementedError("M3")`. Two pieces ship now
-and are tested: `build_claude_cli_command(...)`, the preset command line (§5 item 13),
-and `parse_stream_json_line(...)`, a tolerant reader (§5 item 14). The preset is
+Runs a program the Owner saved as a **preset** (`GET/PUT /api/agents/cli-presets`, host
+tier); an agent names one by `backend_options.preset` and can name nothing else. The program
+must print Claude `stream-json` lines (read with `parse_stream_json_line(...)`, a tolerant
+reader, §5 item 14). It runs in the task's workspace with a minimal environment (the preset's
+`env_secrets` resolved from the secret store), the prompt on stdin, in its own process group;
+Stop and cancel end the whole group. It is fully tested here with a fake program. Presets
+are documented for operators in [../agents.md](../agents.md#command-line-programs-the-owner-only).
+
+A `kind: "claude"` preset builds its command line with `build_claude_cli_command(...)`
+(§5 item 13); tools that would need an approval are left out (a program cannot ask), and MCP
+servers with secret headers are refused. The command line is
 `claude --bare -p --output-format stream-json --verbose --include-partial-messages
 --permission-mode <mode> [--permission-prompts none] --allowedTools <list>
 --mcp-config <file> --strict-mcp-config --setting-sources "" --max-turns N
@@ -275,15 +334,16 @@ Only these (F2, F2b, §5 items 1-2):
 
 1. an **Anthropic Console API key**;
 2. **Amazon Bedrock**, **Google Cloud (Agent Platform)** or **Microsoft Foundry**
-   credentials, or **Claude Platform on AWS** (`CLAUDE_CODE_USE_ANTHROPIC_AWS=1`).
+   credentials from the server's environment ([Provider routes](#provider-routes)), or
+   **Claude Platform on AWS** (`CLAUDE_CODE_USE_ANTHROPIC_AWS=1`).
 
 Never a claude.ai login, an OAuth token (`CLAUDE_CODE_OAUTH_TOKEN` is blanked in the
 SDK environment and removed from the worker's), or anyone's subscription limits,
 unless Anthropic has approved it. The API key is read from `secrets.py` (the OS
 keyring if usable, else a 0600 file under the data dir; `ANTHROPIC_API_KEY` in the
 environment overrides) and handed to the worker over its stdin pipe. The adapter's
-`auth_route` selects the provider switch; only the API-key route is covered
-end to end by tests.
+`auth_route` selects the provider switch; the API-key route is covered end to end
+by tests, the cloud routes with fake environments only.
 
 ## What is sent where
 
@@ -292,7 +352,8 @@ end to end by tests.
 | fake | nothing | - |
 | OpenClaw | the user's prompt and file paths | the local OpenClaw gateway (loopback) or CLI; whatever model provider the OpenClaw agent is configured with then sees it |
 | Claude Agent (local) | prompts, tool results, file contents the agent reads, MCP tool output | Anthropic's API (or the chosen cloud provider) from the worker; the workspace and transcripts stay on this machine |
-| Managed Agents (M2) | the same, and the session history is stored there | Anthropic's platform, until deleted |
+| Managed Agents (off by default) | the same, and the session history is stored there | Anthropic's platform, until deleted |
+| CLI preset | whatever the program sends | wherever the program talks to |
 
 The `Capabilities.data_leaves_host` flag carries the first-order answer for the UI.
 Support bundles exclude prompts and instructions by default.
@@ -314,8 +375,8 @@ batching writer, mirrors the task state, cost and session id into `tasks`, and c
 `restore_task` for tasks a restart interrupted (they come back `cancelled` with reason
 `restart`, resumable when the backend kept a session). A per-day spend ledger (`agent_spend`)
 feeds `Budget.max_usd_per_day`: before every run the effective budget is recomputed from the
-ledger and the profile's limits (`BaseBackend.update_budget`), and every `cost_update` is
-re-checked against the shared per-day caps, hard-stopping the task through
+ledger and the agent's own limits (`BaseBackend.update_budget`; 4.0 has no per-profile limits), and every `cost_update` is
+re-checked against the agent's per-day cap, hard-stopping the task through
 `BaseBackend.stop_for_budget`. `BaseBackend.patch_spec`, `any_active`, `has_task`, `is_active`,
 `forget_task` and the `tokens_so_far` / `turns_so_far` arguments of
 `restore_task` were added for it. Routes, frames and the UI are described in

@@ -14,7 +14,7 @@ import pytest
 
 from app import catalog, config, firstrun, image_providers, llm_api, quicksetup
 from tests.test_image_jobs import _png
-from tests.test_platform_bots import _threads, env
+from tests.test_platform_bots import _copy_threads, claim, env
 
 # --------------------------------------------------------------------------- #
 # The catalog is data, and public-clean
@@ -99,11 +99,12 @@ def test_a_probe_that_raises_reads_as_unknown():
 def test_the_guide_can_be_posted_once_on_demand(env, monkeypatch):
     monkeypatch.setenv("DISPATCH_FIRSTRUN", "0")      # an "existing" install
     c = env(real_defaults=True)
-    assert _threads(c) == []
+    _owner, copy = claim(c)                            # the guide is posted on the Admin's Atlas copy
+    assert _copy_threads(c, copy.id) == []
     r = c.post("/api/guide/seed?name=set-up-add-ons")
     assert r.status_code == 200, r.text
-    (t,) = _threads(c)
-    assert t["title"] == "Set up add-ons" and t["id"] == r.json()["thread_id"]
+    (t,) = _copy_threads(c, copy.id)
+    assert t.title == "Set up add-ons" and t.id == r.json()["thread_id"]
     assert c.post("/api/guide/seed?name=set-up-add-ons").status_code == 409
     assert c.post("/api/guide/seed?name=set-up-add-ons&force=true").status_code == 200
     assert c.post("/api/guide/seed?name=nope").status_code == 404
@@ -240,7 +241,7 @@ def test_picture_rules_reach_the_prompt_only_when_they_can_work(monkeypatch):
     assert advisor.PICTURE_RULES not in prompt(cfg)
     monkeypatch.setattr(advisor, "pictures_available", lambda: True)
     assert advisor.PICTURE_RULES in prompt(cfg)
-    assert advisor.PICTURE_RULES not in prompt(cfg.locked_down())
+    # (the 3.x locked_down() view is gone with Safe Mode, WP-ADV; pictures are gated per owner)
     assert advisor.PICTURE_RULES not in prompt(replace(cfg, pictures=False))
     own = replace(cfg, persona="I draw with [[pic:…]] when asked.")
     assert advisor.PICTURE_RULES not in prompt(own)

@@ -3,7 +3,7 @@
 
     python ui-theme/update.py                    update this folder to the latest release
     python ui-theme/update.py --check            report only; exit 1 if an update exists
-    python ui-theme/update.py --ref v1.2.0       pin a release tag (or a branch or commit)
+    python ui-theme/update.py --ref v2.0.0       pin a release tag (or a branch or commit)
     python update.py --dest static/ui-theme      first install: create the folder there
 
 It is a command-line tool; nothing loads it in a page. Python 3.9 or newer,
@@ -22,6 +22,11 @@ It refuses to overwrite a bundle file that was edited by hand (one that matches
 neither the installed nor the new release) unless you pass --force: the bundle
 is replaced whole on every update, so keep app styles in the app. A run that
 stops half way (a file held open) is safe to repeat: it resumes.
+
+A new major version may remove what an app uses, so moving to one is a decision:
+when the folder holds an older major and neither --ref nor --source names the
+target, nothing is written; it says to read CHANGELOG.md and rerun with --ref
+v<new> (exit 1; --check reports the same). Minor and patch releases just update.
 
 files.json proves the download is complete and unaltered; trust in where it
 came from rests on HTTPS to github.com and on pinning a release tag. Hashes
@@ -178,7 +183,51 @@ def read_manifest(folder: Path):
         data = json.loads(path.read_text(encoding="utf-8"))
     except ValueError as exc:
         raise UpdateError(f"{path} is not valid JSON: {exc}") from exc
-    return data if isinstance(data.get("files"), dict) else None
+    if not isinstance(data, dict) or not isinstance(data.get("files"), dict):
+        return None
+    for rel in data["files"]:
+        # The installed files.json decides what is removed: an entry such as ../../x
+        # (a tampered copy in a repository) must not reach outside the folder.
+        inside(folder, rel, path)
+    return data
+
+
+def inside(folder: Path, rel: str, what) -> Path:
+    """folder / rel, refused unless it stays inside folder (also after links are followed)."""
+    p = PurePosixPath(rel.replace("\\", "/"))
+    target = folder / rel
+    if not rel or p.is_absolute() or ".." in p.parts or re.match(r"^[A-Za-z]:", rel):
+        raise UpdateError(f"unsafe path in {what}: {rel} (outside {folder}); refusing to touch it")
+    base, here = folder.resolve(), folder
+    for part in p.parts:  # a folder or file of the copy that is a link leading out of it
+        here = here / part
+        try:
+            here.resolve().relative_to(base)
+        except ValueError:
+            raise UpdateError(f"{here} is a link that leaves the folder; refusing to write through it") from None
+    return target
+
+
+def installed_version(folder: Path, manifest) -> str:
+    """The version of the bundle in folder, from its files.json or else its VERSION ('' if unknown)."""
+    if manifest and manifest.get("version"):
+        return str(manifest["version"])
+    try:
+        text = (folder / "VERSION").read_text(encoding="utf-8", errors="replace").split()
+    except OSError:
+        return ""
+    return text[1] if len(text) > 1 and text[0] in (NAME, *LEGACY_NAMES) else ""
+
+
+def is_major_jump(old: str, new: str) -> bool:
+    """True when both are x.y.z versions and new has the higher major (a date stamp has no major)."""
+    a, b = (re.match(r"(\d+)\.\d", v or "") for v in (old, new))
+    return bool(a and b and int(a.group(1)) < int(b.group(1)))
+
+
+def major_message(repo: str, old: str, new: str) -> str:
+    return (f"{old} -> {new} is a major release: read CHANGELOG.md "
+            f"(https://github.com/{repo}/blob/main/CHANGELOG.md), then rerun with --ref v{new}")
 
 
 def describe(manifest) -> str:
@@ -240,8 +289,15 @@ def local_state(folder: Path, new_files: dict):
 
 def write_file(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:  # keep the file's mode; mkstemp's 0600 would hide a served copy from the web server
+        mode = path.stat().st_mode & 0o777
+    except OSError:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
     fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
+        os.chmod(tmp, mode)
         with os.fdopen(fd, "wb") as fh:
             fh.write(data.replace(b"\r\n", b"\n"))
         for attempt in range(5):
@@ -262,13 +318,16 @@ def apply(folder: Path, files: dict, old_manifest, new_manifest) -> list:
     bundle owned and the new one does not. Returns the changed paths."""
     old = old_manifest["files"] if old_manifest else {}
     owned = set(old) | set(new_manifest["files"])
+    # Every target is checked before anything is touched: a subfolder that is a link to
+    # somewhere else is refused, not written through, and the copy is left as it was.
+    targets = {rel: inside(folder, rel, "the new bundle") for rel in [*new_manifest["files"], MANIFEST]}
     for path in folder.rglob(".*") if folder.exists() else []:
         rel = path.relative_to(folder).as_posix()
         if path.is_file() and leftover_temp(rel, owned):
             path.unlink()
     changed = []
     for rel in sorted(new_manifest["files"]):
-        target = folder / rel
+        target = targets[rel]
         if old.get(rel) == new_manifest["files"][rel] and target.is_file() \
                 and digest(target.read_bytes()) == new_manifest["files"][rel]:
             continue
@@ -278,7 +337,7 @@ def apply(folder: Path, files: dict, old_manifest, new_manifest) -> list:
         if rel not in new_manifest["files"] and (folder / rel).is_file():
             (folder / rel).unlink()
             changed.append(f"{rel} (removed)")
-    write_file(folder / MANIFEST, files[MANIFEST])
+    write_file(targets[MANIFEST], files[MANIFEST])
     return changed
 
 
@@ -288,7 +347,8 @@ def apply(folder: Path, files: dict, old_manifest, new_manifest) -> list:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--ref", default="latest",
-                        help="release tag, branch or commit (default: latest, the newest release tag)")
+                        help="release tag, branch or commit (default: latest, the newest release tag; "
+                             "a newer major version is installed only when named here)")
     parser.add_argument("--repo", default=REPO, help=f"the GitHub repository as user/name (default: {REPO})")
     parser.add_argument("--dest", help="the ui-theme folder to install into or update "
                                        "(default: the folder this script is in)")
@@ -315,6 +375,9 @@ def main(argv=None) -> int:
             print(f"{target}\n  installed: {describe(installed)}\n  available: {NAME} {version} ({args.repo}@{ref})")
             current = installed.get("version") if installed else None
             print("  up to date" if current == version else "  update available")
+            old = installed_version(target, installed)
+            if current != version and args.ref == "latest" and is_major_jump(old, version):
+                print("  " + major_message(args.repo, old, version))
             return 0 if current == version else 1
 
         if args.source:
@@ -323,6 +386,11 @@ def main(argv=None) -> int:
             origin = str(source)
         else:
             ref = resolve_ref(args.repo, args.ref)
+            if args.ref == "latest":  # a new major version is installed only when --ref (or --source) says so
+                old = installed_version(target, read_manifest(target))
+                if is_major_jump(old, ref[1:]):
+                    print(major_message(args.repo, old, ref[1:]), file=sys.stderr)
+                    return 1
             files, used = download_bundle(args.repo, ref, latest=args.ref == "latest")
             origin = f"{args.repo}@{used}"
         new = verify(files)
@@ -355,6 +423,9 @@ def main(argv=None) -> int:
         return 1
     try:
         changed = apply(target, files, current, new)
+    except UpdateError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except OSError as exc:
         print(f"error: could not write {target}: {exc}. Close anything holding the files and rerun: "
               "the update resumes where it stopped.", file=sys.stderr)

@@ -24,9 +24,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  createStore, createCachePainter, scopedKey, keyTier, keyId, tierFor,
+  createStore, createCachePainter, scopedKey, keyTier, keyId,
   DB_NAME, STORE_DRAFTS, STORE_OUTBOX, STORE_MESSAGES,
-  TIER_FULL, TIER_SAFE, MESSAGE_CACHE_ROWS,
+  TIER_FULL, MESSAGE_CACHE_ROWS,
 } from '../static/js/store.js';
 import { createFakeIndexedDB } from './helpers/fake-idb.js';
 
@@ -35,6 +35,8 @@ import { createFakeIndexedDB } from './helpers/fake-idb.js';
 // one that replaces it have.
 const disk = () => createFakeIndexedDB();
 
+// A second tier, only to prove the partition: the app itself uses TIER_FULL alone.
+const TIER_SAFE = 'other';
 const unlocked = (factory) => createStore({ factory, tier: TIER_FULL });
 const locked = (factory) => createStore({ factory, tier: TIER_SAFE });
 
@@ -82,8 +84,6 @@ test('a key carries its tier, and the halves round-trip', () => {
   assert.equal(keyTier(key), TIER_FULL);
   assert.equal(keyId(key), 'thread-42');
   assert.equal(keyTier('not-a-scoped-key'), null);
-  assert.equal(tierFor(true), TIER_SAFE);
-  assert.equal(tierFor(false), TIER_FULL);
 });
 
 // ---------------------------------------------------------------------------

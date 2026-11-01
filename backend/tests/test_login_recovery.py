@@ -24,9 +24,12 @@ OLD = "owner-pass1"
 
 
 @pytest.fixture(autouse=True)
-def strict(monkeypatch):
+def strict(monkeypatch, request):
     """The secure default: an install nobody owns is closed to the network."""
     monkeypatch.delenv("DISPATCH_ALLOW_OPEN_INSTALL", raising=False)
+    if "world" in request.fixturenames:          # 4.3 (#2): this machine says Host: localhost
+        from _localhost import address_loopback_as_localhost
+        address_loopback_as_localhost(request.getfixturevalue("world"), monkeypatch)
     monkeypatch.delenv(recovery.ENV_NAME, raising=False)
 
 

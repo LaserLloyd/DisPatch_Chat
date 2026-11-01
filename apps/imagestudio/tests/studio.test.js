@@ -30,7 +30,7 @@ const ROWS = [
   { id: ID('b'), url: `/media/${ID('b')}.jpg`, prompt: 'second', provider: 'minimax', model: 'image-01', ratio: '16:9', seed: 5 },
 ];
 
-async function page({ nim = false, state = STATE, generate, clear, images, sort } = {}) {
+async function page({ nim = false, state = STATE, generate, clear, images, sort = 'oldest', extra = {} } = {}) {
   const posted = [];
   const env = setupDom(PAGE, PAGE_URL, {
     'GET /apps/imagestudio/locales/en.json': () => [200, EN],
@@ -38,14 +38,15 @@ async function page({ nim = false, state = STATE, generate, clear, images, sort 
     'GET /api/apps/imagestudio/images': images || (() => [200, { images: ROWS }]),
     'POST /api/apps/imagestudio/generate': generate || (() => [200, { images: [], asked: 1 }]),
     'POST /api/apps/imagestudio/clear': clear || (() => [404, { detail: 'no' }]),
+    ...extra,
   });
   env.win.localStorage.setItem('dispatch-lang', 'en');
-  if (sort) env.win.localStorage.setItem('dispatch-imagestudio-sort', sort);
+  if (sort !== null) env.win.localStorage.setItem('dispatch-imagestudio-sort', sort);
   if (nim) env.win.localStorage.setItem('dispatch-nim', '1');
   Object.defineProperty(env.win, 'parent', { configurable: true, get: () => parentWin });
   const parentWin = { postMessage: (m, o) => posted.push([m, o]) };
   globalThis.__ST_NO_AUTOMOUNT = true;
-  const sdk = await import('/static/js/app-sdk.js?v=3');
+  const sdk = await import('/static/js/app-sdk.js?v=7');
   sdk._resetForTest();
   await sdk.ready('en');
   const mod = await import(`/apps/imagestudio/studio.js?t=${Math.random()}`);
@@ -59,6 +60,7 @@ function key(env, el, init) {
   el.dispatchEvent(ev);
   return ev;
 }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const gens = (env) => env.calls.filter((c) => c.key === 'POST /api/apps/imagestudio/generate');
 
 test('it mounts: provider default, prompt counter, recent prompts, per-day count, past results oldest first', { skip: dom.skip }, async () => {
@@ -113,6 +115,7 @@ test('Ctrl+Enter generates exactly like the button; plain Enter only types; the 
   assert.equal(gens(env)[0].body.prompt, 'a cat');
   assert.equal(doc.querySelectorAll('.st-tile').length, 3, 'the new picture joins the grid');
 
+  await sleep(300);   // one keypress = one job: a later press, not a bounce, starts the next
   const meta = key(env, box, { key: 'Enter', metaKey: true });
   assert.equal(meta.defaultPrevented, true, 'Cmd+Enter is the same shortcut');
   await flush();
@@ -198,14 +201,14 @@ test('with no configured provider the form is replaced by a plain pointer to Set
   assert.equal(doc.querySelector('.st-form').hidden, true);
 });
 
-test('the Safe-Mode decoy 403 shows a locked note, never an empty studio', { skip: dom.skip }, async () => {
+test('a 403 shows a locked note, never an empty studio', { skip: dom.skip }, async () => {
   const env = setupDom(PAGE, PAGE_URL, {
     'GET /apps/imagestudio/locales/en.json': () => [200, EN],
-    'GET /api/apps/imagestudio/state': () => [403, { detail: 'Unlock for full access', decoy: true }],
+    'GET /api/apps/imagestudio/state': () => [403, { detail: 'Permission denied' }],
   });
   env.win.localStorage.setItem('dispatch-lang', 'en');
   globalThis.__ST_NO_AUTOMOUNT = true;
-  const sdk = await import('/static/js/app-sdk.js?v=3');
+  const sdk = await import('/static/js/app-sdk.js?v=7');
   sdk._resetForTest();
   await sdk.ready('en');
   const mod = await import(`/apps/imagestudio/studio.js?t=${Math.random()}`);
@@ -378,5 +381,301 @@ test('no provider yet: a profile that may set one up gets a button that opens Se
   const env2 = await page({ state: { ...none, can_configure: false } });
   assert.equal(env2.doc.querySelector('.st-none button').hidden, true, 'no button that could only lead nowhere');
   assert.equal(env2.doc.querySelector('.st-none .st-muted').hidden, false);
-  assert.match(env2.doc.querySelector('.st-none').textContent, /Ask the Owner or an Admin/);
+  assert.match(env2.doc.querySelector('.st-none').textContent, /Ask an Admin to set one up/);
+});
+
+test('a picture the retention setting removed (410) becomes the "image expired" placeholder; a 404 stays as it is', { skip: dom.skip }, async () => {
+  const env = await page();
+  env.routes[`GET /media/${ID('a')}.png`] = () => [410, {}];
+  env.routes[`GET /media/${ID('b')}.jpg`] = () => [404, {}];
+  const imgs = [...env.doc.querySelectorAll('.st-tile img')];
+  assert.equal(imgs.length, 2);
+  for (const img of imgs) img.dispatchEvent(new env.win.Event('error'));
+  await flush();
+  const ph = env.doc.querySelectorAll('.media-expired');
+  assert.equal(ph.length, 1);
+  assert.equal(ph[0].getAttribute('aria-label'), EN.expired);
+  assert.equal(ph[0].dataset.expiredSrc, `/media/${ID('a')}.png`);
+  assert.equal(env.doc.querySelectorAll('.st-tile img').length, 1, 'the 404 picture is left alone');
+  assert.ok(EN.expired, 'the app locale carries the placeholder text');
+});
+
+test('with no saved preference the grid is newest first; a saved preference still wins', { skip: dom.skip }, async () => {
+  const fresh = await page({ sort: null });
+  assert.equal(fresh.doc.getElementById('st-sort').value, 'newest');
+  assert.deepEqual(tiles(fresh.doc), [ID('b'), ID('a')]);
+  const saved = await page({ sort: 'oldest' });
+  assert.equal(saved.doc.getElementById('st-sort').value, 'oldest');
+  assert.deepEqual(tiles(saved.doc), [ID('a'), ID('b')]);
+});
+
+test('Shift+Enter generates too; IME composition, key repeat and a bounce start only one job', { skip: dom.skip }, async () => {
+  let release;
+  const env = await page({
+    generate: () => new Promise((res) => { release = () => res([200, { images: [], asked: 1 }]); }),
+  });
+  const box = env.doc.getElementById('st-prompt');
+  box.value = 'a dog';
+  box.dispatchEvent(new env.win.Event('input', { bubbles: true }));
+  key(env, box, { key: 'Enter', shiftKey: true, isComposing: true });
+  key(env, box, { key: 'Enter', shiftKey: true, repeat: true });
+  await flush();
+  assert.equal(gens(env).length, 0, 'composition and repeat never fire');
+  const ev = key(env, box, { key: 'Enter', shiftKey: true });
+  assert.equal(ev.defaultPrevented, true);
+  key(env, box, { key: 'Enter', ctrlKey: true });
+  key(env, box, { key: 'Enter', metaKey: true });
+  await flush();
+  assert.equal(gens(env).length, 1, 'one keypress (even a bouncing one) = one job');
+  release();
+  await flush();
+});
+
+// ---------------------------------------------------------------- Delete by age
+
+const DEL_STATE = { ...STATE, can_clear: true };
+const delBtn = (doc) => doc.getElementById('st-delete');
+
+test('no Delete button for a profile that may not delete', { skip: dom.skip }, async () => {
+  const { doc } = await page({ state: { ...STATE, can_clear: false } });
+  assert.ok(!delBtn(doc) || delBtn(doc).hidden, 'no Delete button');
+});
+
+test('Delete asks for a scope, counts on the server, confirms with the number, then deletes by that scope', { skip: dom.skip }, async () => {
+  let rows = ROWS;
+  const counts = { hour: 14, day: 1, all: 2 };
+  const env = await page({
+    state: DEL_STATE,
+    images: () => [200, { images: rows }],
+    clear: (opts) => {
+      const b = JSON.parse(opts.body);
+      if (b.dry_run) return [200, { count: counts[b.since], in_chat: 0, dry_run: true }];
+      rows = [];
+      return [200, { deleted: counts[b.since], files: 1, in_chat: 0 }];
+    },
+  });
+  const { doc, win } = env;
+  assert.ok(delBtn(doc), 'a Delete button sits by the results');
+  delBtn(doc).click();
+  await flush();
+  const dlg = doc.querySelector('.st-dlg');
+  const scope = dlg.querySelector('select');
+  assert.deepEqual([...scope.options].map((o) => o.value), ['hour', 'day', 'all']);
+  assert.deepEqual([...scope.options].map((o) => o.textContent), ['Past hour', 'Past day', 'All my pictures']);
+  assert.deepEqual(clears(env)[0].body, { since: 'hour', dry_run: true });
+  assert.match(dlg.textContent, /Delete 14 pictures from the past hour\?/);
+  assert.equal(clears(env).length, 1, 'nothing is deleted before the confirmation');
+  scope.value = 'day';
+  scope.dispatchEvent(new win.Event('change', { bubbles: true }));
+  await flush();
+  assert.match(dlg.textContent, /Delete 1 picture from the past day\?/);
+  scope.value = 'all';
+  scope.dispatchEvent(new win.Event('change', { bubbles: true }));
+  await flush();
+  assert.match(dlg.textContent, /Delete all 2 of your pictures\?/);
+  dlg.querySelector('.st-danger').click();
+  await flush(30);
+  assert.deepEqual(clears(env).at(-1).body, { since: 'all', expect: 2 }, 'the confirmed count rides along; no client clock');
+  assert.equal(doc.querySelectorAll('.st-tile').length, 0);
+  assert.match(doc.querySelector('.st-status').textContent, /Pictures deleted: 2/);
+});
+
+test('Delete with nothing in range is disabled', { skip: dom.skip }, async () => {
+  const env = await page({ state: DEL_STATE, clear: () => [200, { count: 0, in_chat: 0, dry_run: true }] });
+  delBtn(env.doc).click();
+  await flush();
+  assert.match(env.doc.querySelector('.st-dlg').textContent, /No pictures in that range/);
+  assert.equal(env.doc.querySelector('.st-dlg .st-danger').disabled, true);
+});
+
+test('Delete: a 409 re-counts and asks again, Cancel deletes nothing', { skip: dom.skip }, async () => {
+  let dry = 0;
+  const env = await page({
+    state: DEL_STATE,
+    clear: (opts) => {
+      const b = JSON.parse(opts.body);
+      if (b.dry_run) { dry += 1; return [200, { count: dry === 1 ? 1 : 3, in_chat: 0, dry_run: true }]; }
+      return [409, { detail: 'x', error: { code: 'imagestudio_pictures_changed', message: 'x' } }];
+    },
+  });
+  const { doc } = env;
+  delBtn(doc).click();
+  await flush();
+  doc.querySelector('.st-dlg .st-danger').click();
+  await flush(30);
+  assert.equal(dry, 2);
+  assert.match(doc.querySelector('.st-dlg').textContent, /Delete 3 pictures/);
+  [...doc.querySelectorAll('.st-dlg .st-btn')].find((b) => b.textContent === 'Cancel').click();
+  await flush();
+  assert.equal(clears(env).filter((c) => !c.body.dry_run).length, 1, 'only the refused attempt');
+  assert.equal(doc.querySelectorAll('.st-tile').length, 2);
+});
+
+// ---------------------------------------------------------------- several at once
+
+function holdGenerate() {
+  const held = [];
+  const fn = (opts) => new Promise((res) => held.push({ opts, ok: (images) => res([200, { images, asked: 1 }]), fail: (code, detail) => res([code, { detail }]) }));
+  return { held, fn };
+}
+const pending = (doc) => [...doc.querySelectorAll('.st-tile.st-pending')];
+const fill = (env, prompt) => {
+  const box = env.doc.getElementById('st-prompt');
+  box.value = prompt;
+  box.dispatchEvent(new env.win.Event('input', { bubbles: true }));
+};
+const newRow = (c) => ({ ...ROWS[0], id: ID(c), url: `/media/${ID(c)}.png`, prompt: `pic ${c}` });
+
+test('Generate stays usable while earlier ones run: each request gets its own dots tile, newest first', { skip: dom.skip }, async () => {
+  const h = holdGenerate();
+  const env = await page({ sort: 'newest', generate: h.fn });
+  const { doc } = env;
+  const go = doc.getElementById('st-generate');
+  fill(env, 'first cat');
+  go.click();
+  await flush();
+  assert.equal(go.disabled, false, 'the button is still usable');
+  fill(env, 'second cat');
+  go.click();
+  await flush();
+  fill(env, 'third cat');
+  go.click();
+  await flush();
+  assert.equal(h.held.length, 3, 'three requests overlap');
+  const tilesNow = pending(doc);
+  assert.equal(tilesNow.length, 3);
+  assert.ok(tilesNow.every((t) => t.querySelectorAll('.st-dots span').length === 3), 'bouncing dots');
+  assert.match(tilesNow[0].textContent, /third cat/, 'newest at the top');
+  assert.equal(doc.querySelector('.st-grid').firstElementChild, tilesNow[0]);
+  // The middle one lands: only its tile is swapped for a picture.
+  h.held[1].ok([newRow('c')]);
+  await flush(30);
+  assert.equal(pending(doc).length, 2);
+  assert.ok(tiles(doc).includes(ID('c')));
+  h.held[0].ok([newRow('d')]); h.held[2].ok([newRow('e')]);
+  await flush(30);
+  assert.equal(pending(doc).length, 0);
+  assert.equal(tiles(doc).length, 5);
+});
+
+test('with oldest first the placeholders sit at the end', { skip: dom.skip }, async () => {
+  const h = holdGenerate();
+  const env = await page({ sort: 'oldest', generate: h.fn });
+  fill(env, 'x');
+  env.doc.getElementById('st-generate').click();
+  await flush();
+  assert.equal(env.doc.querySelector('.st-grid').lastElementChild.classList.contains('st-pending'), true);
+});
+
+test('a failed job keeps its tile with the error, Retry re-sends it, Dismiss removes it', { skip: dom.skip }, async () => {
+  const h = holdGenerate();
+  const env = await page({ generate: h.fn });
+  const { doc } = env;
+  fill(env, 'doomed');
+  doc.getElementById('st-generate').click();
+  await flush();
+  h.held[0].fail(429, '4 pictures are already being made; wait for one to finish');
+  await flush(30);
+  const tile = doc.querySelector('.st-tile.st-pending');
+  assert.ok(tile.classList.contains('st-failed'));
+  assert.match(tile.textContent, /already being made/);
+  assert.equal(tile.querySelectorAll('.st-dots').length, 0, 'no dots once it failed');
+  [...tile.querySelectorAll('button')].find((b) => b.textContent === 'Retry').click();
+  await flush();
+  assert.equal(h.held.length, 2);
+  assert.equal(JSON.parse(h.held[1].opts.body).prompt, 'doomed');
+  assert.equal(doc.querySelectorAll('.st-pending .st-dots').length, 1, 'running again');
+  h.held[1].fail(502, 'provider said no');
+  await flush(30);
+  [...doc.querySelector('.st-tile.st-pending').querySelectorAll('button')].find((b) => b.textContent === 'Dismiss').click();
+  assert.equal(pending(doc).length, 0);
+});
+
+test('the page stops at the profile cap before asking the server', { skip: dom.skip }, async () => {
+  const h = holdGenerate();
+  const env = await page({ generate: h.fn, state: { ...STATE, max_in_flight: 2, in_flight: 0 } });
+  fill(env, 'p');
+  const go = env.doc.getElementById('st-generate');
+  go.click(); await flush(); go.click(); await flush(); go.click(); await flush();
+  assert.equal(h.held.length, 2);
+  assert.match(env.doc.querySelector('.st-status').textContent, /2 pictures are already being made/);
+});
+
+// ---------------------------------------------------------------- the prompt stays with its picture
+
+test('the prompt is captured when Generate is pressed: later typing never relabels a running job', { skip: dom.skip }, async () => {
+  const h = holdGenerate();
+  const env = await page({ generate: h.fn });
+  const { doc } = env;
+  fill(env, 'a red fox');
+  doc.getElementById('st-generate').click();
+  await flush();
+  fill(env, 'a blue whale');                       // typed while the first one renders
+  assert.equal(JSON.parse(h.held[0].opts.body).prompt, 'a red fox');
+  assert.match(pending(doc)[0].textContent, /a red fox/);
+  h.held[0].ok([{ ...newRow('f'), prompt: 'a red fox' }]);
+  await flush(30);
+  const tile = doc.querySelector(`.st-tile[data-id="${ID('f')}"]`);
+  assert.match(tile.querySelector('.st-tileprompt').textContent, /a red fox/);
+});
+
+test('overlapping jobs finishing out of order keep their own prompts', { skip: dom.skip }, async () => {
+  const h = holdGenerate();
+  const env = await page({ generate: h.fn });
+  const go = env.doc.getElementById('st-generate');
+  fill(env, 'one'); go.click(); await flush();
+  fill(env, 'two'); go.click(); await flush();
+  h.held[1].ok([{ ...newRow('2'), prompt: 'two' }]);
+  await flush(30);
+  h.held[0].ok([{ ...newRow('1'), prompt: 'one' }]);
+  await flush(30);
+  const prompt = (c) => env.doc.querySelector(`.st-tile[data-id="${ID(c)}"] .st-tileprompt`).textContent;
+  assert.equal(prompt('1'), 'one');
+  assert.equal(prompt('2'), 'two');
+});
+
+test('sending a picture to a chat carries its prompt, model and seed so Details can show them', { skip: dom.skip }, async () => {
+  const env = await page({
+    state: { ...STATE, can_send: true },
+    extra: {
+      'GET /api/apps/imagestudio/targets': () => [200, { threads: [{ id: 't1', bot: 'Bits', title: 'x' }] }],
+      'POST /api/inject': () => [200, { ok: true }],
+    },
+  });
+  const { doc } = env;
+  doc.querySelectorAll('.st-tile')[1].querySelectorAll('.st-actions .st-icon')[3].click();   // oldest first: tile 1 = b
+  await flush();
+  doc.querySelector('.st-dlg .st-primary').click();
+  await flush(30);
+  const call = env.calls.find((c) => c.key === 'POST /api/inject');
+  assert.ok(call, 'it posted');
+  assert.deepEqual(call.body.metadata, {
+    source: 'image-studio', image_id: ID('b'), prompt: 'second', model: 'minimax · image-01', seed: 5,
+  });
+});
+
+// ---- 4.3 Fable review (chat agent)
+
+test('Fable: a failed job shows its reason once (on its tile), not again in the status line', { skip: dom.skip }, async () => {
+  const h = holdGenerate();
+  const env = await page({ generate: h.fn });
+  const { doc } = env;
+  fill(env, 'doomed');
+  doc.getElementById('st-generate').click();
+  await flush();
+  h.held[0].fail(502, 'The picture server answered: not found');
+  await flush(30);
+  const hits = (doc.body.textContent.match(/answered: not found/g) || []).length;
+  assert.equal(hits, 1);
+});
+
+test('Fable: a provider with no price note gets no "metered provider" note', { skip: dom.skip }, async () => {
+  const custom = { id: 'custom', label: 'Custom (OpenAI-compatible)', shape: 'openai-images', configured: true, model: 'x', models: [], price_note: '', supports: { reference: false, optimizer: false, seed: false, max_n: 4 } };
+  const env = await page({ state: { ...STATE, providers: [custom], default: 'custom' } });
+  assert.doesNotMatch(env.doc.body.textContent, /metered/);
+});
+
+test('Fable: "no bots" points to Settings → Characters', () => {
+  assert.match(EN['avatar.no_bots'], /Settings → Characters/);
+  assert.doesNotMatch(EN['avatar.no_bots'], /My bots/);
 });

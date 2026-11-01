@@ -11,7 +11,7 @@
 //   - a 401 (the session ran out) calls the handler main.js registers with setOnLocked(),
 //   - nothing here may hang: every request is aborted after a generous timeout.
 
-import { errorExtras } from './api.js?v=35';
+import { errorExtras } from './api.js?v=37';
 
 let onLocked = null;
 export function setOnLocked(fn) { onLocked = fn; }
@@ -117,7 +117,6 @@ export const w5 = {
   // ---- characters and starter packs
   characters: () => j('/api/characters'),
   allCharacters: () => j('/api/characters/all'),
-  createCharacter: (o) => post('/api/characters', o),
   patchCharacter: (id, o) => patch(`/api/characters/${enc(id)}`, o),
   personalities: () => j('/api/characters/personas'),
   starterPacks: () => j('/api/starter-packs'),
@@ -148,9 +147,6 @@ export const w5 = {
   people: () => j('/api/people'),
 
   // ---- plugins
-  pluginManifests: () => j('/api/plugins/manifests'),
-  setExtensionEnabled: (id, enabled, approve) => j(`/api/plugins/extensions/${enc(id)}`, {
-    method: 'PUT', headers: JSON_HEADERS, body: body(approve ? { enabled, approve } : { enabled }) }),
 };
 
 /** Save a Blob the way a user would ("Save as"): an object URL and a click on a throwaway link. */

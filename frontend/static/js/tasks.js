@@ -13,16 +13,17 @@
 //
 // What it does not own: who may do what. The server decides (manage_agents / dispatch_agents /
 // approve_agent_actions, route_policy.py); this module only decides what to OFFER, from
-// GET /api/auth/me. A Restricted profile is never offered any of it, and every call it could
-// make would answer 403 anyway.
+// GET /api/auth/me. A profile without those permissions is offered none of it, and every call
+// it could make would answer 403 anyway.
 //
 // Wording: UI verbs are "Assign task" / "Send to agent" (the brief); the backend is "OpenClaw" or
 // "Claude Agent" as the server names it; costs are always "estimate".
 
-import { api as realApi } from './api.js?v=35';
-import { t, relTime } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
-import { createTaskCard, stateLabel, costLabel } from './task_card.js?v=1';
+import { api as realApi } from './api.js?v=37';
+import { t, relTime } from './i18n.js?v=5';
+import { el, errorText, spriteIcon } from './util.js?v=23';
+import { createTaskCard, stateLabel, costLabel } from './task_card.js?v=4';
+import { agentApi } from './agents.js?v=6';
 
 export const FILTER_STATES = ['', 'queued', 'running', 'awaiting_approval', 'succeeded', 'failed', 'cancelled'];
 const PROMPT_MAX = 20000;
@@ -59,32 +60,157 @@ export function listQuery(f) {
   return q;
 }
 
-/** What the person may be offered, from /api/auth/me. */
+/** What the person may be offered, from /api/auth/me. Since 4.0 the roles are admin / user /
+ *  basic; the Owner is the protected Admin (`me.protected`), not a role of its own, so there is
+ *  no 'owner' role to test for. */
 export function accessFrom(me) {
   const perms = Array.isArray(me && me.permissions) ? me.permissions : [];
   const all = perms.includes('*');
   const has = (p) => all || perms.includes(p);
   const role = me && me.role;
   return {
-    dispatch: !!(me && !me.restricted) && has('dispatch_agents'),
-    approve: !!(me && !me.restricted) && has('approve_agent_actions'),
-    manage: !!(me && !me.restricted) && has('manage_agents'),
-    operator: !!(me && !me.restricted) && (all || role === 'owner' || role === 'admin'),
+    dispatch: !!me && has('dispatch_agents'),
+    approve: !!me && has('approve_agent_actions'),
+    manage: !!me && has('manage_agents'),
+    operator: !!me && (all || role === 'admin'),
   };
 }
 
 export const NO_ACCESS = Object.freeze({ dispatch: false, approve: false, manage: false, operator: false });
 
+// ----------------------------------------------------------------------------- schedules (4.3 #13)
+
+export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+const DAY_KEYS = {
+  mon: 'sched.day_mon', tue: 'sched.day_tue', wed: 'sched.day_wed', thu: 'sched.day_thu',
+  fri: 'sched.day_fri', sat: 'sched.day_sat', sun: 'sched.day_sun',
+};
+export const dayLabel = (d) => (DAY_KEYS[d] ? t(DAY_KEYS[d]) : String(d || ''));
+export const EVERY_MIN = 15;
+
+/** This browser's time zone: a schedule's daily/weekly times are wall-clock times here. */
+export function localZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+}
+
+/** The editor's fields -> the API rule, or {error: message}. */
+export function scheduleRule(f) {
+  if (f.repeat === 'every') {
+    const n = Number(f.every);
+    if (!Number.isInteger(n) || n < EVERY_MIN) return { error: t('sched.err_every', { min: EVERY_MIN }) };
+    return { rule: { every_minutes: n } };
+  }
+  const at = String(f.at || '').trim();
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(at)) return { error: t('sched.err_time') };
+  if (f.repeat === 'daily') return { rule: { daily_at: at } };
+  if (f.repeat === 'weekly') {
+    if (!DAYS.includes(f.day)) return { error: t('sched.err_day') };
+    return { rule: { weekly_day_at: { day: f.day, at } } };
+  }
+  return { error: t('sched.err_repeat') };
+}
+
+/** A stored rule -> the editor's fields. */
+export function ruleToForm(rule) {
+  const r = rule || {};
+  if (r.every_minutes) return { repeat: 'every', every: String(r.every_minutes), at: '09:00', day: 'mon' };
+  if (r.daily_at) return { repeat: 'daily', every: '60', at: r.daily_at, day: 'mon' };
+  if (r.weekly_day_at) return { repeat: 'weekly', every: '60', at: r.weekly_day_at.at, day: r.weekly_day_at.day };
+  return { repeat: 'daily', every: '60', at: '09:00', day: 'mon' };
+}
+
+/** "Every 30 minutes" / "Every day at 09:00" / "Every Monday at 09:00". */
+export function ruleText(rule) {
+  const r = rule || {};
+  if (r.every_minutes) return t('sched.rule_every', { count: r.every_minutes });
+  if (r.daily_at) return t('sched.rule_daily', { at: r.daily_at });
+  if (r.weekly_day_at) return t('sched.rule_weekly', { day: dayLabel(r.weekly_day_at.day), at: r.weekly_day_at.at });
+  return '';
+}
+
+/** The next `n` run times of `rule` after `now`, on THIS browser's clock (the preview; the server
+ *  computes the real ones in the schedule's zone, which is this browser's when it was saved). */
+export function previewRuns(rule, now = new Date(), n = 3) {
+  const out = [];
+  if (!rule) return out;
+  if (rule.every_minutes) {
+    for (let i = 1; i <= n; i++) out.push(new Date(now.getTime() + i * rule.every_minutes * 60000));
+    return out;
+  }
+  const spec = rule.daily_at ? { at: rule.daily_at, day: null } : rule.weekly_day_at ? { at: rule.weekly_day_at.at, day: rule.weekly_day_at.day } : null;
+  if (!spec) return out;
+  const [hh, mm] = spec.at.split(':').map(Number);
+  const want = spec.day == null ? null : (DAYS.indexOf(spec.day) + 1) % 7;   // JS: 0 = Sunday
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+  for (let i = 0; out.length < n && i < 400; i++) {
+    const c = new Date(d.getFullYear(), d.getMonth(), d.getDate() + i, hh, mm, 0, 0);
+    if (c <= now) continue;
+    if (want != null && c.getDay() !== want) continue;
+    out.push(c);
+  }
+  return out;
+}
+
+/** A date for people: "Mon 3 Nov, 09:00" in the browser's language. */
+export function whenText(d) {
+  const date = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(date.getTime())) return '';
+  try {
+    return date.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  } catch { return date.toISOString(); }
+}
+
+/** POST/PATCH body from the editor, or {error}. */
+export function scheduleBody(f, tz = localZone()) {
+  const r = scheduleRule(f);
+  if (r.error) return r;
+  const prompt = String(f.prompt || '').trim();
+  if (!f.agent_id) return { error: t('sched.err_agent') };
+  if (!prompt) return { error: t('sched.err_prompt') };
+  // The chat the results are posted in (one of the caller's own; the server checks that too).
+  // null = no chat: the result stays on the Tasks page only.
+  const body = { agent_id: f.agent_id, prompt, rule: r.rule, tz, thread_id: f.thread_id ? String(f.thread_id) : null };
+  if (f.enabled === false) body.enabled = false;
+  return body;
+}
+
+/** The caller's own chats for "Post results in", newest first. GET /api/threads without a
+ *  bot_id is the server's own-chats listing (it never returns another profile's chat, nor one
+ *  whose character the caller may no longer use). Fails soft: no list = "no chat" only. */
+export async function ownChats(api) {
+  let res = null;
+  try {
+    if (api && typeof api.ownThreads === 'function') res = await api.ownThreads();
+    else {
+      const r = await fetch('/api/threads?limit=200', { credentials: 'same-origin' });
+      res = r && r.ok ? await r.json() : null;
+    }
+  } catch { res = null; }
+  const rows = (res && Array.isArray(res.threads) ? res.threads : []).filter((th) => th && th.id && !th.is_archived);
+  return rows.slice().sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+}
+
+/** "Bits · Morning notes" (the character, then the chat's title). */
+export function chatLabel(th, botNames = {}) {
+  const title = String((th && th.title) || '').trim() || t('sched.chat_untitled');
+  const bot = botNames[th && th.bot_id] || '';
+  return bot ? t('sched.chat_option', { bot, title }) : title;
+}
+
+
 // ----------------------------------------------------------------------------- the module
 
 /**
- * deps: { api?, toast, confirm, announce, isDecoy, sessionKey, navButton, onAssigned(task, {fromComposer}) }
+ * deps: { api?, toast, confirm, announce, sessionKey, navButton, onAssigned(task, {fromComposer}),
+ *         currentThreadId?() (the chat open now: a new schedule's default "Post results in") }
  */
 export function createTasksUi(deps = {}) {
   const api = deps.api || realApi;
+  const extra = agentApi(api);
   let access = NO_ACCESS;
+  let approvalTimeoutS = 0;                // known to profiles that read the agent settings
+  let schedBackdrop = null;
   let agents = [];                         // agents published to me (api.agentsAvailable)
-  let budget = null;
   let backdrop = null;
   let listEl = null;
   let emptyEl = null;
@@ -103,7 +229,7 @@ export function createTasksUi(deps = {}) {
   const toast = (m, bad) => (deps.toast ? deps.toast(m, bad) : undefined);
   const cardDeps = (extra = {}) => ({
     api, canApprove: access.approve, toast, confirm: deps.confirm, announce: deps.announce,
-    showOwner: access.operator, ...extra,
+    showOwner: access.operator, approvalTimeoutS: () => approvalTimeoutS, ...extra,
   });
 
   function register(card) {
@@ -130,18 +256,12 @@ export function createTasksUi(deps = {}) {
   async function refreshAccess() {
     // The app calls this whenever the sign-in state may have changed; asking the server on every
     // call would be noise, so a burst within a few seconds is answered from the last answer.
-    const key = deps.sessionKey ? deps.sessionKey() : `${deps.isDecoy ? deps.isDecoy() : ''}`;
+    const key = deps.sessionKey ? deps.sessionKey() : '';
     const now = Date.now();
     if (refreshAccess.last && refreshAccess.key === key && now - refreshAccess.last < 3000) return access;
     refreshAccess.last = now;
     if (refreshAccess.key !== undefined && refreshAccess.key !== key) resetForNewSession();
     refreshAccess.key = key;
-    if (deps.isDecoy && deps.isDecoy()) {
-      access = NO_ACCESS;
-      agents = [];
-      paintNav();
-      return access;
-    }
     try {
       access = accessFrom(await api.me());
     } catch {
@@ -151,10 +271,13 @@ export function createTasksUi(deps = {}) {
       try {
         const res = await api.agentsAvailable();
         agents = res.agents || [];
-        budget = res.budget || null;
         const waitingRes = await api.tasks({ state: 'awaiting_approval', limit: 100 });
         waiting = (waitingRes.tasks || []).length;
       } catch { agents = []; }
+      approvalTimeoutS = 0;
+      if (access.manage && typeof api.agentSettings === 'function') {
+        try { approvalTimeoutS = Number((await api.agentSettings()).approval_timeout_s) || 0; } catch { /* unknown */ }
+      }
     } else {
       agents = [];
       waiting = 0;
@@ -186,7 +309,9 @@ export function createTasksUi(deps = {}) {
     filters.state = filters.agent = filters.profile = filters.since = '';
     if (backdrop) { backdrop.remove(); backdrop = null; listEl = null; emptyEl = null; filterForm = null; }
     if (assignBackdrop) { assignBackdrop.remove(); assignBackdrop = null; }
+    if (schedBackdrop) { schedBackdrop.remove(); schedBackdrop = null; }
     waiting = 0;
+    approvalTimeoutS = 0;
   }
 
   // ---- the Tasks page ----
@@ -194,10 +319,14 @@ export function createTasksUi(deps = {}) {
   function buildPage() {
     if (backdrop) return;
     const title = el('h2', { id: 'tasks-title', text: t('tasks.title') });
-    const close = el('button', { type: 'button', class: 'icon-btn ghost', 'aria-label': t('common.close'), text: '✕' });
+    const close = el('button', { type: 'button', class: 'icon-btn ghost', title: t('common.close'), 'aria-label': t('common.close') }, [spriteIcon('x', 18)]);
     close.addEventListener('click', closePage);
     const assignBtn = el('button', { type: 'button', class: 'btn-primary', id: 'tasks-assign', text: t('tasks.assign') });
     assignBtn.addEventListener('click', () => openAssign({}));
+    // 4.3 #13: repeat a task on a timetable. Anyone who may assign tasks has their own schedules.
+    const schedBtn = el('button', { type: 'button', class: 'btn-secondary', id: 'tasks-schedules', title: t('sched.open_title') },
+      [spriteIcon('clock', 16), ` ${t('sched.open')}`]);
+    schedBtn.addEventListener('click', () => openSchedules());
     const stateSel = el('select', { id: 'tasks-f-state', 'aria-label': t('tasks.filter_state') },
       FILTER_STATES.map((s) => el('option', { value: s, text: s ? stateLabel(s) : t('tasks.filter_any_state') })));
     const agentSel = el('select', { id: 'tasks-f-agent', 'aria-label': t('tasks.filter_agent') });
@@ -217,7 +346,7 @@ export function createTasksUi(deps = {}) {
     listEl = el('div', { class: 'tasks-list', role: 'list', 'aria-live': 'polite', 'aria-relevant': 'additions removals' });
     emptyEl = el('p', { class: 'muted tasks-empty', text: t('tasks.empty'), hidden: '' });
     const box = el('div', { class: 'modal tasks-modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'tasks-title' }, [
-      el('header', { class: 'modal-header' }, [title, el('div', { class: 'tasks-header-actions' }, [assignBtn, close])]),
+      el('header', { class: 'modal-header' }, [title, el('div', { class: 'tasks-header-actions' }, [schedBtn, assignBtn, close])]),
       filterForm,
       el('div', { class: 'tasks-body' }, [listEl, emptyEl]),
     ]);
@@ -275,13 +404,16 @@ export function createTasksUi(deps = {}) {
     try {
       res = await api.tasks(listQuery(filters));
     } catch (e) {
-      listEl.replaceChildren(el('p', { class: 'task-error', role: 'alert', text: String((e && (e.userMessage || e.message)) || e) }));
+      listEl.replaceChildren(el('p', { class: 'task-error', role: 'alert', text: errSentence(e) }));
       return;
     }
     rows.clear();
     const items = res.tasks || [];
     listEl.replaceChildren(...items.map(buildRow));
     emptyEl.hidden = items.length > 0;
+    // "No tasks match." only makes sense with a filter; an empty page says how to start.
+    const filtered = !!(filters.state || filters.agent || filters.profile || filters.since);
+    emptyEl.textContent = t(filtered ? 'tasks.empty' : 'tasks.empty_none');
     recount(items);
     if (focusTask) expanded.add(focusTask);
     for (const id of expanded) {
@@ -343,6 +475,229 @@ export function createTasksUi(deps = {}) {
     return row;
   }
 
+  // ---- schedules (4.3 #13) ----
+
+  /** The Schedules dialog: my schedules (an Admin may also look at everyone's, and only switch
+   *  another person's off or delete it - the server enforces that too), and the editor. */
+  async function openSchedules(opts = {}) {
+    if (!access.dispatch) await refreshAccess();
+    if (!access.dispatch) return false;
+    if (!agents.length) {
+      try { agents = (await api.agentsAvailable()).agents || []; } catch { /* leave empty */ }
+    }
+    if (!schedBackdrop) {
+      schedBackdrop = el('div', { class: 'modal-backdrop hidden', id: 'sched-backdrop' });
+      document.body.append(schedBackdrop);
+    }
+    if (access.manage && !people.length && typeof api.agents === 'function') {
+      try { people = (await api.agents()).profiles || []; } catch { /* names stay unknown */ }
+    }
+    // "Post results in": this person's own chats only (fetched each time the dialog opens).
+    const [chats, botNames] = await Promise.all([ownChats(api), (async () => {
+      const out = {};
+      if (typeof api.bots !== 'function') return out;
+      try {
+        const r = await api.bots();
+        for (const b of (Array.isArray(r) ? r : (r && r.bots) || [])) if (b && b.id) out[b.id] = b.name || b.id;
+      } catch { /* titles alone */ }
+      return out;
+    })()]);
+    const host = schedBackdrop;
+    const prevFocus = document.activeElement;
+    let scope = opts.scope || 'mine';
+    const heading = el('h2', { id: 'sched-title', text: t('sched.title') });
+    const closeBtn = el('button', { type: 'button', class: 'icon-btn ghost', 'aria-label': t('common.close'), title: t('common.close') }, [spriteIcon('x', 18)]);
+    const newBtn = el('button', { type: 'button', class: 'btn-primary', id: 'sched-new', title: t('sched.new') }, [spriteIcon('plus', 16), ` ${t('sched.new')}`]);
+    const listEl2 = el('div', { class: 'sched-list', role: 'list', 'aria-live': 'polite' });
+    const editorHost = el('div', { class: 'sched-editor-host' });
+    const status = el('p', { class: 'muted sched-limits' });
+    const everyone = el('input', { type: 'checkbox', id: 'sched-everyone' });
+    // Back to where the limits are set (for the people who may change them).
+    const limitsLink = access.manage && typeof deps.openSettings === 'function'
+      ? el('button', { type: 'button', class: 'text-link-btn sched-limits-link', text: t('sched.limits_link') }) : null;
+    if (limitsLink) {
+      limitsLink.addEventListener('click', () => {
+        schedBackdrop.classList.add('hidden');
+        if (backdrop) backdrop.classList.add('hidden');
+        deps.openSettings('connections#agents');
+      });
+    }
+    const everyoneRow = access.manage
+      ? el('label', { class: 'sched-everyone', for: 'sched-everyone' }, [everyone, ` ${t('sched.everyone')}`]) : null;
+    everyone.addEventListener('change', () => { scope = everyone.checked ? 'all' : 'mine'; load(); });
+    const box = el('div', { class: 'modal sched-modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'sched-title' }, [
+      el('header', { class: 'modal-header' }, [heading, el('div', { class: 'tasks-header-actions' }, [newBtn, closeBtn])]),
+      el('p', { class: 'modal-hint', text: t('sched.hint') }),
+      limitsLink,
+      everyoneRow, status, editorHost, listEl2,
+    ]);
+    host.replaceChildren(box);
+    const done = () => {
+      host.classList.add('hidden');
+      if (prevFocus && prevFocus.focus) { try { prevFocus.focus(); } catch { /* gone */ } }
+    };
+    closeBtn.addEventListener('click', done);
+    host.onkeydown = (e) => trapKeys(e, box, done);
+    host.onclick = (e) => { if (e.target === host) done(); };
+    newBtn.addEventListener('click', () => edit(null));
+    const agentName = (id) => (agents.find((a) => a.id === id) || {}).name || t('sched.agent_unknown');
+
+    async function load() {
+      let res;
+      try {
+        res = await extra.schedules(scope);
+      } catch (e) {
+        listEl2.replaceChildren(el('p', { class: 'task-error', role: 'alert', text: errSentence(e) }));
+        return;
+      }
+      const rows = res.schedules || [];
+      const lim = res.limits || {};
+      status.textContent = lim.per_profile ? t('sched.limits', { max: lim.per_profile, min: lim.every_minutes_min || EVERY_MIN }) : '';
+      listEl2.replaceChildren(...(rows.length ? rows.map(row) : [el('p', { class: 'muted', text: t('sched.empty') })]));
+    }
+
+    function row(sc) {
+      const name = agentName(sc.agent_id);
+      const who = !sc.own && people.length ? (people.find((p) => p.id === sc.owner_profile) || {}).name : '';
+      const next = sc.enabled && sc.next_run ? t('sched.next', { when: whenText(sc.next_run) }) : t('sched.off');
+      const toggle = el('button', {
+        type: 'button', class: 'btn-secondary',
+        title: sc.enabled ? t('sched.pause_aria', { name }) : t('sched.resume_aria', { name }),
+        'aria-label': sc.enabled ? t('sched.pause_aria', { name }) : t('sched.resume_aria', { name }),
+      }, [spriteIcon(sc.enabled ? 'pause' : 'play', 14), ` ${sc.enabled ? t('sched.pause') : t('sched.resume')}`]);
+      // Somebody else's schedule: an Admin may switch it off, never on (no acting as them).
+      if (!sc.own && !sc.enabled) toggle.hidden = true;
+      toggle.addEventListener('click', () => act(async () => { await extra.patchSchedule(sc.id, { enabled: !sc.enabled }); }));
+      const editBtn = el('button', { type: 'button', class: 'btn-secondary', title: t('sched.edit_aria', { name }), 'aria-label': t('sched.edit_aria', { name }) },
+        [spriteIcon('pencil', 14), ` ${t('sched.edit')}`]);
+      editBtn.hidden = !sc.own;
+      editBtn.addEventListener('click', () => edit(sc));
+      const delBtn = el('button', { type: 'button', class: 'btn-secondary danger-text', title: t('sched.delete_aria', { name }), 'aria-label': t('sched.delete_aria', { name }) },
+        [spriteIcon('trash', 14), ` ${t('sched.delete')}`]);
+      delBtn.addEventListener('click', () => act(async () => {
+        if (deps.confirm && !(await deps.confirm(t('sched.delete_confirm', { name }), { danger: true, okText: t('sched.delete') }))) return;
+        await extra.deleteSchedule(sc.id);
+      }));
+      const bad = sc.status && sc.status !== 'ok' && sc.status !== 'disabled';
+      return el('article', { class: `sched-row${sc.enabled ? '' : ' sched-off'}`, role: 'listitem', 'data-schedule': sc.id }, [
+        el('div', { class: 'sched-row-text' }, [
+          el('strong', { text: name }),
+          el('span', { class: 'sched-rule', text: ruleText(sc.rule) }),
+          el('span', { class: `task-pill task-pill-${sc.enabled ? 'running' : 'hold'}`, text: next }),
+          who ? el('span', { class: 'sched-owner', text: t('sched.belongs_to', { name: who }) }) : null,
+          !sc.own && !who ? el('span', { class: 'sched-owner', text: t('sched.someone_else') }) : null,
+          sc.own && sc.prompt ? el('span', { class: 'sched-prompt', dir: 'auto', text: sc.prompt }) : null,
+          bad || sc.status_detail ? el('span', { class: bad ? 'task-error' : 'muted', text: sc.status_detail || sc.status }) : null,
+        ]),
+        el('div', { class: 'sched-actions' }, [toggle, editBtn, delBtn]),
+      ]);
+    }
+
+    async function act(fn) {
+      try { await fn(); await load(); } catch (e) { toast(errSentence(e), true); }
+    }
+
+    function edit(sc) {
+      const usable = agents.filter((a) => a.available !== false || (sc && a.id === sc.agent_id));
+      // A new schedule posts in the chat open now when it is one of mine, else my newest chat;
+      // an existing one keeps the chat it has (or none).
+      const current = typeof deps.currentThreadId === 'function' ? deps.currentThreadId() : null;
+      const defaultChat = (current && chats.some((c) => c.id === current)) ? current : ((chats[0] || {}).id || '');
+      const f = {
+        agent_id: sc ? sc.agent_id : (usable[0] || {}).id || '', prompt: sc ? sc.prompt || '' : '',
+        thread_id: sc ? sc.thread_id || '' : defaultChat, ...ruleToForm(sc && sc.rule),
+      };
+      if (!sc) f.repeat = 'daily';
+      const ids = { agent: 'sched-agent', prompt: 'sched-prompt', thread: 'sched-thread', repeat: 'sched-repeat', every: 'sched-every', at: 'sched-at', day: 'sched-day' };
+      const agentSel = el('select', { id: ids.agent, class: 'ui-select' }, usable.map((a) => el('option', { value: a.id, text: a.name })));
+      agentSel.value = f.agent_id;
+      agentSel.addEventListener('change', () => { f.agent_id = agentSel.value; });
+      const prompt = el('textarea', { id: ids.prompt, rows: '4', maxlength: String(PROMPT_MAX), dir: 'auto', required: '' });
+      prompt.value = f.prompt;
+      prompt.addEventListener('input', () => { f.prompt = prompt.value; });
+      const chatOpts = chats.map((c) => el('option', { value: c.id, text: chatLabel(c, botNames) }));
+      // The schedule's own chat beyond the first page of chats: still offered, never dropped.
+      if (f.thread_id && !chats.some((c) => c.id === f.thread_id)) {
+        chatOpts.unshift(el('option', { value: f.thread_id, text: t('sched.post_kept') }));
+      }
+      chatOpts.push(el('option', { value: '', text: t('sched.post_none') }));
+      const threadSel = el('select', { id: ids.thread, class: 'ui-select', 'aria-describedby': 'sched-thread-help' }, chatOpts);
+      threadSel.value = f.thread_id;
+      threadSel.addEventListener('change', () => { f.thread_id = threadSel.value; });
+      const repeat = el('select', { id: ids.repeat, class: 'ui-select' }, [
+        el('option', { value: 'every', text: t('sched.repeat_every') }),
+        el('option', { value: 'daily', text: t('sched.repeat_daily') }),
+        el('option', { value: 'weekly', text: t('sched.repeat_weekly') }),
+      ]);
+      repeat.value = f.repeat;
+      const every = el('input', { id: ids.every, type: 'number', min: String(EVERY_MIN), max: '10080', step: '1', inputmode: 'numeric', value: f.every });
+      const at = el('input', { id: ids.at, type: 'time', step: '60', value: f.at });
+      const day = el('select', { id: ids.day, class: 'ui-select' }, DAYS.map((d) => el('option', { value: d, text: dayLabel(d) })));
+      day.value = f.day;
+      const lbl = (id, key) => el('label', { for: id, text: t(key) });
+      const everyRow = el('div', { class: 'sched-field sched-every-row' }, [lbl(ids.every, 'sched.every_label'), el('div', { class: 'sched-inline' }, [every, el('span', { class: 'agents-unit', text: t('sched.minutes') })])]);
+      const dayRow = el('div', { class: 'sched-field' }, [lbl(ids.day, 'sched.day_label'), day]);
+      const atRow = el('div', { class: 'sched-field' }, [lbl(ids.at, 'sched.at_label'), at]);
+      const preview = el('p', { class: 'sched-preview', role: 'status', 'aria-live': 'polite' });
+      const err = el('p', { class: 'task-error', role: 'alert', hidden: '' });
+      const paint = () => {
+        f.repeat = repeat.value; f.every = every.value; f.at = at.value; f.day = day.value;
+        everyRow.hidden = f.repeat !== 'every';
+        atRow.hidden = f.repeat === 'every';
+        dayRow.hidden = f.repeat !== 'weekly';
+        const r = scheduleRule(f);
+        preview.textContent = r.error ? r.error
+          : t('sched.preview', { rule: ruleText(r.rule), when: previewRuns(r.rule).map(whenText).join(' · '), tz: localZone() });
+        preview.classList.toggle('task-error', !!r.error);
+      };
+      for (const n of [repeat, every, at, day]) { n.addEventListener('input', paint); n.addEventListener('change', paint); }
+      const save = el('button', { type: 'submit', class: 'btn-primary', text: sc ? t('sched.save') : t('sched.create') });
+      const cancel = el('button', { type: 'button', class: 'btn-secondary', text: t('common.cancel') });
+      cancel.addEventListener('click', () => { editorHost.replaceChildren(); newBtn.focus(); });
+      const form = el('form', { class: 'sched-form', 'aria-label': sc ? t('sched.edit_title') : t('sched.new_title') }, [
+        el('h3', { text: sc ? t('sched.edit_title') : t('sched.new_title') }),
+        el('div', { class: 'sched-field' }, [lbl(ids.agent, 'sched.agent_label'), agentSel]),
+        el('div', { class: 'sched-field' }, [lbl(ids.prompt, 'sched.prompt_label'), prompt]),
+        el('div', { class: 'sched-field' }, [lbl(ids.thread, 'sched.post_label'), threadSel,
+          el('p', { class: 'muted sched-help', id: 'sched-thread-help', text: t('sched.post_help') })]),
+        el('div', { class: 'sched-when' }, [el('div', { class: 'sched-field' }, [lbl(ids.repeat, 'sched.repeat_label'), repeat]), everyRow, dayRow, atRow]),
+        preview, err,
+        el('div', { class: 'assign-actions' }, [cancel, save]),
+      ]);
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        paint();
+        const body = scheduleBody(f);
+        if (body.error) { err.hidden = false; err.textContent = body.error; return; }
+        err.hidden = true;
+        save.disabled = true;
+        try {
+          if (sc) await extra.patchSchedule(sc.id, body);
+          else await extra.createSchedule(body);
+          toast(t('sched.saved'));
+          editorHost.replaceChildren();
+          await load();
+          newBtn.focus();
+        } catch (ex) {
+          err.hidden = false;
+          err.textContent = errSentence(ex);
+        } finally { save.disabled = false; }
+      });
+      if (!usable.length) {
+        editorHost.replaceChildren(el('p', { class: 'modal-hint', text: t('tasks.assign_none') }));
+        return;
+      }
+      editorHost.replaceChildren(form);
+      paint();
+      agentSel.focus();
+    }
+
+    host.classList.remove('hidden');
+    await load();
+    newBtn.focus();
+    return true;
+  }
+
   // ---- assign ----
 
   function buildAssign() {
@@ -362,7 +717,7 @@ export function createTasksUi(deps = {}) {
     const prevFocus = document.activeElement;
     const usable = agents.filter((a) => a.available !== false);
     const heading = el('h2', { id: 'assign-title', text: t('tasks.assign') });
-    const closeBtn = el('button', { type: 'button', class: 'icon-btn ghost', 'aria-label': t('common.close'), text: '✕' });
+    const closeBtn = el('button', { type: 'button', class: 'icon-btn ghost', title: t('common.close'), 'aria-label': t('common.close') }, [spriteIcon('x', 18)]);
     const select = el('select', { id: 'assign-agent', required: '' },
       usable.map((a) => el('option', { value: a.id, text: `${a.name} · ${a.backend_label || a.backend}` })));
     if (agentId && usable.some((a) => a.id === agentId)) select.value = agentId;
@@ -385,9 +740,6 @@ export function createTasksUi(deps = {}) {
       el('label', { for: 'assign-agent', text: t('tasks.assign_agent') }), select,
       hint,
       el('label', { for: 'assign-prompt', text: t('tasks.assign_prompt') }), area,
-      budget && budget.usd_per_day != null
-        ? el('p', { class: 'muted', text: t('tasks.assign_budget', { spent: budget.spent_today_usd.toFixed(2), limit: Number(budget.usd_per_day).toFixed(2) }) })
-        : null,
       err,
       el('div', { class: 'assign-actions' }, [cancel, go]),
     ]);
@@ -483,16 +835,21 @@ export function createTasksUi(deps = {}) {
   }
 
   return {
-    refreshAccess, openPage, closePage, openAssign, interceptSend, cardForMessage, onFrame,
+    refreshAccess, openPage, closePage, openAssign, openSchedules, interceptSend, cardForMessage, onFrame,
     get access() { return access; },
     get agents() { return agents; },
     get isOpen() { return !!backdrop && !backdrop.classList.contains('hidden'); },
     closeAll() {
       if (backdrop) backdrop.classList.add('hidden');
       if (assignBackdrop) assignBackdrop.classList.add('hidden');
+      if (schedBackdrop) schedBackdrop.classList.add('hidden');
     },
   };
 }
+
+/** An API error as a sentence for people: the server's own words (it sends whole sentences),
+ *  without the "403:" status prefix, plus the fix when it gives one. */
+export const errSentence = errorText;
 
 /** Keep Tab inside `box` and let Escape close it. Shared by both dialogs. */
 export function trapKeys(e, box, onEscape) {

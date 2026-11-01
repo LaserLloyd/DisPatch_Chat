@@ -57,21 +57,21 @@ export const APP_KEYS = [
   'dispatch-custom-links',    // links.js (custom link buttons on the rail)
   'dispatch-menu-bots',       // menubots.js (which bots were parked in the ⌥ menu)
   'dispatch-last-character',  // newchat.js (the character the phone New chat tab goes to)
-  'dispatch-show-hidden-bots', // menubots.js (show bots hidden on unlocked devices here)
   'dispatch-imagestudio-sort', // apps/imagestudio studio.js (the results grid's order)
   'dispatch-rail-layout',     // railmenu.js (which rail buttons sit in Tools & more)
+  'dispatch-settings-size',   // settings-resize.js (the Settings window's size on this device)
   'dispatch-settings-last',   // main.js (the Settings section this device opened last)
   'dispatch-settings-adv',    // main.js (which Settings "Advanced" disclosures were left open)
-  // NOT 'dispatch-privacy-ack' (host-notice.js): it only records that this device
-  // dismissed the one-time "stored on the host computer" card. It is not personal
-  // data, and wiping it would show that card again on every visit of a privacy-mode
-  // device. Exempt on purpose (frontend/tests/privacy-keys.test.js EXEMPT).
   'dispatch-viewer-recent',   // main.js (recent local-viewer paths in the palette)
+  'dispatch-lightbox-details', // main.js (the picture viewer's Details panel was left open)
   'tl-collapsed',             // main.js (thread list collapsed, desktop)
-  'lc-remember',              // main.js (unlock keypad "keep this device unlocked")
-  'dp-firstrun-dismissed',    // main.js (the "create the owner account" card was put away here)
+  'lc-remember',              // main.js (sign-in keypad "keep this device signed in")
+  'dp-firstrun-dismissed',    // main.js (the "create the first Admin account" card was put away here)
+  'dispatch-signin-notice-day',    // host-notice.js (the day the security notice last showed here)
+  'dispatch-signin-notice-resets', // host-notice.js (PIN-reset notices this device has shown)
+  'dispatch-password-card',        // host-notice.js (the "set a password" card showed on this device)
   // DELIBERATELY ABSENT: 'dispatch-nim'. No-Image Mode is a RATCHET — once on,
-  // it takes the PIN to turn off (js/nim.js canDisableNim). Wiping it here
+  // a signed-out device cannot turn it off (js/nim.js canDisableNim). Wiping it here
   // would make "clear this device" a one-click way around that gate on a
   // handed-over tablet, which is the exact scenario NIM exists for. It is not
   // an oversight; do not "fix" it by adding the key.

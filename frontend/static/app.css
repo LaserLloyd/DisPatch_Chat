@@ -444,9 +444,13 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .bubble th.md-th { position: relative; cursor: pointer; user-select: none; -webkit-user-select: none; padding-inline-end: 22px; }
 .bubble th.md-th:hover, .bubble th.md-th:focus-visible { background: color-mix(in oklab, var(--bg-hover) 70%, var(--accent) 30%); }
 .bubble th.md-th:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.bubble th.md-th::after { content: '⇅'; position: absolute; inset-inline-end: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; opacity: .35; }
-.bubble th.md-th[aria-sort="ascending"]::after { content: '▲'; opacity: 1; color: var(--accent-text); }
-.bubble th.md-th[aria-sort="descending"]::after { content: '▼'; opacity: 1; color: var(--accent-text); }
+.bubble th.md-th::after {
+  content: ""; position: absolute; inset-inline-end: 7px; top: 50%; transform: translateY(-50%);
+  width: 14px; height: 14px; opacity: .4; background: currentColor;
+  -webkit-mask: var(--ico-arrow-up-down) center / contain no-repeat; mask: var(--ico-arrow-up-down) center / contain no-repeat;
+}
+.bubble th.md-th[aria-sort="ascending"]::after { opacity: 1; background: var(--accent-text); -webkit-mask-image: var(--ico-arrow-up); mask-image: var(--ico-arrow-up); }
+.bubble th.md-th[aria-sort="descending"]::after { opacity: 1; background: var(--accent-text); -webkit-mask-image: var(--ico-arrow-down); mask-image: var(--ico-arrow-down); }
 /* The grip sits MOSTLY inside its own header (12 of 16px; 20 of 26px on touch):
    a grip centred on the column border lost to Chrome's touch-target adjustment,
    which snapped the finger to the neighbouring header and sorted instead. */
@@ -586,33 +590,16 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid var(--border-strong); }
 .modal-header h2 { font-size: 17px; }
 .modal-hint { font-size: 12.5px; padding: 10px 18px 0; }
-.bm-list { padding: 10px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 /* Avatar pools section (Bots pane, below the roster) */
 .ap-panel { margin: 4px 14px 12px; border-top: 1px solid var(--border-strong); padding-top: 10px; }
-.ap-title { margin: 0 0 8px; font-size: 14px; }
 .ap-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; flex-wrap: wrap; }
 .ap-name { font-weight: 600; min-width: 72px; }
 .ap-stats { flex: 1 1 auto; font-size: 12px; }
-.ap-warn { color: #c0392b; font-size: 12px; }
+.ap-warn { color: var(--error-text); font-size: 12px; }
 .ap-editor { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 10px; }
 .ap-editor .bm-avatar-btn { align-self: flex-start; }
 .ap-ta { width: 100%; resize: vertical; box-sizing: border-box; }
-/* flex-wrap, not shrink-to-nothing: every control in this row has a fixed
-   width, so the name span was the only thing that could give — and it gave all
-   the way down to "As…", "Sa…", "Alp…" at a full 1440px desktop. The name now
-   holds a floor (min-width below) and the CONTROLS wrap to a second line when
-   the row genuinely runs out of room, which is the honest trade: a bot's name
-   is the one thing in the row you cannot infer from an icon. */
-.bm-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 9px 10px; background: var(--bg-tertiary); border: 1px solid var(--border-strong); border-radius: var(--radius-md); }
-.bm-row.dragging { opacity: 0.5; }
-.bm-row.drop-target { border-color: var(--accent); }
-.bm-handle { cursor: grab; color: var(--text-muted); font-size: 18px; }
-.bm-row img { width: 36px; height: 36px; border-radius: 9px; object-fit: cover; }
-/* min-width is a FLOOR, not a width: names shorter than that just leave slack,
-   longer ones still ellipsize. 9ch fits "Assistant" outright and leaves any
-   longer name legible ("Alphabet…" rather than "Alp…"). */
-.bm-name { flex: 1 1 9ch; font-weight: 600; min-width: 9ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Row = handle + ▲▼ + avatar + name + safe + photo + switch: needs more than
+/* Row = handle + up/down + avatar + name + photo + switch: needs more than
    the 420px default or the visibility switch clips off the right edge. The
    width now comes from .settings-modal (which has to hold the dashboard's card
    grid too) — comfortably more than the 640px this row was tuned to. */
@@ -623,6 +610,9 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .switch input:checked + .slider { background: var(--accent); }
 .switch input:checked + .slider::before { transform: translateX(18px); }
 .modal-footer { padding: 14px 18px; border-top: 1px solid var(--border-strong); display: flex; justify-content: flex-end; }
+/* the face picker for an AI picture: Discard / Try again on the left, Save on the right */
+.crop-footer { gap: 8px; flex-wrap: wrap; }
+.crop-footer #crop-discard:not([hidden]) { margin-right: auto; }
 
 /* ===================== Settings (3.2: sections, not tabs) =====================
    Seven sections in two groups. Desktop: a side nav (with the search box) beside
@@ -711,10 +701,89 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   .stab-glyph { width: 22px; height: 22px; }
   .settings-nav .stab-glyph .rail-icon { width: 20px; height: 20px; }
   .stab-summary { display: block; }
-  .stab-chevron { display: block; flex: none; width: 8px; height: 8px; border: solid var(--text-secondary);
-    border-width: 0 2px 2px 0; transform: rotate(-45deg); margin-inline-end: 4px; }
-  [dir="rtl"] .stab-chevron { transform: rotate(135deg); }
+  .stab-chevron { display: block; flex: none; width: 18px; height: 18px; background: var(--text-secondary);
+    -webkit-mask: var(--ico-chevron-right) center / contain no-repeat; mask: var(--ico-chevron-right) center / contain no-repeat; margin-inline-end: 2px; }
+  [dir="rtl"] .stab-chevron { transform: scaleX(-1); }
   .snav-heading { margin-inline: 4px; }
+}
+
+/* ---- Settings window sizes (4.1): a desktop window can be resized ----
+   js/settings-resize.js sets --sm-w/--sm-h on the dialog and adds .is-sized; the
+   handles and the maximize button exist only with a fine pointer and a wide
+   viewport (a phone keeps its full-screen drill-in). What the sections look like
+   inside follows the DIALOG's width through container queries on .settings-body,
+   never the viewport: narrow = an icons-only nav (the label is the tooltip),
+   medium = the layout above, wide = cards in two columns where that reads well. */
+.settings-max, .sr-handle { display: none; }
+.settings-max svg { display: block; }
+.settings-max .sm-ico-restore, .settings-max[aria-pressed="true"] .sm-ico-max { display: none; }
+.settings-max[aria-pressed="true"] .sm-ico-restore { display: block; }
+.settings-body { container: smodal / inline-size; }
+@media (min-width: 900px) and (pointer: fine) {
+  .settings-modal { position: relative; }
+  .settings-modal.is-sized { width: var(--sm-w); height: var(--sm-h); max-height: none; }
+  .settings-modal.is-resizing { user-select: none; }
+  .settings-max { display: inline-flex; }
+  .sr-handle { display: block; position: absolute; z-index: 6; touch-action: none; }
+  .sr-n, .sr-s { inset-inline: 14px; height: 8px; cursor: ns-resize; }
+  .sr-e, .sr-w { inset-block: 14px; width: 8px; cursor: ew-resize; }
+  .sr-n { top: -4px; } .sr-s { bottom: -4px; }
+  .sr-e { right: -4px; } .sr-w { left: -4px; }
+  .sr-ne, .sr-nw, .sr-sw { width: 16px; height: 16px; }
+  .sr-ne { top: -6px; right: -6px; cursor: nesw-resize; }
+  .sr-nw { top: -6px; left: -6px; cursor: nwse-resize; }
+  .sr-sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+  /* The keyboard handle: a small grip on the bottom-inline-end corner. */
+  .sr-grip {
+    width: 18px; height: 18px; padding: 0; bottom: 2px; inset-inline-end: 2px; cursor: nwse-resize;
+    background: var(--text-muted); opacity: .55; border: 0; border-radius: 3px;
+    -webkit-mask: linear-gradient(135deg, transparent 52%, #000 52% 60%, transparent 60% 72%, #000 72% 80%, transparent 80%);
+    mask: linear-gradient(135deg, transparent 52%, #000 52% 60%, transparent 60% 72%, #000 72% 80%, transparent 80%);
+  }
+  [dir="rtl"] .sr-grip { cursor: nesw-resize; transform: scaleX(-1); }
+  .sr-grip:hover, .sr-grip:focus-visible { opacity: 1; background: var(--accent); }
+  .sr-grip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .settings-modal.is-maximized { border-radius: var(--radius-md); }
+  .settings-modal.is-maximized .sr-handle:not(.sr-grip) { display: none; }
+}
+
+/* Narrow: the side nav keeps only the glyphs. Every tab is still a real button in
+   the tab order, with its label as the tooltip (settings-resize.js labelTabs).
+   The search box needs room, so it gives way here. */
+@media (min-width: 900px) {
+  @container smodal (max-width: 759px) {
+    .settings-nav { flex-basis: 60px; padding-inline: 6px; align-items: stretch; }
+    /* The search stays reachable: a magnifier the width of a tab that opens into a field on focus. */
+    .settings-search { padding: 0 0 6px; height: 40px; }
+    .settings-search-input {
+      width: 100%; height: 36px; padding: 0; cursor: pointer; color: transparent; caret-color: transparent;
+      background: var(--bg-secondary) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") center / 18px no-repeat;
+    }
+    .settings-search-input::placeholder { color: transparent; }
+    /* The nav scrolls, which would clip the opened field and its results: let them overlay the pane while it has focus. */
+    .settings-nav:focus-within { overflow: visible; position: relative; z-index: 6; }
+    .settings-search-input:focus {
+      position: absolute; z-index: 6; inset-inline-start: 0; top: 0; width: 260px; padding: 0 10px; cursor: text;
+      color: var(--text-primary); caret-color: auto; background-image: none;
+    }
+    .settings-search-input:focus::placeholder { color: var(--text-secondary); }
+    .settings-tab { justify-content: center; padding-inline: 0; gap: 0; }
+    .stab-text { display: none; }
+    .snav-heading { font-size: 0; margin: 8px 8px 4px; height: 0; border-top: 1px solid var(--border-strong); }
+    .snav-heading:first-child { display: none; }
+  }
+}
+/* Wide: the plain cards of Appearance, Account and Voice sit two to a row; notes
+   and disclosures keep the full width. A grid grows the pane's scroll HEIGHT, never
+   its width (CSS columns on a fixed-height pane spilled sideways). Sections that
+   hold tables stay one column. The query is on the whole body, so the threshold
+   includes the 224px nav. */
+@container smodal (min-width: 1200px) {
+  #spane-appearance:not(.hidden), #spane-account:not(.hidden), #spane-voice:not(.hidden) {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-content: start; column-gap: 0; overflow-x: hidden;
+  }
+  #spane-appearance > *, #spane-account > *, #spane-voice > * { grid-column: 1 / -1; min-width: 0; }
+  #spane-appearance > .dev-group, #spane-account > .dev-group, #spane-voice > .dev-group { grid-column: auto; margin-top: 0; padding-top: 16px; }
 }
 
 /* The pane is the ONE scroll region between header and footer. Modules that
@@ -725,8 +794,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
 .settings-pane > .sec-body,
 .settings-pane > .llm-body,
 .settings-pane > .rx-body,
-.settings-pane > .dash-body,
-.settings-pane > .bm-list { overflow: visible; flex: 0 0 auto; min-height: 0; }
+.settings-pane > .dash-body { overflow: visible; flex: 0 0 auto; min-height: 0; }
 /* Busy = a manager request in flight. Same treatment its backdrop used to get. */
 .settings-pane.busy { pointer-events: none; opacity: .7; }
 /* A pane's lead sentence (Security's status line, AI models' intro) sat 4px
@@ -811,10 +879,6 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
   font-size: 12px; font-weight: 600; color: var(--text-secondary);
 }
 .theme-revision { margin: 0; padding: 0 18px 16px; font-size: 12px; }
-
-/* Contextual footer: one group per tab, and the whole bar hides when the
-   active tab has no actions of its own. */
-.settings-actions { display: flex; flex: 1; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
 /* Lock now is a security action, not a device preference — it rides with the
    PIN controls rather than the footer's Set/Remove pair. */
 /* `.sec-body` in the selector: .bm-actions (declared further down, same
@@ -822,33 +886,14 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; 
    the PIN fields above it. */
 .sec-body .sec-lock-row { padding-inline: 0; }
 
-/* Safe-Mode companions panel (the gear's locked face). */
-.comp-list { padding: 12px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; }
-.comp-row { display: flex; align-items: center; gap: 12px; padding: 9px 10px; background: var(--bg-tertiary); border: 1px solid var(--border-strong); border-radius: var(--radius-md); }
-.comp-avatar { width: 38px; height: 38px; border-radius: 10px; font-size: 17px; flex-shrink: 0; object-fit: cover; }
-.comp-avatar-pick { cursor: pointer; }
-.comp-avatar-pick:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
-.comp-name { font-weight: 600; }
-.comp-empty { padding: 8px 4px; }
-/* Deliberately understated — reads as a quiet "show more", not an unlock. */
-.comp-footer { justify-content: center; }
-.comp-more { background: none; border: none; color: var(--text-muted); font-size: 12.5px; padding: 4px 12px; cursor: pointer; letter-spacing: .02em; }
-.comp-more:hover { color: var(--text-secondary); }
-
 /* ===================== Toast / Reconnect ===================== */
 .toast {
   /* Sits above a single-line composer, not on top of it. */
   position: fixed; bottom: 118px; left: 50%; transform: translateX(-50%);
   background: var(--bg-tertiary); border: 1px solid var(--border-light); color: var(--text-primary);
-  padding: 11px 18px; border-radius: var(--radius-md); z-index: 200; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  padding: 11px 18px; border-radius: var(--radius-md); z-index: 350;   /* above .lightbox (300): its copy confirmations */ box-shadow: 0 8px 24px rgba(0,0,0,.5);
   max-width: 90vw; font-size: 14px;
 }
-/* The voice chat overlay (the voice add-on's voice.css; it sets
-   body.drive-open) is z 1000. A toast raised from inside it ("Voice chat
-   ended", a refused open) must land on top, not underneath where nobody can
-   see it. Scoped to the overlay being open so the app's normal stacking
-   (lock screen above toasts) is unchanged. */
-body.drive-open .toast { z-index: 1100; }
 .toast.error { border-color: var(--error); }
 .reconnect-overlay { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: center; z-index: 150; pointer-events: none; }
 .reconnect-card { margin-top: 10px; background: var(--warning); color: var(--on-warning-fill); padding: 7px 16px; border-radius: 999px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
@@ -960,8 +1005,12 @@ body.drive-open .toast { z-index: 1100; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sub-details summary::-webkit-details-marker { display: none; }
-.sub-details summary::before { content: "▸ "; }
-.sub-details[open] summary::before { content: "▾ "; }
+.sub-details summary::before {
+  content: ""; display: inline-block; width: 14px; height: 14px; margin-inline-end: 4px; vertical-align: -2px;
+  background: currentColor;
+  -webkit-mask: var(--ico-chevron-right) center / contain no-repeat; mask: var(--ico-chevron-right) center / contain no-repeat;
+}
+.sub-details[open] summary::before { -webkit-mask-image: var(--ico-chevron-down); mask-image: var(--ico-chevron-down); }
 .sub-details summary:hover { color: var(--text-secondary); }
 .sub-content { padding: 4px 12px 10px; font-size: 13.5px; color: var(--text-secondary); }
 .sub-content pre { font-size: 12px; }
@@ -1003,9 +1052,9 @@ body.drive-open .toast { z-index: 1100; }
 
 /* ---- Lightbox chrome + gallery (2.3.9) -------------------------------------
    The close button, Download pill, caption, counter and side arrows (all
-   `.lightbox-chrome`) show only while the pointer is near the bottom of the
-   picture or on a control, fade ~1.5 s after it leaves, toggle on a touch tap
-   and show on keyboard focus (js/lightbox-nav.js decides; `.chrome-on` is the
+   `.lightbox-chrome`) show only while the pointer is over the picture or on a
+   control, fade a moment after it leaves, toggle on a touch tap and show on
+   keyboard focus (never on a mouse click) (js/lightbox-nav.js decides; `.chrome-on` is the
    verdict). Hidden chrome keeps pointer-events off but stays focusable, so Tab
    brings it back; Esc and the arrow keys never depend on it. */
 .lightbox { touch-action: none; }
@@ -1026,20 +1075,85 @@ body.drive-open .toast { z-index: 1100; }
 .lightbox-next { right: 14px; }
 .lightbox-next .rail-icon { transform: scaleX(-1); }
 .lightbox-counter {
-  position: absolute; bottom: 30px; inset-inline-start: 18px; z-index: 5;
+  position: absolute; top: calc(18px + env(safe-area-inset-top)); inset-inline-start: 18px; z-index: 5;
   padding: 4px 10px; border-radius: 999px; background: rgba(20,20,40,.8); color: #fff;
   font-size: 13px; font-variant-numeric: tabular-nums;
 }
 .lightbox-counter:empty { display: none; }
-.lightbox-caption {
-  position: absolute; bottom: 74px; left: 50%; transform: translateX(-50%); z-index: 5;
-  width: min(720px, calc(100vw - 32px)); padding: 8px 12px; border-radius: 10px;
-  background: rgba(20,20,40,.82); color: #fff; font-size: 13px; line-height: 1.4;
-  text-align: center; cursor: pointer; overflow: hidden;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+.copy-buffer { position: fixed; top: 0; left: 0; opacity: 0; pointer-events: none; }
+.lb-download[hidden], .lb-zoom[hidden] { display: none; }
+/* The toolbar (4.0): zoom out · 100% · zoom in | Details | Download, bottom centre, chrome. */
+.lightbox-bar {
+  position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 6;
+  display: flex; align-items: center; gap: 6px; padding: 5px; border-radius: 999px;
+  background: rgba(20,20,40,.86); color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.45);
+  max-width: calc(100vw - 24px);
 }
-.lightbox-caption.open { display: block; max-height: 40vh; overflow: auto; text-align: start; }
-.lightbox-caption[hidden], .lightbox-download[hidden] { display: none; }
+.lb-group { display: flex; align-items: center; gap: 2px; }
+.lb-zoom { padding-inline-end: 6px; border-inline-end: 1px solid rgba(255,255,255,.18); }
+.lb-tool {
+  min-width: 40px; height: 40px; padding: 0 10px; border: 0; border-radius: 999px;
+  background: transparent; color: inherit; font: inherit; font-size: 14px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  cursor: pointer; text-decoration: none; white-space: nowrap;
+}
+.lb-tool .rail-icon { width: 18px; height: 18px; flex: none; }
+.lb-tool:hover:not(:disabled), .lb-tool[aria-expanded="true"] { background: var(--accent); color: var(--on-accent); }
+.lb-tool:disabled { opacity: .4; cursor: default; }
+.lb-tool:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.lb-zoom-label { min-width: 58px; font-variant-numeric: tabular-nums; }
+/* The details panel: a drawer on the right, a sheet at the bottom on a phone. Not chrome. */
+.lightbox-details {
+  position: absolute; top: 0; inset-inline-end: 0; bottom: 0; width: 340px; z-index: 7;
+  background: var(--surface-1, var(--bg-secondary)); color: var(--text-primary);
+  border-inline-start: 1px solid var(--border-light); box-shadow: -8px 0 30px rgba(0,0,0,.35);
+  overflow-y: auto; padding: 16px 18px 24px; cursor: default; text-align: start;
+  touch-action: pan-y;
+}
+.lightbox-details[hidden] { display: none; }
+.lb-details-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.lb-details-title { font-size: 16px; margin: 0; }
+.lb-details-close { color: var(--text-primary); }
+.lb-rows { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0 0 14px; font-size: 13px; }
+.lb-rows dt { color: var(--text-secondary); }
+.lb-rows dd { margin: 0; overflow-wrap: anywhere; }
+.lb-prompt-title { font-size: 13px; color: var(--text-secondary); margin: 4px 0 6px; font-weight: 600; }
+.lb-prompt {
+  margin: 0 0 14px; padding: 10px 12px; border-radius: 10px; background: var(--bg-hover, rgba(127,127,127,.12));
+  font-size: 13px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow-y: auto;
+  user-select: text;
+}
+.lb-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.lb-act { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; text-decoration: none; }
+.lb-act .rail-icon { width: 16px; height: 16px; flex: none; }
+/* With the panel open the picture shares the screen with it. */
+.lightbox.details-open img, .lightbox.details-open video { max-width: calc(94vw - 360px); }
+.lightbox.details-open { padding-inline-end: 340px; }
+.lightbox.details-open .lightbox-bar { left: calc((100vw - 340px) / 2); }
+.lightbox.details-open .lightbox-next { right: 354px; }
+/* RTL: the panel sits on the left, so the left arrow moves instead. */
+:root[dir="rtl"] .lightbox.details-open .lightbox-next { right: 14px; }
+:root[dir="rtl"] .lightbox.details-open .lightbox-prev { left: 354px; }
+.lightbox.details-open .lightbox-close { inset-inline-end: 356px; }
+:root[dir="rtl"] .lightbox.details-open .lightbox-bar { left: calc(340px + (100vw - 340px) / 2); }
+@media (max-width: 720px) {
+  .lightbox-details {
+    top: auto; inset-inline-start: 0; width: auto; max-height: 55vh;
+    border-inline-start: 0; border-top: 1px solid var(--border-light); border-radius: 16px 16px 0 0;
+    box-shadow: 0 -8px 30px rgba(0,0,0,.35); padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+  .lightbox.details-open { padding-inline-end: 0; padding-bottom: 55vh; }
+  .lightbox.details-open img, .lightbox.details-open video { max-width: 94vw; max-height: calc(45vh - 72px); }
+  .lightbox.details-open .lightbox-next { right: 6px; }
+  :root[dir="rtl"] .lightbox.details-open .lightbox-prev { left: 6px; }
+  :root[dir="rtl"] .lightbox.details-open .lightbox-next { right: 6px; }
+  .lightbox.details-open .lightbox-close { inset-inline-end: 16px; }
+  /* The sheet has Download, and a pinch zooms: the toolbar would sit on the picture. */
+  .lightbox.details-open .lightbox-bar { display: none; }
+  .lb-tool-text { display: none; }
+  .lightbox-bar { bottom: calc(14px + env(safe-area-inset-bottom)); }
+  .lb-tool { min-width: 44px; height: 44px; }
+}
 @media (hover: none) {
   .lightbox-prev { left: 6px; }
   .lightbox-next { right: 6px; }
@@ -1062,46 +1176,9 @@ body.drive-open .toast { z-index: 1100; }
   padding: 9px 16px; border-radius: var(--radius-md); font-weight: 600; font-size: 14px;
 }
 .btn-secondary:hover { border-color: var(--accent); }
-.bm-footer { justify-content: space-between; }
 .fs-modal { width: min(640px, 94vw); max-height: 88vh; }
 .fs-modal.drop-hot { outline: 2px dashed var(--accent); outline-offset: -8px; }
 .fs-header-actions { display: flex; gap: 10px; align-items: center; }
-/* ---- Locked-side drop sheet ---- */
-.drop-modal { max-width: 460px; }
-.drop-list {
-  padding: 6px 18px 14px; overflow-y: auto;
-  display: flex; flex-direction: column; gap: 8px; min-height: 92px;
-}
-.drop-empty { color: var(--text-muted); font-size: 13px; text-align: center; padding: 22px 0; }
-.drop-row { display: flex; align-items: center; gap: 11px; }
-.drop-icon { flex-shrink: 0; width: 26px; display: flex; align-items: center; justify-content: center; }
-.drop-icon .rail-icon { width: 22px; height: 22px; display: block; }
-.drop-info { flex: 1; min-width: 0; }
-.drop-name {
-  font-size: 13.5px; font-weight: 600;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.drop-detail { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-.drop-row.failed .drop-detail { color: var(--error-text); }
-/* --success, not --ok. There has never been an --ok custom property in this
-   codebase, so this rule always fell through to its literal #4ade80 — a fixed
-   green that ignores the palette and, on the two light skins, sits on a pale
-   surface at well under 3:1. --success is the token that actually exists and
-   is tuned per palette. */
-.drop-row.done .drop-icon { color: var(--success-text); }
-.drop-row.failed .drop-icon { color: var(--error-text); }
-/* Determinate bar; hidden once the row settles so finished rows stay compact. */
-.drop-bar {
-  height: 4px; margin-top: 6px; border-radius: 2px;
-  background: var(--bg-tertiary); overflow: hidden;
-}
-.drop-row.done .drop-bar, .drop-row.failed .drop-bar { display: none; }
-.drop-bar > i {
-  display: block; height: 100%; width: 0; border-radius: 2px;
-  background: var(--accent-hover); transition: width .15s linear;
-}
-.drop-footer { justify-content: space-between; gap: 10px; }
-
 .fs-list { padding: 8px 14px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; min-height: 160px; }
 .fs-day {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -1150,16 +1227,6 @@ body.drive-open .toast { z-index: 1100; }
 }
 .fs-act-btn .rail-icon { width: 16px; height: 16px; }
 .fs-act-btn:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-.lightbox-download {
-  position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%);
-  background: var(--accent); color: var(--on-accent); text-decoration: none; font-weight: 600;
-  padding: 10px 22px; border-radius: 999px; font-size: 14px; z-index: 5;
-  box-shadow: 0 6px 20px rgba(0,0,0,.5);
-  display: inline-flex; align-items: center; gap: 6px;
-}
-.lightbox-download .rail-icon { width: 15px; height: 15px; flex: none; }
-.lightbox-download:hover { background: var(--accent-hover); }
-
 /* ===================== Avatar crop modal ===================== */
 .crop-modal { width: min(560px, 94vw); }
 .crop-stage {
@@ -1180,21 +1247,6 @@ body.drive-open .toast { z-index: 1100; }
   white-space: nowrap; flex-shrink: 0; cursor: pointer;
 }
 .bm-avatar-btn:hover { border-color: var(--accent); }
-/* ▲/▼ reorder buttons — HTML5 drag-and-drop is dead on touch, so these are the
-   universal affordance (shown everywhere; drag still works on desktop). */
-.bm-move { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
-.bm-move-btn {
-  width: 26px; height: 17px; padding: 0; line-height: 1; font-size: 10px;
-  background: var(--bg-hover); border: 1px solid var(--border-strong); border-radius: 5px;
-  color: var(--text-secondary); cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-}
-.bm-move-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text-primary); }
-.bm-move-btn:disabled { opacity: .35; cursor: default; }
-/* Avatar doubles as the click-to-change target. */
-.bm-row img, .bm-avatar-pick { cursor: pointer; }
-.bm-avatar-pick { width: 36px; height: 36px; border-radius: 9px; object-fit: cover; flex-shrink: 0; }
-.bm-row .bm-avatar-pick:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ===================== Mobile tabs ===================== */
 .mobile-tabs { display: none; }
@@ -1239,12 +1291,12 @@ body.drive-open .toast { z-index: 1100; }
   }
   /* The gear rail on a phone: ONE ROW OF ICONS, not a stack of full-width bars.
      Four 100%-wide 48px buttons plus margins ate ~380px — roughly 40% of a
-     390x844 screen — for controls a family member touches maybe once a week,
+     390x844 screen — for controls touched maybe once a week,
      while the actual content (the bots) sat squeezed at the top. As a row it
      costs ~64px.
      The captions stay. They were added deliberately (see the data-label note
      below) because a bare glyph mislabelled the theme toggle and the lock
-     button, and on a family phone this rail IS the navigation; "icons only"
+     button, and on a phone this rail IS the navigation; "icons only"
      would be tidier and less usable. */
   .app[data-view="bots"] .gear-row > .gear-btn {
     /* Share the row evenly, but never below a comfortable tap target. */
@@ -1259,7 +1311,7 @@ body.drive-open .toast { z-index: 1100; }
      The label TEXT is not written here. It comes from data-label, which
      main.js fills from the locale files (applyRailLabels) on boot and on every
      language switch: a CSS `content:` string is English forever, and on a
-     family phone this rail is the entire navigation. attr() yields "" for a
+     phone this rail is the entire navigation. attr() yields "" for a
      button with no data-label, so an un-labelled button simply shows its glyph
      — which is also what ⚡ and 🩺 used to do PERMANENTLY, having been added
      without a `content:` rule of their own. */
@@ -1286,14 +1338,6 @@ body.drive-open .toast { z-index: 1100; }
     flex-wrap: wrap; flex-shrink: 0;
     max-height: 40dvh; overflow-y: auto;
   }
-  /* The locked side's only upload entry point — it earns a primary-ish
-     treatment here because on a family phone this IS the Bots page's action. */
-  .app[data-view="bots"] #drop-btn {
-    color: var(--accent-text);
-    border-color: color-mix(in oklab, var(--accent) 40%, transparent);
-    background: var(--accent-wash);
-  }
-
   /* --- Threads + chat views --- */
   .app[data-view="threads"] .threadlist { display: flex; width: 100vw; border-inline-end: none; }
   .app[data-view="chat"] .chatview { display: flex; }
@@ -1322,17 +1366,11 @@ body.drive-open .toast { z-index: 1100; }
   .back-btn { width: 44px; height: 44px; }
   .scroll-bottom { bottom: 110px; width: 44px; height: 44px; }
   .btn-primary, .btn-secondary { min-height: 44px; }
-  .bm-move-btn { width: 36px; height: 22px; font-size: 11px; }
   .lock-submit { min-height: 46px; }
   .fs-act-btn, .fs-del-btn { width: 42px; height: 42px; }
   /* (.retry-chip button / .lock-forgot / .bm-safe-btn are bumped in the
      touch-target block at the END of the file — their base rules come
      later in source and would override rules placed here.) */
-
-  /* Bot Manager rows are too wide for a phone with every affordance shown:
-     drop the (touch-dead) drag handle and the redundant "Change photo" button
-     — the avatar itself is the tap-to-change target, per the hint. */
-  .bm-handle { display: none; }
 
   /* --- Settings goes full-screen on a phone --- */
   /* Six panes of admin surface inside a 92vw card left every one of them in a
@@ -1367,15 +1405,8 @@ body.drive-open .toast { z-index: 1100; }
 
 }
 
-/* ===================== Lock / PIN / Safe Mode ===================== */
-/* Safe Mode hides full-mode-only controls entirely (they'd only fail with an
-   unlock hint, defeating the deniability model). Auto-restores on unlock —
-   applyAuthChrome() toggles body.decoy-mode. */
-body.decoy-mode #search-btn,
-body.decoy-mode #ch-modelchip,
-body.decoy-mode #thread-menu-btn { display: none; }
-
-/* Generic letter-block avatar (Safe Mode: no images). Sits on the same base
+/* ===================== Lock / PIN ===================== */
+/* Generic letter-block avatar (No-Image Mode: no pictures). Sits on the same base
    classes (bot-avatar / thread-avatar / msg-avatar / tl-avatar / ch-avatar)
    that already define size + radius, so we only supply look + glyph sizing. */
 .letter-avatar {
@@ -1384,6 +1415,7 @@ body.decoy-mode #thread-menu-btn { display: none; }
   font-weight: 700; text-transform: uppercase; border: 1px solid var(--border-light);
   -webkit-user-select: none; user-select: none;
 }
+.letter-avatar[data-letter]::before { content: attr(data-letter); }
 .bot-avatar.letter-avatar { font-size: 24px; opacity: 1; }
 .thread-avatar.letter-avatar { font-size: 15px; }
 .msg-avatar.letter-avatar { font-size: 14px; }
@@ -1546,8 +1578,6 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .bm-avatar-style input { accent-color: var(--accent); width: 16px; height: 16px;
   margin-top: 1px; flex: none; }
 .bm-avatar-style strong { color: var(--text-primary); font-weight: 600; }
-.sec-remember { display: flex; flex-direction: column; gap: 10px; padding: 10px 0 2px;
-  border-top: 1px solid var(--border-strong); }
 .sec-remember-row { display: flex; align-items: flex-start; gap: 9px; font-size: 13px;
   color: var(--text-primary); cursor: pointer; line-height: 1.45; }
 .sec-remember-row input { accent-color: var(--accent); width: 16px; height: 16px;
@@ -1559,7 +1589,7 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .bm-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 18px 0; }
 .bm-actions .btn-secondary { flex: 1 1 auto; font-size: 13px; }
 
-/* Per-bot Safe Mode toggle (Bot Manager, full mode only) */
+/* Pill toggle in a Characters row (bots-edit.js: Lookups on/off). */
 .bm-safe-btn {
   font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 4px 8px;
   border-radius: 999px; border: 1px solid var(--border-light);
@@ -1567,15 +1597,6 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 }
 .bm-safe-btn:hover { border-color: var(--accent); }
 .bm-safe-btn.on { background: var(--accent-wash); color: var(--accent-text); border-color: color-mix(in oklab, var(--accent) 50%, transparent); }
-/* 2.4.2: a bot with neither "Show locked" nor "Show unlocked" is on no
-   device. The row stays editable; only its identity dims, plus a Hidden tag. */
-.bm-row--hidden .bm-avatar-pick, .bm-row--hidden .bm-name { opacity: .45; }
-.bm-hidden-tag {
-  flex: none; font-size: 10px; font-weight: 700; letter-spacing: 1px;
-  padding: 3px 8px; border-radius: 999px;
-  border: 1px dashed var(--text-muted); color: var(--text-muted);
-}
-.bm-hidden-tag[hidden] { display: none; }
 
 /* ===================== Modern message surface ===================== */
 /* De-bubble assistant turns into full-width reading rows (Claude/ChatGPT
@@ -1748,6 +1769,42 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   }
 }
 
+/* Lock vs "Go to <default profile>" (main.js paintLockButton) and the Switch profile button. */
+/* .gear-btn in the selectors on purpose: `.gear-btn .rail-icon { display: block }` comes later in
+   this file with the same weight as `.lock-now-btn .home-glyph`, and won -- with "The profile
+   list" as the lock target (the default) the button showed a lock AND a house. */
+.gear-btn.lock-now-btn .home-glyph, .gear-btn.lock-now-btn.to-default .lock-glyph { display: none; }
+.gear-btn.lock-now-btn.to-default .home-glyph { display: block; }
+.switch-glyphs { display: inline-flex; align-items: center; justify-content: center; gap: 2px; }
+/* The pair stands where a lone .rail-icon would, and takes its `margin: auto`: in the phone bar's
+   column-flex button that auto margin is what sends the caption to the foot, so without it the
+   "Switch" caption sat higher than Owner / Home / Settings beside it. */
+.gear-btn > .switch-glyphs { margin: auto; }
+.app .tools-menu .gear-btn.rail-menu-item > .switch-glyphs { margin: 0 4px; flex: none; }
+.app .tools-menu .gear-btn.rail-menu-item > .switch-glyphs .rail-icon { margin: 0; }
+.switch-glyphs .rail-icon { margin: 0; }
+.switch-shuffle { flex: none; }
+/* Desktop rail, 2026-10-31 (maintainer): the Tools tile keeps its size; the small buttons under it
+   (profile, Lock / Go home, Settings, pins, links, Switch profile) are half-height bars as
+   wide as a bot tile; Switch profile sits at the very foot. */
+@media (min-width: 769px) {
+  .gear-row { gap: 8px; }
+  .gear-row > .gear-btn { width: 56px; height: 26px; border-radius: 9px; }
+  .gear-row > .gear-btn .rail-icon { width: 15px; height: 15px; }
+  .gear-row > .profile-chip .profile-chip-img,
+  .gear-row > .profile-chip .profile-chip-text { width: 20px; height: 20px; font-size: 11px; }
+  .gear-row > .switch-profile-btn .switch-shuffle { width: 10px; height: 10px; }
+  .gear-row > .switch-profile-btn:not(.hidden) {
+    position: sticky; bottom: 0; z-index: 1; box-shadow: 0 0 0 6px var(--bg-sidebar);
+  }
+  /* Settings stays pinned too, stacked just above Switch profile (26px bar + 8px gap): with
+     many pins and links the column scrolls, and Settings must never be the button that
+     scrolls away (the 2026-09-18 rule above). */
+  .gear-row:has(> .switch-profile-btn:not(.hidden)) > #manage-bots { bottom: 34px; }
+  .gear-row:has(> .switch-profile-btn:not(.hidden))::after { flex-basis: 0; }
+  .gear-row:has(> .switch-profile-btn:not(.hidden)) > .gear-btn { scroll-margin-bottom: 72px; }
+}
+
 /* Theme toggle reuses .gear-btn; show its glyph centered. */
 .theme-toggle-btn { font-size: 17px; }
 
@@ -1806,7 +1863,6 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 .msg.assistant.streaming .msg-col { max-width: var(--assistant-col); }
 .typing-col { max-width: var(--assistant-col); }
 .msg.streaming > .msg-col > .bubble { background: transparent; border: none; padding: 2px 0 0; font-size: 15px; line-height: 1.6; }
-.stream-pre { font-size: 15px; line-height: 1.6; }
 .stream-cursor { background: var(--accent-hover); }
 .msg.streaming .msg-avatar { align-self: flex-start; margin-top: 2px; }
 
@@ -1945,15 +2001,21 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 /* ---- Message actions: visible on touch + focus, bigger taps (F6) ---- */
 .msg-act-btn { transition: background .12s, color .12s, transform .1s; }
 .msg-act-btn:active { transform: scale(.94); }
-.msg:focus-within .msg-actions { opacity: 1; }
+/* Keyboard focus shows them; a mouse click (which focuses too) does not pin them. */
+.msg:has(:focus-visible) .msg-actions { opacity: 1; }
 @media (hover: none) {
   /* Always visible on touch (no hover to reveal it), but quiet: two small
      icons, not a row of words. 36px keeps them honest tap targets. */
   .msg-actions { opacity: .6; }
-  .msg-icon-btn { width: 36px; height: 30px; }
   .msg-menu button { padding: 11px 12px; }
   /* Code-block copy: always visible on touch (no hover to reveal it). */
   .copy-btn { opacity: 1; padding: 6px 12px; }
+}
+
+/* Copy and ⋯ are the only way to act on a message on a phone: real tap targets (4.3 Fable;
+   they measured 36x30 at 390 px). */
+@media (hover: none), (max-width: 768px) {
+  .msg-icon-btn { width: 44px; height: 40px; }
 }
 
 /* ---- Reply/quote chip (Feature 5) — staged above the composer ---- */
@@ -1998,14 +2060,16 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 /* ---- Thumbs feedback (Feature 28) ---- */
 
 /* ---- Toast + reconnect: entrance motion + safe-area (F11) ---- */
-.toast { box-shadow: var(--shadow-lg); transition: opacity .25s var(--easing), transform .25s var(--easing); }
-.toast.hidden { display: block !important; opacity: 0; transform: translateX(-50%) translateY(12px); pointer-events: none; }
+/* A hidden toast is visibility:hidden once its fade-out ends (the 0s visibility step waits .25s), so
+   the faded box is out of the accessibility tree and no contrast checker reads its text at 0-10% opacity. */
+.toast { box-shadow: var(--shadow-lg); visibility: visible; transition: opacity .25s var(--easing), transform .25s var(--easing), visibility 0s linear 0s; }
+.toast.hidden { display: block !important; opacity: 0; transform: translateX(-50%) translateY(12px); pointer-events: none; visibility: hidden; transition: opacity .25s var(--easing), transform .25s var(--easing), visibility 0s linear .25s; }
 .toast.error { color: var(--text-primary); border-color: var(--error); box-shadow: var(--shadow-lg), 0 0 0 1px var(--error); }
 .reconnect-card { margin-top: calc(10px + env(safe-area-inset-top)); box-shadow: var(--shadow-md); }
 
 /* ---- Modal entrance motion (F15) ---- */
 .modal-backdrop { animation: fade-in .16s ease both; }
-.modal, .fs-modal, .crop-modal, .companions-modal { animation: modal-in .2s var(--easing) both; box-shadow: var(--shadow-lg); }
+.modal, .fs-modal, .crop-modal { animation: modal-in .2s var(--easing) both; box-shadow: var(--shadow-lg); }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes modal-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .modal-backdrop, .modal, .messages > .msg, .toast { animation: none; } }
@@ -2101,24 +2165,6 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 /* The harness / StudioForge panes and the ⌥ tools entry share this chrome; the
    `terminal-*` class names are the surviving vocabulary from the console pane
    they were first built for. */
-/* Sidebar pseudo-bot: a monospace text block instead of a photo avatar. */
-.terminal-avatar {
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-mono); font-weight: 700; font-size: 15px;
-  letter-spacing: -1px;
-  /* Solid accent tile with a white glyph so it reads clearly against the
-     sidebar in both themes (the old accent-on-tertiary was near-invisible in
-     dark mode). The tertiary ring + border-light halo separate it from
-     neighbouring avatars. */
-  color: var(--on-accent); background: var(--accent);
-  border: 2px solid var(--bg-tertiary); box-shadow: 0 0 0 1px var(--border-light);
-  /* .bot-avatar's 0.7 resting dim is for PHOTOS — it makes them recede until
-     hovered. This is the one avatar made of TEXT, and that dim measured its
-     glyph at 4.29:1 (dark) / 3.97:1 (light) off real painted pixels: under AA
-     for a 15px glyph. Text doesn't get to be decorative. Full opacity here
-     takes it to 5.70:1 / 7.10:1; the hover scale still marks the interaction. */
-  opacity: 1;
-}
 .terminal-sidedot.running { background: var(--success-text); }
 .terminal-sidedot.stopped { background: var(--text-muted); }
 .terminal-sidedot.exited  { background: var(--error-text); }
@@ -2155,7 +2201,7 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; padding: 24px; text-align: center; color: var(--text-secondary);
 }
-.harness-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; color: #1d4ed8; }
+.harness-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; color: var(--accent-text); }
 .harness-note p { max-width: 46ch; margin: 0; }
 /* Headless jobs pane. */
 .harness-job-form { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 12px 14px 8px; border-bottom: 1px solid var(--border-strong); background: var(--bg-secondary); }
@@ -2249,7 +2295,7 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   justify-content: center; gap: 10px; padding: 24px; text-align: center;
   color: var(--text-secondary);
 }
-.studioforge-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; color: #b45309; }
+.studioforge-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; color: var(--warning-text, var(--warning)); }
 .studioforge-note p { max-width: 46ch; margin: 0; }
 .terminal-dot.studioforge-up { background: var(--success-text); box-shadow: 0 0 8px color-mix(in oklab, var(--success-text) 60%, transparent); }
 .terminal-dot.studioforge-down { background: var(--error-text); }
@@ -2358,16 +2404,12 @@ body.tool-full #collapse-threads { display: none; }
   padding: 10px 12px; color: var(--text-primary); font-size: 15px; width: 100%;
 }
 .llm-body select:focus { outline: none; border-color: var(--accent); }
-/* The Lookups switch (2.3.0): a plain checkbox on one line with its word. */
-.llm-check { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; color: var(--text-primary); cursor: pointer; }
-.llm-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
 .llm-body textarea {
   background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 10px;
   padding: 10px 12px; color: var(--text-primary); font-size: 14px;
   font-family: inherit; resize: vertical; min-height: 64px;
 }
 .llm-body textarea:focus { outline: none; border-color: var(--accent); }
-.llm-sublabel { margin-top: 4px; }
 .llm-docs { font-size: 12.5px; color: var(--accent-text); align-self: flex-start; }
 .llm-test-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 /* The result line is the whole feedback surface for Test: it has to be able to
@@ -2378,13 +2420,6 @@ body.tool-full #collapse-threads { display: none; }
 }
 .llm-result.good { color: var(--success-text); }
 .llm-result.bad { color: var(--error-text); }
-.llm-advanced { border-top: 1px solid var(--border-strong); padding-top: 10px; }
-.llm-advanced summary {
-  font-size: 13px; color: var(--text-secondary); cursor: pointer;
-  list-style: revert; padding: 2px 0;
-}
-.llm-advanced summary:hover { color: var(--text-primary); }
-.llm-advanced[open] { display: flex; flex-direction: column; gap: 12px; }
 
 /* First-run card in the empty chat area. Bigger than the "pick a bot" prompt
    it replaces, because on a fresh install it is the only thing to do. */
@@ -2395,9 +2430,6 @@ body.tool-full #collapse-threads { display: none; }
 .llm-firstrun-title { font-size: var(--step-2); font-weight: 700; color: var(--text-primary); }
 .llm-firstrun-body { font-size: 13.5px; line-height: 1.6; color: var(--text-secondary); }
 .llm-firstrun .btn-primary { margin-top: 4px; }
-
-/* Dedicated unlock padlock (locked mode only). Matches the gear-btn chrome. */
-.unlock-btn { font-size: 18px; }
 
 /* Narrow widths: compact the bar so it doesn't crowd the
    Start/Restart/Stop controls. */
@@ -2605,8 +2637,10 @@ details.json-collapse > summary {
 }
 details.json-collapse > summary::-webkit-details-marker { display: none; }
 details.json-collapse > summary::before {
-  content: '▸';
-  color: var(--text-muted);
+  content: "";
+  width: 14px; height: 14px; flex: none;
+  background: var(--text-muted);
+  -webkit-mask: var(--ico-chevron-right) center / contain no-repeat; mask: var(--ico-chevron-right) center / contain no-repeat;
   transition: transform .15s;
   display: inline-block;
 }
@@ -2746,103 +2780,6 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
    positioning of its own, so without this it escapes to the nearest positioned
    ancestor and renders off-screen. */
 .composer { position: relative; }
-
-.reaction-picker {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 8px;
-  right: 8px;
-  max-width: 420px;
-  z-index: 60;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  box-shadow: 0 16px 44px rgba(0, 0, 0, .45);
-  display: flex;
-  flex-direction: column;
-  max-height: min(52vh, 380px);
-  animation: fade-in .12s ease both;
-}
-.reaction-picker.hidden { display: none; }
-
-.reaction-picker-head {
-  display: flex;
-  gap: 8px;
-  padding: 10px;
-  border-bottom: 1px solid var(--border-strong);
-}
-.reaction-search {
-  flex: 1;
-  min-width: 0;
-  background: var(--bg-input);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  padding: 7px 10px;
-  font: inherit;
-  font-size: 13px;
-}
-.reaction-search:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.reaction-manage-btn {
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  padding: 0 10px;
-  font-size: 12.5px;
-  white-space: nowrap;
-}
-.reaction-manage-btn:hover { border-color: var(--accent); color: var(--text-primary); }
-
-.reaction-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
-  gap: 8px;
-  padding: 10px;
-  overflow-y: auto;
-}
-.reaction-cell {
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  transition: border-color .12s, transform .12s;
-}
-.reaction-cell:hover { border-color: var(--accent); transform: translateY(-1px); }
-.reaction-cell:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.reaction-thumb {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: var(--radius-sm);
-  background: var(--bg-primary);
-}
-.reaction-cell-name {
-  font-size: 11px;
-  color: var(--text-secondary);
-  text-align: center;
-  line-height: 1.15;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-/* One-shot pool image: fired once, then gone for good. */
-.reaction-cell.pool { border-style: dashed; }
-/* The "surprise" cell uses a glyph where the others use a thumbnail. */
-.reaction-surprise {
-  display: flex; align-items: center; justify-content: center;
-  font-size: 30px; line-height: 1;
-}
-.reaction-cell.pool .reaction-cell-name::after {
-  content: " · once";
-  color: var(--accent-text);
-  font-weight: 600;
-}
 .reaction-empty {
   grid-column: 1 / -1;
   padding: 18px 10px;
@@ -2850,19 +2787,13 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
   color: var(--text-muted);
   font-size: 13px;
 }
-.reaction-picker-note {
-  padding: 8px 10px;
-  border-top: 1px solid var(--border-strong);
-  font-size: 11.5px;
-  color: var(--text-muted);
-}
 
 /* ---- In-transcript trace chip ---- */
 
 /* Image jobs — the bubble that is waiting for a picture (js/imagejobs.js).
    Never contains an image, in any state: the pending card is a spinner and a
    line of text, and a FINISHED job is rendered by the ordinary markdown path,
-   so Safe Mode and No-Image Mode need no rule of their own here. */
+   so No-Image Mode needs no rule of their own here. */
 .image-job-bubble { padding-block: 9px; }
 .image-job-card { display: flex; align-items: center; gap: 9px; }
 .image-job-spinner {
@@ -2970,27 +2901,9 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
 .rx-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .rx-gen-row .rx-input { flex: 1; }
 .rx-num { width: 86px; }
-
-.rx-list { display: flex; flex-direction: column; gap: 8px; }
-.rx-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-}
-.rx-row-thumb { width: 46px; height: 46px; border-radius: 10px; object-fit: cover; flex-shrink: 0; background: var(--bg-primary); }
-.rx-row-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.rx-row-fields .rx-input { width: 100%; padding: 5px 8px; font-size: 12.5px; }
 .rx-row-meta { display: flex; gap: 10px; align-items: center; font-size: 11px; }
 .rx-row-id { background: var(--code-inline); padding: 1px 5px; border-radius: 4px; font-family: var(--font-mono); }
 .rx-row-src { text-transform: uppercase; letter-spacing: .05em; font-size: 10px; }
-.rx-row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.rx-row-actions .btn-secondary { padding: 5px 9px; font-size: 12px; }
-.rx-safe { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); cursor: pointer; }
-.rx-safe input { accent-color: var(--accent); }
 
 .rx-field { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 12px; padding: 6px 0; }
 .rx-field-label { font-size: 13px; }
@@ -3002,30 +2915,21 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
 .rx-pool-stat b { color: var(--text-primary); }
 .rx-pool-warn { color: var(--warning-text); }
 
-
 @media (max-width: 768px) {
   .reaction-card { width: min(360px, 92vw); }
-  .reaction-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
-  .rx-row { flex-wrap: wrap; }
-  .rx-row-actions { width: 100%; justify-content: flex-end; }
   .reaction-embed { width: min(320px, 94%); }
 }
 
 /* Motion is the whole point of the pop, but never at the cost of accessibility:
    the card just appears, and the timer bar stays full rather than animating. */
 @media (prefers-reduced-motion: reduce) {
-  .reaction-overlay, .reaction-picker { animation: none; }
+  .reaction-overlay { animation: none; }
   .reaction-card, .reaction-card.in { animation: none; transform: none; opacity: 1; }
   .reaction-trace-row.expanded .reaction-embed { animation: none; }
-  .reaction-cell:hover { transform: none; }
 }
 
-/* Companions panel: which safe bots carry reaction images (read-only there). */
-.comp-react { margin-inline-start: auto; opacity: .85; display: inline-flex; }
-.comp-react .rail-icon { width: 14px; height: 14px; }
 /* Reaction traces are centred dividers, not bubbles — no avatar column. */
 .msg.reaction-trace-row { justify-content: center; padding: 2px 0; }
-
 
 /* ---------------------------------------------------------------------------
    Touch sizing + narrow-screen fixes (review pass 2026-08-03)
@@ -3035,10 +2939,6 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
    back to.
    --------------------------------------------------------------------------- */
 @media (hover: none), (max-width: 768px) {
-  /* The ▲/▼ reorder buttons ARE the reorder affordance on touch: HTML5 drag
-     never fires there and .bm-handle is display:none. 22px tall was half the
-     minimum. */
-  .bm-move-btn { min-height: 34px; min-width: 40px; }
   /* Only way to drop a mis-attached file before sending. */
   /* Same edge as the base rule (F12): a physical `right` here would override the
      logical property and land the badge in the wrong corner under RTL. */
@@ -3060,26 +2960,10 @@ a.markdown-file-link:focus-visible { outline: 2px solid var(--accent); outline-o
   .llm-body select, .llm-body textarea,
   .lang-select, #bm-lang,
   .rx-input { min-height: 44px; font-size: 16px; }
-  .rx-row-fields .rx-input { padding: 8px 10px; }
   /* ▶ test-fire: 44 tall already, but a 31px-wide glyph button is a miss. */
   .rx-row-test { min-width: 44px; }
-  /* Checkbox rows: the LABEL is the tap target, so give it the height and the
-     box enough size to read as one. */
-  .rx-safe { min-height: 44px; }
-  .rx-safe input { width: 18px; height: 18px; }
   /* Text-only disclosure controls — 19px tall each. */
-  .dash-log-toggle,
-  .llm-advanced summary { min-height: 44px; display: flex; align-items: center; }
-}
-
-/* Bot Manager rows are structurally over-wide below ~420px: only .bm-name can
-   shrink, and once it hits zero the fixed items (move buttons, avatar, Safe,
-   React, switch) still overflow — and .modal has visible overflow, so the
-   excess painted outside the modal instead of scrolling. Let the row wrap and
-   give the name its own line. */
-@media (max-width: 420px) {
-  .bm-row { flex-wrap: wrap; gap: 8px; }
-  .bm-name { flex: 1 0 100%; order: -1; }
+  .dash-log-toggle { min-height: 44px; display: flex; align-items: center; }
 }
 
 /* ========================================================================= *
@@ -3200,13 +3084,12 @@ a.markdown-file-link > code,
 
 /* --- Directional glyph content --- */
 
-/* F48 · Collapsed disclosure points to the reading start. NBSP, not a plain
-   space: a trailing ASCII space collapses at an RTL run boundary. */
-[dir="rtl"] .sub-details summary::before { content: "◂\00a0"; }
+/* F48 · A collapsed disclosure points to the reading start. */
+[dir="rtl"] .sub-details:not([open]) summary::before { -webkit-mask-image: var(--ico-chevron-left); mask-image: var(--ico-chevron-left); }
 
 /* F49/F50 · JSON collapse caret + its open-state rotation.
-   `◂` needs counter-clockwise to end up pointing down. */
-[dir="rtl"] details.json-collapse > summary::before { content: '◂'; }
+   the left chevron needs counter-clockwise to end up pointing down. */
+[dir="rtl"] details.json-collapse > summary::before { -webkit-mask-image: var(--ico-chevron-left); mask-image: var(--ico-chevron-left); }
 [dir="rtl"] details.json-collapse[open] > summary::before { transform: rotate(-90deg); }
 
 /* --- Animation / gradient sweep direction --- */
@@ -3291,6 +3174,9 @@ body.popout .app { grid-template-columns: 1fr; padding-bottom: 0; }
   gap: 4px; margin-top: 14px; opacity: .62; transition: opacity .15s ease; }
 .lock-options:hover,
 .lock-options:focus-within { opacity: 1; }
+/* The group's .62 rest opacity already makes it quiet; on --text-secondary that dropped the labels
+   under 4.5:1 (4.47 on Midnight). --text-primary at the same opacity keeps them quiet and readable. */
+.lock-options .lock-remember { color: var(--text-primary); }
 .lock-nim input:disabled { opacity: .55; cursor: not-allowed; }
 .lock-nim.is-locked span { opacity: .75; }
 /* A disabled row must never look merely dim: the whole group is already dim,
@@ -4092,6 +3978,7 @@ body.tools-sheet-open::after {
 .step.status-done .step-glyph { color: var(--success); }
 .step.status-current .step-glyph { color: var(--accent-text); }
 .step.status-upcoming .step-glyph { color: var(--text-muted); }
+
 .step-title { flex: 1 1 auto; }
 .gate-tag { font-size: var(--step--1); color: var(--warning-text); border: 1px solid var(--warning); border-radius: var(--radius-sm); padding: 1px 6px; }
 .step-body { padding: 0 14px 12px; display: flex; flex-direction: column; gap: 10px; }
@@ -4170,7 +4057,6 @@ body.tools-sheet-open::after {
 }
 .mail-note .empty-emoji { font-family: var(--font-mono); font-weight: 700; color: var(--accent-text); }
 .mail-note p { max-width: 46ch; margin: 0; }
-
 
 /* ===== Editing a message, and paging its earlier answers ===== */
 .msg-editor { margin-top: 4px; display: flex; flex-direction: column; gap: 6px; }
@@ -4268,9 +4154,9 @@ body.tools-sheet-open::after {
 
 /* The boot mark is inline SVG with presentation attributes (white strokes on
    a black tile); CSS outranks presentation attributes. */
-:root[data-contrast-profile="night"] .boot-logo rect { fill: var(--surface-0); }
-:root[data-contrast-profile="night"] .boot-logo g { stroke: var(--text-primary); }
-:root[data-contrast-profile="night"] .boot-logo circle { fill: var(--text-primary); }
+:root[data-contrast-profile="night"] .boot-logo .bl-tile { fill: var(--surface-0); }
+:root[data-contrast-profile="night"] .boot-logo .bl-d { stroke: var(--text-primary); }
+:root[data-contrast-profile="night"] .boot-logo .bl-home { fill: var(--text-primary); }
 
 /* Fixed-dark overlays and chips. */
 :root[data-contrast-profile="night"] .bot-btn .bot-name-tip { background: var(--surface-3); color: var(--text-primary); }
@@ -4307,14 +4193,6 @@ body.tools-sheet-open::after {
   outline: 2px solid var(--focus-ring); outline-offset: 1px;
 }
 
-
-/* Settings → Bots: "Change photo" is an icon now (the picture itself is the
-   main tap target). Last in the file so it beats the chip-group rules above. */
-.bm-avatar-btn.bm-avatar-btn--icon {
-  width: 32px; height: 32px; padding: 0; justify-content: center;
-}
-.bm-avatar-btn--icon .rail-icon { width: 16px; height: 16px; }
-
 /* ===================== System notices (notice.js) =====================
    Machine-posted alerts as one muted line; the full text opens below it. */
 .msg.notice { display: block; margin: 2px 0; padding: 0; }
@@ -4325,8 +4203,12 @@ body.tools-sheet-open::after {
   font-size: 12px; color: var(--text-muted); min-width: 0;
 }
 .notice-summary::-webkit-details-marker { display: none; }
-.notice-summary::after { content: '▸'; font-size: 10px; opacity: .7; flex: none; }
-.notice-details[open] > .notice-summary::after { content: '▾'; }
+.notice-summary::after {
+  content: ""; width: 12px; height: 12px; opacity: .7; flex: none; background: currentColor;
+  -webkit-mask: var(--ico-chevron-right) center / contain no-repeat; mask: var(--ico-chevron-right) center / contain no-repeat;
+}
+.notice-details[open] > .notice-summary::after { -webkit-mask-image: var(--ico-chevron-down); mask-image: var(--ico-chevron-down); }
+[dir="rtl"] .notice-details:not([open]) > .notice-summary::after { -webkit-mask-image: var(--ico-chevron-left); mask-image: var(--ico-chevron-left); }
 .notice-summary:hover { background: var(--bg-hover); color: var(--text-secondary); }
 .notice-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--text-muted); }
 .notice-error .notice-dot { background: var(--error-text); }
@@ -4365,11 +4247,6 @@ body.tools-sheet-open::after {
   overflow-y: auto; overflow-x: hidden; scrollbar-width: thin;
   padding: 8px 0 2px; border-top: 1px solid var(--border-strong);
 }
-.tool-list-head {
-  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--text-muted); line-height: 1.2;
-  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
 .tool-avatar {
   display: flex; align-items: center; justify-content: center;
   background: var(--bg-tertiary); color: var(--text-secondary);
@@ -4399,7 +4276,6 @@ body.tools-sheet-open::after {
 .terminal-sidedot.tools-sidedot.error { background: var(--error-text); }
 @media (min-width: 769px) {
   :root[data-avatar-style="minimal"] .tool-list { align-items: stretch; padding: 6px 8px 2px; gap: 4px; }
-  :root[data-avatar-style="minimal"] .tool-list-head { padding-inline-start: 12px; }
   /* Minimal rows name every bot in its own hue; a tool has no persona hue,
      so its label is plain text in the theme's colour. */
   :root[data-avatar-style="minimal"] .tool-btn .bot-name-label,
@@ -4551,6 +4427,7 @@ body.tools-sheet-open::after {
 .advisor-state { opacity: .75; }
 .advisor-done .advisor-state { color: var(--success-text); opacity: 1; }
 .advisor-failed .advisor-state { color: var(--error-text); opacity: 1; }
+
 .advisor-error { flex-basis: 100%; opacity: .75; font-size: .92em; overflow-wrap: anywhere; }
 .advisor-actions { display: inline-flex; gap: 8px; margin-inline-start: auto; }
 .advisor-actions .busy { opacity: .6; cursor: progress; }
@@ -4620,21 +4497,8 @@ body.tools-sheet-open::after {
 .plugins-tools-host { padding: 0; }
 .plugins-tools-host > .modal-hint { padding-inline: 0; }
 
-/* Bots tab: backend badge, "not connected" link, inline editor, add-bot form. */
-.bm-backend {
-  flex: none; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
-  background: var(--bg-input, var(--bg-secondary)); color: var(--text-secondary);
-  border: 1px solid var(--border-strong); white-space: nowrap;
-}
-.bm-backend-direct { color: var(--accent-text); border-color: color-mix(in oklab, var(--accent) 45%, transparent); }
-.bm-notconnected {
-  flex: none; background: none; border: 0; padding: 2px 4px; cursor: pointer;
-  color: var(--warning-text, var(--accent-text)); font: inherit; font-size: 12px; font-weight: 600;
-  text-decoration: underline;
-}
-.bm-notconnected:focus-visible, .bm-remove:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.bm-remove:hover { border-color: var(--error, var(--accent)); }
-.bm-edit-panel, .bm-add-form {
+/* Bots tab: the add-bot form. */
+.bm-add-form {
   flex: 1 0 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;
   padding-top: 8px; border-top: 1px solid var(--border-strong);
 }
@@ -4652,33 +4516,6 @@ body.tools-sheet-open::after {
 .bm-add { margin-top: 4px; padding: 9px 10px; border: 1px dashed var(--border-strong); border-radius: var(--radius-md); }
 .bm-add .bm-add-open { display: inline-flex; align-items: center; gap: 6px; }
 .bm-add .bm-add-form { border-top: 0; padding-top: 0; }
-.bm-instant-hint { padding-top: 0; }
-
-/* ========================================================================= *
- * Settings -> Bots -> Personality (js/personality.js, 2.3.6)
- * ========================================================================= */
-.bm-persona {
-  flex: 1 0 100%; display: flex; flex-direction: column; gap: 8px; min-width: 0;
-  padding-top: 8px; border-top: 1px solid var(--border-strong);
-}
-.bm-persona-head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-.bm-persona-pick { max-width: 320px; }
-.bm-persona-desc, .bm-persona-hint, .bm-persona-note { margin: 0; font-size: 12.5px; }
-.bm-persona-safe {
-  margin: 0; font-size: 12.5px; padding: 6px 9px; border-radius: var(--radius-sm);
-  border: 1px solid var(--border-strong); background: var(--bg-secondary); color: var(--text-secondary);
-}
-.bm-persona-text {
-  width: 100%; box-sizing: border-box; min-height: 9lh; resize: vertical;
-  padding: 8px 10px; font: inherit; font-size: 14px; line-height: 1.45; color: var(--text-primary);
-  background: var(--bg-input, var(--bg-secondary)); border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-}
-.bm-persona-text:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.bm-persona-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-.bm-persona-foot .bm-edit-actions { flex-wrap: wrap; }
-.bm-persona-count { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.bm-persona-count.over { color: var(--danger); }
 
 /* ==========================================================================
    2.3.8 — Settings on a phone (360px): compact Bots rows, Plugins tools table
@@ -4698,11 +4535,6 @@ body.tools-sheet-open::after {
 .tools-path { background: var(--code-inline); padding: 1px 5px; border-radius: 4px; }
 
 @media (max-width: 480px) {
-  /* Bots row = avatar + name + inline ▲▼ on the first line; the pills,
-     switches and the Personality button wrap neatly underneath. The name's
-     basis leaves no room for a fourth item on line one (avatar 36 + move 2x32
-     + gaps), so line one is always exactly those three. */
-  .bm-move-btn { min-width: 32px; width: 32px; min-height: 32px; height: 32px; font-size: 11px; }
 
   /* Reactions: the describe box takes its own full line, Generate under it. */
   .rx-gen-row { flex-wrap: wrap; }
@@ -4761,7 +4593,7 @@ body.tools-sheet-open::after {
 @media (max-width: 480px) { .cat-grid { grid-template-columns: 1fr; } }
 
 /* ===================== 3.0 profiles, roles and policy =====================
-   Sign-in tiles, first-run setup, the Restricted strip, the rail chip and
+   Sign-in tiles, first-run setup, the rail chip and
    Settings -> People & Profiles. Tokens only (no colour literals), so every
    palette applies; focus rings come from the global :focus-visible rule. */
 
@@ -4811,23 +4643,6 @@ body.tools-sheet-open::after {
 .firstrun-card p { margin: 6px 0 10px; font-size: 13px; color: var(--text-secondary); line-height: 1.45; }
 @media (max-width: 768px) { .firstrun-card { bottom: calc(68px + env(safe-area-inset-bottom)); inset-inline-end: 16px; } }
 
-/* ---- Restricted strip + panel ---- */
-.restricted-banner { position: relative; z-index: 50; display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
-  gap: 4px 10px; padding: 6px 16px; font-size: 12.5px; line-height: 1.4; text-align: center;
-  background: var(--bg-tertiary); color: var(--text-primary); border-bottom: 1px solid var(--border-strong); }
-.restricted-more { background: none; border: none; padding: 2px 4px; color: var(--accent-text); text-decoration: underline; font-size: inherit; min-height: 24px; }
-body.has-restricted-banner .app,
-body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
-@media (max-width: 768px) {
-  body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px) - 56px - env(safe-area-inset-bottom)); }
-  body.has-restricted-banner .app[data-view="bots"] .sidebar { height: calc(100dvh - var(--rb-h, 34px) - 56px - env(safe-area-inset-bottom)); }
-}
-.restricted-panel { width: min(560px, 94vw); }
-.restricted-usage { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; }
-.restricted-over { color: var(--error-text); }
-.access-card { text-align: center; align-items: center; gap: 8px; max-width: 380px; }
-.access-actions { justify-content: center; flex-wrap: wrap; }
-
 /* ---- Rail chip + menu ---- */
 .profile-chip { overflow: hidden; padding: 0; }
 .profile-chip-text { width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
@@ -4856,19 +4671,12 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .people-form { display: flex; flex-direction: column; gap: 10px; }
 .people-field input, .people-field select { width: 100%; max-width: 360px; }
 .people-field-hint { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
-.people-group-label { font-size: 12.5px; color: var(--text-secondary); }
-.people-budgets { border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 10px 12px 12px;
-  display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.people-budgets legend { padding: 0 6px; font-size: 13px; font-weight: 600; }
-.people-quiet-row { display: flex; flex-wrap: wrap; gap: 10px; }
-.people-quiet-row .people-field { flex: 1 1 130px; }
 .people-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-start; }
 .people-actions-extra { border-top: 1px solid var(--border-strong); padding-top: 10px; }
 .people-disabled-row { align-self: flex-start; }
 .people-error[hidden] { display: none; }
 .people-row-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 .people-device { flex-wrap: wrap; }
-.people-device-pick select { max-width: 260px; }
 .people-subtitle { margin: 0 0 6px; font-size: 13.5px; }
 .people-table-wrap { overflow-x: auto; max-width: 100%; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
 .people-table { border-collapse: collapse; width: 100%; font-size: 13px; color: var(--text-primary); }
@@ -4892,8 +4700,6 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 @media (prefers-reduced-motion: reduce) {
   .signin-tile { transition: none; }
 }
-.bm-audience { font-size: 11.5px; color: var(--text-secondary); white-space: nowrap; }
-.bm-row--hidden .bm-audience { opacity: .45; }
 
 /* ---------------------------------------------------------------------------
    "Stored on the host computer" (js/host-notice.js): the Settings -> Security
@@ -4910,18 +4716,54 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .host-notice-title { display: block; font-weight: 700; color: var(--danger-text, var(--error-text)); }
 .host-notice-body { margin: 4px 0 0; }
 .privacy-card {
-  position: fixed; z-index: 400; inset-inline-end: 16px; bottom: 16px;
-  width: min(380px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto;
-  padding: 14px 16px 12px; border-radius: 14px; background: var(--bg-primary); color: var(--text-primary);
+  /* The sign-in popup (js/host-notice.js): top centre, over the app but never a
+     modal -- no backdrop; a press anywhere dismisses it. */
+  position: fixed; z-index: 400; top: 16px; left: 50%; transform: translateX(-50%);
+  width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto;
+  padding-block: 14px 12px; padding-inline: 16px 40px; border-radius: 14px;
+  background: var(--bg-primary); color: var(--text-primary);
   border: 1px solid var(--border-strong); border-inline-start: 4px solid var(--danger, var(--error));
   box-shadow: 0 10px 30px rgb(0 0 0 / .28); font-size: 13.5px; line-height: 1.5;
+  animation: privacy-card-in .18s ease-out;
 }
+@keyframes privacy-card-in { from { opacity: 0; translate: 0 -8px; } to { opacity: 1; translate: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .privacy-card { animation: none; } }
+.privacy-card-close {
+  position: absolute; top: 8px; inset-inline-end: 8px; width: 28px; height: 28px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: 8px;
+  background: transparent; color: var(--text-secondary); font-size: 15px; line-height: 1; cursor: pointer;
+}
+.privacy-card-close:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+.privacy-card-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .privacy-card-title { margin: 0 0 6px; font-size: 15px; color: var(--danger-text, var(--error-text)); }
 .privacy-card-points { margin: 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 4px; }
+.privacy-card-shared, .privacy-card-notice { margin: 8px 0 0; }
 .privacy-card-more { margin: 8px 0 0; font-size: 12px; }
 .privacy-card-foot { display: flex; justify-content: flex-end; margin-top: 10px; }
 @media (max-width: 768px) {
-  .privacy-card { inset-inline: 12px; width: auto; bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .privacy-card { top: calc(12px + env(safe-area-inset-top)); width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+}
+/* 4.3 Fable: the top stack (js/host-notice.js noticeStack): the sign-in card, the landing
+   banner ("You were signed out ...") and the password card in one column at the top, so they
+   never cover each other or the phone's bottom row. Above the sign-in screen (400): a device
+   whose shared profile was turned off lands there and the banner says why. */
+.notice-stack {
+  position: fixed; z-index: 410; top: 16px; left: 50%; transform: translateX(-50%);
+  width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+}
+.notice-stack:empty { display: none; }
+.notice-stack > .privacy-card {
+  position: relative; top: auto; left: auto; transform: none; width: auto; max-height: none;
+  overflow: visible; pointer-events: auto; flex: none;
+}
+.notice-stack .privacy-card-foot { gap: 8px; flex-wrap: wrap; }
+.landing-banner { border-inline-start-color: var(--accent); }
+.landing-banner-text { margin: 0; }
+@media (max-width: 768px) {
+  .notice-stack { top: calc(12px + env(safe-area-inset-top)); width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px - 72px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
 }
 
 /* ---------------------------------------------------------------------------
@@ -4947,6 +4789,9 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
   content: attr(data-label); flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 400;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; letter-spacing: normal;
 }
+/* A button whose bar caption is a short word ("Home", "Switch") names itself in full here
+   (main.js sets data-menu-label: "Go to DisPatch", "Switch profile"). */
+.app .tools-menu .gear-btn.rail-menu-item[data-menu-label]::after { content: attr(data-menu-label); }
 .tools-menu.tools-sheet .gear-btn.rail-menu-item { min-height: 52px; font-size: 15px; }
 .tools-arrange { color: var(--text-secondary); font-size: 13px; }
 /* Drag marks: the bot rail's drop-above/below line, for the bar and the popup. */
@@ -4966,8 +4811,8 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .rail-arrange-name { flex: 1 1 120px; min-width: 0; overflow-wrap: anywhere; }
 .rail-arrange-btn { padding: 4px 10px; min-height: 32px; }
 
-/* The paperclip folded into the ⚡ menu (js/quick-actions.js syncButtons). */
-.attach-btn.qa-folded { display: none !important; }
+/* 4.3 Fable: the paperclip no longer folds into ⚡ (first-timers looked for it); ⚡ keeps its
+   Upload entry as a second way in. */
 .quick-menu .qm-sep { height: 1px; margin: 4px 8px; background: var(--border-light); }
 .quick-menu .qm-icon .rail-icon { width: 15px; height: 15px; display: block; }
 .qa-chip.qa-upload { border-style: dashed; }
@@ -4994,7 +4839,7 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 @media (prefers-reduced-motion: reduce) { .chat-drop-target { transition: none; } }
 
 /* ===================== Settings 3.2: sections, disclosures, rows ===================== */
-/* Advanced ▸ and subsection disclosures: a quiet summary row at the bottom of a
+/* Advanced and subsection disclosures: a quiet summary row at the bottom of a
    section (Advanced) or a titled card with a one-line hint (Reactions, Agents…). */
 .settings-adv, .settings-sub { margin: 16px 18px 0; }
 .settings-adv:last-child, .settings-sub:last-child { margin-bottom: 18px; }
@@ -5006,11 +4851,12 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 }
 .settings-adv > summary::-webkit-details-marker, .settings-sub > summary::-webkit-details-marker { display: none; }
 .settings-adv > summary::before, .settings-sub > summary::before {
-  content: ""; flex: none; width: 7px; height: 7px; border: solid var(--text-secondary);
-  border-width: 0 2px 2px 0; transform: rotate(-45deg); transition: transform .15s ease;
+  content: ""; flex: none; width: 16px; height: 16px; background: var(--text-secondary);
+  -webkit-mask: var(--ico-chevron-right) center / contain no-repeat; mask: var(--ico-chevron-right) center / contain no-repeat;
+  transition: transform .15s ease;
 }
-[dir="rtl"] .settings-adv > summary::before, [dir="rtl"] .settings-sub > summary::before { transform: rotate(135deg); }
-.settings-adv[open] > summary::before, .settings-sub[open] > summary::before { transform: rotate(45deg); }
+[dir="rtl"] .settings-adv > summary::before, [dir="rtl"] .settings-sub > summary::before { transform: scaleX(-1); }
+.settings-adv[open] > summary::before, .settings-sub[open] > summary::before { transform: rotate(90deg); }
 .settings-adv > summary:focus-visible, .settings-sub > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .settings-adv > summary { background: none; border-style: dashed; color: var(--text-secondary); font-size: 13px; }
 .settings-sub-hint { flex: 1 1 100%; margin-inline-start: 17px; font-size: 12.5px; font-weight: 400; color: var(--text-secondary); }
@@ -5049,28 +4895,10 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .chars-toolbar { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 18px; position: relative; }
 .chars-add-btn { display: inline-flex; align-items: center; gap: 6px; }
 .chars-caret { font-size: 11px; }
-.chars-reorder-btn { display: none; }
 .chars-add-host:empty { display: none; }
 .chars-add-host { margin: 0 18px; }
 .chars-add-host .bm-add-form { padding: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-tertiary); }
 .chars-add-host .dev-group { margin-inline: 0; }
-.bm-row { flex-wrap: nowrap; position: relative; }
-.bm-name-block { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.bm-name-block .bm-name { flex: none; min-width: 0; }
-.bm-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; font-size: 11.5px; color: var(--text-secondary); }
-.bm-meta:empty { display: none; }
-.bm-feat { display: inline-grid; place-items: center; width: 18px; height: 18px; color: var(--text-secondary); }
-.bm-feat .rail-icon { width: 14px; height: 14px; }
-.bm-narrow { white-space: nowrap; }
-.bm-who { flex: 0 1 190px; min-width: 0; max-width: 210px; }
-.bm-details-btn { flex: none; min-height: 34px; }
-.bm-more-btn { flex: none; color: var(--text-secondary); }
-.bm-more-btn:hover, .bm-more-btn[aria-expanded="true"] { color: var(--text-primary); }
-/* ▲/▼: on a desktop the drag handle does it (the buttons stay for the keyboard,
-   shown while the row has focus or the pointer); on a phone only in Reorder mode. */
-.bm-move { display: none; }
-.bm-list.reordering .bm-move, .bm-row:focus-within .bm-move { display: flex; }
-@media (hover: hover) { .bm-row:hover .bm-move { display: flex; } }
 .bm-row-menu {
   position: absolute; z-index: 6; top: calc(100% - 4px); inset-inline-end: 8px; min-width: 180px;
   display: flex; flex-direction: column; padding: 4px;
@@ -5084,14 +4912,8 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 }
 .bm-row-menu .menu-item:hover, .bm-row-menu .menu-item:focus-visible { background: var(--bg-hover); outline: none; }
 .bm-row-menu .menu-item.danger-text { color: var(--error-text, var(--error)); }
-.chr-drawer { margin: -2px 0 6px; padding: 12px; border: 1px solid var(--border-strong); border-top: 0;
-  border-radius: 0 0 var(--radius-md) var(--radius-md); background: var(--bg-secondary); }
-.chr-drawer[hidden] { display: none; }
 .chr-drawer-title { margin: 0 2px 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); }
-.chr-drawer .chr-panel { margin: 12px 0 0; }
-.chr-features .chr-ext { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .ap-off { gap: 10px; }
-.bm-empty { padding: 8px 4px; }
 
 /* ---- Account ---- */
 .acct-who-group { margin-top: 14px; }
@@ -5136,6 +4958,21 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .agents-connect { margin-top: 8px; }
 .agents-connect > summary { cursor: pointer; color: var(--accent-text); font-weight: 600; font-size: 13px; }
 .agents-claude { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+/* No agents yet: a centred box like the other empty states, with the New agent button in it. */
+.agents-empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px;
+  padding: 24px 16px; border: 1px dashed var(--border-strong); border-radius: var(--radius-md);
+  color: var(--text-secondary);
+}
+.agents-empty p { margin: 0; max-width: 38em; }
+.agents-empty-title { font-weight: 600; color: var(--text-primary); }
+/* A sentence that is also a way somewhere (Agents -> Tasks, Schedules -> agent limits). */
+.text-link-btn {
+  background: none; border: none; padding: 2px 0; margin: 0 0 6px; cursor: pointer;
+  color: var(--accent-text); font: inherit; font-size: 13px; text-align: start; text-decoration: underline;
+}
+.text-link-btn:hover { color: var(--text-link-hover, var(--accent-text)); }
+.agents-route-details > summary { cursor: pointer; color: var(--accent-text); font-size: 13px; }
 .cxn-host .cxn-top { padding: 14px 18px 0; }
 
 /* ---- Plugins & Apps ---- */
@@ -5147,15 +4984,6 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .tools-settings-rows .ui-settings { margin: 0; }
 
 @media (max-width: 899px) {
-  .chars-reorder-btn { display: inline-flex; align-items: center; justify-content: center; }
-  .bm-row { flex-wrap: wrap; gap: 8px 10px; }
-  /* Line one: picture, name, ⋯. Line two: Who can see it, Details. */
-  .bm-name-block { flex: 1 1 calc(100% - 36px - 44px - 20px); }
-  .bm-more-btn { order: 4; }
-  .bm-who { order: 5; flex: 1 1 0; min-width: 0; max-width: none; }
-  .bm-details-btn { order: 6; flex: none; }
-  .bm-list.reordering .bm-name-block { flex-basis: calc(100% - 36px - 44px - 92px - 30px); }
-  .bm-list.reordering .bm-move { order: -1; flex-direction: row; gap: 4px; }
   .settings-adv, .settings-sub { margin-inline: 12px; }
   .chars-toolbar { padding: 0 12px; }
   .chars-add-host { margin: 0 12px; }
@@ -5164,7 +4992,7 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .dev-group > .theme-grid { padding: 4px 0 8px; }
 .dev-group > .theme-revision { padding: 0 2px 4px; }
 #acct-signin .bm-actions .btn-secondary, #acct-signin .bm-actions .btn-primary { flex: 0 1 auto; width: auto; }
-.people-forget-row .btn-secondary, .chr-pack-sheet .bm-actions > button { flex: 0 1 auto; }
+.people-forget-row .btn-secondary { flex: 0 1 auto; }
 .ui-setting__control > input[type="number"] { max-width: 9em; }
 .ui-setting__control > :is(input[type="text"], input[type="url"], input[type="password"], select) { max-width: 100%; }
 .tools-cell-kind { white-space: nowrap; }
@@ -5176,18 +5004,18 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
   display: flex; align-items: center; gap: 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-md);
   background: var(--bg-tertiary); font-size: 14px; font-weight: 600; color: var(--text-primary); }
 #qs-box > summary::-webkit-details-marker { display: none; }
-#qs-box > summary::before { content: ""; flex: none; width: 7px; height: 7px; border: solid var(--text-secondary);
-  border-width: 0 2px 2px 0; transform: rotate(-45deg); transition: transform .15s ease; }
-#qs-box[open] > summary::before { transform: rotate(45deg); }
-[dir="rtl"] #qs-box:not([open]) > summary::before { transform: rotate(135deg); }
+#qs-box > summary::before { content: ""; flex: none; width: 16px; height: 16px; background: var(--text-secondary);
+  -webkit-mask: var(--ico-chevron-right) center / contain no-repeat; mask: var(--ico-chevron-right) center / contain no-repeat; transition: transform .15s ease; }
+#qs-box[open] > summary::before { transform: rotate(90deg); }
+[dir="rtl"] #qs-box:not([open]) > summary::before { transform: scaleX(-1); }
 @media (max-width: 899px) { #qs-box { margin-inline: 12px; } }
 /* ---- Reactions manager (3.2): a grid of the pack, one edit sheet ---- */
 .rx-fold > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; margin-bottom: 0; min-height: 32px; }
 .rx-fold > summary::-webkit-details-marker { display: none; }
-.rx-fold > summary::before { content: ""; width: 7px; height: 7px; border: solid var(--text-secondary); border-width: 0 2px 2px 0; transform: rotate(-45deg); transition: transform .15s ease; }
-[dir="rtl"] .rx-fold:not([open]) > summary::before { transform: rotate(135deg); }
+.rx-fold > summary::before { content: ""; flex: none; width: 16px; height: 16px; background: var(--text-secondary); -webkit-mask: var(--ico-chevron-right) center / contain no-repeat; mask: var(--ico-chevron-right) center / contain no-repeat; transition: transform .15s ease; }
+[dir="rtl"] .rx-fold:not([open]) > summary::before { transform: scaleX(-1); }
 .rx-fold[open] > summary { margin-bottom: 10px; }
-.rx-fold[open] > summary::before { transform: rotate(45deg); }
+.rx-fold[open] > summary::before { transform: rotate(90deg); }
 .rx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
 .rx-tile {
   position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px;
@@ -5198,8 +5026,6 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 .rx-tile:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .rx-tile-thumb { width: 100%; aspect-ratio: 1; border-radius: var(--radius-sm); object-fit: cover; background: var(--bg-primary); display: grid; place-items: center; font-weight: 700; color: var(--text-secondary); }
 .rx-tile-name { width: 100%; font-size: 12px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rx-tile-badge { position: absolute; top: 9px; inset-inline-end: 9px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
-  background: var(--accent); color: var(--on-accent); font-size: 11px; font-weight: 700; display: grid; place-items: center; }
 .rx-sheet { display: flex; gap: 14px; margin-top: 12px; padding: 12px; border: 1px solid var(--accent); border-radius: var(--radius-md); background: var(--bg-secondary); }
 .rx-sheet-img { width: 120px; height: 120px; border-radius: var(--radius-md); object-fit: cover; flex: none; }
 .rx-sheet-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -5220,8 +5046,63 @@ body.has-restricted-banner .panel { height: calc(100dvh - var(--rb-h, 34px)); }
 }
 #spane-account > .host-notice { margin-top: 12px; }
 @media (max-width: 899px) { #spane-account > .host-notice { margin-inline: 12px; } }
-.bm-parked { white-space: nowrap; }
-/* 3.2: plain notes inside Settings cards (a module's status line, the agent note in a
-   character's Details, the backups checkbox) read at the card's size, not the body's. */
-#botmanager .settings-pane :is(.sys-backups-host p.muted, .sys-backups-host .bkp-check, .chr-drawer .chr-panel > p.muted) { font-size: 13px; line-height: 1.45; }
+/* 3.2: plain notes inside Settings cards (a module's status line, the backups checkbox)
+   read at the card's size, not the body's. */
+#botmanager .settings-pane :is(.sys-backups-host p.muted, .sys-backups-host .bkp-check) { font-size: 13px; line-height: 1.45; }
 #botmanager .settings-pane .sys-backups-host > p.muted { margin: 4px 2px 8px; }
+
+/* ---- Profile picture (WP-AVATAR): Settings -> Account and the People editor ---- */
+.pp-row { display: flex; flex-direction: column; gap: 8px; }
+.pp-main { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.pp-preview { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; flex: none; background: var(--bg-hover); }
+.pp-preview--text { display: grid; place-items: center; font-size: 24px; font-weight: 700; color: var(--text-primary); }
+.pp-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.pp-actions .ui-btn { min-height: 44px; min-width: 44px; }
+.pp-actions .ui-btn[hidden] { display: none; }
+.pp-file[hidden] { display: none; }
+.pp-note { margin: 0; font-size: 13px; line-height: 1.45; color: var(--text-primary); }
+.pp-hint { margin: 0; font-size: 12px; }
+.pp-status { min-height: 1.2em; font-size: 13px; }
+.pp-status.pp-bad { color: var(--error-text); }
+.people-field-label { font-weight: 600; font-size: 13px; }
+
+/* The default profile's picture (4.1): the DisPatch mark drawn inline (profiles.js markNode).
+   The avatar class beside it sets the size and the round (or rounded) frame; overflow clips
+   the navy square to that frame. */
+svg.profile-mark { display: inline-block; vertical-align: middle; overflow: hidden; flex: none; }
+
+/* 4.3 (#24): outside sign-in (OIDC) - the sign-in screen's button, the Owner's card in
+   Settings > System, and its warning line. Buttons reuse btn-secondary / ui-btn. */
+.signin-oidc-row { width: 100%; display: flex; justify-content: center; margin-top: 6px; }
+.signin-oidc-row .signin-oidc { width: 100%; max-width: 320px; }
+.oidc-card .oidc-form { display: flex; flex-direction: column; gap: 8px; }
+.oidc-card .oidc-field { display: flex; flex-direction: column; gap: 4px; }
+.oidc-card .oidc-field input { width: 100%; min-width: 0; }
+.oidc-card .oidc-toggle-row { display: flex; align-items: center; gap: 8px; }
+.oidc-card .oidc-redirect { overflow-wrap: anywhere; font-size: 0.85em; }
+.oidc-warn { color: var(--warning-text, var(--error-text)); font-weight: 600; margin: 4px 0; }
+.oidc-warn[hidden] { display: none; }
+
+/* 4.3 Fable (touch targets): small icon-only controls keep their look, but on a phone or a
+   touch screen an invisible ::after takes the taps around them, so each has at least a
+   44px-tall (and, where the neighbours allow it, 44px-wide) hit area. A tooltip cannot help
+   a finger; a bigger target does. Desktop with a mouse is unchanged. */
+@media (max-width: 768px), (hover: none) {
+  :is(.msg-icon-btn, .tools-gear, .reply-chip-cancel, .bm-links-remove, .alt-btn,
+      .doc-preview-link, .qa-pill-remove) { position: relative; }
+  :is(.msg-icon-btn, .tools-gear, .reply-chip-cancel, .bm-links-remove, .alt-btn,
+      .doc-preview-link, .privacy-card-close, .attach-preview .rm)::after {
+    content: ''; position: absolute; left: 50%; top: 50%;
+    width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%);
+  }
+  /* The pill's × sits right after its label: taller, not wider, so a tap on the words
+     never removes the quick action. */
+  .qa-pill-remove::after {
+    content: ''; position: absolute; left: 0; right: 0; top: 50%;
+    height: 44px; transform: translateY(-50%);
+  }
+}
+
+/* Settings -> System -> Network: the Unknown addresses card (js/settings_schema.js hostCheckCard,
+   4.3 Fable). A .ui-setting's row spacing without being a control row. */
+.schema-host-check { padding: var(--space-3, .75rem) var(--space-4, 1rem); border-top: 1px solid var(--divider, transparent); }

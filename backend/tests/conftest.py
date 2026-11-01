@@ -22,8 +22,62 @@ os.environ.setdefault("DISPATCH_EXT_BOOT_MARKER", "0")
 # developer's real OS keyring (app/secret_store.py).
 os.environ.setdefault("DISPATCH_SECRET_STORE", "file")
 
+# A new Atlas copy opens with guide chats, and an update posts a "What's new" chat: both would add
+# threads to every profile a test makes. Off for the suite; tests/test_atlas_guides.py turns them on.
+os.environ.setdefault("DISPATCH_ATLAS_GUIDES", "0")
+os.environ.setdefault("DISPATCH_RELEASE_NOTES", "0")
+
 from app import config as config_module
 from app import openclaw
+
+# --------------------------------------------------------------------------- #
+# No test ever opens the real install's database (fail closed, whole session).
+#
+# 2026-10-23: a test that entered the app's lifespan without its own Database opened
+# main.db - built at import from the REAL data directory - and ran schema statements on the
+# live chats.db (the per-test guards below redirect config paths, not an object made at
+# import). The app now re-derives that path in the lifespan and refuses a live path under
+# pytest (accounts.refuse_live_db_under_pytest); this wraps sqlite3.connect for the whole
+# session as well, so any other route to that file (a direct sqlite3.connect, aiosqlite,
+# a read-only URI) fails before a byte is read or written.
+# --------------------------------------------------------------------------- #
+
+def _sqlite_target(database) -> str | None:
+    """The file path a sqlite3.connect() argument names (None: memory / not a file)."""
+    if isinstance(database, bytes):
+        database = database.decode("utf-8", "replace")
+    text = os.fspath(database) if not isinstance(database, str) else database
+    if not text or text == ":memory:" or text.startswith("file::memory:"):
+        return None
+    if text.startswith("file:"):
+        from urllib.parse import unquote, urlsplit
+        parts = urlsplit(text)
+        text = unquote(parts.path or parts.netloc)
+        if not text or "mode=memory" in (parts.query or ""):
+            return None
+    return text
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _never_open_the_live_database():
+    import sqlite3
+
+    from app import accounts
+    real = sqlite3.connect
+
+    def guarded(database, *args, **kwargs):
+        target = _sqlite_target(database)
+        if target is not None and accounts.is_live_db_path(target):
+            raise RuntimeError(
+                f"test tried to open {target}: that is the real install's data "
+                f"({accounts.LIVE_DATA_DIR} / {accounts.IMPORT_DB_PATH}). Use a scratch directory.")
+        return real(database, *args, **kwargs)
+
+    sqlite3.connect = guarded
+    try:
+        yield guarded
+    finally:
+        sqlite3.connect = real
 
 
 @pytest.fixture
@@ -115,6 +169,35 @@ def _test_roster():
     yield
     mp.undo()
     config_module._invalidate_bots_cache()
+
+from app import profiles_service as _ps_for_claim  # noqa: E402  (after the env set-up above)
+
+_real_adopt_agent_bots = _ps_for_claim.adopt_agent_bots
+REAL_CLAIM = {"test_copies_engine", "test_access_42", "test_characters_manage", "test_fixbe_42", "test_claim_adopts_agents"}
+
+
+@pytest.fixture(autouse=True)
+def _claim_leaves_test_roster_household(request):
+    """The 4.0-shaped test roster's agent bots stay household on a claim, so the access suites
+    can share them with Members. R1 itself (a claim makes every agent bot the Owner's) is covered
+    by tests/test_claim_adopts_agents.py through the ``adopt_on_claim`` fixture. The 4.2 access
+    suites (``REAL_CLAIM``) run with the production claim."""
+    from app import profiles_service
+    if request.module.__name__.split(".")[-1] in REAL_CLAIM:
+        yield
+        return
+    mp = pytest.MonkeyPatch()
+    mp.setattr(profiles_service, "adopt_agent_bots", lambda admin_id: [])
+    yield
+    mp.undo()
+
+
+@pytest.fixture
+def adopt_on_claim(monkeypatch):
+    """Undo the autouse stub above: the claim adopts agent bots, as production does."""
+    from app import profiles_service
+    monkeypatch.setattr(profiles_service, "adopt_agent_bots", _real_adopt_agent_bots)
+
 
 # --------------------------------------------------------------------------- #
 # Making the suite fast enough to actually run
@@ -243,11 +326,15 @@ def _accounts_and_auth_state(tmp_path, tmp_path_factory, monkeypatch):
     """
     from _tmpguard import is_disposable
 
-    from app import accounts, auth, limits
+    from app import accounts, auth
 
     monkeypatch.setenv("DISPATCH_ARGON2_MEMORY_KIB", "8")
     monkeypatch.setenv("DISPATCH_ARGON2_PASSES", "1")
     monkeypatch.setenv("DISPATCH_ALLOW_OPEN_INSTALL", "1")
+    # 4.3 (#7): a fresh install starts with machine_loopback_trust false; most of the suite
+    # drives on-box machine callers on an install it just claimed (the 2.x-upgrade posture).
+    # tests/test_i43_*.py set it back to the shipped False.
+    monkeypatch.setattr(auth, "FRESH_INSTALL_LOOPBACK_TRUST", True)
     base = tmp_path / "data"
     base.mkdir(parents=True, exist_ok=True)
     for name, fname in (("SECURITY_PATH", "security.yaml"), ("RECOVERY_PATH", "RECOVERY-CODE.txt"),
@@ -256,7 +343,6 @@ def _accounts_and_auth_state(tmp_path, tmp_path_factory, monkeypatch):
         if not is_disposable(getattr(auth, name), tmp_path_factory.getbasetemp()):
             monkeypatch.setattr(auth, name, base / fname)
     accounts.reset_for_tests()
-    limits.reset()
     auth._cache = None
     auth._trusted = None
     auth._trusted_sig = None

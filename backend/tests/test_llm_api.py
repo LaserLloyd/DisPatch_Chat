@@ -194,21 +194,21 @@ LLM_ROUTES = [
 def test_sessionless_caller_is_refused_when_a_pin_is_set(llm_env, method, path, body):
     client = llm_env()
     _unlock(client)                       # sets a PIN and hands us a session
-    client.cookies.clear()                # …and now we are Safe Mode
+    client.cookies.clear()                # …and now we are signed out
     r = client.request(method, path, json=body)
-    assert r.status_code == 403
-    assert "unlock" in r.text.lower()
+    assert r.status_code in (401, 403)
+    assert "unlock" in r.text.lower() or "sign in" in r.text.lower()
 
 
 @pytest.mark.parametrize("method,path,body", LLM_ROUTES)
-def test_decoy_is_blocked_by_the_middleware_too(llm_env, method, path, body):
-    """Belt-and-braces: the prefix is in _decoy_blocked, so a limited session is
+def test_signed_out_is_blocked_by_the_middleware_too(llm_env, method, path, body):
+    """Belt-and-braces: the prefix is in _signed_out_blocked, so a signed-out caller is
     turned away one layer before the route's own dependency runs."""
-    assert main._decoy_blocked(method, path) is True
+    assert main._signed_out_blocked(method, path) is True
     client = llm_env()
     _unlock(client)
     client.cookies.clear()
-    assert client.request(method, path, json=body).status_code == 403
+    assert client.request(method, path, json=body).status_code in (401, 403)
 
 
 @pytest.mark.parametrize("method,path,body", LLM_ROUTES)
@@ -328,7 +328,7 @@ def test_connect_creates_a_bot_that_round_trips_through_load_bots(llm_env):
     bot = r.json()["bot"]
     assert bot["id"] == "llm-openai"
     assert bot["name"] == "Nova"   # the Advanced override wins
-    assert bot["safe"] is False, "a new provider is never exposed to Safe Mode"
+    assert "safe" not in bot and bot["hidden"] is False   # 4.0: no legacy flags on the wire
     assert bot["reactions"] is False
     assert bot["api"]["has_key"] is True
     assert "api_key" not in json.dumps(bot), "the key must never come back out"
@@ -408,7 +408,7 @@ def test_public_bot_list_exposes_the_provider_but_no_url_or_key(llm_env):
         "provider": "openai", "model": "gpt-4o", "api_key": "sk-secret-abc"})
     body = client.get("/api/bots").text
     assert "sk-secret-abc" not in body
-    assert "api.openai.com" not in body, "Safe Mode has no business knowing the URL"
+    assert "api.openai.com" not in body, "a non-Admin has no business knowing the URL"
     entry = next(b for b in client.get("/api/bots").json()["bots"]
                  if b["id"] == "llm-openai")
     assert entry["api_provider"] == "openai"
@@ -1058,14 +1058,14 @@ def test_a_turn_timeout_still_quotes_the_turn_timeout():
     assert f"{int(llm_api.READ_TIMEOUT_S)}s" in err.detail
 
 
-def test_default_prompt_is_family_framed_only_for_safe_bots():
-    """Content policy by tier: only a Safe-Mode bot gets the family framing;
-    an unlocked-only bot gets no content framing of ours."""
+def test_the_default_prompt_has_no_content_framing_whatever_the_safe_flag():
+    """4.0: no Restricted tier, so no tier-dependent framing - the 3.x ``safe`` flag changes
+    nothing about what a bot is told."""
     api = {"provider": "custom", "base_url": "http://127.0.0.1:9/v1", "model": "m"}
     safe = llm_api.resolve(config.Bot(id="s", name="S", safe=True, api=api))
-    private = llm_api.resolve(config.Bot(id="p", name="P", safe=False, api=api))
-    assert "family" in safe.system_prompt
-    assert "family" not in private.system_prompt.lower()
+    private = llm_api.resolve(config.Bot(id="p", name="S", safe=False, api=api))
+    assert safe.system_prompt == private.system_prompt
+    assert "family" not in safe.system_prompt.lower()
     # An operator's own prompt always wins, on either tier.
     own = llm_api.resolve(config.Bot(id="o", name="O", safe=True,
                                      api={**api, "system_prompt": "Be terse."}))

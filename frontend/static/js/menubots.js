@@ -2,35 +2,48 @@
 // (js/tools.js: under the tools on the desktop, a "More bots" tile on the phone).
 //
 // Why this is a DEVICE setting and not a roster field: it answers "where do I
-// want this on THIS screen", not "does this bot exist". The unlocked desktop
-// rail carries every agent plus the operator tools and gets crowded; a family
-// tablet in Safe Mode sees three safe bots and has room to spare. Those two
-// screens genuinely want different rails, which is the same reasoning behind
+// want this on THIS screen", not "does this bot exist". A desktop rail carries
+// every agent plus the operator tools and gets crowded; a phone has room for less.
+// Those screens genuinely want different rails, which is the same reasoning behind
 // No-Image Mode, pinned settings and custom links — all localStorage, none of
-// them an account preference. The server keeps owning whether a bot is visible
-// at all (`bot.visible`); this only chooses where a visible bot is drawn.
+// them an account preference. The server keeps owning which bots a profile may
+// use at all; this only chooses where a listed bot is drawn.
 //
-// SAFE MODE IGNORES THIS ENTIRELY. Parked bots are unlocked-only, so honouring a
-// placement while locked would make a bot unreachable rather than merely moved
-// — the roster would silently lose an entry on a handed-over tablet. menuIds()
-// returns an empty set in Safe Mode, so every visible bot falls back to the
-// rail, which is also what happens if storage is unavailable.
+// A device can be shared by several profiles, so placements are kept per profile
+// inside the one storage key ({ "<profile id>": [bot ids] }): one person parking
+// a bot never moves another person's, and pruning the ids a profile cannot see
+// never deletes what the other profiles parked. main.js names the profile with
+// setMenuScope() whenever a different one takes over. If storage is unavailable
+// every bot simply stays on the rail.
 
 const KEY = 'dispatch-menu-bots';
+let scope = '';
 
-/** Bot ids the user has moved into the Tools popup on this device. */
-export function menuBotIds() {
+/** Whose placements menuBotIds() / toggleMenuBot() / pruneMenuBots() work on. */
+export function setMenuScope(profileId) {
+  scope = String(profileId || '');
+}
+
+function readAll() {
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) || '[]');
-    return new Set(Array.isArray(raw) ? raw.filter((v) => typeof v === 'string') : []);
+    const raw = JSON.parse(localStorage.getItem(KEY) || '{}');
+    if (Array.isArray(raw)) return { [scope]: raw };       // the pre-4.0 shape: one list for the device
+    return raw && typeof raw === 'object' ? raw : {};
   } catch {
-    return new Set();   // storage off / corrupt value: everything stays on the rail
+    return {};   // storage off / corrupt value: everything stays on the rail
   }
 }
 
-/** The set to actually render with, given the current tier. */
-export function activeMenuBotIds(decoy) {
-  return decoy ? new Set() : menuBotIds();
+function writeIds(ids) {
+  const all = readAll();
+  if (ids.length) all[scope] = ids; else delete all[scope];
+  try { localStorage.setItem(KEY, JSON.stringify(all)); } catch { /* storage off */ }
+}
+
+/** Bot ids the signed-in profile has moved into the Tools popup on this device. */
+export function menuBotIds() {
+  const mine = readAll()[scope];
+  return new Set(Array.isArray(mine) ? mine.filter((v) => typeof v === 'string') : []);
 }
 
 export function isMenuBot(id) {
@@ -41,7 +54,7 @@ export function isMenuBot(id) {
 export function toggleMenuBot(id) {
   const ids = menuBotIds();
   if (ids.has(id)) ids.delete(id); else ids.add(id);
-  try { localStorage.setItem(KEY, JSON.stringify([...ids])); } catch { /* storage off */ }
+  writeIds([...ids]);
   return ids.has(id);
 }
 
@@ -52,40 +65,8 @@ export function pruneMenuBots(knownIds) {
   const ids = menuBotIds();
   if (!ids.size) return;
   const known = new Set(knownIds);
+  if (!known.size) return;   // the roster has not arrived yet: never read that as "every bot is gone"
   const kept = [...ids].filter((id) => known.has(id));
   if (kept.length === ids.size) return;
-  try { localStorage.setItem(KEY, JSON.stringify(kept)); } catch { /* storage off */ }
-}
-
-// ---- Bots hidden on unlocked devices (2.4.0) -------------------------------
-// A roster flag (`bot.hide_unlocked`, set in Settings → Bots) keeps a bot off
-// the UNLOCKED rail — the kids' science animals belong on the family tablet,
-// not on the owner's own screen. Whether THIS unlocked device honours the flag
-// is a device choice, like the placement above: "Show hidden bots on this
-// device" (Settings → Device) brings them back on, say, a second laptop.
-//
-// Display only. The server still lists the bot to every tier allowed to see it
-// (so its threads open by URL and the Bot Manager can edit it), and SAFE MODE
-// IGNORES THIS just as it ignores placement: a locked device always lists every
-// safe bot, hidden or not.
-
-const SHOW_HIDDEN_KEY = 'dispatch-show-hidden-bots';
-
-/** Does this device show bots flagged hide_unlocked? Off by default, and off
- *  when storage is unavailable (the flag then simply does what it says). */
-export function showHiddenBots() {
-  try { return localStorage.getItem(SHOW_HIDDEN_KEY) === '1'; } catch { return false; }
-}
-
-export function setShowHiddenBots(on) {
-  try {
-    if (on) localStorage.setItem(SHOW_HIDDEN_KEY, '1');
-    else localStorage.removeItem(SHOW_HIDDEN_KEY);
-  } catch { /* storage off */ }
-  return showHiddenBots();
-}
-
-/** Is `bot` left off this device's rail? Never in Safe Mode. */
-export function hiddenHere(bot, decoy) {
-  return !decoy && !!(bot && bot.hide_unlocked) && !showHiddenBots();
+  writeIds(kept);
 }

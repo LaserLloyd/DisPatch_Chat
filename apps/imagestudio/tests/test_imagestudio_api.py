@@ -13,6 +13,7 @@ import json
 
 import httpx
 import pytest
+
 from app import config, image_providers
 from tests.test_image_jobs import _png, _say, _thread, _unlocked
 from tests.test_image_jobs import env as env
@@ -71,7 +72,7 @@ def _gen(c, **over):
 
 # ---------------------------------------------------------------- security
 
-def test_locked_cookieless_and_forged_callers_get_the_decoy_403_everywhere(env, provider):
+def test_cookieless_and_forged_callers_get_the_403_everywhere(env, provider):
     from app import auth
     auth.set_pin("4321")
     for cookies in ({}, {"lc_session": "forged-cookie"}):
@@ -80,10 +81,10 @@ def test_locked_cookieless_and_forged_callers_get_the_decoy_403_everywhere(env, 
             c.cookies.set(k, v)
         for path in ROUTES_GET:
             r = c.get(BASE + path)
-            assert r.status_code == 403, (path, r.status_code)
-            assert r.json().get("decoy") is True
+            assert r.status_code in (401, 403), (path, r.status_code)
+            assert "images" not in r.json()
         r = _gen(c)
-        assert r.status_code == 403 and r.json().get("decoy") is True
+        assert r.status_code in (401, 403)
         assert provider.requests == [], "a refused caller never reaches the provider"
 
 
@@ -233,22 +234,113 @@ def test_fewer_pictures_than_asked_is_reported_not_hidden(env, provider):
     assert out["asked"] == 4 and len(out["images"]) == 1
 
 
-def test_a_second_generate_while_one_runs_is_refused(env, provider):
-    from dispatch_app_imagestudio import _lock
-    c = _unlocked(env)
+def test_generations_overlap_and_the_profile_cap_is_a_429(env, provider, monkeypatch):
+    import threading
+    import time
 
-    async def hold():
-        await _lock.acquire()
-    loop = asyncio.new_event_loop()
-    try:
-        # Simulate "busy" on the module lock itself.
-        loop.run_until_complete(hold())
-        r = _gen(c)
-        assert r.status_code == 409 and "already running" in r.json()["detail"]
-        assert provider.requests == []
-    finally:
-        _lock.release()
-        loop.close()
+    import dispatch_app_imagestudio as studio
+    c = _unlocked(env)
+    live = {"now": 0, "max": 0}
+    mu = threading.Lock()
+    real = image_providers.generate_batch
+
+    async def slow(*a, **kw):
+        with mu:
+            live["now"] += 1
+            live["max"] = max(live["max"], live["now"])
+        await asyncio.sleep(0.4)
+        try:
+            return await real(*a, **kw)
+        finally:
+            with mu:
+                live["now"] -= 1
+    monkeypatch.setattr(image_providers, "generate_batch", slow)
+    out = []
+    ts = [threading.Thread(target=lambda: out.append(_gen(c).status_code)) for _ in range(3)]
+    for t in ts:
+        t.start()
+        time.sleep(0.05)
+    for t in ts:
+        t.join()
+    assert out == [200, 200, 200] and live["max"] >= 2, (out, live)
+    assert len(c.get(BASE + "/images").json()["images"]) == 3, "no ledger row lost to the overlap"
+    assert studio._inflight == {}, "every slot is given back"
+
+    monkeypatch.setattr(studio, "MAX_PER_PROFILE", 1)
+    out.clear()
+    ts = [threading.Thread(target=lambda: out.append(_gen(c))) for _ in range(2)]
+    for t in ts:
+        t.start()
+        time.sleep(0.1)
+    for t in ts:
+        t.join()
+    codes = sorted(r.status_code for r in out)
+    assert codes == [200, 429], codes
+    assert "already being made" in next(r for r in out if r.status_code == 429).json()["detail"]
+    assert studio._inflight == {}
+
+
+def test_overlapping_jobs_keep_their_own_prompts(env, provider, monkeypatch):
+    """Three overlapping requests finishing in reverse order: each stored row carries the
+    prompt of ITS request, and the file under it is the one that request's call made."""
+    import threading
+    import time
+    c = _unlocked(env)
+    real = image_providers.generate_batch
+
+    async def slow(res, spec, **kw):
+        await asyncio.sleep({"first fox": 0.5, "second owl": 0.3, "third eel": 0.1}[spec.prompt])
+        return await real(res, spec, **kw)
+    monkeypatch.setattr(image_providers, "generate_batch", slow)
+    seen = {}
+
+    def handler(request):
+        body = json.loads(request.content)
+        size = {"first fox": 21_000, "second owl": 22_000, "third eel": 23_000}[body["prompt"]]
+        return httpx.Response(200, json={"data": {"image_base64": [_b64(_png(size))]},
+                                         "base_resp": {"status_code": 0}})
+    provider.handler = handler
+    out = {}
+
+    def run(prompt):
+        out[prompt] = _gen(c, prompt=prompt).json()["images"][0]
+    ts = [threading.Thread(target=run, args=(p,)) for p in ("first fox", "second owl", "third eel")]
+    for t in ts:
+        t.start()
+        time.sleep(0.03)
+    for t in ts:
+        t.join()
+    for prompt, size in (("first fox", 21_000), ("second owl", 22_000), ("third eel", 23_000)):
+        row = out[prompt]
+        assert row["prompt"] == prompt
+        assert (config.MEDIA_DIR / row["url"].rsplit("/", 1)[1]).read_bytes() == _png(size)
+    ledger = {r["prompt"]: r["id"] for r in c.get(BASE + "/images").json()["images"]}
+    assert ledger == {p: out[p]["id"] for p in out}
+    del seen
+
+
+def test_a_failed_generation_gives_its_slot_back(env, provider, monkeypatch):
+    import dispatch_app_imagestudio as studio
+    monkeypatch.setattr(studio, "MAX_PER_PROFILE", 1)
+    c = _unlocked(env)
+    provider.handler = lambda request: httpx.Response(500, json={})
+    assert _gen(c).status_code == 502
+    provider.handler = provider.ok
+    assert _gen(c).status_code == 200, "the failure did not leave the profile at its cap"
+    assert studio._inflight == {}
+
+
+def test_the_install_wide_cap_is_a_429_too(env, provider, monkeypatch):
+    import dispatch_app_imagestudio as studio
+    c = _unlocked(env)
+    monkeypatch.setattr(studio, "MAX_TOTAL", 0)
+    r = _gen(c)
+    assert r.status_code == 429 and provider.requests == []
+
+
+def test_state_tells_the_page_its_cap(env, provider):
+    s = _unlocked(env).get(BASE + "/state").json()
+    assert s["max_in_flight"] == 4 and s["in_flight"] == 0
 
 
 # ---------------------------------------------------------------- reference
@@ -333,3 +425,29 @@ def test_the_seed_prompts_start_the_history_and_then_become_ordinary_history(env
     _gen(c, prompt="mine")
     assert c.get(BASE + "/state").json()["prompts"] == ["mine", "seeded one", "seeded two"], \
         "the seeds become ordinary history, newest prompt first"
+
+
+def test_a_user_is_offered_only_their_own_bots_for_an_avatar_and_no_send(env, provider):
+    """4.0: a User may make pictures and has bots of its own, but changes no household
+    character's picture and may not inject: the studio offers only what will work."""
+    owner = _unlocked(env)
+    r = owner.post("/api/people", json={"name": "Uma", "role": "user", "pin": "1111"})
+    assert r.status_code == 201, r.text
+    u = env()
+    assert u.post("/api/auth/login", json={"profile_id": r.json()["id"], "pin": "1111"}).status_code == 200
+    mine = u.post("/api/me/characters", json={"name": "Mine"})
+    assert mine.status_code in (200, 201), mine.text
+    mine_id = (mine.json().get("bot") or mine.json())["id"]
+    bots = u.get(BASE + "/targets").json()["bots"]
+    assert {b["id"] for b in bots} <= {b["id"] for b in bots if b["personal"]}
+    assert mine_id in {b["id"] for b in bots} and "main" not in {b["id"] for b in bots}
+    assert u.get(BASE + "/state").json()["can_send"] is False
+    st = owner.get(BASE + "/state").json()
+    assert st["can_send"] is True
+    # 4.2 R1: main is an agent bot, personal to the Owner alone
+    assert any(b["id"] == "main" and b["personal"] for b in owner.get(BASE + "/targets").json()["bots"])
+    # The route the studio uses for an own bot takes the studio's square as fractions.
+    from tests.test_image_jobs import _png as png
+    up = u.post(f"/api/me/characters/{mine_id}/avatar?crop_x=0&crop_y=0&crop_size=1",
+                files={"file": ("s.png", png(), "image/png")})
+    assert up.status_code == 200, up.text

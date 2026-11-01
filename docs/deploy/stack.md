@@ -9,7 +9,9 @@ One compose file, [`deploy/compose/stack.yml`](../../deploy/compose/stack.yml), 
 | `dispatch` | `dispatch-chat:local` (built from this checkout) or `ghcr.io/laserlloyd/dispatch_chat:<v>` | The chat workspace | 8765 |
 | `kiwix`, `infoforge-seed`, `infoforge` | Kiwix's image, `ghcr.io/laserlloyd/infoforge` | Optional offline knowledge, **profile `knowledge`** | none (kiwix is private to the network) |
 
-They share one private network (`dispatch-stack`). DisPatch reaches the model server at
+They share one private network, `stack`, scoped to the compose project (Docker and Podman name it
+`dispatch-stack_stack`; the file sets no fixed network name, so a second checkout or a renamed project
+never collides with it). DisPatch reaches the model server at
 `http://studioforge:1234/v1`; StudioForge's panel is wired into DisPatch's StudioForge pane.
 
 ## Start
@@ -21,7 +23,7 @@ docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env p
 ```
 
 Open <http://localhost:8765> and finish the **setup wizard**: a fresh container is closed to the
-network until an owner exists, and the wizard asks for the one-time setup token printed by
+network until the first Admin exists, and the wizard asks for the one-time setup token printed by
 `docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env logs dispatch`
 (`SETUP TOKEN: ...`). Then drop your GGUF files in the folder `STUDIOFORGE_MODELS` points at
 (default `deploy/compose/models/`) and load one from StudioForge's panel at <http://localhost:8080>.
@@ -120,15 +122,15 @@ The same commands as [accounts.md](../accounts.md), with the stack's flags and t
 P="docker compose -f deploy/compose/stack.yml --env-file deploy/compose/stack.env"
 $P exec dispatch python -m app users list
 $P exec dispatch python -m app users passwd Olive                        # prompts on your terminal
-printf '%s\n' "$NEWPW" | $P exec -T dispatch python -m app users add Noor --profile member --password-stdin
-$P exec dispatch python -m app owner reset --yes                         # prints a SETUP TOKEN; setup opens again
+printf '%s\n' "$NEWPW" | $P exec -T dispatch python -m app users add Noor --profile user --password-stdin
+$P exec dispatch python -m app admin reset --yes                         # prints a SETUP TOKEN; setup opens again
 $P run --rm --no-deps dispatch python -m app users list                  # container stopped or crash-looping
 ```
 
 (The root filesystem is read-only; the commands only write the volume.) If you have nothing but the volume, create
 `/data/RESET_LOGIN` and restart DisPatch: `$P exec dispatch sh -c ': > /data/RESET_LOGIN' && $P restart dispatch`, then
-`$P logs dispatch | grep -E "login recovery|SETUP TOKEN"`. An empty file clears the owner's sign-in and opens setup (the
-wizard needs the logged `SETUP TOKEN` through the published port); `Olive:new-password` as its first line sets the owner's
+`$P logs dispatch | grep -E "login recovery|SETUP TOKEN"`. An empty file clears the first Admin's sign-in and opens setup (the
+wizard needs the logged `SETUP TOKEN` through the published port); `Olive:new-password` as its first line sets the first Admin's
 password instead. `DISPATCH_RESET_OWNER=1` in the repository's `.env` (the stack's `dispatch` service reads it; `stack.env` only feeds compose substitutions, not the container), then `$P up -d`, does the empty-file reset once per value.
 StudioForge has its own accounts: `$P exec studioforge studioforge users passwd <name>` (see its docs).
 
@@ -138,7 +140,9 @@ StudioForge has its own accounts: `$P exec studioforge studioforge users passwd 
 
 - Build images with `--format docker` so `HEALTHCHECK` survives; healthchecks need a systemd user
   session, and without one `depends_on: service_healthy` never completes.
-- `read_only` + `tmpfs` are supported (the home tmpfs uses `mode=1777`, not `uid=`).
+- `read_only` + `tmpfs` are supported (the home tmpfs uses `mode=1777`, not `uid=`). DisPatch's own
+  home is on its volume (`HOME=/data/home`, created by the entrypoint), and its `/tmp` is a 64 MB tmpfs:
+  uploads spool through `TMPDIR=/data/tmp` on the volume, never through `/tmp`.
 - Rootless + `kiwix`: `KIWIX_USER=0`.
 
 ## Known limits
@@ -148,10 +152,12 @@ StudioForge has its own accounts: `$P exec studioforge studioforge users passwd 
   CLI as a separate container (`compose run --rm infoforge …`); wiring the two is the InfoForge
   integration work, not part of this file.
 - StudioForge's `-cuda` image has no compiler: on a fresh volume its entrypoint downloads upstream's
-  prebuilt llama.cpp engine once (about 150 MB from github.com; `SF_ENGINE_BOOTSTRAP=0` skips it, and the
+  prebuilt llama.cpp engine once (about 150 MB from github.com), so the slim default tag serves on NVIDIA
+  as shipped and you do **not** need the large `-cuda-devel` image (only to build an engine from source).
+  `SF_ENGINE_BOOTSTRAP=0` skips the download for an offline host, and the
   [docker guide](https://github.com/LaserLloyd/StudioForge/blob/main/docs/deploy/docker.md) covers the
   offline alternatives). Allow about a minute before the first model load.
-- Running the stack on a LAN: set `BIND_ADDR=0.0.0.0` only after DisPatch has an owner (the setup
+- Running the stack on a LAN: set `BIND_ADDR=0.0.0.0` only after DisPatch has an Admin (the setup
   wizard) and the StudioForge connection carries an API key (above).
 - **Find servers** in DisPatch probes loopback and the Docker host, not the compose hostname: use
   **Add by address** with `http://studioforge:1234/v1` (or keep the seeded connection) to add the

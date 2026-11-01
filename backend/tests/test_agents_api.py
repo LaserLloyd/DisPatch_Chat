@@ -27,8 +27,7 @@ AGENT_ROUTES = [
     ("PUT", "/api/agents/credentials/claude"), ("DELETE", "/api/agents/credentials/claude"),
     ("GET", "/api/agents/secrets"), ("PUT", "/api/agents/secrets/MCP_X"),
     ("DELETE", "/api/agents/secrets/MCP_X"), ("GET", "/api/agents/settings"),
-    ("PUT", "/api/agents/settings"), ("GET", "/api/agents/profile-budgets"),
-    ("PUT", "/api/agents/profile-budgets/{profile}"), ("GET", "/api/agents/usage"),
+    ("PUT", "/api/agents/settings"), ("GET", "/api/agents/usage"),
     ("POST", "/api/agents/retention/purge"),
     ("POST", "/api/tasks"), ("GET", "/api/tasks"), ("GET", "/api/tasks/{task}"),
     ("GET", "/api/tasks/{task}/events?after_seq=-1"), ("POST", "/api/tasks/{task}/send"),
@@ -62,8 +61,8 @@ def test_a_restricted_session_cannot_list_start_or_view_agents_or_tasks(aw):
         client = getattr(aw, who)
         for method, template in AGENT_ROUTES:
             resp = _call(client, method, template, **ids)
-            assert resp.status_code == 403, f"{who}: {method} {template} -> {resp.status_code} {resp.text[:120]}"
-            assert resp.json()["error"]["code"] == "safe_mode"
+            assert resp.status_code in (401, 403), f"{who}: {method} {template} -> {resp.status_code} {resp.text[:120]}"
+            assert resp.json()["error"]["code"] in ("safe_mode", "signin_required", "permission_denied")
     # and it is not just the status code: nothing about the task leaked
     assert aw.mgr.backends["fake"].task_info(tid).state.value == "awaiting_approval"
 
@@ -123,7 +122,7 @@ def test_unpublishing_takes_effect_at_once(aw):
     assert aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "hi"}).status_code == 404
 
 
-def test_a_task_belongs_to_its_owner_and_the_owner_account_sees_all(aw):
+def test_a_task_belongs_to_its_dispatcher_admins_included(aw):
     a = make_agent(aw.owner, published=["*"])
     t_eve = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:long"}).json()["task"]["id"]
     t_fay = aw.fay.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:long"}).json()["task"]["id"]
@@ -137,33 +136,41 @@ def test_a_task_belongs_to_its_owner_and_the_owner_account_sees_all(aw):
         assert {t["id"] for t in c.get("/api/tasks").json()["tasks"]} == {mine}
         # the profile filter is an operator's tool; for everyone else it is ignored
         assert {t["id"] for t in c.get(f"/api/tasks?profile={aw.eve_id}").json()["tasks"]} == {mine}
-    assert {t_eve, t_fay} <= {t["id"] for t in aw.owner.get("/api/tasks").json()["tasks"]}
-    only_eve = aw.owner.get(f"/api/tasks?profile={aw.eve_id}").json()["tasks"]
-    assert [t["id"] for t in only_eve] == [t_eve]
-    for tid in (t_eve, t_fay):
-        aw.owner.post(f"/api/tasks/{tid}/cancel")
+    # 4.0: the Owner (an Admin) sees its own tasks only; ?profile= is ignored for it too.
+    assert not {t_eve, t_fay} & {t["id"] for t in aw.owner.get("/api/tasks").json()["tasks"]}
+    assert aw.owner.get(f"/api/tasks?profile={aw.eve_id}").json()["tasks"] == []
+    assert aw.owner.get(f"/api/tasks/{t_eve}").status_code == 404
+    aw.eve.post(f"/api/tasks/{t_eve}/cancel")
+    aw.fay.post(f"/api/tasks/{t_fay}/cancel")
 
 
 def test_only_host_control_grants_host_level_powers_to_an_agent(aw):
     # Since 2026-10-19 an Admin holds admin_system like the Owner; the guard is for a profile
-    # that was only GRANTED manage_agents.
-    aw.world.person(aw.owner, "Gil", "member", pin="5555", grants=["manage_agents"])
+    # that was only GRANTED manage_agents. 4.0: no such profile can exist (manage_agents is in
+    # a User's "never" column): the grant is refused, one forged into the database is not
+    # effective, and the route refuses before the host-control guard is reached.
+    from app import accounts
+    r = aw.owner.post("/api/people", json={"name": "Gil", "role": "member", "pin": "5555",
+                                           "grants": ["manage_agents"]})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "permissions_invalid", r.text
+    gil = aw.world.person(aw.owner, "Gil", "member", pin="5555")
+    accounts.update_profile(gil["id"], grants=["manage_agents"])          # forged straight into the DB
     admin = aw.world.client(("203.0.113.60", 1))
     assert aw.world.login(admin, name="Gil", pin="5555").status_code == 200
     aw.world.person(aw.owner, "Ada", "admin", password="admin-pass1")
     real_admin = aw.world.client(("203.0.113.61", 1))
     assert aw.world.login(real_admin, name="Ada", password="admin-pass1").status_code == 200
-    # A manage_agents grant manages agents...
-    ok = admin.post("/api/agents", json={"name": "Plain", "spec": spec()})
-    assert ok.status_code == 201
-    # ...but not the powers that are code execution in effect.
+    r = admin.post("/api/agents", json={"name": "Plain", "spec": spec()})
+    assert r.status_code == 403 and r.json()["error"]["code"] == "permission_denied", r.text
     for extra in ({"workspace_policy": {"trust_repo_settings": True}},
                   {"mcp_servers": {"x": {"transport": "stdio", "command": "node", "args": ["s.js"]}}},
                   {"mcp_servers": {"x": {"transport": "http", "url": "http://localhost:9/mcp", "privileged": True}}}):
         r = admin.post("/api/agents", json={"name": "Risky", "spec": spec(**extra)})
-        assert r.status_code == 403 and r.json()["error"]["code"] == "agent_needs_owner", extra
+        assert r.status_code == 403 and r.json()["error"]["code"] == "permission_denied", extra
         assert aw.owner.post("/api/agents", json={"name": "Risky" + str(len(str(extra))), "spec": spec(**extra)}).status_code == 201
-        assert real_admin.post("/api/agents", json={"name": "AdaRisky" + str(len(str(extra))), "spec": spec(**extra)}).status_code == 201
+        # 4.3 #30: host-level grants are the protected Admin's alone; a second Admin is refused.
+        r = real_admin.post("/api/agents", json={"name": "AdaRisky" + str(len(str(extra))), "spec": spec(**extra)})
+        assert r.status_code == 403 and r.json()["error"]["code"] == "agent_needs_owner", r.text
 
 
 def test_an_agent_definition_is_validated(aw):
@@ -254,9 +261,14 @@ def test_approving_needs_the_approve_permission_and_sight_of_the_task(aw):
     # Eve may dispatch but was not granted approve_agent_actions: her own task waits for an operator.
     r = aw.eve.post(f"/api/approvals/{rid}", json={"decision": "allow"})
     assert r.status_code == 403 and r.json()["required_permission"] == "approve_agent_actions"
-    # Fay holds dispatch too, but cannot see Eve's task - not even to say no.
-    assert aw.fay.post(f"/api/approvals/{rid}", json={"decision": "deny"}).status_code == 403
-    assert aw.owner.post(f"/api/approvals/{rid}", json={"decision": "allow"}).status_code == 200
+    # Fay holds dispatch too, but cannot see Eve's task - not even to say no. 4.0: nor can
+    # the Owner (a task is its dispatcher's); Eve answers once she holds the permission.
+    assert aw.fay.post(f"/api/approvals/{rid}", json={"decision": "deny"}).status_code in (403, 404)
+    assert aw.owner.post(f"/api/approvals/{rid}", json={"decision": "allow"}).status_code in (403, 404)
+    from app import accounts
+    accounts.update_profile(aw.eve_id, grants=["dispatch_agents", "approve_agent_actions"])
+    r = aw.eve.post(f"/api/approvals/{rid}", json={"decision": "allow"})
+    assert r.status_code == 200, r.text
     wait_state(aw.eve, tid, "succeeded")
 
 
@@ -300,32 +312,27 @@ def test_the_daily_limit_is_shared_by_every_task_of_the_agent(aw):
     assert spent[("agent", a["id"])] == pytest.approx(0.02)
 
 
-def test_a_profile_budget_limits_what_that_profile_can_spend(aw):
+def test_there_are_no_per_profile_agent_budgets(aw):
+    """SPEC section 5: no daily limits or budgets of any kind. The per-profile agent cost caps are
+    gone: the routes do not exist, /available carries no budget, and one profile's spend never
+    stops another's task. The agent's OWN budget (its spec) still applies (test above)."""
     a = make_agent(aw.owner, "Shared", published=["*"])
-    r = aw.owner.put(f"/api/agents/profile-budgets/{aw.eve_id}", json={"usd_per_day": 0.015})
-    assert r.status_code == 200
-    ok = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:simple"}).json()["task"]["id"]
-    assert wait_state(aw.eve, ok, TERMINAL)["state"] == "succeeded"
-    over = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:simple"}).json()["task"]["id"]
-    assert wait_state(aw.eve, over, TERMINAL)["reason"] == "budget_exceeded"
-    assert aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x"}).status_code == 429
-    # Fay is not limited by Eve's budget
-    fay = aw.fay.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:simple"}).json()["task"]["id"]
-    assert wait_state(aw.fay, fay, TERMINAL)["state"] == "succeeded"
-    b = aw.eve.get("/api/agents/available").json()["budget"]
-    assert b["usd_per_day"] == 0.015 and b["estimate"] is True and b["spent_today_usd"] > 0.015 - 0.001
+    assert aw.owner.get("/api/agents/profile-budgets").status_code in (403, 404, 405)
+    assert aw.owner.put(f"/api/agents/profile-budgets/{aw.eve_id}",
+                        json={"usd_per_day": 0.015}).status_code in (403, 404, 405)
+    body = aw.eve.get("/api/agents/available").json()
+    assert "budget" not in body
+    for _ in range(3):
+        tid = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:simple"}).json()["task"]["id"]
+        assert wait_state(aw.eve, tid, TERMINAL)["state"] == "succeeded"
 
 
-def test_turn_and_time_limits_come_from_the_tighter_of_agent_and_profile(aw):
+def test_turn_and_time_limits_come_from_the_agent_alone(aw):
     from app.agents.interface import AgentSpec
     a = make_agent(aw.owner, "Limits", published=["*"], spec=spec(budget={"max_turns": 10, "max_wall_clock_s": 600}))
-    aw.owner.put(f"/api/agents/profile-budgets/{aw.eve_id}", json={"max_turns": 3, "max_tokens": 5000})
     b = aw.mgr.effective_budget(AgentSpec.model_validate(store.get_agent(a["id"])["spec"]),
                                 a["id"], aw.eve_id, 0.0)
-    assert (b.max_turns, b.max_wall_clock_s, b.max_tokens) == (3, 600, 5000)
-    b2 = aw.mgr.effective_budget(AgentSpec.model_validate(store.get_agent(a["id"])["spec"]),
-                                 a["id"], "someone-else", 0.0)
-    assert (b2.max_turns, b2.max_tokens) == (10, None)
+    assert (b.max_turns, b.max_wall_clock_s, b.max_tokens) == (10, 600, None)
 
 
 def test_done_and_approval_notifications_reach_the_chat_and_the_phone(aw):
@@ -356,22 +363,23 @@ def test_done_and_approval_notifications_reach_the_chat_and_the_phone(aw):
     assert aw.owner.get(f"/api/tasks/{tid}").json()["task"]["origin_message_id"] == "msg-1"
 
 
-def test_a_task_never_starts_from_a_chat_a_restricted_profile_can_read(aw):
-    """What the agent is asked and answers is posted into the originating chat. A chat with a
-    character a Restricted profile may talk to would hand both to the child."""
+def test_a_task_starts_only_from_the_dispatchers_own_chat(aw):
+    """What the agent is asked and answers is posted into the originating chat, so it must be
+    the dispatcher's own (4.0 ownership; the 3.x "a Restricted profile can read it" rule is
+    gone with the Restricted tier)."""
     a = make_agent(aw.owner, published=["*"])
-    kids_thread = aw.owner.post("/api/threads", json={"bot_id": "alpha"}).json()["id"]    # audience: all
-    for who in (aw.owner, aw.eve):
-        r = who.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": kids_thread})
-        assert r.status_code == 409 and r.json()["error"]["code"] == "task_thread_not_allowed"
-    assert store.list_tasks() == []
-    members = aw.owner.post("/api/threads", json={"bot_id": "main"}).json()["id"]
+    owners_thread = aw.owner.post("/api/threads", json={"bot_id": "alpha"}).json()["id"]
+    r = aw.owner.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": owners_thread})
+    assert r.status_code == 201, r.text
+    # somebody else's chat is not a task's origin at all (404).
+    r = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": owners_thread})
+    assert r.status_code == 404
+    members = aw.eve.post("/api/threads", json={"bot_id": "main"}).json()["id"]
     ok = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "x", "origin_thread_id": members})
     assert ok.status_code == 201
-    # and the manager itself refuses to post into such a thread even if the character changes later
     mgr = agents_service.get_manager()
-    assert aw.owner.portal.call(mgr._thread_postable, kids_thread) is False
     assert aw.owner.portal.call(mgr._thread_postable, members) is True
+    assert aw.owner.portal.call(mgr._thread_postable, "no-such-thread") is False
 
 
 def test_unpublishing_an_agent_stops_follow_ups_and_resumes_but_not_the_history(aw):
@@ -382,8 +390,8 @@ def test_unpublishing_an_agent_stops_follow_ups_and_resumes_but_not_the_history(
     r = aw.eve.post(f"/api/tasks/{tid}/send", json={"message": "more"})
     assert r.status_code == 404 and r.json()["error"]["code"] == "agent_not_found"
     assert aw.eve.get(f"/api/tasks/{tid}").status_code == 200, "the history stays readable"
-    assert aw.owner.post(f"/api/tasks/{tid}/send", json={"message": "more"}).status_code == 202
-    wait_state(aw.owner, tid, "succeeded")
+    # 4.0: an Admin cannot drive somebody else's task either (it is the dispatcher's)
+    assert aw.owner.post(f"/api/tasks/{tid}/send", json={"message": "more"}).status_code == 404
 
 
 def test_an_edit_to_an_agent_applies_to_the_next_run_of_its_existing_task(aw):
@@ -398,7 +406,11 @@ def test_an_edit_to_an_agent_applies_to_the_next_run_of_its_existing_task(aw):
 
 def test_a_manage_agents_grant_cannot_point_a_stored_secret_at_a_server_of_their_choosing(aw):
     # An Admin may (admin_system, 2026-10-19); a Member granted manage_agents may not.
-    aw.world.person(aw.owner, "Gil", "member", pin="5555", grants=["manage_agents"])
+    # 4.0: the grant itself is refused and a forged one is ineffective (see above), so the
+    # Member is stopped by the route before the secret guard.
+    from app import accounts
+    gil = aw.world.person(aw.owner, "Gil", "member", pin="5555")
+    accounts.update_profile(gil["id"], grants=["manage_agents"])          # forged straight into the DB
     admin = aw.caller(9)
     assert aw.world.login(admin, name="Gil", pin="5555").status_code == 200
     remote = {"s": {"transport": "http", "url": "https://attacker.example/mcp",
@@ -406,8 +418,8 @@ def test_a_manage_agents_grant_cannot_point_a_stored_secret_at_a_server_of_their
     local = {"s": {"transport": "http", "url": "http://127.0.0.1:1234/mcp",
                    "header_secrets": {"Authorization": "STUDIOFORGE_MCP_KEY_RO"}}}
     r = admin.post("/api/agents", json={"name": "Exfil", "spec": spec(tool_allowlist=["Read"], mcp_servers=remote)})
-    assert r.status_code == 403 and r.json()["error"]["code"] == "agent_needs_owner"
-    assert admin.post("/api/agents", json={"name": "Local", "spec": spec(tool_allowlist=["Read"], mcp_servers=local)}).status_code == 201
+    assert r.status_code == 403 and r.json()["error"]["code"] == "permission_denied"
+    assert admin.post("/api/agents", json={"name": "Local", "spec": spec(tool_allowlist=["Read"], mcp_servers=local)}).status_code == 403
     assert aw.owner.post("/api/agents", json={"name": "Remote", "spec": spec(tool_allowlist=["Read"], mcp_servers=remote)}).status_code == 201
 
 
@@ -572,3 +584,14 @@ def test_settings_roundtrip_and_the_flag_defaults_off(aw):
     aw.owner.put("/api/agents/settings", json={"unified_dispatch": True})
     assert agents_service.unified_dispatch_enabled() is True
     aw.owner.put("/api/agents/settings", json={"unified_dispatch": False})
+
+
+def test_an_openclaw_agent_with_a_seat_id_saves(aw):
+    """The 3.x Restricted-seat check called advisor.safe_agent_ids(), which 4.0 removed: any
+    OpenClaw agent spec answered 500. A valid seat id saves; a malformed one is still a 422."""
+    r = aw.owner.post("/api/agents", json={"name": "Seat", "published_to": [], "spec": spec(
+        backend="openclaw", backend_options={"agent_id": "worker_one"})})
+    assert r.status_code == 201, r.text
+    r = aw.owner.post("/api/agents", json={"name": "Seat2", "published_to": [], "spec": spec(
+        backend="openclaw", backend_options={"agent_id": "bad id!"})})
+    assert r.status_code == 422, r.text

@@ -42,24 +42,24 @@ def _result_of(task_id):
 
 
 @pytest.mark.timeout(60)
-def test_the_owner_of_a_task_and_the_owner_account_receive_its_frames_and_nobody_else(aw):
+def test_the_owner_of_a_task_receives_its_frames_and_nobody_else_admins_included(aw):
+    """4.0: a task is its dispatcher's; the Owner's socket hears nothing of Eve's task."""
+    from app import accounts
+    accounts.update_profile(aw.eve_id, grants=["dispatch_agents", "approve_agent_actions"])
     a = make_agent(aw.owner, published=["*"])
     with aw.owner.websocket_connect("/ws") as op, aw.eve.websocket_connect("/ws") as eve, \
             aw.fay.websocket_connect("/ws") as fay, aw.max.websocket_connect("/ws") as max_, \
-            aw.kid.websocket_connect("/ws") as kid, aw.anonymous.websocket_connect("/ws") as anon:
-        for s in (op, eve, fay, max_, kid, anon):
+            aw.kid.websocket_connect("/ws") as kid:
+        for s in (op, eve, fay, max_, kid):
             assert s.receive_json()["type"] == "hello"
         tid = aw.eve.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:approval"}).json()["task"]["id"]
-        # Eve's own socket: the timeline, then the approval card (she may not answer it)
+        # Eve's own socket: the timeline, then the approval card (she answers it)
         got = _drain(eve, until=lambda f: f.get("type") == "task.approval" and f["state"] == "pending")
         assert {f["task_id"] for f in got if "task_id" in f} == {tid}
         pending = got[-1]
         assert pending["tool"] == "Bash" and pending["scopes"] == ["once"]
         assert "echo hi" in pending["args_summary"]
-        # the operator's socket sees the same card, and answers it
-        seen_op = _drain(op, until=lambda f: f.get("type") == "task.approval" and f["state"] == "pending")
-        assert seen_op[-1]["request_id"] == pending["request_id"]
-        assert aw.owner.post(f"/api/approvals/{pending['request_id']}", json={"decision": "allow"}).status_code == 200
+        assert aw.eve.post(f"/api/approvals/{pending['request_id']}", json={"decision": "allow"}).status_code == 200
         rest = _drain(eve, until=_result_of(tid))
         assert any(f["type"] == "task.approval" and f["state"] == "allow" for f in rest)
         events = [f["event"] for f in got + rest if f["type"] == "task.event"]
@@ -68,10 +68,8 @@ def test_the_owner_of_a_task_and_the_owner_account_receive_its_frames_and_nobody
         assert [e["type"] for e in events][-1] == "result"
         last = [f for f in rest if f["type"] == "task.event"][-1]
         assert last["task"]["state"] == "succeeded"
-        # operator got the result too
-        assert any(_result_of(tid)(f) for f in _drain(op, until=_result_of(tid)))
-        # Everyone else heard nothing at all about it
-        for name, sock in (("fay", fay), ("max", max_), ("kid", kid), ("anonymous", anon)):
+        # Everyone else heard nothing at all about it - the Owner included
+        for name, sock in (("owner", op), ("fay", fay), ("max", max_), ("kid", kid)):
             leaked = [f for f in _ping(sock) if str(f.get("type", "")).startswith("task.")]
             assert leaked == [], f"{name} received task frames: {leaked[:2]}"
 
@@ -88,7 +86,7 @@ def test_another_dispatching_member_gets_only_their_own_frames(aw):
 
 
 @pytest.mark.timeout(60)
-def test_a_restricted_socket_receives_nothing_even_if_a_frame_is_forced_at_it(aw):
+def test_a_socket_without_dispatch_agents_receives_nothing_even_if_a_frame_is_forced_at_it(aw):
     a = make_agent(aw.owner, published=["*"])
     tid = aw.owner.post("/api/tasks", json={"agent_id": a["id"], "prompt": "scenario:simple"}).json()["task"]["id"]
     wait_state(aw.owner, tid, "succeeded")
@@ -96,25 +94,29 @@ def test_a_restricted_socket_receives_nothing_even_if_a_frame_is_forced_at_it(aw
     frames = [agents_ws.event_frame(task, {"seq": 99, "type": "text_delta", "text": "secret"}),
               agents_ws.approval_frame(task, {"request_id": "r", "tool": "Bash"}, "pending"),
               agents_ws.update_frame(task)]
-    with aw.kid.websocket_connect("/ws") as kid, aw.anonymous.websocket_connect("/ws") as anon:
-        kid.receive_json(), anon.receive_json()
+    with aw.kid.websocket_connect("/ws") as kid:
+        kid.receive_json()
         for fr in frames:
-            # (1) to everyone: the redactor drops it for the Restricted socket
+            # (1) to everyone: the scoper drops it for a socket without dispatch_agents
             aw.owner.portal.call(main.manager.broadcast, fr)
             # (2) to exactly the people who "own" it - the audience predicate still excludes them
             aw.owner.portal.call(agents_ws.publish, fr, aw.eve_id)
-            # (3) even an audience that would match a MEMBER owner id cannot reach a Restricted socket
+            # (3) even an audience that matches everyone cannot reach a socket without the permission
             aw.owner.portal.call(main.manager.broadcast_where, fr, lambda pr: True)
-        for sock in (kid, anon):
+        for sock in (kid,):
             assert [f for f in _ping(sock) if str(f.get("type", "")).startswith("task.")] == []
 
 
-def test_the_new_frames_are_explicitly_denied_to_locked_sockets():
+def test_the_task_frames_need_dispatch_agents_at_the_scoper():
+    from app import policy
+    from app.contracts.permissions import Permission
     assert agents_ws.FRAME_TYPES == {"task.event", "task.approval", "task.update"}
-    assert agents_ws.FRAME_TYPES <= main._DECOY_FRAME_DENY
-    assert not (agents_ws.FRAME_TYPES & main._DECOY_FRAME_ALLOW)
+    assert all(main._FRAME_PERMISSION[t] == Permission.DISPATCH_AGENTS for t in agents_ws.FRAME_TYPES)
+    basic = policy.Principal(kind="profile", role="basic", profile_id="b", name="B",
+                             permissions=frozenset({"use_chat"}))
     for t in agents_ws.FRAME_TYPES:
-        assert main.redact_for_decoy({"type": t, "task_id": "x", "bot_id": "alpha"}) is None
+        assert main.scope_frame_for_principal({"type": t, "task_id": "x"}, basic) is None
+        assert main.scope_frame_for_principal({"type": t, "task_id": "x"}, None) is None
 
 
 def test_who_may_see_a_task_is_one_rule():
@@ -122,18 +124,19 @@ def test_who_may_see_a_task_is_one_rule():
 
     class P:  # a stand-in with the attributes may_see_task reads
         def __init__(self, kind="profile", restricted=False, operator=False, pid=None, perms=()):
-            self.kind, self.is_restricted, self.is_operator, self.profile_id = kind, restricted, operator, pid
+            self.kind, self.is_restricted, self.is_admin, self.profile_id = kind, restricted, operator, pid
             self._perms = set(perms)
 
         def can(self, p):
             return (p.value if isinstance(p, Permission) else p) in self._perms
 
     assert agents_ws.may_see_task(P(kind="open"), "anyone")
-    assert agents_ws.may_see_task(P(operator=True), "anyone")
+    assert not agents_ws.may_see_task(P(operator=True, pid="z", perms={"dispatch_agents"}), "anyone")  # 4.0
     assert agents_ws.may_see_task(P(pid="a", perms={"dispatch_agents"}), "a")
     assert not agents_ws.may_see_task(P(pid="a", perms={"dispatch_agents"}), "b")
     assert not agents_ws.may_see_task(P(pid="a"), "a"), "the grant was revoked: the old frames stop at once"
-    assert not agents_ws.may_see_task(P(pid="a", restricted=True, perms={"dispatch_agents"}), "a")
+    # 4.0: a Basic profile granted dispatch_agents sees its own task like anyone else
+    assert agents_ws.may_see_task(P(pid="a", restricted=True, perms={"dispatch_agents"}), "a")
     assert not agents_ws.may_see_task(P(kind="machine"), "a")
     assert not agents_ws.may_see_task(P(kind="anonymous", restricted=True), "")
     assert not agents_ws.may_see_task(None, "a")

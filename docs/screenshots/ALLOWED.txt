@@ -35,7 +35,6 @@ mobile-thread.png
 settings-theme.png
 
 # Safe Mode with an empty roster: no threads, no names, no message text.
-live-locked-1280.png
 # 2.3.0 (2026-10-14), captured on a fresh scratch install (Atlas + the two
 # seeded chats, no real roster, no address or path in frame):
 welcome.png
@@ -54,7 +53,6 @@ guide/bots-tab.png
 guide/ai-models.png
 guide/plugins-tab.png
 guide/quick-actions.png
-guide/safe-mode.png
 guide/voice-screen.png
 
 # README gallery (docs/screenshots/readme/), opened one by one 2026-10-19: Atlas,
@@ -64,3 +62,18 @@ readme/chat.png
 readme/settings.png
 readme/people-profiles.png
 readme/tasks.png
+
+# Re-shot 2026-10-23 for 4.0.0 (INT-3) from a fresh scratch install with synthetic data
+# (Alex/Sam/Mia, Nova/Scout letter avatars, the shipped Atlas avatar, invented chatter, a
+# localhost connection address only) and opened one by one: welcome, ai-models,
+# quick-actions, plugins-tab, bot-manager, desktop-*, mobile-*, settings-theme and
+# readme/{people-profiles,settings}. voice-screen.png is still a 3.x capture.
+
+# 4.1 (2026-10-25): the Using DisPatch guide's pictures, shot as the shared User profile on a
+# fresh scratch install (Nova/Scout letter-block bots, the shipped Atlas avatar, the DisPatch
+# mark, invented chatter about a beach trip and a birthday card; no address, path or real
+# name in frame) and opened one by one.
+guide/phone-chats.png
+guide/phone-bots.png
+guide/composer-menu.png
+guide/profile-picture.png

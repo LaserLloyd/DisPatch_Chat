@@ -1,0 +1,32 @@
+[
+ {
+  "id": "c30db2d188b5c09aa9a6768ca6ab6cd6",
+  "name": "Owner",
+  "role": "owner",
+  "household_bots": "all"
+ },
+ {
+  "id": "1643f014f0507dbcdcceac1214d0c5e4",
+  "name": "DisPatch",
+  "role": "member",
+  "household_bots": [
+   "atlas",
+   "wikka"
+  ]
+ },
+ {
+  "id": "8f78572fc3dff747bd6eaf8f0b384867",
+  "name": "Kids",
+  "role": "member",
+  "household_bots": [
+   "kid_lobster",
+   "kid_fruitbat",
+   "kid_octopus",
+   "kid_bee",
+   "kid_owl",
+   "kid_frog",
+   "kid_tortoise",
+   "kid_penguin"
+  ]
+ }
+]

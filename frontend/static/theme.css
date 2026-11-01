@@ -77,6 +77,15 @@
      the same fill. */
   --on-error-fill:   var(--on-danger);
   --on-warning-fill: var(--on-warning);
+
+  /* ThemeForge icon shapes as masks, for CSS-drawn glyphs (disclosure carets, sort arrows).
+     Same paths as ui-theme/icons.svg; a mask cannot reference a <symbol>, so they are inlined. */
+  --ico-chevron-right: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M9.5%206l6%206-6%206%22%2F%3E%3C%2Fsvg%3E");
+  --ico-chevron-down: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%209.5l6%206%206-6%22%2F%3E%3C%2Fsvg%3E");
+  --ico-chevron-left: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M14.5%206l-6%206%206%206%22%2F%3E%3C%2Fsvg%3E");
+  --ico-arrow-up-down: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M8%2020V4M4.5%207.5%208%204l3.5%203.5%22%2F%3E%3Cpath%20d%3D%22M16%204v16M12.5%2016.5%2016%2020l3.5-3.5%22%2F%3E%3C%2Fsvg%3E");
+  --ico-arrow-up: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M12%2019.5V5%22%2F%3E%3Cpath%20d%3D%22M6%2011l6-6%206%206%22%2F%3E%3C%2Fsvg%3E");
+  --ico-arrow-down: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M12%204.5V19%22%2F%3E%3Cpath%20d%3D%22M6%2013l6%206%206-6%22%2F%3E%3C%2Fsvg%3E");
 }
 
 /* ----------------------------------------------------------------------------

@@ -7,12 +7,17 @@
 //   Support bundle      a redacted zip for a bug report; prompts are left out unless ticked.
 //   Profile data        export or erase what DisPatch holds about one profile.
 //
-// Owner and Admins server side (admin_system); this module only decides what to OFFER. Everything that can
+// Admins server side (admin_system); this module only decides what to OFFER. Everything that can
 // lose data asks first, and a recovery key is shown exactly once.
+//
+// 4.3: "Show recovery key" (the protected Admin only, after typing the PIN or password again)
+// opens a small dialog that shows the generated key once, with Copy; closing it removes the key
+// from the page. A restore that cannot put a key back lists it (`re_enter`). Pre-restore copies
+// are their own kind and, like pre-migration copies, cannot be deleted from here.
 
-import { w5 as realApi, saveBlob, errorText } from './w5-api.js?v=1';
-import { t, fileSize, fullTimestamp } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
+import { w5 as realApi, saveBlob, errorText } from './w5-api.js?v=3';
+import { t, fileSize, fullTimestamp } from './i18n.js?v=5';
+import { el } from './util.js?v=23';
 
 // ------------------------------------------------------------------ pure
 
@@ -30,13 +35,66 @@ export function actionsFor(b) {
   return {
     verify: b.kind === 'archive',
     restore: b.restorable !== false,
-    remove: b.kind !== 'premigration',
+    remove: b.kind !== 'premigration' && b.kind !== 'prerestore',
     needsPassphrase: b.kind === 'archive',
   };
 }
 
-const KIND_KEYS = { archive: 'bkp.kind_archive', snapshot: 'bkp.kind_snapshot', premigration: 'bkp.kind_premigration' };
+/** The reveal route's body: the credential typed again, as a PIN or as a password. */
+export function revealBody(kind, value) {
+  const v = String(value || '');
+  return kind === 'password' ? { password: v } : { pin: v };
+}
+
+/** The sentence that names the keys to enter again, or '' when there are none. */
+export function reEnterText(names, key = 'bkp.re_enter_after') {
+  const list = (Array.isArray(names) ? names : []).filter(Boolean);
+  return list.length ? t(key, { names: list.join(', ') }) : '';
+}
+
+/** Should "Show recovery key" be offered? Only when a generated key exists, and not to a caller
+ *  known not to be the protected Admin (the server refuses everyone else anyway). */
+export function offerReveal(schedule, isProtected) {
+  return !!(schedule && schedule.generated_key) && isProtected !== false;
+}
+
+/** Map a failed reveal to what the dialog says. */
+export function revealError(e) {
+  const status = e && e.status;
+  if (status === 401) return t('bkp.reveal_wrong');
+  if (status === 429) {
+    const secs = (e.body && e.body.retry_after) || e.retryAfter || 0;
+    return t('bkp.reveal_wait', { seconds: secs });
+  }
+  if (status === 404) return t('bkp.reveal_none');
+  return errorText(e);
+}
+
+/** POST the reveal itself, NOT through w5-api: a 401 here is a mistyped PIN, not an ended
+ *  session, so it must not trip the "signed out" handler. Never cached by the browser. */
+export async function postReveal(body, fetchImpl = globalThis.fetch) {
+  const r = await fetchImpl('/api/backups/recovery-key/reveal', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+    credentials: 'same-origin', cache: 'no-store',
+  });
+  let b = null;
+  try { b = await r.json(); } catch { /* not JSON */ }
+  if (!r.ok) {
+    const msg = (b && (b.detail || (b.error && b.error.message))) || r.statusText || String(r.status);
+    const err = new Error(`${r.status}: ${msg}`);
+    err.status = r.status;
+    err.body = b;
+    err.code = b && b.error && b.error.code;
+    throw err;
+  }
+  return b || {};
+}
+
+const KIND_KEYS = { archive: 'bkp.kind_archive', snapshot: 'bkp.kind_snapshot', premigration: 'bkp.kind_premigration', prerestore: 'bkp.kind_prerestore' };
 export const kindLabel = (kind) => t(KIND_KEYS[kind] || KIND_KEYS.snapshot);
+// 4.0 scale: a rotating snapshot is kept as a recent, a daily or a weekly one.
+const TIER_KEYS = { recent: 'bkp.tier_recent', daily: 'bkp.tier_daily', weekly: 'bkp.tier_weekly' };
+export const tierLabel = (b) => (b && b.kind === 'snapshot' && TIER_KEYS[b.tier] ? t(TIER_KEYS[b.tier]) : '');
 
 // ------------------------------------------------------------------ DOM
 
@@ -48,13 +106,13 @@ function section(title, hint, ...kids) {
   ]);
 }
 
-/** Mount into `host`. deps: { api?, toast, confirm(msg, opts), role } */
+/** Mount into `host`. deps: { api?, toast, confirm(msg, opts), role, isProtected } */
 export function mountBackups(host, deps = {}) {
   const api = deps.api || realApi;
   const toast = deps.toast || (() => {});
   const ask = deps.confirm || (async () => true);
   host.textContent = '';
-  const owner = deps.role === 'owner' || deps.role === 'admin' || deps.role == null;   // admin_system; the server decides
+  const owner = deps.role === 'admin' || deps.role == null;   // admin_system; the server decides
   if (!owner) {
     host.append(el('p', { class: 'muted', text: t('bkp.owner_only') }));
     return;
@@ -70,11 +128,24 @@ export function mountBackups(host, deps = {}) {
   const now = el('button', { type: 'button', class: 'btn-primary', text: t('bkp.now') });
   const keyBox = el('div', { class: 'bkp-key', role: 'alert', hidden: '' });
   const msg = el('p', { class: 'muted', role: 'status', 'aria-live': 'polite' });
+  const reEnter = el('p', { class: 'bkp-re-enter', role: 'status', hidden: '' });
+  const revealBtn = el('button', { type: 'button', class: 'btn-secondary bkp-reveal-btn', text: t('bkp.reveal'), hidden: '' });
+  const revealHost = el('div', { class: 'bkp-reveal-host' });
+  // 4.3 Fable: a second Admin sees the button, switched off, with the reason (not nothing).
+  const revealNote = el('p', { class: 'muted bkp-reveal-note', hidden: '', text: t('bkp.reveal_owner_only') });
+  revealBtn.addEventListener('click', () => openReveal());
 
   async function refresh() {
     let d;
     try { d = await api.backups(); } catch (e) { list.textContent = errorText(e); return; }
     summary.textContent = scheduleSummary(d.schedule);
+    const ownerOnly = !!(d.schedule && d.schedule.generated_key) && deps.isProtected === false;
+    revealBtn.hidden = !offerReveal(d.schedule, deps.isProtected) && !ownerOnly;
+    revealBtn.disabled = ownerOnly;
+    revealNote.hidden = !ownerOnly;
+    const again = reEnterText(d.schedule && d.schedule.last_restore && d.schedule.last_restore.re_enter);
+    reEnter.hidden = !again;
+    reEnter.textContent = again;
     list.textContent = '';
     if (!d.backups.length) list.append(el('p', { class: 'muted', text: t('bkp.none') }));
     for (const b of d.backups) list.append(row(b));
@@ -111,6 +182,8 @@ export function mountBackups(host, deps = {}) {
         try {
           const out = await api.restoreBackup(b.id, need());
           toast(out.message || t('bkp.restore_staged_toast'));
+          const missing = reEnterText(out.re_enter, 'bkp.re_enter_staged');
+          if (missing) msg.textContent = missing;
           refresh();
         } catch (e) { toast(errorText(e), true); }
       });
@@ -128,6 +201,7 @@ export function mountBackups(host, deps = {}) {
       el('span', { class: 'dev-row-text' }, [
         el('strong', { text: b.name }), ' ',
         el('span', { class: 'ui-badge', text: kindLabel(b.kind) }), ' ',
+        tierLabel(b) ? el('span', { class: 'ui-badge ui-badge--info bkp-tier', text: tierLabel(b) }) : null, ' ',
         el('span', { class: 'dev-row-hint', text: `${fileSize(b.size)} · ${fullTimestamp(b.created)}${b.encrypted ? ` · ${t('bkp.encrypted')}` : ''}` }),
       ]),
       ...buttons,
@@ -159,6 +233,65 @@ export function mountBackups(host, deps = {}) {
     const done = el('button', { type: 'button', class: 'btn-secondary', text: t('bkp.key_saved') });
     done.addEventListener('click', () => { keyBox.hidden = true; keyBox.textContent = ''; });
     keyBox.append(el('strong', { text: t('bkp.key_title') }), el('p', { text: t('bkp.key_note') }), input, copy, done);
+    input.focus();
+  }
+
+  // ---- show the generated recovery key again (protected Admin, credential re-entered)
+  function closeReveal() {
+    revealHost.textContent = '';          // the key leaves the page with the dialog
+    revealBtn.disabled = false;
+    revealBtn.focus();
+  }
+
+  function openReveal() {
+    revealHost.textContent = '';
+    revealBtn.disabled = true;
+    const titleId = `bkp-reveal-title-${Math.random().toString(36).slice(2, 8)}`;
+    const dlg = el('div', { class: 'bkp-key bkp-reveal', role: 'dialog', 'aria-labelledby': titleId });
+    const kind = el('select', { class: 'ui-select', 'aria-label': t('bkp.reveal_with') }, [
+      el('option', { value: 'pin', text: t('bkp.reveal_pin') }),
+      el('option', { value: 'password', text: t('bkp.reveal_password') }),
+    ]);
+    const cred = el('input', { type: 'password', class: 'ui-input', autocomplete: 'current-password',
+      'aria-label': t('bkp.reveal_credential') });
+    const err = el('p', { class: 'muted bkp-reveal-error', role: 'alert' });
+    const go = el('button', { type: 'submit', class: 'btn-primary', text: t('bkp.reveal_submit') });
+    const cancel = el('button', { type: 'button', class: 'btn-secondary', text: t('bkp.reveal_cancel') });
+    const form = el('form', { class: 'bkp-form' }, [kind, cred, go, cancel]);
+    cancel.addEventListener('click', closeReveal);
+    dlg.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeReveal(); });
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      if (!cred.value) { cred.focus(); return; }
+      go.disabled = true;
+      err.textContent = '';
+      try {
+        const body = revealBody(kind.value, cred.value);
+        const out = await (api.revealRecoveryKey ? api.revealRecoveryKey(body) : postReveal(body));
+        cred.value = '';
+        showRevealed(dlg, titleId, out.recovery_key || '');
+      } catch (e) {
+        cred.value = '';
+        err.textContent = revealError(e);
+        go.disabled = false;
+        cred.focus();
+      }
+    });
+    dlg.append(el('strong', { id: titleId, text: t('bkp.reveal_title') }), el('p', { text: t('bkp.reveal_hint') }), form, err);
+    revealHost.append(dlg);
+    cred.focus();
+  }
+
+  function showRevealed(dlg, titleId, key) {
+    dlg.textContent = '';
+    const input = el('input', { type: 'text', readonly: '', class: 'ui-input bkp-key-input', value: key, 'aria-label': t('bkp.key_label') });
+    const copy = el('button', { type: 'button', class: 'btn-secondary', text: t('bkp.copy') });
+    copy.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(key); toast(t('bkp.copied')); } catch { input.select(); }
+    });
+    const done = el('button', { type: 'button', class: 'btn-secondary', text: t('bkp.key_saved') });
+    done.addEventListener('click', closeReveal);
+    dlg.append(el('strong', { id: titleId, text: t('bkp.key_title') }), el('p', { text: t('bkp.key_note') }), input, copy, done);
     input.focus();
   }
 
@@ -198,13 +331,13 @@ export function mountBackups(host, deps = {}) {
   });
 
   host.append(
-    head, summary, pending,
+    head, summary, pending, reEnter,
     section(t('bkp.encrypted_title'), t('bkp.encrypted_hint'),
       el('div', { class: 'bkp-form' }, [
         pass,
         el('label', { class: 'bkp-check', for: 'bkp-media' }, [media, ' ', t('bkp.include_media')]),
-        now,
-      ]), msg, keyBox, list),
+        now, revealBtn,
+      ]), revealNote, revealHost, msg, keyBox, list),
     section(t('bkp.bundle_title'), t('bkp.bundle_hint'),
       el('div', { class: 'bkp-form' }, [el('label', { class: 'bkp-check', for: 'bkp-prompts' }, [prompts, ' ', t('bkp.include_prompts')]), bundle])),
     section(t('bkp.profile_title'), t('bkp.profile_hint'), el('div', { class: 'bkp-form' }, [who, exportBtn, eraseBtn])),

@@ -4,7 +4,7 @@ Why
 ---
 Agents are the second audience for this API and the one that cannot read. A
 refusal reaching a model today is a prose sentence — "Only agents may fire
-reactions", "Unlock for full access", "thread not found" — and the only way to
+reactions", "Sign in to continue.", "thread not found" — and the only way to
 branch on it is to match that sentence, which means the day anyone improves the
 wording, every caller that was handling the case correctly starts handling it
 wrongly, silently. That is the whole reason a small model retries the thing it
@@ -17,11 +17,11 @@ So a machine gets a stable, enumerable `code` alongside the prose:
     Content-Type: application/problem+json
 
     {
-      "type":   "/problems/safe-mode",
-      "title":  "Unlock for full access",
+      "type":   "/problems/permission-denied",
+      "title":  "Your profile does not have permission to do that.",
       "status": 403,
-      "code":   "safe_mode",
-      "detail": "Unlock for full access"
+      "code":   "permission_denied",
+      "detail": "Your profile does not have permission to do that."
     }
 
 Additive on purpose
@@ -52,7 +52,7 @@ MEDIA_TYPE = "application/problem+json"
 # table keeps its code, and one that falls out of the table degrades to the
 # generic per-status code rather than inventing a new name nobody published.
 _BY_DETAIL: dict[str, str] = {
-    "Unlock for full access":            "safe_mode",
+    "Your profile does not have permission to do that.": "permission_denied",
     "Only agents may fire reactions":    "agents_only",
     "thread not found":                  "thread_not_found",
     "Thread not found":                  "thread_not_found",
@@ -141,7 +141,7 @@ def _response(status: int, description: str) -> dict:
 # route REFUSES is the half of an API reference an agent actually needs, and it
 # was entirely absent: every machine-inbound route advertised a 200 and a
 # validation error, and nothing else.
-SAFE_MODE = {403: _response(403, "Safe Mode: this caller holds no full session.")}
+FORBIDDEN = {403: _response(403, "The caller's profile (or API key) lacks the permission this needs.")}
 NOT_FOUND = {404: _response(404, "No such thread, bot, message or reaction.")}
 BAD_INPUT = {422: _response(422, "The request body failed validation.")}
 UNAUTHORIZED = {401: _response(401, "A remote caller needs X-API-Key.")}
@@ -149,4 +149,4 @@ TOO_LARGE = {413: _response(413, "The upload exceeds the configured limit.")}
 RATE_LIMITED = {429: _response(429, "Rate limited; the refusal is final, do not retry.")}
 
 # The set almost every machine-inbound route can produce.
-MACHINE = {**UNAUTHORIZED, **SAFE_MODE, **NOT_FOUND, **BAD_INPUT}
+MACHINE = {**UNAUTHORIZED, **FORBIDDEN, **NOT_FOUND, **BAD_INPUT}

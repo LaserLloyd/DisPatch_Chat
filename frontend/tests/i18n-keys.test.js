@@ -68,8 +68,6 @@ function flatten(obj, prefix = '') {
 const DYNAMIC = [
   // js/settings_schema.js  customUnits() / the Custom… unit picker:  t(`schema.unit_${u}`)
   { re: /^schema\.unit_(seconds|minutes|hours|days|megabytes|gigabytes)$/, built: 'settings_schema.js  t(`schema.unit_${u}`)' },
-  // js/main.js  renderBotManager():  t(`chars.who_${o}`) over characters.js WHO_OPTIONS
-  { re: /^chars\.who_(everyone|members|restricted|hidden)$/, built: 'main.js  t(`chars.who_${o}`)' },
   // js/main.js  paintAccountChoices():  t(`acct.opt_${c}`) over accountChoices()
   { re: /^acct\.opt_(pin_change|pin_set|pin_remove|pw_set|pw_change|my_pin)$/, built: 'main.js  t(`acct.opt_${c}`)' },
   // js/plugins.js  lookupLabel():  `plugins.lookup_${id}` over the server's livetools names
@@ -115,30 +113,54 @@ const DYNAMIC = [
   { re: /^msg\.notice_level_(error|warn|ok|info)$/,
     built: 'main.js  t(`msg.notice_level_${notice.level}`)' },
   // 3.0 profiles, roles and policy -- keys built from a closed vocabulary.
-  // js/main.js  bot row audience caption:  t(`settings.audience_${aud}`), aud from profiles.js audienceOf()
-  { re: /^settings\.audience_(all|members|restricted)$/,
-    built: 'main.js  t(`settings.audience_${aud}`)' },
-  // js/people.js + js/signin.js  roleLabel():  t(`role.${role}`), profiles.js ROLES
-  { re: /^role\.(owner|admin|member|restricted)$/, built: 'people.js / signin.js  t(`role.${role}`)' },
-  // js/signin.js  openRestrictedPanel():  t(`restricted.use_${l.key}`), profiles.js usageLines()
-  { re: /^restricted\.use_(minutes|turns|threads|feedback|upload_mb)$/,
-    built: 'signin.js  t(`restricted.use_${l.key}`)' },
-  // js/signin.js  paintAccessNotice():  t(`${stem}_title|_body`), stem from profiles.js BLOCK_NOTICES
-  { re: /^notice\.(time_limit|quiet_hours)_(title|body)$/,
-    built: 'signin.js  t(`${stem}_title|_body`)' },
-  // js/people.js  errorText():  t(`people.err_${code}`), codes from profiles.js formToBudgets()/createPayload()
-  { re: /^people\.err_(required|min_4|min_8|range_1_1440|range_0_100000|both_times|same_times|range_1_43200)$/,
-    built: 'people.js  t(`people.err_${code}`)' },
+  // js/people.js + js/signin.js  roleLabel():  t(`role.${role}`) (admin, user, basic)
+  { re: /^role\.(admin|user|basic)$/, built: 'people.js / signin.js  t(`role.${role}`)' },
   // js/people.js + js/signin.js  activity table:  t(`people.col_${c}`), profiles.js ACTIVITY_COLUMNS
-  { re: /^people\.col_(login|turn|thread|upload|feedback|limit_hit)$/,
+  { re: /^people\.col_(login|turn|thread|upload|feedback)$/,
     built: 'people.js / signin.js  t(`people.col_${c}`)' },
-  // js/people.js  auditKind():  t(`people.audit_${kind}`) for the kinds the server writes (people_api._audit, main.py)
-  { re: /^people\.audit_[a-z_]+$/, built: 'people.js  t(`people.audit_${kind}`)' },
+  // js/people.js  auditKind():  t(`people.audit_${kind}`), dots in the kind read as `_`
+  // (plugin.approve -> audit_plugin_approve). EXPLICIT list of the kinds the server writes
+  // with category="audit" (people_api, main.py, recovery.py, cli.py, backup_api.py,
+  // plugins_api.py, agents_api.py, agents_service.py); a kind without a label shows raw.
+  // device_bound is no longer written (4.0 removed device binding) but stays as a history
+  // label: upgraded installs still have 3.x rows of that kind in their activity table.
+  { re: new RegExp('^people\\.audit_(' + [
+    'login_failed', 'owner_created', 'owner_reset', 'owner_password_reset',
+    'profile_created', 'profile_updated', 'profile_deleted', 'profile_avatar_set', 'profile_avatar_removed',
+    'pin_set', 'pin_cleared', 'pin_changed', 'password_set', 'password_changed',
+    'signed_out', 'device_removed', 'device_bound', 'recovered', 'recovery_failed',
+    'api_token_changed', 'support_bundle', 'plugin_approve',
+    'agent_created', 'agent_changed', 'agent_deleted', 'agent_credentials', 'agent_secret',
+    'agent_settings', 'agent_task_started', 'agent_task_sent', 'agent_task', 'agent_approval',
+  ].join('|') + ')$'), built: 'people.js  auditKind()' },
+  // js/storage-card.js  t(`storage.${r.key}`), key from areaRows()
+  { re: /^storage\.(database|media|reactions|imagestudio|avatars|avatar_pool|files|voices|backups|trash|stray|rest)$/,
+    built: 'storage-card.js  t(`storage.${r.key}`)' },
+  // js/storage-card.js  stepLabel():  t(`storage.step_${id}`), id from the server's maintenance.py STEPS
+  { re: /^storage\.step_(sync_media_index|prune_activity|prune_task_events|prune_job_events|prune_usage_daily|prune_transcript_seen|prune_sessions|prune_agent_spend|prune_approvals|prune_job_feedback|archive_chats|image_retention|prune_image_jobs|orphan_sweep|trash_purge|backup_tiers|fts_maintenance|sqlite_optimize|incremental_vacuum|wal_checkpoint|storage_scan)$/,
+    built: 'storage-card.js  t(`storage.step_${id}`)' },
+  // js/people.js  typeLabel() / typeHint():  t(`people.type_${role}`), role from TYPES (user | basic | admin)
+  { re: /^people\.type_(admin|user|basic)(_hint)?$/, built: 'people.js  t(`people.type_${role}`)' },
+  // js/people-perms.js  permissionsPanel():  t(`perms.${r.perm}`), perm from PERM_ORDER
+  { re: /^perms\.(use_chat|use_voice|attach_files|use_lookups|manage_history|use_notifications|files_upload|files_read|use_images|voice_lab|create_characters|choose_backend|dispatch_agents|approve_agent_actions)$/,
+    built: 'people-perms.js  t(`perms.${r.perm}`)' },
 ];
+
+// A key counts as used only where it appears as a whole token in CODE (comments
+// stripped, strings kept): `SOURCE.includes(key)` let a key live on through a
+// comment that mentioned it, or as the prefix of a longer key.
+// index.html is NOT run through the JS lexer here (an apostrophe in its text
+// would open a pseudo string); only its HTML comments are blanked.
+const USE_CODE = [readFileSync(join(STATIC, 'index.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, ' ')]
+  .concat(readdirSync(JS_DIR).filter((f) => f.endsWith('.js'))
+    .map((f) => blankNonCode(readFileSync(join(JS_DIR, f), 'utf8'), { keepStrings: true, keepTemplates: true })))
+  .join('\n');
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const usedInCode = (key) => new RegExp(`(?<![\\w.])${escapeRe(key)}(?![\\w])`).test(USE_CODE);
 
 test('every key in en.json is used by the app', () => {
   const dead = flatten(EN).filter((key) => {
-    if (SOURCE.includes(key)) return false;
+    if (usedInCode(key)) return false;
     return !DYNAMIC.some((d) => d.re.test(key));
   });
   assert.deepEqual(dead, [],

@@ -13,7 +13,7 @@ MOUNTING IT (the exact change in main.py — one added name, one added line):
            app.include_router(dashboard_routes.router)
 
     3. and — belt-and-braces, not the gate itself — add the prefix to the tuple
-       of paths ``_decoy_blocked()`` bars for limited (Safe-Mode) sessions:
+       of paths a signed-out caller is barred from (``_signed_out_blocked()``):
 
            if path.startswith(("/media/", "/api/media", "/api/files",
                                "/api/search", "/api/export", "/api/recover",
@@ -35,7 +35,7 @@ Access model, matching the rest of the app exactly (see main.auth_gate):
   * no PIN configured at all           → allowed, because the whole app is open
     in that state — and this page's own `auth.no_pin` finding is what tells the
     operator to fix it;
-  * anything else (Safe Mode, expired session, no cookie) → 403.
+  * anything else (a profile without the permission, expired session, no cookie) → 403.
 
 Everything here is a read. The expensive path (`/deep`) is serialised behind a
 lock and returns 409 rather than queueing, mirroring the service panels'

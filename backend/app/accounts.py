@@ -9,7 +9,7 @@ Why a synchronous ``sqlite3`` module and not the app's ``aiosqlite`` handle: the
 auth gate, the WebSocket handshake and a dozen sync helpers ask "who is this?" on
 every request. The tables are tiny, the answers are cached in memory (keyed by the
 database path, so a test that points the data dir elsewhere gets a fresh cache), and
-writes are rare (a login, a role change) or one small UPSERT (a budget charge). WAL
+writes are rare (a login, a role change) or one small UPSERT (a usage row). WAL
 mode and ``busy_timeout`` make the second connection safe next to the app's own.
 
 The schema is additive only: ``CREATE TABLE IF NOT EXISTS``, nothing dropped. A 2.x
@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -31,27 +32,53 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import config
+from .contracts.permissions import Role, normalise_role
 
 log = logging.getLogger("local-chat.accounts")
 
-ROLES = ("owner", "admin", "member", "restricted")
+# --------------------------------------------------------------------------- #
+# Stored role strings (4.0, BUILD-PLAN-v2 §1.1)
+#
+# The ``profiles.role`` column keeps the 3.x words - ``owner/admin/member/restricted`` - so
+# 4.0 needs no table rebuild (its CHECK constraint and the one-owner unique index stay).
+# THIS MODULE IS THE ONLY PLACE THAT KNOWS THEM: everything else sees a ``Role`` (``admin /
+# user / basic``) and ``Profile.protected``. ``tests/test_stored_role_strings.py`` fails the
+# build if another module compares or writes a stored string. The stored ``owner`` IS the
+# protected first Admin (``ux_profiles_one_owner`` guarantees there is at most one).
+# --------------------------------------------------------------------------- #
+
+#: Every value the ``profiles.role`` column may hold (its CHECK constraint).
+STORED_ROLES = ("owner", "admin", "member", "restricted")
+#: The stored word that marks the protected first Admin.
+_STORED_PROTECTED = "owner"
+#: stored string -> Role.
+ROLE_OF_STORED: dict[str, Role] = {
+    "owner": Role.ADMIN, "admin": Role.ADMIN, "member": Role.USER, "restricted": Role.BASIC,
+}
+#: Role -> stored string, for every profile but the protected Admin (stored ``owner``).
+STORED_OF_ROLE: dict[Role, str] = {Role.ADMIN: "admin", Role.USER: "member", Role.BASIC: "restricted"}
+#: A WHERE fragment naming the protected Admin's row, for read-only SQL elsewhere (the
+#: migration's dry run reads chats.db without this module's cache).
+PROTECTED_ROW_SQL = "role = 'owner'"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS profiles (
     id             TEXT PRIMARY KEY,
     name           TEXT NOT NULL,
-    role           TEXT NOT NULL CHECK (role IN ('owner','admin','member','restricted')),
+    role           TEXT NOT NULL CHECK (role IN ('owner','admin','member','restricted')),  -- stored words, see ROLE_OF_STORED
     pin_hash       TEXT,                       -- quick-switch PIN (argon2id, or the legacy pbkdf2 string)
     password_hash  TEXT,                       -- owner/admin credential (argon2id)
     avatar         TEXT NOT NULL DEFAULT '',
-    budgets        TEXT NOT NULL DEFAULT '{}', -- JSON: per-day limits and quiet hours
+    budgets        TEXT NOT NULL DEFAULT '{}', -- 3.x per-day limits; unused since 4.0 (always '{}' on new rows)
     grants         TEXT NOT NULL DEFAULT '[]', -- JSON: extra permissions (incl. use_tools:<id>)
     denies         TEXT NOT NULL DEFAULT '[]', -- JSON: permissions removed from the role's set
     session_timeout INTEGER,                   -- seconds of inactivity; NULL = role default
     created        TEXT NOT NULL,
     disabled       INTEGER NOT NULL DEFAULT 0,
     epoch          INTEGER NOT NULL DEFAULT 0, -- bumped to invalidate every session of the profile
-    backends       TEXT NOT NULL DEFAULT '{}'  -- 4.0: JSON {allowed, default, models}; {} = inherit
+    backends       TEXT NOT NULL DEFAULT '{}', -- 4.0: JSON {allowed}; {} = every household connection
+    household_bots TEXT DEFAULT '"all"',       -- 4.0: JSON "all" or a list of household bot ids
+    archive_after_months INTEGER               -- 4.0 (011_scale): archive own chats older than N months; NULL = off
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_profiles_name ON profiles(lower(name));
 CREATE UNIQUE INDEX IF NOT EXISTS ux_profiles_one_owner ON profiles(role) WHERE role = 'owner';
@@ -79,9 +106,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_profile ON sessions(profile_id);
 
 CREATE TABLE IF NOT EXISTS usage_daily (
-    subject TEXT NOT NULL,                     -- profile id, or device:<id> / ip:<addr> when anonymous
+    subject TEXT NOT NULL,                     -- "machine" (the upload guard); 3.x rows: profile/device/ip
     day     TEXT NOT NULL,                     -- local YYYY-MM-DD
-    kind    TEXT NOT NULL,                     -- turn | thread | feedback | upload_bytes | active_seconds
+    kind    TEXT NOT NULL,                     -- upload_bytes (3.x also turn | thread | feedback | active_seconds)
     amount  INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (subject, day, kind)
 );
@@ -91,7 +118,7 @@ CREATE TABLE IF NOT EXISTS activity (
     ts         TEXT NOT NULL,
     category   TEXT NOT NULL DEFAULT 'activity',   -- 'activity' | 'audit'
     kind       TEXT NOT NULL,
-    profile_id TEXT,                               -- who did it (NULL = anonymous / machine)
+    profile_id TEXT,                               -- who did it (NULL = a machine; 3.x: an anonymous device)
     subject    TEXT NOT NULL DEFAULT '',
     detail     TEXT NOT NULL DEFAULT ''
 );
@@ -110,16 +137,34 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     applied_at TEXT NOT NULL,
     app_version TEXT NOT NULL DEFAULT ''
 );
+
+-- 4.3 (issue #24): an outside (OIDC) account linked to a profile. Only an existing link signs
+-- in (no auto-provisioning, no email matching); one IdP account names at most one profile, a
+-- profile has at most one link per issuer. Deleting the profile deletes its links.
+CREATE TABLE IF NOT EXISTS oidc_links (
+    profile_id    TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    issuer        TEXT NOT NULL,
+    subject       TEXT NOT NULL,
+    email_at_link TEXT NOT NULL DEFAULT '',   -- shown in People; never used to match
+    created       TEXT NOT NULL,
+    PRIMARY KEY (issuer, subject)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_oidc_links_profile_issuer ON oidc_links(profile_id, issuer);
 """
 
 #: ALTERs for columns added to a table after it first shipped (idempotent: a duplicate
 #: column is ignored).
 _ADDED_COLUMNS = (
     "ALTER TABLE profiles ADD COLUMN backends TEXT NOT NULL DEFAULT '{}'",
+    # 4.0 (migration 010_profiles reports it; added here too so no reader ever meets a
+    # profiles table without it, exactly like ``backends``).
+    "ALTER TABLE profiles ADD COLUMN household_bots TEXT DEFAULT '\"all\"'",
+    # 4.0 (migration 011_scale): the profile's own "archive chats older than N months"; NULL = off.
+    "ALTER TABLE profiles ADD COLUMN archive_after_months INTEGER",
 )
 
 #: Tables this module owns, in drop-safe (children first) order.
-TABLES = ("sessions", "devices", "usage_daily", "activity", "profiles", "account_rev", "schema_migrations")
+TABLES = ("oidc_links", "sessions", "devices", "usage_daily", "activity", "profiles", "account_rev", "schema_migrations")
 
 _lock = threading.RLock()
 _ready: set[str] = set()
@@ -151,6 +196,46 @@ def new_id() -> str:
 # --------------------------------------------------------------------------- #
 
 
+#: The real install's data directory, and the chats.db the data directory resolved to when
+#: this module was imported (before any test moved it). Under pytest nothing may open either:
+#: see :func:`refuse_live_db_under_pytest`.
+LIVE_DATA_DIR = Path.home() / ".local" / "share" / "local-chat"
+IMPORT_DB_PATH = Path(config.DATA_DIR) / "chats.db"
+#: The import-time path was chosen explicitly (``DISPATCH_DATA_DIR`` / ``LOCAL_CHAT_DATA_DIR``
+#: exported, e.g. a scratch directory as a backstop): then it is not the install's default and
+#: is allowed - only the real data directory stays refused.
+IMPORT_DB_EXPLICIT = bool(os.environ.get("DISPATCH_DATA_DIR") or os.environ.get("LOCAL_CHAT_DATA_DIR"))
+
+
+def _resolved(p: Path | str) -> Path:
+    try:
+        return Path(p).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return Path(p).expanduser().absolute()
+
+
+def is_live_db_path(path: Path | str) -> bool:
+    """Is ``path`` inside the real install's data directory, or the import-time chats.db?"""
+    p = _resolved(path)
+    for root in (LIVE_DATA_DIR,):
+        r = _resolved(root)
+        if p == r or r in p.parents:
+            return True
+    return not IMPORT_DB_EXPLICIT and p == _resolved(IMPORT_DB_PATH)
+
+
+def refuse_live_db_under_pytest(path: Path | str) -> None:
+    """Fail closed: a test run never opens the real install's database. (2026-10-23 a test that
+    entered the app's lifespan without its own Database ran schema statements on the live
+    chats.db.) Outside pytest this does nothing."""
+    import sys
+    if "pytest" not in sys.modules or os.environ.get("DISPATCH_ALLOW_LIVE_DB_IN_TESTS") == "1":
+        return
+    if is_live_db_path(path):
+        raise RuntimeError(f"refusing to open {path} under pytest: that is the real install's "
+                           "data. Point config.DATA_DIR (and the Database) at a scratch directory.")
+
+
 def db_path() -> Path:
     return Path(config.DATA_DIR) / "chats.db"
 
@@ -158,6 +243,7 @@ def db_path() -> Path:
 @contextlib.contextmanager
 def connect(path: Path | None = None) -> Iterator[sqlite3.Connection]:
     path = path or db_path()
+    refuse_live_db_under_pytest(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
     con.row_factory = sqlite3.Row
@@ -182,23 +268,42 @@ def connect(path: Path | None = None) -> Iterator[sqlite3.Connection]:
 
 @dataclass
 class Profile:
+    """One profile. ``role`` is a :class:`Role` (``admin/user/basic``) and ``protected`` marks
+    the first Admin; the stored column words never leave this module (a 3.x word passed in
+    - ``Profile(role="owner")`` in an old test - is normalised by ``__post_init__``)."""
+
     id: str
     name: str
-    role: str
+    role: Role
     pin_hash: str | None = None
     password_hash: str | None = None
     avatar: str = ""
-    budgets: dict = field(default_factory=dict)
+    budgets: dict = field(default_factory=dict)   # 3.x column, read but never used or shown
     grants: list[str] = field(default_factory=list)
     denies: list[str] = field(default_factory=list)
     session_timeout: int | None = None
     created: str = ""
     disabled: bool = False
     epoch: int = 0
-    # 4.0: which AI backends this profile may use - {"allowed": [...], "default": ...,
-    # "models": {...}}. {} = inherit the install's (today's behaviour). Stored and read
-    # only for now: nothing consults it yet, and it is not in public().
+    # 4.0: which household connections this profile's own bots may use - {"allowed": [...]};
+    # {} = every household connection (backends_policy). Shown in public() for the People
+    # editor; never carries a key.
     backends: dict = field(default_factory=dict)
+    #: 4.0: the household bots this profile may use - ``"all"`` or a list of bot ids
+    #: (``characters.may_use``). A Basic profile's list is what an Admin picked for it.
+    household_bots: str | list[str] = "all"
+    #: 4.0 (011_scale): the profile's own "archive chats older than N months" (1..120); None =
+    #: off. Set by the profile itself (maintenance_api); the maintenance task reads it.
+    archive_after_months: int | None = None
+    #: 4.0: the protected first Admin (stored role ``owner``): cannot be demoted, disabled or
+    #: deleted; only it changes its own credentials.
+    protected: bool = False
+
+    def __post_init__(self) -> None:
+        raw = self.role
+        if isinstance(raw, str) and not isinstance(raw, Role) and raw.strip().lower() == _STORED_PROTECTED:
+            self.protected = True
+        self.role = normalise_role(raw)
 
     @property
     def has_pin(self) -> bool:
@@ -211,11 +316,14 @@ class Profile:
     def public(self) -> dict:
         """Everything a client may see - never a hash."""
         return {
-            "id": self.id, "name": self.name, "role": self.role, "avatar": self.avatar,
-            "has_pin": self.has_pin, "has_password": self.has_password,
-            "budgets": dict(self.budgets), "grants": list(self.grants),
+            "id": self.id, "name": self.name, "role": self.role.value, "protected": self.protected,
+            "avatar": self.avatar, "has_pin": self.has_pin, "has_password": self.has_password,
+            "grants": list(self.grants),
             "denies": list(self.denies), "session_timeout": self.session_timeout,
             "created": self.created, "disabled": self.disabled,
+            "backends": dict(self.backends),
+            "household_bots": self.household_bots if self.household_bots == "all"
+            else list(self.household_bots),
         }
 
 
@@ -226,14 +334,54 @@ def _row_profile(r: sqlite3.Row) -> Profile:
         except ValueError:
             return default
         return v if isinstance(v, type(default)) else default
+    keys = r.keys()
+    hb = None
+    if "household_bots" in keys:
+        try:
+            hb = json.loads(r["household_bots"] or "")
+        except ValueError:
+            hb = None
+    stored = str(r["role"] or "")
     return Profile(
-        id=r["id"], name=r["name"], role=r["role"], pin_hash=r["pin_hash"],
+        id=r["id"], name=r["name"], role=ROLE_OF_STORED.get(stored, Role.BASIC),
+        protected=stored == _STORED_PROTECTED, pin_hash=r["pin_hash"],
         password_hash=r["password_hash"], avatar=r["avatar"] or "",
         budgets=_j(r["budgets"], {}), grants=[str(x) for x in _j(r["grants"], [])],
         denies=[str(x) for x in _j(r["denies"], [])],
         session_timeout=r["session_timeout"], created=r["created"],
         disabled=bool(r["disabled"]), epoch=int(r["epoch"] or 0),
-        backends=_j(r["backends"], {}) if "backends" in r.keys() else {})
+        backends=_j(r["backends"], {}) if "backends" in keys else {},
+        household_bots=_household_bots(hb),
+        archive_after_months=_archive_months(r["archive_after_months"])
+        if "archive_after_months" in keys else None)
+
+
+#: Bounds of ``archive_after_months`` (the same as the image-retention ``months``).
+ARCHIVE_MONTHS_MIN, ARCHIVE_MONTHS_MAX = 1, 120
+
+
+def _archive_months(value) -> int | None:
+    """The stored ``archive_after_months`` as the model reads it: an int in range, else None."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if ARCHIVE_MONTHS_MIN <= n <= ARCHIVE_MONTHS_MAX else None
+
+
+def _household_bots(value) -> str | list[str]:
+    """The stored ``household_bots`` JSON as the model reads it: ``"all"`` or a list of ids.
+    NULL, garbage or a missing column read as ``"all"`` (3.x behaviour: every bot the old
+    rules allowed)."""
+    if isinstance(value, list):
+        return [str(x) for x in value if isinstance(x, str) and x]
+    return "all"
+
+
+def stored_role(role: Role | str, *, protected: bool = False) -> str:
+    """The ``profiles.role`` word for a Role (the protected Admin is ``owner``). Internal to
+    this module and the migration's raw writes."""
+    return _STORED_PROTECTED if protected else STORED_OF_ROLE[normalise_role(role)]
 
 
 #: path -> {id: Profile}. Invalidated by every write in this process.
@@ -310,12 +458,18 @@ def get_by_name(name: str) -> Profile | None:
     return next((p for p in _all().values() if p.name.casefold() == want), None) if want else None
 
 
+def get_protected_admin() -> Profile | None:
+    """THE protected first Admin (stored ``owner``), or None while an install has none."""
+    return next((p for p in _all().values() if p.protected), None)
+
+
 def get_owner() -> Profile | None:
-    return next((p for p in _all().values() if p.role == "owner"), None)
+    """3.x name of :func:`get_protected_admin` (kept: dozens of callers and the migration)."""
+    return get_protected_admin()
 
 
 def has_owner() -> bool:
-    return get_owner() is not None
+    return get_protected_admin() is not None
 
 
 def _clean_name(name: str) -> str:
@@ -325,21 +479,33 @@ def _clean_name(name: str) -> str:
     return n
 
 
-def _check_role(role: str) -> str:
-    if role not in ROLES:
-        raise AccountError("profile_role_invalid", f"Unknown role {role!r}.")
-    return role
+def _check_role(role: Role | str) -> tuple[Role, bool]:
+    """(Role, protected) from a Role, a 4.0 word or a 3.x word; the 3.x ``owner`` means the
+    protected Admin (old callers and tests still say ``create_profile(name, "owner")``)."""
+    is_owner_word = isinstance(role, str) and not isinstance(role, Role) \
+        and role.strip().lower() == _STORED_PROTECTED
+    try:
+        return normalise_role(role), is_owner_word
+    except ValueError:
+        raise AccountError("profile_role_invalid", f"Unknown role {role!r}.") from None
 
 
-def create_profile(name: str, role: str, *, pin_hash: str | None = None,
+def create_profile(name: str, role: Role | str, *, protected: bool = False,
+                   pin_hash: str | None = None,
                    password_hash: str | None = None, avatar: str = "",
-                   budgets: dict | None = None, grants: list[str] | None = None,
+                   grants: list[str] | None = None,
                    denies: list[str] | None = None,
                    session_timeout: int | None = None,
+                   household_bots: str | list[str] | None = None,
                    profile_id: str | None = None) -> Profile:
+    """Create a profile. ``protected=True`` makes it THE protected first Admin (role must be
+    Admin; at most one per install)."""
     name = _clean_name(name)
-    _check_role(role)
-    if role == "owner" and has_owner():
+    r, owner_word = _check_role(role)
+    protected = bool(protected or owner_word)
+    if protected and r is not Role.ADMIN:
+        raise AccountError("profile_role_invalid", "Only an Admin can be the protected Admin.")
+    if protected and has_owner():
         raise AccountError("owner_exists", "This install already has an owner.", 409)
     if get_by_name(name) is not None:
         raise AccountError("profile_name_taken", f"A profile named {name!r} already exists.", 409)
@@ -348,14 +514,16 @@ def create_profile(name: str, role: str, *, pin_hash: str | None = None,
         try:
             con.execute(
                 "INSERT INTO profiles (id,name,role,pin_hash,password_hash,avatar,budgets,"
-                "grants,denies,session_timeout,created) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (pid, name, role, pin_hash, password_hash, avatar or "",
-                 json.dumps(budgets or {}), json.dumps(grants or []),
-                 json.dumps(denies or []), session_timeout, now_iso()))
+                "grants,denies,session_timeout,created,household_bots) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (pid, name, stored_role(r, protected=protected), pin_hash, password_hash,
+                 avatar or "", "{}", json.dumps(grants or []),
+                 json.dumps(denies or []), session_timeout, now_iso(),
+                 json.dumps(_household_value(household_bots))))
         except sqlite3.IntegrityError as e:
-            raise AccountError("profile_conflict", "That profile could not be created "
-                               "(duplicate name or second owner).", 409) from e
-        if role == "owner":
+            raise AccountError("profile_conflict", "That profile couldn't be created: "
+                               "another profile already has that name.", 409) from e
+        if protected:
             _adopt_unowned(con, pid)
         _bump_rev(con)
         invalidate()
@@ -381,8 +549,45 @@ def _adopt_unowned(con: sqlite3.Connection, owner_id: str) -> None:
                         "OR owner_profile_id NOT IN (SELECT id FROM profiles)", (owner_id,))
 
 
-_UPDATABLE = {"name", "role", "pin_hash", "password_hash", "avatar", "budgets", "grants",
-              "denies", "session_timeout", "disabled", "backends"}
+_UPDATABLE = {"name", "role", "pin_hash", "password_hash", "avatar", "grants",
+              "denies", "session_timeout", "disabled", "backends", "household_bots",
+              "archive_after_months"}
+
+
+def _household_value(value) -> str | list[str]:
+    """``household_bots`` as stored (JSON): ``"all"`` or a de-duplicated list of ids."""
+    if value is None or value == "all":
+        return "all"
+    if not isinstance(value, (list, tuple)) or not all(isinstance(x, str) for x in value):
+        raise AccountError("profile_field_invalid", 'household_bots must be "all" or a list of bot ids.')
+    return list(dict.fromkeys(x.strip() for x in value if x.strip()))
+
+
+DEFAULT_PROFILE_NO_CREDENTIAL = ("The shared default profile cannot have a PIN or password. "
+                                 "Pick another default profile in Settings > People first.")
+
+
+def _refuse_credential_on_default(cur: Profile, fields: dict) -> None:
+    """4.3 Fable (the owner's decision): the shared default profile every unsigned device and every lock lands
+    on never gets a PIN or password. THE guard for every writer of ``pin_hash`` /
+    ``password_hash`` (people routes, the profile's own routes, recovery, the wizard, the CLI):
+    setting one on the current default profile is a 409 ``default_profile_no_credential``.
+    Clearing (``None``) is always allowed. The reverse - choosing a profile with a credential
+    as the default - is ``auth.check_lock_target``'s 422. The protected Admin is never the
+    default profile, so it skips the security.yaml read (its PIN mirror runs under auth's lock)."""
+    if cur.protected or not any(fields.get(k) for k in ("pin_hash", "password_hash")):
+        return
+    # auth imports this module: read security.yaml lazily
+    from . import auth
+    cfg = auth.load()
+    if cfg.lock_target == "default_profile" and cfg.default_profile == cur.id:
+        raise AccountError("default_profile_no_credential", DEFAULT_PROFILE_NO_CREDENTIAL, 409)
+
+
+def refuse_credential_on_default(profile: Profile) -> None:
+    """Raise the 409 when ``profile`` is the current default profile: what a route asks before
+    it validates a new PIN or password, so the answer is the plain reason, not a format error."""
+    _refuse_credential_on_default(profile, {"pin_hash": "?"})
 
 
 def update_profile(profile_id: str, **fields) -> Profile:
@@ -391,6 +596,7 @@ def update_profile(profile_id: str, **fields) -> Profile:
     cur = get_profile(profile_id)
     if cur is None:
         raise AccountError("profile_not_found", "No such profile.", 404)
+    _refuse_credential_on_default(cur, fields)
     sets: list[str] = []
     args: list = []
     bump = False
@@ -403,20 +609,29 @@ def update_profile(profile_id: str, **fields) -> Profile:
             if other is not None and other.id != profile_id:
                 raise AccountError("profile_name_taken", f"A profile named {v!r} already exists.", 409)
         if k == "role":
-            _check_role(v)
-            if v == "owner" and cur.role != "owner":
+            r, owner_word = _check_role(v)
+            if owner_word and not cur.protected:
                 raise AccountError("owner_exists", "Ownership is not transferred through a role change.", 409)
-            if cur.role == "owner" and v != "owner":
-                raise AccountError("owner_immutable", "The owner's role cannot be changed.", 409)
-            bump = bump or v != cur.role
-        if k in ("budgets", "backends"):
-            if k == "backends" and not isinstance(v or {}, dict):
+            if cur.protected and r is not Role.ADMIN:
+                raise AccountError("owner_immutable", "The Owner's profile type can't be changed.", 409)
+            bump = bump or r is not cur.role
+            v = stored_role(r, protected=cur.protected)
+        if k == "household_bots":
+            v = json.dumps(_household_value(v))
+        elif k == "archive_after_months":
+            if v is not None and (isinstance(v, bool) or not isinstance(v, int)
+                                  or not ARCHIVE_MONTHS_MIN <= v <= ARCHIVE_MONTHS_MAX):
+                raise AccountError("profile_field_invalid",
+                                   f"archive_after_months must be null or "
+                                   f"{ARCHIVE_MONTHS_MIN}..{ARCHIVE_MONTHS_MAX}.")
+        elif k == "backends":
+            if not isinstance(v or {}, dict):
                 raise AccountError("profile_field_invalid", "backends must be an object.")
             v = json.dumps(v or {})
         elif k in ("grants", "denies"):
             v = json.dumps(list(v or []))
         elif k == "disabled":
-            if cur.role == "owner" and v:
+            if cur.protected and v:
                 raise AccountError("owner_immutable", "The owner cannot be disabled.", 409)
             v = 1 if v else 0
             bump = True
@@ -445,9 +660,12 @@ def delete_profile(profile_id: str) -> None:
     cur = get_profile(profile_id)
     if cur is None:
         raise AccountError("profile_not_found", "No such profile.", 404)
-    if cur.role == "owner":
+    if cur.protected:
         raise AccountError("owner_immutable", "The owner cannot be deleted.", 409)
     with _lock, connect() as con:
+        # 4.3: the FK cascades too; stated here so a database opened without foreign_keys
+        # (an old tool, a hand repair) still never keeps a sign-in link to a dead profile.
+        con.execute("DELETE FROM oidc_links WHERE profile_id = ?", (profile_id,))
         con.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
         _bump_rev(con)
         invalidate()
@@ -480,32 +698,6 @@ def _row_device(r: sqlite3.Row) -> Device:
                   user_agent=r["user_agent"] or "")
 
 
-#: path -> {device id: default profile id}. A bound device is looked up on every
-#: sessionless request, so it must not cost a query.
-_bound: dict[str, dict[str, str | None]] = {}
-
-
-def _bound_map() -> dict[str, str | None]:
-    key = str(db_path())
-    with _lock:
-        hit = _bound.get(key)
-        if hit is None:
-            with connect() as con:
-                rows = con.execute("SELECT id, default_profile_id FROM devices "
-                                   "WHERE default_profile_id IS NOT NULL").fetchall()
-            hit = {r["id"]: r["default_profile_id"] for r in rows}
-            _bound[key] = hit
-        return hit
-
-
-def default_profile_for_device(device_id: str | None) -> Profile | None:
-    if not device_id:
-        return None
-    pid = _bound_map().get(device_id)
-    p = get_profile(pid) if pid else None
-    return p if p is not None and not p.disabled else None
-
-
 def ensure_device(device_id: str, user_agent: str = "", label: str = "") -> Device:
     ua = (user_agent or "")[:160]
     with _lock, connect() as con:
@@ -529,32 +721,9 @@ def list_devices() -> list[Device]:
     return [_row_device(r) for r in rows]
 
 
-def bind_device(device_id: str, profile_id: str | None, label: str | None = None) -> Device:
-    """Bind a device to a default profile (``None`` unbinds). Owner/Admin profiles
-    cannot be a device default: a bound device opens WITHOUT a credential."""
-    if profile_id is not None:
-        p = get_profile(profile_id)
-        if p is None:
-            raise AccountError("profile_not_found", "No such profile.", 404)
-        if p.role in ("owner", "admin"):
-            raise AccountError(
-                "device_bind_role", "A device can only open as a Member or Restricted profile; "
-                "Admins and the Owner always sign in with their credential.", 409)
-    with _lock, connect() as con:
-        if label is not None:
-            con.execute("UPDATE devices SET label = ? WHERE id = ?", (label[:60], device_id))
-        con.execute("UPDATE devices SET default_profile_id = ?, bound_at = ? WHERE id = ?",
-                    (profile_id, now_iso() if profile_id else None, device_id))
-        _bound.pop(str(db_path()), None)
-    d = get_device(device_id)
-    assert d is not None
-    return d
-
-
 def delete_device(device_id: str) -> None:
     with _lock, connect() as con:
         con.execute("DELETE FROM devices WHERE id = ?", (device_id,))
-        _bound.pop(str(db_path()), None)
 
 
 # --------------------------------------------------------------------------- #
@@ -605,7 +774,7 @@ def list_sessions(profile_id: str | None = None) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
-# Daily usage (budgets)
+# Daily usage counters (4.0: only the machine upload guard - people have no daily limits)
 # --------------------------------------------------------------------------- #
 
 
@@ -633,43 +802,14 @@ def usage_add(subject: str, kind: str, amount: int) -> int:
     return total
 
 
-def usage_charge(subject: str, kind: str, limit: int, amount: int = 1) -> bool:
-    """Atomically charge ``amount`` unless that would exceed ``limit``. False = spent."""
-    if amount > limit:
-        return False
-    with _lock, connect() as con:
-        con.execute("BEGIN IMMEDIATE")
-        try:
-            row = con.execute("SELECT amount FROM usage_daily WHERE subject=? AND day=? AND kind=?",
-                              (subject, today(), kind)).fetchone()
-            used = int(row["amount"]) if row else 0
-            if used + amount > limit:
-                con.execute("COMMIT")
-                return False
-            con.execute(
-                "INSERT INTO usage_daily (subject,day,kind,amount) VALUES (?,?,?,?) "
-                "ON CONFLICT(subject,day,kind) DO UPDATE SET amount = amount + excluded.amount",
-                (subject, today(), kind, amount))
-            con.execute("COMMIT")
-            return True
-        except Exception:
-            con.execute("ROLLBACK")
-            raise
-
-
-def usage_today(subject: str) -> dict[str, int]:
-    with connect() as con:
-        rows = con.execute("SELECT kind, amount FROM usage_daily WHERE subject=? AND day=?",
-                           (subject, today())).fetchall()
-    return {r["kind"]: int(r["amount"]) for r in rows}
-
-
 def prune(keep_days: int = 35) -> None:
-    cutoff = (datetime.now() - timedelta(days=keep_days)).strftime("%Y-%m-%d")
-    cutoff_ts = (datetime.now(UTC) - timedelta(days=90)).isoformat(timespec="seconds")
-    with _lock, connect() as con:
-        con.execute("DELETE FROM usage_daily WHERE day < ?", (cutoff,))
-        con.execute("DELETE FROM activity WHERE ts < ?", (cutoff_ts,))
+    """Kept for its caller (``auth.purge_expired``); deletes nothing any more.
+
+    It used to delete ``usage_daily`` older than 35 days and EVERY ``activity`` row older than
+    90 days - audit rows included, against the 400-day audit rule. Since 4.0 the daily
+    maintenance task owns those deletes (``maintenance.py``: activity 90 days, audit 400,
+    usage_daily 45, each an Admin setting), so two writers can no longer disagree."""
+    del keep_days
 
 
 # --------------------------------------------------------------------------- #
@@ -724,7 +864,7 @@ def recent_activity(profile_id: str | None = None, *, category: str = "activity"
 def delete_owner_row() -> None:
     """Remove the owner row - only for "remove the lock" on a PIN-only 2.x install."""
     with _lock, connect() as con:
-        con.execute("DELETE FROM profiles WHERE role = 'owner'")
+        con.execute(f"DELETE FROM profiles WHERE {PROTECTED_ROW_SQL}")
         _bump_rev(con)
         invalidate()
 
@@ -740,45 +880,81 @@ def update_profile_hash_silently(profile_id: str, column: str, value: str) -> No
         invalidate()
 
 
-class UsageMap:
-    """A dict-shaped view of today's ``usage_daily`` rows for one kind.
+# --------------------------------------------------------------------------- #
+# OIDC links (4.3, issue #24; the protocol lives in app/oidc.py)
+# --------------------------------------------------------------------------- #
 
-    The 2.x per-IP counters were plain dicts (``main._decoy_upload_used``,
-    ``_decoy_action_used``) that tests and tools read and clear. They are now rows
-    in SQLite - so they survive a restart and can be keyed by profile - and this
-    adapter keeps the dict spelling working: ``m.get(subject, 0)``, ``m[subject] = n``,
-    ``m.clear()``. With ``tuple_keys`` the key is ``(subject, action)`` and the kind is
-    ``<prefix><action>``."""
 
-    def __init__(self, kind: str, tuple_keys: bool = False) -> None:
-        self.kind = kind
-        self.tuple_keys = tuple_keys
+@dataclass(frozen=True)
+class OidcLink:
+    profile_id: str
+    issuer: str
+    subject: str
+    email_at_link: str = ""
+    created: str = ""
 
-    def _split(self, key) -> tuple[str, str]:
-        if self.tuple_keys:
-            subject, action = key
-            return str(subject), f"{self.kind}{action}"
-        return str(key), self.kind
+    def to_dict(self) -> dict:
+        return {"profile_id": self.profile_id, "issuer": self.issuer, "subject": self.subject,
+                "email_at_link": self.email_at_link, "created": self.created}
 
-    def get(self, key, default: int = 0) -> int:
-        subject, kind = self._split(key)
-        v = usage_get(subject, kind)
-        return v if v else default
 
-    def __getitem__(self, key) -> int:
-        return self.get(key, 0)
+def _row_link(r: sqlite3.Row) -> OidcLink:
+    return OidcLink(r["profile_id"], r["issuer"], r["subject"], r["email_at_link"] or "", r["created"])
 
-    def __setitem__(self, key, value: int) -> None:
-        subject, kind = self._split(key)
-        with _lock, connect() as con:
-            con.execute("INSERT OR REPLACE INTO usage_daily (subject,day,kind,amount) VALUES (?,?,?,?)",
-                        (subject, today(), kind, max(0, int(value))))
 
-    def __contains__(self, key) -> bool:
-        subject, kind = self._split(key)
-        return usage_get(subject, kind) > 0
+def list_oidc_links(profile_id: str | None = None) -> list[OidcLink]:
+    with connect() as con:
+        if profile_id is None:
+            rows = con.execute("SELECT * FROM oidc_links ORDER BY created, profile_id").fetchall()
+        else:
+            rows = con.execute("SELECT * FROM oidc_links WHERE profile_id = ? ORDER BY created",
+                               (profile_id,)).fetchall()
+    return [_row_link(r) for r in rows]
 
-    def clear(self) -> None:
-        pattern = self.kind + ("%" if self.tuple_keys else "")
-        with _lock, connect() as con:
-            con.execute("DELETE FROM usage_daily WHERE kind LIKE ? AND day = ?", (pattern, today()))
+
+def find_oidc_link(issuer: str, subject: str) -> OidcLink | None:
+    """The link for exactly this (issuer, subject) - both compared byte for byte."""
+    with connect() as con:
+        r = con.execute("SELECT * FROM oidc_links WHERE issuer = ? AND subject = ?",
+                        (issuer, subject)).fetchone()
+    return _row_link(r) if r else None
+
+
+def add_oidc_link(profile_id: str, issuer: str, subject: str, email: str = "") -> OidcLink:
+    """Link ``(issuer, subject)`` to ``profile_id``, replacing that profile's earlier link to
+    the same issuer. An outside account already linked to ANOTHER profile is refused (409)."""
+    if not issuer or not subject:
+        raise AccountError("oidc_failed", "Sign-in with the outside provider did not work.", 401)
+    if get_profile(profile_id) is None:
+        raise AccountError("profile_not_found", "No such profile.", 404)
+    with _lock, connect() as con:
+        other = con.execute("SELECT profile_id FROM oidc_links WHERE issuer = ? AND subject = ?",
+                            (issuer, subject)).fetchone()
+        if other is not None and other["profile_id"] != profile_id:
+            raise AccountError("oidc_link_conflict",
+                               "That outside account is already linked to another profile.", 409)
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            con.execute("DELETE FROM oidc_links WHERE profile_id = ? AND issuer = ?", (profile_id, issuer))
+            con.execute("INSERT INTO oidc_links (profile_id, issuer, subject, email_at_link, created) "
+                        "VALUES (?, ?, ?, ?, ?)", (profile_id, issuer, subject, (email or "")[:254], now_iso()))
+            con.execute("COMMIT")
+        except sqlite3.IntegrityError as e:
+            con.execute("ROLLBACK")
+            raise AccountError("oidc_link_conflict",
+                               "That outside account is already linked to another profile.", 409) from e
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+    out = find_oidc_link(issuer, subject)
+    assert out is not None
+    return out
+
+
+def delete_oidc_links(profile_id: str, issuer: str | None = None) -> int:
+    with _lock, connect() as con:
+        if issuer is None:
+            cur = con.execute("DELETE FROM oidc_links WHERE profile_id = ?", (profile_id,))
+        else:
+            cur = con.execute("DELETE FROM oidc_links WHERE profile_id = ? AND issuer = ?", (profile_id, issuer))
+        return cur.rowcount or 0

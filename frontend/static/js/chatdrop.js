@@ -4,8 +4,7 @@
 // two targets. "Insert into chat" is the paperclip's flow (main.js handleFiles:
 // the same caps, the upload, the composer preview; the person still presses
 // send). "Upload to File Server" is the File Server's own upload for a profile
-// that has it, or, on a Restricted device, the one-way "Send a file" drop that
-// device already has. A target the profile may not use is not drawn; with
+// that has it. A target the profile may not use is not drawn; with
 // neither there is no overlay at all. Dropping anywhere but on a target, or
 // Escape, cancels.
 //
@@ -13,8 +12,8 @@
 // overlay counts them (a depth counter) instead of trusting one dragleave.
 // Touch screens never drag files, so phones see nothing new.
 
-import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
-import { t } from './i18n.js?v=4';
+import { el, railIcon, RAIL_ICONS } from './util.js?v=23';
+import { t } from './i18n.js?v=5';
 
 /** Is this a drag of files (not text, a link or an element of the page)? */
 export function dragHasFiles(e) {

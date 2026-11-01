@@ -96,6 +96,7 @@ services:
         VERSION: ${VERSION:-dev}
         VOICE: ${VOICE:-0}
         VOICE_REF: ${VOICE_REF:-refs/heads/main}
+        AGENTS_CLAUDE: ${AGENTS_CLAUDE:-0}   # 1 = the Claude Agent backend (bundles the `claude` CLI)
     user: "1000:1000"
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -155,15 +156,24 @@ services:
       LOCAL_CHAT_DATA_DIR: /data
       LOCAL_CHAT_HOST: 0.0.0.0
       LOCAL_CHAT_PORT: "8765"
+      # HOME on the volume (voice rig token, the Claude Agent SDK's ~/.claude), so
+      # the read-only root below holds; the entrypoint creates it if missing.
+      HOME: /data/home
+      # The host port, for the setup banner (the container always listens on 8765).
+      DISPATCH_PUBLIC_PORT: ${DISPATCH_PORT:-8765}
+      # No reverse proxy in this file, so DISPATCH_TRUSTED_PROXIES stays unset:
+      # forwarded headers are believed from nobody. Put a proxy in front? Give it a
+      # fixed address and list it there (docs/deploy-docker.md, Reverse proxy).
       DISPATCH_STUDIOFORGE: "1"
       DISPATCH_STUDIOFORGE_URL: http://studioforge:8080
       DISPATCH_STUDIOFORGE_REMOTE_URL: http://localhost:${STUDIOFORGE_PANEL_PORT:-8080}
     user: "1000:1000"
     # Nothing stateful lives in the image: chats.db (+ WAL), avatars, uploads,
-    # config.yaml and backups/ are all on the dispatch-data volume. A read-only
-    # root makes any leak fail loudly. TMPDIR is /data/tmp (the volume).
+    # config.yaml, backups/ and HOME are all on the dispatch-data volume. A
+    # read-only root makes any leak fail loudly. TMPDIR is /data/tmp (the volume:
+    # uploads spool there), so /tmp stays a small tmpfs.
     read_only: true
-    tmpfs: ["/tmp"]
+    tmpfs: ["/tmp:size=64m"]
     volumes:
       - dispatch-data:/data
     networks: [stack]
@@ -241,9 +251,10 @@ services:
       - infoforge-state:/state
     networks: [stack]
 
+# No fixed `name:`: compose scopes the network to the project (`dispatch-stack_stack`
+# here), so two checkouts or a renamed project never fight over one global network.
 networks:
-  stack:
-    name: dispatch-stack
+  stack: {}
 
 volumes:
   dispatch-data:

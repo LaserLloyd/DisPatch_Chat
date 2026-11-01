@@ -39,6 +39,85 @@ With that said, here is how to do it properly on Windows.
 
 ---
 
+## Easiest: the Windows installer (no Docker, no WSL)
+
+New in 4.3. A normal per-user installer: no administrator rights, no Docker Desktop, no
+WSL. It is the quickest way to try DisPatch on one Windows PC.
+
+1. Get `DisPatch-Setup-<version>.exe` (built by the project's
+   [Windows installer workflow](../.github/workflows/windows-installer.yml)) and run it.
+   Windows SmartScreen may warn about an unsigned app: **More info → Run anyway**.
+2. Tick **Start DisPatch when I sign in to Windows** if you want it running all the time.
+3. The first install downloads Python and the app's libraries (roughly 200 MB that unpack to about 600 MB; a few
+   minutes), so it needs an internet connection. Later starts are offline.
+4. Start menu → **DisPatch** starts the server if it is not running and opens
+   <http://127.0.0.1:8765> in your browser. **Set up the Owner profile first** (the app
+   walks you through it).
+
+| What | Where |
+|---|---|
+| Program (app, `uv.exe`, its own Python) | `%LOCALAPPDATA%\Programs\DisPatch` |
+| Your chats, settings and uploads | `%LOCALAPPDATA%\DisPatch\data` |
+| Logs (`launcher.log`, `setup.*.log`, `server.*.log`) | `%LOCALAPPDATA%\DisPatch\logs` (Start menu → **DisPatch logs**) |
+| Listen address and port | `%LOCALAPPDATA%\DisPatch\launcher.json` |
+
+The server runs as you, through a scheduled task called `\DisPatch\DisPatch` (or, on a PC
+whose policy blocks per-user tasks, a shortcut in your Startup folder). Start menu →
+**Stop DisPatch** stops it. Like every other path on this page, "start at sign-in" means
+exactly that: after a reboot it runs once you sign in, not before.
+
+### Use it from your phone (opt in)
+
+Out of the box DisPatch listens on **127.0.0.1 only**: nothing else on your network can
+reach it. To open it to your home network:
+
+1. Make sure every profile that can sign in has a PIN or password, and in
+   Settings → System → Network set **Who can reach DisPatch** to *My home network* (the
+   setup wizard then stops warning that the two disagree).
+2. Edit `%LOCALAPPDATA%\DisPatch\launcher.json`:
+
+   ```json
+   {
+     "host": "0.0.0.0",
+     "port": 8765
+   }
+   ```
+
+   Only an IP address is accepted. Anything the launcher cannot read falls back to
+   `127.0.0.1`, so a typo never opens the port.
+3. Add the firewall rule from [Path A step 4](#4-make-it-reachable-from-your-phone)
+   (that one step needs an Administrator PowerShell; keep `-Profile Private`).
+4. Start menu → **Stop DisPatch**, then **DisPatch** again.
+
+To close it again, put `"127.0.0.1"` back and restart DisPatch the same way.
+
+### Upgrade and uninstall
+
+Run a newer installer over the old one: it stops DisPatch, replaces the program files,
+keeps your data and `launcher.json`, and brings the libraries up to date.
+
+Settings → Apps → DisPatch → Uninstall (or Start menu → **Uninstall DisPatch**) stops the
+server, removes the scheduled task and the program folder, then asks **"Also delete your
+DisPatch data?"**. The answer defaults to **No**: your data stays in
+`%LOCALAPPDATA%\DisPatch` and a later install picks it up again. A silent uninstall
+(`unins000.exe /VERYSILENT`) keeps it too, unless you add `/DELETEDATA=1`.
+
+### If it does not start
+
+- Read `%LOCALAPPDATA%\DisPatch\logs\server.err.log` (the newest run) and `launcher.log`.
+- "Setting up Python failed" at install: the first install needs the internet. Opening
+  DisPatch from the Start menu runs that step again (`setup.err.log` says what went wrong).
+- Something else already uses port 8765: change `"port"` in `launcher.json`.
+- PowerShell scripts blocked by your organisation's policy: the shortcuts already pass
+  `-ExecutionPolicy Bypass`; a Group Policy that forbids that wins, and then this installer
+  cannot run DisPatch on that PC. Use Docker Desktop below.
+
+Agent bots need their agent program on this PC; the installer does not bring one.
+Everything in [Agents in a container](deploy-docker.md#agents-in-a-container) about which
+features work without one applies here too.
+
+---
+
 ## Which path?
 
 | | Docker Desktop | Docker Engine inside WSL2 |
@@ -315,14 +394,21 @@ Docker Desktop (path A): run the commands inside the container, from PowerShell:
 ```powershell
 docker compose exec app python -m app users list
 docker compose exec app python -m app users passwd Olive            # prompts; nothing is echoed
-docker compose exec app python -m app owner reset --yes             # prints a SETUP TOKEN
+docker compose exec app python -m app admin reset --yes             # prints a SETUP TOKEN
 docker compose exec app sh -c ': > /data/RESET_LOGIN'               # no command line? this + restart does the same
 docker compose restart app
 ```
 
 Do not reach for the volume through `\\wsl$` or a Windows path; `exec` / `run --rm` are the supported way. With the native
 uv install the data folder is `%USERPROFILE%\.local\share\local-chat`, and the commands run from `DisPatch_Chat\backend` as
-`uv run python -m app ...`. Everything else, including the file and `DISPATCH_RESET_OWNER` forms: [accounts.md](accounts.md).
+`uv run python -m app ...`. With the Windows installer, stop DisPatch first (Start menu → **Stop DisPatch**), then in
+PowerShell:
+
+```powershell
+cd "$env:LOCALAPPDATA\Programs\DisPatch\backend"
+$env:DISPATCH_DATA_DIR = "$env:LOCALAPPDATA\DisPatch\data"
+.\.venv\Scripts\python.exe -m app users list
+``` Everything else, including the file and `DISPATCH_RESET_OWNER` forms: [accounts.md](accounts.md).
 
 ## Making it survive reboots (as far as Windows allows)
 

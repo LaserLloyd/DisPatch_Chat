@@ -43,10 +43,9 @@ endpoint. For the pool the FILESYSTEM is the source of truth: whatever image
 files sit in a mood's folder are that reaction's stock, so there is no manifest
 to drift out of sync with the disk.
 
-Safe Mode: every reaction carries a ``safe`` flag, defaulting to **False**.
-Only explicitly-flagged reactions are visible to (or firable from) a locked
-device, mirroring how safe bots' avatars work. Fail closed: an unknown or
-unflagged reaction is simply not there as far as Safe Mode is concerned.
+Every signed-in profile sees the whole pack (4.0: reactions are for every role). A
+reaction's and a pool's ``safe`` flag are legacy 3.x data: still read and written so
+an older registry round-trips, never used to decide who sees what.
 """
 
 from __future__ import annotations
@@ -356,7 +355,7 @@ class Reaction:
     file: str                                    # "<root>/<filename>"
     aliases: list[str] = field(default_factory=list)
     category: str = "general"
-    safe: bool = False                           # visible/firable in Safe Mode
+    safe: bool = False                           # legacy 3.x flag: kept, inert
     duration_ms: int | None = None               # None = pack default
     source: str = "upload"                       # builtin | upload | generated
     prompt: str = ""                             # set for generated images
@@ -364,6 +363,7 @@ class Reaction:
 
     def to_dict(self, *, settings: Settings | None = None) -> dict:
         d = asdict(self)
+        d.pop("safe", None)                      # legacy 3.x flag: stored, never sent
         d["image_url"] = image_url(self.id, self.file.rsplit("/", 1)[-1])
         if settings is not None:
             d["effective_duration_ms"] = settings.clamp_duration(self.duration_ms)
@@ -610,9 +610,8 @@ def load() -> Pack:
 
 
 def invalidate() -> None:
-    global _cache, _cache_mtime, _safe_ids_cache
+    global _cache, _cache_mtime
     _cache = _cache_mtime = None
-    _safe_ids_cache = None
 
 
 def save(pack: Pack) -> Pack:
@@ -781,109 +780,6 @@ def get(key: str, *, bot_id: str | None = None) -> Reaction | None:
     return None
 
 
-# safe_ids() walks EVERY mood folder plus the shared spent/ store, which only
-# grows — fired images are kept forever. It sits on the request path of the
-# Safe-Mode redactor, i.e. on the event loop, so the walk is memoised against
-# the directory mtimes: adding or removing a file changes its folder's mtime,
-# so the cache is exact rather than time-based.
-_safe_ids_cache: tuple[tuple, set[str]] | None = None
-
-
-def _mtime_ns(p: Path) -> int | None:
-    try:
-        return p.stat().st_mtime_ns
-    except OSError:
-        return None
-
-
-def _safe_ids_key() -> tuple:
-    """One stat per directory (never per file) — what safe_ids() depends on."""
-    parts: list[tuple] = [("pack", _mtime_ns(config.REACTIONS_PATH))]
-    for base in (*_all_moods_roots(), config.REACTIONS_SPENT_DIR):
-        parts.append((str(base), _mtime_ns(base)))
-        for _mood, d in _mood_dirs(base):
-            parts.append((str(d), _mtime_ns(d)))
-    for base in _all_moods_roots():
-        pp = _pool_path(_bot_id_from_moods_dir(base))
-        parts.append((str(pp), _mtime_ns(pp)))    # the pool's `safe` flag
-    return tuple(parts)
-
-
-def safe_ids() -> set[str]:
-    """Ids a Safe-Mode client may see the image of / fire.
-
-    Includes spent pool images: a fired image is broadcast the instant it moves
-    to spent/, so every client's fetch — a locked device's included — lands
-    after the move; and the trace row can re-open it any time later.
-
-    Pools are per bot, so this is the union over every pool ON DISK — not just
-    the rostered ones. A bot whose reactions were switched off (or that was
-    deleted outright) still has traces in the chat, and those must keep
-    resolving for the devices allowed to see them.
-    """
-    global _safe_ids_cache
-    key = _safe_ids_key()
-    if _safe_ids_cache is not None and _safe_ids_cache[0] == key:
-        return set(_safe_ids_cache[1])
-
-    ids = {r.id for r in load().reactions if r.safe}
-
-    def _add(mood: str, p: Path) -> None:
-        ids.add(pool_file_id_for(mood, p))
-        # Legacy chat traces name the blob's stem ("pool-<hex>") — keep those
-        # fetchable too. See _resolve_pool_file.
-        ids.add(f"{POOL_ID_PREFIX}{p.stem}")
-
-    for moods_base in _all_moods_roots():
-        try:
-            st = pool_load(_bot_id_from_moods_dir(moods_base))
-        except Exception:                  # a junk pool file is not a leak
-            continue
-        if not st.config.safe:
-            continue
-        for mood, d in _mood_dirs(moods_base):
-            for p in _mood_files(d):
-                _add(mood, p)
-
-    # spent/ is SHARED and a spent blob no longer records which bot fired it —
-    # it moved out of the only directory that said so. "Some pool is safe" was
-    # therefore enough to publish EVERY spent blob, so an unsafe bot's fired
-    # picture became fetchable by a locked device the moment any other bot's
-    # pool was marked safe. The conservative reading is per mood: a spent blob
-    # is Safe-Mode visible only when every pool that could have owned it — the
-    # pools carrying a folder of that mood — is itself safe.
-    for mood, d in _mood_dirs(config.REACTIONS_SPENT_DIR):
-        if not _spent_mood_safe(mood):
-            continue
-        for p in _mood_files(d):
-            _add(mood, p)
-    _safe_ids_cache = (key, set(ids))
-    return ids
-
-
-def _spent_mood_safe(mood: str) -> bool:
-    """May a locked device see a FIRED blob of this mood?
-
-    Only if every pool that could have produced it says so. The owners are the
-    pools with a folder of that mood; when none has one any more (the folder
-    was removed after its last picture was fired) the whole set of pools on
-    disk is the owner set — still "all of them agree", never "one of them
-    does". An install with no pool at all publishes nothing.
-    """
-    owners: list[bool] = []
-    others: list[bool] = []
-    for moods_base in _all_moods_roots():
-        try:
-            st = pool_load(_bot_id_from_moods_dir(moods_base))
-        except Exception:                  # a junk pool file is not a leak
-            return False
-        others.append(bool(st.config.safe))
-        if any(m == mood for m, _d in _mood_dirs(moods_base)):
-            owners.append(bool(st.config.safe))
-    flags = owners or others
-    return bool(flags) and all(flags)
-
-
 def reaction_bots() -> list[str]:
     """The rostered bots with reactions enabled, in roster order.
 
@@ -936,20 +832,31 @@ def _bot_id_from_moods_dir(moods_dir: Path) -> str:
     return default_bot_id()
 
 
-def list_for(*, decoy: bool, bot_id: str | None = None) -> list[dict]:
+def pool_owner(reaction: Reaction) -> str | None:
+    """The bot whose READY pool shelf holds ``reaction`` (``moods-<bot_id>/...``), else None
+    (pack cards, fired ``spent/`` images and pre-per-bot references carry no owner)."""
+    head = str(reaction.file or "").split("/", 1)[0]
+    if head.startswith(_MOODS_PREFIX) and BOT_ID_RE.match(head[len(_MOODS_PREFIX):]):
+        return head[len(_MOODS_PREFIX):]
+    return None
+
+
+def list_for(*, bot_id: str | None = None, allow_bot=None) -> list[dict]:
     """The pack plus the ready pool, as one list the picker can render.
 
     ``bot_id`` scopes the pool half to one bot; without it every
     reactions-enabled bot's pool is listed (the manager's view). The pack half
-    is shared and always the same.
+    is shared and always the same. ``allow_bot`` (a callable on a bot id) drops the pools of
+    bots the caller may not see (4.2: a pool belongs to its bot's owner).
     """
     pack = load()
-    rs = [r for r in pack.reactions if r.safe] if decoy else list(pack.reactions)
-    out = [r.to_dict(settings=pack.settings) for r in rs]
+    out = [r.to_dict(settings=pack.settings) for r in pack.reactions]
 
     for bid in ([resolve_bot_id(bot_id)] if bot_id else reaction_bots()):
+        if allow_bot is not None and not allow_bot(bid):
+            continue
         st = pool_load(bid)
-        if st.config.enabled and (st.config.safe or not decoy):
+        if st.config.enabled:
             for mood, p in _iter_ready(bid):
                 d = _file_reaction(mood, p, st.config,
                                    bot_id=bid).to_dict(settings=pack.settings)
@@ -1688,9 +1595,8 @@ def seed_starter_pack(force: bool = False) -> int:
                 log.warning("could not render starter reaction %s: %s", rid, e)
                 continue
         if dest.is_file():
-            # The starter cards are deliberately wholesome, so they ship
-            # safe=True — Safe-Mode family devices get the feature out of the
-            # box. Anything added later defaults to safe=False.
+            # safe=True is the 3.x flag the starter cards always carried (inert in 4.0;
+            # kept so a registry written by an older build reads back the same).
             entries.append(Reaction(
                 id=rid, name=display, file=f"builtin/{rid}.png",
                 aliases=_norm_aliases(aliases), category="starter", safe=True,
@@ -1771,7 +1677,7 @@ class PoolConfig:
     min_per_mood: int = 5            # a mood dipping below this refills right away
     refresh_hour: int = 4            # local hour of the nightly top-up
     max_per_cycle: int = 6           # generation is slow — cap one refill run
-    safe: bool = False               # Safe-Mode visibility for generated images
+    safe: bool = False               # legacy 3.x flag: kept, inert
     style: str = ""                  # image CLI style preset
     workflow: str = ""               # image CLI workflow override
     per_mood_overrides: dict = field(default_factory=dict)
@@ -1793,6 +1699,12 @@ class PoolConfig:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    def public(self) -> dict:
+        """The pool settings as the API sends them (the legacy ``safe`` flag is stored only)."""
+        d = asdict(self)
+        d.pop("safe", None)
+        return d
 
 
 def per_mood_for(cfg: PoolConfig, mood: str) -> int:
@@ -2029,15 +1941,6 @@ def bank_save(bank: dict, *, bot_id: str | None = None) -> dict:
     os.replace(tmp, path)
     _bank_cache.pop(bot_id, None)
     return bank_load(bot_id)
-
-
-def bank_invalidate(bot_id: str | None = None) -> None:
-    """Drop one bot's cached bank — or every bot's, with ``bot_id="*"``."""
-    global _bank_cache
-    if bot_id == "*":
-        _bank_cache.clear()
-        return
-    _bank_cache.pop(resolve_bot_id(bot_id), None)
 
 
 def bank_categories(bot_id: str | None = None) -> list[str]:
@@ -2508,13 +2411,7 @@ def pool_get(rid: str, *, bot_id: str | None = None, include_spent: bool = False
     if include_spent:
         hit = _resolve_pool_file(rid, config.REACTIONS_SPENT_DIR)
         if hit is not None:
-            # A spent blob has no owner on record, so its `safe` flag may NOT
-            # come from whichever pool happened to be queried — that let an
-            # unsafe bot's fired picture render safe simply because the caller
-            # named a safe pool. Same conservative rule as safe_ids().
-            cfg = PoolConfig(**st.config.to_dict())
-            cfg.safe = _spent_mood_safe(hit[0])
-            return _file_reaction(hit[0], hit[1], cfg, spent=True, bot_id=bot_id)
+            return _file_reaction(hit[0], hit[1], st.config, spent=True, bot_id=bot_id)
     return None
 
 
@@ -2605,10 +2502,89 @@ def pool_consume(rid: str, *, bot_id: str | None = None) -> bool:
     hit = _resolve_pool_file(rid, _moods_dir(bot_id))
     if hit is None:
         return False
-    if _retire(hit[1]) is None:
+    dst = _retire(hit[1])
+    if dst is None:
         return False
     _note_fire(hit[0], bot_id)
+    _note_spent_owner(dst, bot_id)
     return True
+
+
+# --------------------------------------------------------------------------- #
+# Who fired a spent image (4.3, OPUS L-6)
+# --------------------------------------------------------------------------- #
+# spent/ is shared by every bot, so a fired image's path no longer says whose it was. The
+# fire records it in an append-only ledger beside the mood folders: one JSON line
+# {"f": "<mood>/<file>", "bot": "<bot id>"} per fire. A dotfile, so no image walker
+# (_mood_files, media_inventory, the migration's _relocate) ever sees it. An image fired
+# before 4.3 has no line: spent_owner() answers None and the picture is served as before.
+
+_SPENT_OWNERS_NAME = ".owners.jsonl"
+_spent_owner_lock = threading.Lock()
+_spent_owner_cache: dict = {"key": None, "map": {}}
+
+
+def _spent_owners_path() -> Path:
+    return config.REACTIONS_SPENT_DIR / _SPENT_OWNERS_NAME
+
+
+def _note_spent_owner(dst: Path, bot_id: str | None) -> None:
+    """Record which bot fired the spent blob ``dst``. Never raises: the fire already happened,
+    and a missing line only means the picture keeps the pre-4.3 (unscoped) serving."""
+    try:
+        line = json.dumps({"f": f"{dst.parent.name}/{dst.name}", "bot": resolve_bot_id(bot_id)},
+                          ensure_ascii=True)
+        path = _spent_owners_path()
+        with _spent_owner_lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a+b") as fh:          # append mode: every write lands at the end
+                fh.seek(0, os.SEEK_END)
+                size = fh.tell()
+                lead = b""
+                if size:
+                    # A crash mid-append left a torn last line: end it first, so this record
+                    # starts on a line of its own instead of being glued to the debris.
+                    fh.seek(size - 1)
+                    lead = b"" if fh.read(1) == b"\n" else b"\n"
+                fh.write(lead + line.encode("ascii") + b"\n")
+    except Exception as e:                 # pragma: no cover
+        log.warning("reaction pool: could not record who fired %s: %s", dst.name, e)
+
+
+def _spent_owner_map() -> dict[str, str]:
+    path = _spent_owners_path()
+    try:
+        st = path.stat()
+    except OSError:
+        return {}
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    with _spent_owner_lock:
+        if _spent_owner_cache["key"] == key:
+            return _spent_owner_cache["map"]
+        out: dict[str, str] = {}
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                for raw in fh:
+                    try:
+                        row = json.loads(raw)
+                    except ValueError:
+                        continue                   # a torn last line: skip it
+                    if isinstance(row, dict) and isinstance(row.get("f"), str) \
+                            and isinstance(row.get("bot"), str) and BOT_ID_RE.match(row["bot"]):
+                        out[row["f"]] = row["bot"]
+        except OSError:
+            return {}
+        _spent_owner_cache["key"], _spent_owner_cache["map"] = key, out
+        return out
+
+
+def spent_owner(reaction: Reaction) -> str | None:
+    """The bot that fired a spent pool image (``spent/<mood>/<file>``), as recorded at the fire;
+    None for anything else, and for a spent image fired before 4.3 (no record)."""
+    parts = str(reaction.file or "").split("/")
+    if len(parts) != 3 or parts[0] != "spent":
+        return None
+    return _spent_owner_map().get(f"{parts[1]}/{parts[2]}")
 
 
 def _note_fire(mood: str, bot_id: str | None = None) -> None:
@@ -2680,7 +2656,7 @@ def pool_status(bot_id: str | None = None) -> dict:
     for mood in sorted(have):
         moods.setdefault(mood, have[mood])
     return {
-        **st.config.to_dict(),
+        **st.config.public(),
         # Daily freshness: fires counted toward the next daily run, and what
         # today's run (daily_date) still owes per mood.
         "fired_since_daily": dict(st.fired),

@@ -11,25 +11,33 @@
 // fetched; the lightbox refuses too.
 
 import {
-  api, t, ready, theme, toast, lightbox, DecoyError, el, railIcon, RAIL_ICONS,
-} from '/static/js/app-sdk.js?v=3';
+  api, t, ready, theme, toast, lightbox, el, railIcon, RAIL_ICONS,
+} from '/static/js/app-sdk.js?v=7';
+
+/** A 403: this profile may not use Image Studio (4.0; 3.x sent a Safe-Mode DecoyError). */
+const refused = (e) => !!e && e.status === 403;
 import {
   PROMPT_MAX, isGenerateShortcut, shortcutLabel, promptStatus, canGenerate, clampCount,
   buildRequest, cropRect, defaultCropPos, galleryItems, isMetered,
-  SORTS, normalizeSort, sortRows,
-} from './studio-logic.js?v=2';
+  SORTS, normalizeSort, sortRows, canStartAnother, SHORTCUT_DEBOUNCE_MS,
+  DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata, DELETE_SCOPE_LABELS,
+} from './studio-logic.js?v=5';
+import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
 export const API = '/api/apps/imagestudio';
 
 const S = {
   info: null,            // GET /state
   images: [],            // GET /images, oldest -> newest
-  busy: false,
+  busy: false,           // any generation in flight (aria only: Generate is never blocked)
+  pending: [],           // this page's jobs: {key, body, state: 'running'|'failed', error}
+  jobSeq: 0,
+  lastKey: 0,            // when the shortcut last started a job (debounce)
   reference: null,       // {kind, ..., preview}
   status: '',
   statusError: false,
   nim: false,
-  sort: 'oldest',        // the grid's order (SORTS), remembered per device
+  sort: 'newest',        // the grid's order (SORTS), remembered per device; newest first when none saved
 };
 const R = {};            // DOM refs
 const SORT_LABELS = { oldest: 'sort.oldest', newest: 'sort.newest' };
@@ -41,7 +49,7 @@ function nimOn() {
 }
 
 function loadSort() {
-  try { return normalizeSort(localStorage.getItem(SORT_KEY)); } catch { return 'oldest'; }
+  try { return normalizeSort(localStorage.getItem(SORT_KEY)); } catch { return 'newest'; }
 }
 
 function saveSort(value) {
@@ -89,8 +97,10 @@ function refreshForm() {
   R.optimizerRow.hidden = !c.optimizer;
   R.seedRow.hidden = !c.seed;
   R.refBox.hidden = !c.reference;
-  R.go.disabled = !canGenerate({ prompt: R.prompt.value, busy: S.busy, provider: p && p.configured ? p.id : '' });
-  R.go.textContent = S.busy ? t('generating') : t('generate');
+  S.busy = running() > 0;
+  // Running jobs never disable Generate: more may start (the cap is checked on press).
+  R.go.disabled = !canGenerate({ prompt: R.prompt.value, busy: false, provider: p && p.configured ? p.id : '' });
+  R.go.textContent = t('generate');
   R.go.title = t('generate.tip', { keys: shortcutLabel(navigator.platform || '') });
   R.go.setAttribute('aria-busy', S.busy ? 'true' : 'false');
   R.cost.hidden = !isMetered(p);
@@ -218,7 +228,10 @@ function iconBtn(icon, label, onClick) {
 
 function renderGrid() {
   R.grid.replaceChildren();
-  R.empty.hidden = S.images.length > 0;
+  R.empty.hidden = S.images.length > 0 || S.pending.length > 0;
+  if (R.deleteBtn) R.deleteBtn.hidden = !(S.info && S.info.can_clear) || S.images.length < 1;
+  const jobs = S.pending.map(pendingTile);
+  if (S.sort === 'newest') R.grid.append(...jobs.reverse());
   R.sortWrap.hidden = S.images.length < 2;
   shown().forEach((r, i) => {
     const media = S.nim
@@ -235,6 +248,8 @@ function renderGrid() {
       iconBtn(RAIL_ICONS.user, t('tile.avatar'), () => openAvatar(r)),
     ]);
     if (!caps().reference) actions.children[2].hidden = true;
+    // Send posts through the inject route: only for a profile the server lets do that.
+    if (S.info && S.info.can_send === false) actions.children[3].hidden = true;
     if (S.info && S.info.can_clear) {
       const clear = iconBtn(RAIL_ICONS.trash, t('tile.clear'), () => openClear(r));
       clear.classList.add('st-icon-danger');
@@ -248,11 +263,40 @@ function renderGrid() {
       ]),
     ]));
   });
+  if (S.sort !== 'newest') R.grid.append(...jobs);
+}
+
+function running() { return S.pending.filter((j) => j.state === 'running').length; }
+
+/** One placeholder per request: bouncing dots while it runs, the error + Retry/Dismiss after. */
+function pendingTile(job) {
+  const failed = job.state === 'failed';
+  const snippet = job.body.prompt.length > 90 ? `${job.body.prompt.slice(0, 90)}…` : job.body.prompt;
+  const face = failed
+    ? el('div', { class: 'st-pendface st-error', role: 'alert', text: t('pending.failed', { error: job.error }) })
+    : el('div', { class: 'st-pendface', role: 'status', 'aria-label': t('pending.running') }, [
+      el('span', { class: 'st-dots', 'aria-hidden': 'true' }, [el('span'), el('span'), el('span')]),
+      el('span', { class: 'st-muted', text: t('pending.running') }),
+    ]);
+  const kids = [face];
+  if (failed) {
+    const retry = el('button', { type: 'button', class: 'st-btn', text: t('pending.retry') });
+    retry.addEventListener('click', () => {
+      const max = S.info && S.info.max_in_flight;
+      if (!canStartAnother(running(), max)) { setStatus(t('pending.cap', { n: max }), true); return; }
+      startJob(job);
+    });
+    const drop = el('button', { type: 'button', class: 'st-btn', text: t('pending.dismiss') });
+    drop.addEventListener('click', () => { S.pending = S.pending.filter((j) => j !== job); renderGrid(); refreshForm(); });
+    kids.push(el('div', { class: 'st-pendactions' }, [retry, drop]));
+  }
+  kids.push(el('div', { class: 'st-tilemeta' }, [el('div', { class: 'st-tileprompt', title: job.body.prompt, text: snippet })]));
+  return el('li', { class: `st-tile st-pending${failed ? ' st-failed' : ''}` }, kids);
 }
 
 function openFull(index) {
   if (S.nim) { setStatus(t('nim.hidden')); return; }
-  lightbox(galleryItems(shown()), index);
+  lightbox(galleryItems(shown(), { source: t('title'), optimizerNote: t('details.optimizer') }), index);
 }
 
 async function copyPrompt(r) {
@@ -311,7 +355,8 @@ async function openSend(r) {
       await api('/api/inject', { method: 'POST', body: {
         thread_id: thread.value, role: asSys.checked ? 'system' : 'assistant',
         content: cap.value.trim(), media_url: r.url,
-        metadata: { source: 'image-studio', image_id: r.id },
+        // The picture's own record (the chat's Details panel reads it): what was typed.
+        metadata: sendMetadata(r),
       } });
       closeDialog();
       setStatus(t('send.done', { title: (th && (th.title || th.bot)) || '' }));
@@ -342,6 +387,7 @@ async function openAvatar(r) {
   let targets;
   try { targets = await api(`${API}/targets`); } catch (e) { setStatus(e.message, true); return; }
   if (S.nim) { setStatus(t('nim.hidden')); return; }
+  if (!targets.bots.length) { setStatus(t('avatar.no_bots'), true); return; }
   let im;
   try { im = await loadImage(r.url); } catch { setStatus(t('avatar.failed', { error: 'image' }), true); return; }
   const bot = el('select', { id: 'st-av-bot' }, targets.bots.map((b) => el('option', { value: b.id, text: b.name || b.id })));
@@ -367,8 +413,19 @@ async function openAvatar(r) {
       const faceBlob = await new Promise((res) => face.toBlob(res, 'image/png'));
       const fd = new FormData();
       fd.append('file', full, `studio-${r.id.slice(0, 8)}.${/\.jpe?g$/i.test(r.url) ? 'jpg' : 'png'}`);
-      fd.append('face', faceBlob, `studio-${r.id.slice(0, 8)}-face.png`);
-      const res = await fetch(`/api/bots/${encodeURIComponent(bot.value)}/avatar`, { method: 'POST', body: fd, credentials: 'same-origin' });
+      const pick = targets.bots.find((b) => b.id === bot.value) || {};
+      let url;
+      if (pick.personal) {
+        // The caller's own bot: its route takes the square as fractions and crops itself.
+        const rc = cropRect(im.naturalWidth, im.naturalHeight, Number(pos.value) / 100);
+        const q = new URLSearchParams({ crop_x: rc.sx / im.naturalWidth, crop_y: rc.sy / im.naturalHeight,
+          crop_size: rc.size / Math.min(im.naturalWidth, im.naturalHeight) });
+        url = `/api/me/characters/${encodeURIComponent(bot.value)}/avatar?${q}`;
+      } else {
+        fd.append('face', faceBlob, `studio-${r.id.slice(0, 8)}-face.png`);
+        url = `/api/bots/${encodeURIComponent(bot.value)}/avatar`;
+      }
+      const res = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const name = (targets.bots.find((b) => b.id === bot.value) || {}).name || bot.value;
       closeDialog();
@@ -435,27 +492,102 @@ async function openClear(r) {
   cancel.focus();
 }
 
+// ---------------------------------------------------------------- delete by age
+//
+// Delete (All / Past hour / Past day): the page names a scope, never a time. The server
+// counts the signed-in profile's own pictures in that window on ITS clock (dry run),
+// the dialog asks "Delete N pictures from the past hour?", and the confirmed count rides
+// along so a picture that arrived meanwhile triggers a re-count instead of a surprise.
+// Files a chat still shows stay (the same /clear path as "Clear from here down").
+
+async function openDelete(scopeIn = 'hour') {
+  let scope = normalizeScope(scopeIn);
+  let plan = null;
+  const sel = el('select', { id: 'st-del-scope', 'aria-label': t('delete.scope') },
+    DELETE_SCOPES.map((v) => el('option', { value: v, text: t(DELETE_SCOPE_LABELS[v]) })));
+  sel.value = scope;
+  const msg = el('p', { class: 'st-clear-msg', role: 'status', text: '…' });
+  const note = el('p', { class: 'st-muted', hidden: '' });
+  const go = el('button', { type: 'button', class: 'st-btn st-danger', text: t('clear.go'), disabled: '' });
+  const cancel = el('button', { type: 'button', class: 'st-btn', text: t('common.cancel') });
+  cancel.addEventListener('click', closeDialog);
+  async function count() {
+    go.disabled = true; plan = null; msg.textContent = '…';
+    const mine = scope;
+    try {
+      const r = await api(`${API}/clear`, { method: 'POST', body: { since: mine, dry_run: true } });
+      if (mine !== scope) return;      // the person moved on to another scope
+      plan = r;
+      note.hidden = !r.in_chat;
+      note.textContent = r.in_chat ? t('clear.in_chat', { n: r.in_chat }) : '';
+      msg.textContent = r.count ? t(deleteConfirmKey(scope, r.count), { n: r.count }) : t('delete.none');
+      go.disabled = !r.count;
+    } catch (e) { msg.textContent = t('clear.failed', { error: e.message }); }
+  }
+  sel.addEventListener('change', () => { scope = normalizeScope(sel.value); count(); });
+  go.addEventListener('click', async () => {
+    if (!plan) return;
+    go.disabled = true;
+    try {
+      const res = await api(`${API}/clear`, { method: 'POST', body: { since: scope, expect: plan.count } });
+      closeDialog();
+      S.images = (await api(`${API}/images`)).images;
+      await reloadState(false);
+      renderGrid();
+      setStatus(t('clear.done', { n: res.deleted }));
+      toast(t('clear.done', { n: res.deleted }));
+    } catch (e) {
+      const code = e && e.body && e.body.error && e.body.error.code;
+      if (code === 'imagestudio_pictures_changed') {
+        setStatus(t('clear.changed'));
+        try { S.images = (await api(`${API}/images`)).images; renderGrid(); } catch { /* the count below reports it */ }
+        await count();
+        return;
+      }
+      go.disabled = false; setStatus(t('clear.failed', { error: e.message }), true);
+    }
+  });
+  dialog(t('delete.title'), [el('label', { for: 'st-del-scope', text: t('delete.scope') }), sel, msg, note], [cancel, go]);
+  cancel.focus();
+  await count();
+}
+
 // ---------------------------------------------------------------- generate
 
-async function generate() {
+function generate() {
   const p = provider();
-  if (!p || !canGenerate({ prompt: R.prompt.value, busy: S.busy, provider: p.configured ? p.id : '' })) return;
-  S.busy = true; refreshForm();
+  if (!p || !canGenerate({ prompt: R.prompt.value, busy: false, provider: p.configured ? p.id : '' })) return;
+  const max = S.info && S.info.max_in_flight;
+  if (!canStartAnother(running(), max)) {
+    setStatus(t('pending.cap', { n: max }), true);
+    return;
+  }
+  startJob({ key: ++S.jobSeq, body: buildRequest(formState(), caps()) });
+}
+
+/** Send one job (new or a retry). Several run at once; each lands in its own tile. */
+async function startJob(job) {
+  job.state = 'running'; job.error = '';
+  if (!S.pending.includes(job)) S.pending.push(job);
+  renderGrid(); refreshForm();
   setStatus(t('generating_note'));
   try {
-    const body = buildRequest(formState(), caps());
-    const r = await api(`${API}/generate`, { method: 'POST', body });
+    const r = await api(`${API}/generate`, { method: 'POST', body: job.body });
+    S.pending = S.pending.filter((j) => j !== job);
     S.images = S.images.concat(r.images);
     await reloadState(false);
     renderGrid();
     setStatus(r.images.length < r.asked
       ? t('results.partial', { got: r.images.length, asked: r.asked })
       : t('results.done', { n: r.images.length }));
-    (S.sort === 'newest' ? R.grid.firstElementChild : R.grid.lastElementChild)?.scrollIntoView?.({ block: 'nearest' });
   } catch (e) {
-    setStatus(e instanceof DecoyError ? t('locked') : e.message, true);
+    job.state = 'failed';
+    job.error = refused(e) ? t('locked') : e.message;
+    renderGrid();
+    // The reason is on the job's own tile (role=alert); saying it again here showed it twice.
+    setStatus('');
   } finally {
-    S.busy = false; refreshForm();
+    refreshForm();
   }
 }
 
@@ -519,6 +651,8 @@ function build(root) {
   R.sort = el('select', { id: 'st-sort', class: 'st-sort' }, SORTS.map((v) => el('option', { value: v, text: t(SORT_LABELS[v]) })));
   R.sort.value = S.sort;
   R.sortWrap = el('label', { class: 'st-sortwrap', for: 'st-sort' }, [`${t('sort.label')}: `, R.sort]);
+  R.deleteBtn = el('button', { type: 'button', id: 'st-delete', class: 'st-btn st-danger-outline', text: t('delete.button'), hidden: '' });
+  R.deleteBtn.addEventListener('click', () => openDelete());
   R.grid = el('ul', { class: 'st-grid' });
   R.empty = el('p', { class: 'st-muted st-emptynote', text: t('results.empty') });
   R.dlg = el('div', { class: 'st-dlgwrap', hidden: '' });
@@ -527,22 +661,31 @@ function build(root) {
     el('div', { class: 'st-layout' }, [
       el('section', { class: 'st-controls' }, [R.none, R.form, R.status]),
       el('section', { class: 'st-results' }, [
-        el('div', { class: 'st-resultshead' }, [el('h2', { text: t('results.title') }), R.sortWrap]),
+        el('div', { class: 'st-resultshead' }, [el('h2', { text: t('results.title') }), el('div', { class: 'st-headtools' }, [R.sortWrap, R.deleteBtn])]),
         R.empty, R.grid]),
     ]),
     R.dlg,
   );
 
   R.prompt.addEventListener('input', refreshForm);
-  // Ctrl+Enter / Cmd+Enter = the Generate button, and only while it is enabled.
+  // Shift/Ctrl/Cmd+Enter = the Generate button, and only while it is enabled.
   R.prompt.addEventListener('keydown', (ev) => {
     if (!isGenerateShortcut(ev)) return;
     ev.preventDefault();
-    if (!R.go.disabled) generate();
+    // One keypress = one job: a bounce right after the last start is ignored.
+    const now = Date.now();
+    if (now - S.lastKey < SHORTCUT_DEBOUNCE_MS) return;
+    if (R.go.disabled) return;
+    S.lastKey = now;
+    generate();
   });
   R.provider.addEventListener('change', refreshForm);
   R.count.addEventListener('change', () => { R.count.value = String(clampCount(R.count.value, caps().max_n)); });
-  R.go.addEventListener('click', generate);
+  R.go.addEventListener('click', (ev) => {
+    // The second click of a double-click is not a second job (every Generate is metered).
+    if (ev && ev.detail > 1) return;
+    generate();
+  });
   R.sort.addEventListener('change', () => {
     S.sort = normalizeSort(R.sort.value);
     saveSort(S.sort);
@@ -565,6 +708,10 @@ export async function mount(root = document.getElementById('st-root')) {
   document.title = t('title');
   root.setAttribute('aria-label', t('title'));
   document.documentElement.lang = document.documentElement.lang || 'en';
+  // A picture the image-retention setting removed answers 410 + X-Image-Expired: the tile
+  // shows the "image expired" placeholder instead of a broken image (the shell's listener
+  // does not reach into this frame).
+  installExpiredImages({ t: () => t('expired'), el, icon: () => railIcon(RAIL_ICONS.nim) });
   build(root);
   try {
     await reloadState();
@@ -573,7 +720,7 @@ export async function mount(root = document.getElementById('st-root')) {
     renderGrid();
     refreshForm();
   } catch (e) {
-    root.replaceChildren(el('p', { class: 'st-locked', text: e instanceof DecoyError ? t('locked') : e.message }));
+    root.replaceChildren(el('p', { class: 'st-locked', text: refused(e) ? t('locked') : e.message }));
   }
   document.body.classList.add('st-ready');
 }

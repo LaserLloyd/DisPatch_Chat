@@ -17,8 +17,10 @@ from app import accounts, auth
 
 
 @pytest.fixture
-def strict(monkeypatch):
+def strict(monkeypatch, world):
     monkeypatch.delenv("DISPATCH_ALLOW_OPEN_INSTALL", raising=False)
+    from _localhost import address_loopback_as_localhost  # 4.3 (#2): Host: localhost
+    address_loopback_as_localhost(world, monkeypatch)
 
 
 LAN = ("203.0.113.50", 40000)
@@ -67,7 +69,7 @@ def test_setup_from_the_network_needs_the_one_time_token(world, strict):
     again = world.client(LAN).post("/api/auth/setup", json={**body, "setup_token": auth.setup_token()})
     assert again.status_code == 403
     # And the new owner is signed in on that client.
-    assert lan.get("/api/auth/me").json()["role"] == "owner"
+    assert lan.get("/api/auth/me").json()["role"] == "admin"
 
 
 def test_guessing_the_setup_token_is_throttled(world, strict):
@@ -113,7 +115,26 @@ def test_a_pin_only_2x_install_is_claimed_on_upgrade(world, strict):
     accounts.delete_owner_row()           # as a 2.x data dir looks before the first 3.0 start
     lan = world.client(LAN)
     assert lan.get("/api/auth/status").json()["claimed"] is True
-    assert lan.get("/api/bots/all").status_code == 403           # Restricted, not "setup required"
+    assert lan.get("/api/bots/all").status_code in (401, 403)           # Restricted, not "setup required"
     assert lan.post("/api/auth/unlock", json={"pin": "1234"}).status_code == 200
-    assert lan.get("/api/auth/me").json()["role"] == "owner"
+    assert lan.get("/api/auth/me").json()["role"] == "admin"
     assert accounts.get_owner() is not None                       # created on first use
+
+
+def test_an_open_socket_is_reconnected_not_locked_once_the_install_is_claimed(world):
+    """INT-1 (scratch E2E): the first-run wizard claims the install over a socket opened while
+    it was open. That socket must be closed for a reconnect, never sent "locked": the client
+    answers "locked" with POST /api/auth/lock, which signed the brand-new Admin out."""
+    from starlette.websockets import WebSocketDisconnect
+    local = world.client(("127.0.0.1", 40000))
+    with local.websocket_connect("/ws") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        r = local.post("/api/auth/setup", json={"name": "Olive", "password": "owner-pass1"})
+        assert r.status_code == 200, r.text
+        ws.send_json({"type": "ping"})
+        with pytest.raises(WebSocketDisconnect) as e:
+            frame = ws.receive_json()
+            assert frame.get("type") != "locked", frame
+            ws.receive_json()
+        assert e.value.code == 1012
+    assert local.get("/api/auth/status").json()["signed_in"] is True    # still the new Admin

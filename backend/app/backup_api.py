@@ -7,12 +7,15 @@
 * ``POST   /api/backups/{id}/restore``     stage a restore; applied at the next start (admin_system)
 * ``GET    /api/backups/pending`` / ``DELETE /api/backups/pending``  see / cancel a staged restore
 * ``DELETE /api/backups/{id}``             delete an archive or snapshot       (admin_system)
+* ``POST   /api/backups/recovery-key/reveal``  show the GENERATED recovery key again, after the
+                                           PIN or password is typed again      (the protected Admin only)
 * ``POST   /api/support-bundle``           a redacted zip for a bug report     (admin_system)
 * ``GET    /api/users/{id}/export``        everything DisPatch holds about a profile (manage_users)
-* ``DELETE /api/users/{id}``               erase a profile and what is attached to it (manage_users)
+* ``DELETE /api/users/{id}``               erase a profile: the same removal as ``POST /api/people/{id}/delete``
+                                           (its bots, chats, files, pictures and voices go too) (manage_users)
 
-Ids look like ``archive:dispatch-20261018-120000.dpbk``, ``snapshot:chats-....db`` or
-``premigration:3.0.0-....``. A passphrase typed here is never stored; the one in Settings is read
+Ids look like ``archive:dispatch-20261018-120000.dpbk``, ``snapshot:chats-....db``,
+``premigration:3.0.0-....`` or ``prerestore:pre-restore-....``. A passphrase typed here is never stored; the one in Settings is read
 from the secret store.
 """
 
@@ -23,11 +26,12 @@ import json
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import accounts, auth, backups, config, policy, secret_store, settings_store
+from . import accounts, auth, auth_attempts, backups, config, policy, settings_store
 from .api_common import audit, caller, fail
+from .contracts import errors
 from .contracts.permissions import Permission
 
 router = APIRouter()
@@ -50,6 +54,13 @@ class RestoreIn(BaseModel):
     confirm: bool = False
 
 
+class RevealIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pin: str | None = Field(default=None, max_length=128, repr=False)
+    password: str | None = Field(default=None, max_length=256, repr=False)
+
+
 class SupportBundleIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -69,6 +80,10 @@ def _state() -> dict:
         "has_passphrase": bool(backups.configured_passphrase()),
         "last_archive_age_hours": backups.last_archive_age_hours(),
         "pending_restore": backups.pending_path().exists(),
+        # 4.3: is there a generated recovery key the protected Admin may show again (never the key)
+        "generated_key": backups.generated_key() is not None,
+        # 4.3 (#35): the last applied restore and the secrets it could not put back
+        "last_restore": backups.last_restore(),
     }
 
 
@@ -107,7 +122,7 @@ async def create_backup(request: Request, payload: BackupCreateIn | None = None)
     if not pw:
         # No passphrase anywhere: make a recovery key, keep it in the secret store, and show it ONCE.
         generated = pw = backups.recovery_key()
-        secret_store.put("setting.system.backup_passphrase", pw)
+        backups.store_generated_key(pw)
     media = bool(settings_store.get("system.encrypted_backup_include_media", False)
                  if p.include_media is None else p.include_media)
     try:
@@ -122,7 +137,6 @@ async def create_backup(request: Request, payload: BackupCreateIn | None = None)
                                       "install's secret store as the backup passphrase, so only a copy kept elsewhere "
                                       "opens the backup if this computer is lost."),
                    passphrase_source="generated")
-    from fastapi.responses import JSONResponse
     return JSONResponse(out, status_code=201)
 
 
@@ -164,11 +178,57 @@ async def delete_backup(request: Request, backup_id: str):
         kind, path = backups.resolve_id(backup_id)
     except backups.BackupError as e:
         raise _err(e) from e
-    if kind == "premigration":
-        raise fail(409, "backup_protected", "Pre-migration copies are kept until they age out; delete them from the backups folder by hand if you must.")
+    if kind in ("premigration", "prerestore"):
+        raise fail(409, "backup_protected", "Pre-migration and pre-restore copies are kept until they age out; "
+                   "delete them from the backups folder by hand if you must.")
     await asyncio.to_thread(path.unlink)
     audit(request, "backup.delete", backup_id[:80])
     return {"deleted": backup_id}
+
+
+@router.post("/api/backups/recovery-key/reveal", dependencies=[_SYSTEM])
+async def reveal_recovery_key(request: Request, payload: RevealIn):
+    """Show the recovery key DisPatch generated (and keeps as the backup passphrase) once more.
+
+    Only the protected Admin, signed in as a profile (route policy ``host=True``; checked here as
+    well so it holds before the host tier is enforced), and only after typing the PIN or the
+    password again: verified through ``auth_attempts.guarded_verify`` (refused before verifying
+    once the throttle trips). Audited either way; the answer is never cached. A passphrase a person
+    chose is never shown: 404 ``no_generated_key``."""
+    me = caller(request)
+    prof = me.profile
+    if me.kind != "profile" or not me.is_protected or prof is None:
+        raise fail(403, "host_owner_only", "Only the Owner can show the recovery key.")
+    if not payload.pin and not payload.password:
+        raise fail(422, "bad_request", "Type your PIN or your password again to show the recovery key.")
+    cfg = auth.load()
+
+    def verify() -> bool:
+        if payload.password:
+            return bool(prof.has_password and auth.verify_profile_secret(prof, "password", payload.password))
+        return bool(cfg.pin_set and auth.verify_pin(payload.pin or ""))
+
+    try:
+        ok = auth_attempts.guarded_verify(request, scope="reveal", subject=prof.id, verify=verify)
+    except auth_attempts.AttemptRefused as e:
+        audit(request, "backup.reveal_key", prof.id, "refused: too many attempts")
+        secs = max(1, int(e.retry_after))
+        msg = f"Too many tries. Wait {secs} seconds, then try again."
+        return JSONResponse({"detail": msg, "retry_after": secs,
+                             "error": errors.envelope(e.code, message=msg)},
+                            status_code=e.status, headers={"Retry-After": str(secs), "Cache-Control": "no-store"})
+    if not ok:
+        audit(request, "backup.reveal_key", prof.id, "wrong credential")
+        raise fail(401, "incorrect_credential", "Incorrect PIN or password")
+    key = await asyncio.to_thread(backups.generated_key)
+    if not key:
+        audit(request, "backup.reveal_key", prof.id, "no generated key")
+        raise fail(404, "no_generated_key",
+                   "This backup uses a passphrase you chose, so there is no generated key to show.")
+    audit(request, "backup.reveal_key", prof.id, "shown")
+    return JSONResponse({"recovery_key": key, "recovery_key_note": (
+        "Write it down and keep it OFF this computer: only a copy kept elsewhere opens the backups "
+        "if this computer is lost.")}, headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
 
 
 @router.post("/api/support-bundle", dependencies=[_SYSTEM])
@@ -192,7 +252,7 @@ def _target(request: Request, profile_id: str) -> accounts.Profile:
     if prof is None:
         raise fail(404, "profile_not_found", "No such profile.")
     me = caller(request)
-    if prof.id != me.profile_id and not _may_manage(me, prof.role):
+    if prof.id != me.profile_id and not _may_manage(me, prof.protected):
         raise fail(403, "permission_denied", "You cannot manage that profile.")
     return prof
 
@@ -209,15 +269,18 @@ def export_user(prof: accounts.Profile) -> dict:
         devices = [dict(r) for r in con.execute(
             "SELECT id, label, bound_at, created, last_seen FROM devices WHERE default_profile_id=?", (prof.id,))]
     sessions = accounts.list_sessions(prof.id)
-    chars = [b.id for b in config.load_bots() if prof.id in b.profiles]
+    # 4.0: the profile's own bots (setup only - ids); which household bots it may use is
+    # ``profile.household_bots``.
+    chars = [b.id for b in config.load_bots()
+             if b.scope == "personal" and b.owner_profile == prof.id]
     return {
         "schema": 1, "exported_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "profile": prof.public(), "devices": devices, "sessions": sessions, "usage": usage,
         "activity": activity, "audit_entries_about_this_profile": about,
-        "characters_limited_to_this_profile": chars,
-        "conversations": ("Chats are shared by the household in this version and are not attributed to a "
-                          "single profile, so they are not part of a per-profile export. Use the full "
-                          "History export (Settings > Account > Recovery & Export) to take the conversations."),
+        "own_characters": chars,
+        "conversations": ("Chats belong to the profile that started them (4.0) and are not part of this "
+                          "account export. Each person takes their own with the History export (Settings > "
+                          "Account > Recovery & Export), signed in as themselves."),
     }
 
 
@@ -233,37 +296,20 @@ async def export_user_route(request: Request, profile_id: str):
 
 @router.delete("/api/users/{profile_id}", dependencies=[_USERS])
 async def erase_user(request: Request, profile_id: str):
-    prof = _target(request, profile_id)
+    """Erase a profile. One removal path: this is ``POST /api/people/{id}/delete`` (the same
+    ``profiles_api.people_delete``, so the same rank rules, the same purge of the profile's bots,
+    chats, files, pictures, voices and push subscriptions, the same audit line) with the
+    confirmation token minted here, because this route is the older one-call form. The protected
+    Admin cannot be deleted and nobody deletes the profile they are using."""
+    from . import profiles_api, profiles_service
+    prof = profiles_api._target(request, profile_id, allow_self_protected=True)
     me = caller(request)
     if prof.id == me.profile_id:
         raise fail(409, "permission_denied", "You cannot delete the profile you are using.")
-    if prof.role == "owner":
-        raise fail(409, "owner_immutable", "The owner cannot be deleted.")
-
-    def run() -> dict:
-        auth.revoke_profile(prof.id)
-        with accounts.connect() as con:
-            n_act = con.execute("DELETE FROM activity WHERE profile_id=? AND category='activity'", (prof.id,)).rowcount
-            n_use = con.execute("DELETE FROM usage_daily WHERE subject=?", (prof.id,)).rowcount
-        for b in config.load_bots():
-            if prof.id in b.profiles:
-                config.update_bot(b.id, lambda x: _without_profile(x, prof.id))
-        accounts.delete_profile(prof.id)
-        return {"activity_rows": n_act, "usage_rows": n_use}
-
-    out = await asyncio.to_thread(run)
-    audit(request, "user.erase", prof.id, f"{out['activity_rows']} activity, {out['usage_rows']} usage rows")
-    return {"erased": prof.id, **out}
-
-
-def _without_profile(b, profile_id: str):
-    """``b`` with ``profile_id`` taken off its profiles list. An EMPTY list means "everyone", so a
-    character that was made for this profile alone must not become visible to the whole household
-    (and its chats readable) because that profile was erased: it is left to the Owner instead."""
-    from dataclasses import replace
-    rest = [p for p in b.profiles if p != profile_id]
-    if not rest and b.profiles:
-        owner = accounts.get_owner()
-        rest = [owner.id] if owner is not None else [profile_id]
-    return replace(b, profiles=rest)
-
+    try:
+        preview = await asyncio.to_thread(profiles_service.delete_preview, profile_id)
+    except profiles_service.ProfileServiceError as e:
+        raise profiles_api._err(e) from e
+    out = await profiles_api.people_delete(request, profile_id,
+                                           profiles_api.DeleteIn(confirm_token=preview["token"]))
+    return {"erased": profile_id, "deleted": out["deleted"]}

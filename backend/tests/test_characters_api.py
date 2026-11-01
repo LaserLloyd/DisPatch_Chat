@@ -44,7 +44,7 @@ def test_create_a_character_on_a_connection(owner, conn):
     assert r.status_code == 201, r.text
     ch = r.json()
     assert ch["backend"] == {"kind": "direct", "connection": conn, "model": "qwen-7b", "agent": None}
-    assert ch["audience"] == "members" and ch["description"] == "Quick and curious"
+    assert "audience" not in ch and "safe" not in ch and ch["description"] == "Quick and curious"
     assert ch["personality"]["preset"] == "tutor" and ch["voice_link"] == {
         "section": "voice", "anchor": "voices", "character": "nova"}
     entry = _roster()["nova"]["advisor"]["providers"][0]
@@ -89,8 +89,12 @@ def test_patch_connection_model_personality_and_detach(owner, conn):
 def test_an_agent_character_has_no_connection(owner, conn):
     r = owner.post("/api/characters", json={"name": "Runner", "backend": "agent", "agent": "runner"})
     assert r.status_code == 201 and r.json()["backend"]["kind"] == "agent"
-    r = owner.patch("/api/characters/runner", json={"connection": conn})
-    assert r.status_code == 422 and "agent" in r.json()["detail"].lower()
+    # R1 (4.2): an agent bot is the protected Admin's own, so the household PATCH no longer sees it;
+    # the rule itself lives in characters.with_connection
+    from app import characters
+    with pytest.raises(characters.CharacterError) as e:
+        characters.with_connection(config.get_bot("runner"), conn, None)
+    assert e.value.status == 422 and "agent" in str(e.value).lower()
     assert owner.post("/api/characters", json={"name": "X", "backend": "agent", "connection": conn}).status_code == 422
 
 
@@ -106,12 +110,6 @@ def test_removing_the_only_character_is_refused(tmp_path):
     with pytest.raises(characters.CharacterError) as e:
         characters.remove("solo")
     assert e.value.code == "character_last" and e.value.status == 409
-
-
-def test_the_default_audience_setting_applies_to_new_characters(owner):
-    owner.patch("/api/settings", json={"set": {"characters.default_audience": "restricted"}})
-    assert owner.post("/api/characters", json={"name": "Kidbot"}).json()["audience"] == "restricted"
-    assert owner.post("/api/characters", json={"name": "Adultbot", "audience": "members"}).json()["audience"] == "members"
 
 
 def test_the_bots_aliases_return_the_same_data_under_the_old_name(owner, conn):
@@ -131,52 +129,9 @@ def test_the_bots_aliases_return_the_same_data_under_the_old_name(owner, conn):
 # --------------------------------------------------------------------------- #
 
 
-def test_the_character_list_follows_audience_and_the_profile_list(world, owner):
-    mia = world.person(owner, "Mia", "restricted")
-    leo = world.person(owner, "Leo", "restricted")
-    max_ = world.person(owner, "Max", "member", pin="5555")
-    owner.post("/api/characters", json={"name": "Everyone", "audience": "all"})
-    owner.post("/api/characters", json={"name": "Kids", "audience": "restricted"})
-    owner.post("/api/characters", json={"name": "Mias", "audience": "restricted", "profiles": [mia["id"]]})
-    owner.post("/api/characters", json={"name": "Adults", "audience": "members"})
-    owner.post("/api/characters", json={"name": "Maxs", "audience": "members", "profiles": [max_["id"]]})
-
-    def see(profile_id, pin=None):
-        c = world.client(("203.0.113.60", 41000 + abs(hash(profile_id)) % 1000))
-        assert world.login(c, profile_id=profile_id, pin=pin).status_code == 200
-        return c, {b["id"] for b in c.get("/api/characters").json()["characters"]}
-
-    _, mia_sees = see(mia["id"])
-    _, leo_sees = see(leo["id"])
-    _, max_sees = see(max_["id"], "5555")
-    assert {"everyone", "kids", "mias"} <= mia_sees and not ({"adults", "maxs"} & mia_sees)
-    assert {"everyone", "kids"} <= leo_sees and "mias" not in leo_sees and not ({"adults", "maxs"} & leo_sees)
-    assert {"adults", "maxs", "everyone"} <= max_sees
-    assert "mias" not in max_sees                   # the profile list limits everyone but Owner and Admin
-    owner_sees = {b["id"] for b in owner.get("/api/characters").json()["characters"]}
-    assert {"everyone", "kids", "mias", "adults", "maxs"} <= owner_sees
-    # the legacy list agrees
-    stranger = world.client(("203.0.113.61", 41001))
-    anon = {b["id"] for b in stranger.get("/api/bots").json()["bots"]}
-    assert "everyone" in anon and "kids" in anon and not ({"mias", "adults", "maxs"} & anon)
-
-
-def test_a_profile_outside_the_list_cannot_start_a_chat_with_the_character(world, owner):
-    mia = world.person(owner, "Mia", "restricted")
-    leo = world.person(owner, "Leo", "restricted")
-    owner.post("/api/characters", json={"name": "Mias", "audience": "restricted", "profiles": [mia["id"]]})
-    c_mia = world.client(("203.0.113.62", 41002))
-    c_leo = world.client(("203.0.113.63", 41003))
-    world.login(c_mia, profile_id=mia["id"])
-    world.login(c_leo, profile_id=leo["id"])
-    assert c_mia.post("/api/threads", json={"bot_id": "mias"}).status_code == 200
-    assert c_leo.post("/api/threads", json={"bot_id": "mias"}).status_code == 403
-    assert owner.post("/api/threads", json={"bot_id": "mias"}).status_code == 200
-
-
-def test_the_profile_list_must_name_real_profiles(owner):
+def test_the_3x_profile_list_is_refused(owner):
     r = owner.post("/api/characters", json={"name": "Bad", "profiles": ["nobody"]})
-    assert r.status_code == 422 and r.json()["error"]["code"] == "character_invalid"
+    assert r.status_code == 422 and r.json()["error"]["code"] == "validation_error"
 
 
 def test_only_manage_characters_may_change_characters(world, owner):
@@ -184,11 +139,11 @@ def test_only_manage_characters_may_change_characters(world, owner):
     member = world.client(("203.0.113.64", 41004))
     world.login(member, profile_id=max_["id"], pin="5555")
     for c in (member, world.client(("203.0.113.65", 41005))):
-        assert c.post("/api/characters", json={"name": "Nope"}).status_code == 403
-        assert c.patch("/api/characters/atlas", json={"name": "Nope"}).status_code == 403
-        assert c.get("/api/characters/all").status_code == 403
-        assert c.get("/api/starter-packs").status_code == 403
-        assert c.post("/api/starter-packs/animal_friends/install").status_code == 403
+        assert c.post("/api/characters", json={"name": "Nope"}).status_code in (401, 403)
+        assert c.patch("/api/characters/atlas", json={"name": "Nope"}).status_code in (401, 403)
+        assert c.get("/api/characters/all").status_code in (401, 403)
+        assert c.get("/api/starter-packs").status_code in (401, 403)
+        assert c.post("/api/starter-packs/assistants/install").status_code in (401, 403)
 
 
 # --------------------------------------------------------------------------- #
@@ -201,7 +156,7 @@ _PERSONAL = re.compile(r"(?i)\b(lisbon|portugal|wikka|nova|scout|atlas|lloyd|las
 
 def test_the_packs_load_and_every_character_fits_the_character_manifest():
     packs = starter_packs._load_all()
-    assert set(packs) == {"animal_friends", "assistants"}
+    assert set(packs) == {"assistants", "animal_friends"}
     for p in packs.values():
         assert p["characters"]
         for c in p["characters"]:
@@ -209,50 +164,14 @@ def test_the_packs_load_and_every_character_fits_the_character_manifest():
             assert re.fullmatch(r"[A-Za-z0-9_-]{1,48}", c.id)
 
 
-def test_animal_friends_is_gentle_restricted_and_free_of_personal_references():
-    pack = starter_packs.get_pack("animal_friends")
-    assert pack["audience"] == "restricted" and len(pack["characters"]) == 6
-    for c in pack["characters"]:
-        assert c.audience == "restricted" and c.voice.startswith("builtin:"), c.id
-        blob = " ".join([c.name, c.description, c.persona, c.emoji, c.voice])
-        assert not _PERSONAL.search(blob), f"{c.id}: personal reference {_PERSONAL.search(blob).group(0)!r}"
-        low = " ".join(c.persona.lower().split())
-        assert "grown-up" in low and "personal detail" in low and "appropriate for young children" in low
-    raw = (ROOT / "backend" / "app" / "starter_packs" / "animal_friends.yaml").read_text(encoding="utf-8")
-    assert not _PERSONAL.search(raw.replace("`audience: restricted`", ""))
-
-
-def test_installing_animal_friends_creates_restricted_characters_a_child_can_use(world, owner):
-    mia = world.person(owner, "Mia", "restricted")
-    r = owner.post("/api/starter-packs/animal_friends/install", json={})
-    assert r.status_code == 200, r.text
-    assert r.json()["installed"] == ["otto", "hazel", "hoot", "pip", "maple", "bruno"] and r.json()["skipped"] == []
-    roster = _roster()
-    for cid in r.json()["installed"]:
-        e = roster[cid]
-        assert e["audience"] == "restricted" and e["safe"] is True and e["hide_unlocked"] is True
-        assert e["quick_actions"] is False and e["pack"] == "animal_friends" and e["voice"].startswith("builtin:")
-        assert e["advisor"]["tools"] is False                              # no lookups for a child
-    kid = world.client(("203.0.113.66", 41006))
-    world.login(kid, profile_id=mia["id"])
-    kid_sees = {b["id"] for b in kid.get("/api/characters").json()["characters"]}
-    assert {"otto", "hazel", "hoot", "pip", "maple", "bruno"} <= kid_sees
-    # a second install is a no-op that says so
-    again = owner.post("/api/starter-packs/animal_friends/install").json()
-    assert again["installed"] == [] and len(again["skipped"]) == 6
-    packs = {p["id"]: p for p in owner.get("/api/starter-packs").json()["packs"]}
-    assert packs["animal_friends"]["installed"] is True and packs["assistants"]["installed"] is False
-
-
-def test_a_pack_can_be_installed_on_a_connection_for_chosen_profiles(world, owner, conn):
-    mia = world.person(owner, "Mia", "restricted")
-    r = owner.post("/api/starter-packs/animal_friends/install",
-                   json={"connection": conn, "model": "qwen", "only": ["otto", "pip"], "profiles": [mia["id"]]})
-    assert r.json()["installed"] == ["otto", "pip"]
-    e = _roster()["otto"]
-    assert e["profiles"] == [mia["id"]] and e["advisor"]["providers"][0]["connection"] == conn
-    assert "hazel" not in _roster()
-    assert owner.post("/api/starter-packs/animal_friends/install", json={"only": ["ghost"]}).status_code == 404
+def test_a_pack_can_be_installed_on_a_connection(world, owner, conn):
+    r = owner.post("/api/starter-packs/assistants/install",
+                   json={"connection": conn, "model": "qwen", "only": ["scribe", "dev"]})
+    assert r.json()["installed"] == ["scribe", "dev"]
+    e = _roster()["scribe"]
+    assert e["advisor"]["providers"][0]["connection"] == conn
+    assert "planner" not in _roster()
+    assert owner.post("/api/starter-packs/assistants/install", json={"only": ["ghost"]}).status_code == 404
     assert owner.post("/api/starter-packs/ghost/install").json()["error"]["code"] == "starter_pack_not_found"
 
 

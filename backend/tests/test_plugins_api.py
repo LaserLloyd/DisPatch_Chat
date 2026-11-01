@@ -156,7 +156,7 @@ def test_routes_are_operator_only(ext_env, method, path, body):
     install()
     lock(c)                                           # PIN set, no session = Safe Mode
     r = c.request(method, path, json=body, headers=ORIGIN)
-    assert r.status_code == 403, (path, r.text)
+    assert r.status_code in (401, 403), (path, r.text)
     assert not (tmp / "extensions.yaml").exists()
     unlock(c)
     r = c.request(method, path, json=body, headers=ORIGIN)

@@ -25,15 +25,17 @@ const dom = { skip: domSkip(jsdom ? false : 'jsdom is not installed') };
 // ---------------------------------------------------------------- section order (3.2)
 
 const SECTION_ORDER = ['appearance', 'account', 'voice', 'characters', 'connections', 'people', 'plugins', 'system'];
+// The panes are not a visible order; they stay in the order they were written.
+const PANE_ORDER = ['appearance', 'account', 'characters', 'voice', 'connections', 'people', 'plugins', 'system'];
 
-test('the nav reads Appearance, Account, Voice, then Characters, AI & Connections, People & Access, Plugins & Apps, System', () => {
+test('the nav reads Appearance, Account, Voice, Characters, then AI & Connections, People & Access, Plugins & Apps, System', () => {
   const tabs = [...HTML.matchAll(/<button class="settings-tab[^"]*" id="stab-([a-z]+)"/g)].map((m) => m[1]);
   assert.deepEqual(tabs, SECTION_ORDER);
 });
 
-test('the panes follow the same order as the nav', () => {
+test('the panes are the same eight sections', () => {
   const panes = [...HTML.matchAll(/<section class="settings-pane[^"]*" id="spane-([a-z]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(panes, SECTION_ORDER);
+  assert.deepEqual(panes, PANE_ORDER);
 });
 
 test('every section button points at its pane and the pane back at the button', () => {
@@ -47,11 +49,11 @@ test('settings-nav.js lists the sections in the same order and the household one
   const N = await import('../static/js/settings-nav.js');
   assert.deepEqual(N.SECTION_IDS, SECTION_ORDER);
   assert.deepEqual(N.SECTIONS.filter((x) => x.perm === 'admin').map((x) => x.id),
-    ['characters', 'connections', 'people', 'plugins', 'system']);
+    ['connections', 'people', 'plugins', 'system']);
   assert.match(MAIN, /const ADMIN_TABS = SECTIONS\.filter\(\(s\) => s\.perm === 'admin'\)/);
   // The same sections are admin-only in the markup; Voice has its own rule (voiceTabAllowed).
   const adminInMarkup = [...HTML.matchAll(/class="settings-tab admin-only[^"]*" id="stab-([a-z]+)"/g)].map((x) => x[1]).sort();
-  assert.deepEqual(adminInMarkup, ['characters', 'connections', 'people', 'plugins', 'system']);
+  assert.deepEqual(adminInMarkup, ['connections', 'people', 'plugins', 'system']);
   assert.match(HTML, /class="settings-tab hidden" id="stab-voice"/);
 });
 
@@ -114,7 +116,7 @@ async function setup(over = {}) {
       headers: new win.Headers(), json: async () => body,
     };
   };
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   const mod = await import(`../static/js/plugins.js?t=${Math.random()}`);
   const rec = { toasts: [], tools: [], tabs: [] };
@@ -239,7 +241,7 @@ test('Built-in lookups: the switch PUTs /api/plugins/livetools and the tool name
     ['Web search', 'Weather', 'Calculator']);
   assert.deepEqual([...body.querySelectorAll('.plugins-chip')].map((c) => c.title), ['web_search', 'weather', 'calculator']);
   assert.equal(mod.lookupLabel('some_new_tool'), 'Some new tool', 'an unknown id is made readable');
-  assert.match(body.textContent, /Offered to bots whose settings turn them on\./);
+  assert.match(body.textContent, /Only bots with lookups turned on in their settings use them\./);
   const cb = body.querySelector('input[type=checkbox]');
   assert.equal(cb.checked, true);
   cb.checked = false;

@@ -245,9 +245,9 @@ test('closeViewer with nothing open is a no-op, not a throw', () => {
 });
 
 test('installViewerHandlers ignores junk and keeps working defaults', () => {
-  const cfg = installViewerHandlers({ onToast: 'nope', isDecoy: null, api: { stat: 1 } });
+  const cfg = installViewerHandlers({ onToast: 'nope', refuse: null, isDecoy: null, api: { stat: 1 } });
   assert.equal(typeof cfg.onToast, 'function');
-  assert.equal(typeof cfg.isDecoy, 'function');
+  assert.equal(typeof cfg.refuse, 'function');
   assert.equal(typeof cfg.api.stat, 'function');
   assert.equal(typeof cfg.api.ls, 'function');
   // A complete api is taken.

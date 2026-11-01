@@ -53,10 +53,14 @@ ALLOW: list[tuple[str, str, str]] = [
     ("backend/app/guide",           "backend/app/guide",           "*.md"),
     # 3.0: the starter packs (app/starter_packs.py reads the YAML).
     ("backend/app/starter_packs",   "backend/app/starter_packs",   "*.yaml"),
+    # 4.3: a pack's shipped pictures (starter_packs.install copies them into the avatar folder).
+    ("backend/app/starter_packs/pictures", "backend/app/starter_packs/pictures", "*.png"),
     # The shipped Atlas avatar (firstrun.install_default_avatars copies it).
     ("backend/app/default_avatars", "backend/app/default_avatars", "*.png"),
     # 2.3.6: the Bots tab's personality presets (app/personas.py reads them).
     ("backend/app/personas",        "backend/app/personas",        "*.md"),
+    # 4.0: the AI-build meta-prompt template(s) (app/bot_builder_api.py reads them).
+    ("backend/app/bot_templates",   "backend/app/bot_templates",   "*.md"),
     # 2.3.7: the "Works with DisPatch" catalog (app/catalog.py reads it).
     ("backend/app",                 "backend/app",                 "catalog.yaml"),
     ("frontend/static/guide",       "frontend/static/guide",       "*.png"),
@@ -68,10 +72,14 @@ ALLOW: list[tuple[str, str, str]] = [
     ("backend/tests/livetools",      "backend/tests/livetools",     "*.py"),
     ("backend/tests/agents",         "backend/tests/agents",        "*.py"),
     ("backend/tests/agents/contract", "backend/tests/agents/contract", "*.py"),
+    # 4.0 (INT-3a): the opt-in synthetic-load benchmark (pytest -m scale) and its generator.
+    ("backend/tests/scale",         "backend/tests/scale",         "*.py"),
     ("backend",                     "backend",                     "pyproject.toml"),
     ("backend",                     "backend",                     "uv.lock"),
     ("frontend/static",             "frontend/static",             "index.html"),
     ("frontend/static",             "frontend/static",             "app.css"),
+    # 4.0: the chat-first profiles sheet (one section per frontend package).
+    ("frontend/static",             "frontend/static",             "profiles.css"),
     ("frontend/static",             "frontend/static",             "sw.js"),
     # The mark: one SVG, its raster fallbacks, and the .ico. Brand assets,
     # not user data — they were outside every list here until 2026-09-18,
@@ -82,6 +90,8 @@ ALLOW: list[tuple[str, str, str]] = [
     ("frontend/static",             "frontend/static",             "favicon-32.png"),
     ("frontend/static",             "frontend/static",             "icon-192.png"),
     ("frontend/static",             "frontend/static",             "icon-512.png"),
+    ("frontend/static",             "frontend/static",             "icon-maskable-512.png"),
+    ("frontend/static",             "frontend/static",             "apple-touch-icon.png"),
     ("frontend/static",             "frontend/static",             "manifest.webmanifest"),
     ("frontend/static/js",          "frontend/static/js",          "*.js"),
     ("frontend/static/vendor",      "frontend/static/vendor",      "*"),

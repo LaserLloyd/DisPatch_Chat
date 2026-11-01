@@ -110,8 +110,8 @@ def test_the_envelope_degrades_instead_of_raising():
 
 def test_lookup_matches_templates_and_prefers_the_status():
     assert errors.lookup(404, "Unknown bot: nova").code == "bot_not_found"
-    assert errors.lookup(429, "Too many attempts — wait 12s.").code == "too_many_attempts"
-    assert errors.lookup(403, "Unlock for full access").code == "safe_mode"
+    assert errors.lookup(429, "Too many tries. Wait 12 seconds, then try again.").code == "too_many_attempts"
+    assert errors.lookup(403, "Your profile does not have permission to do that.").code == "permission_denied"
     assert errors.lookup(500, "no such thing as this message") is None
 
 
@@ -129,7 +129,7 @@ def test_responses_carry_the_error_object(world):
     # ... a gate refusal ...
     anon = world.client(("203.0.113.9", 1))
     r = anon.get("/api/dashboard")
-    assert r.status_code == 403 and r.json()["error"]["code"] == "safe_mode"
+    assert r.status_code in (401, 403) and r.json()["error"]["code"] in ("safe_mode", "signin_required")
     # ... and a machine caller gets the same object inside the problem document.
     r = world.client(("127.0.0.1", 2), origin=False).get("/api/threads/no-such-thread")
     assert r.headers["content-type"].startswith("application/problem+json")

@@ -133,6 +133,9 @@ class ApprovalPolicy(BaseModel):
     # named here by an admin to be usable at all.
     unattended_allow: list[str] = Field(default_factory=list)
     timeout_s: float | None = Field(default=None, gt=0)       # None: wait indefinitely
+    # 4.3 (#8): command-prefix patterns a Bash call must match to run without asking;
+    # empty = every Bash call asks (interactive) or is denied (unattended). Enforced by WP-A7.
+    bash_allow: list[str] = Field(default_factory=list)
 
 
 ToolTier = Literal["auto", "ask", "always_ask"]

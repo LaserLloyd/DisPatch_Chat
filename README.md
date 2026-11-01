@@ -4,7 +4,9 @@
 
 **Your own AI, in a chat app the whole family can use.**
 
-**Current release: 3.1.0** (October 2026) · [what changed](CHANGELOG.md#310--2026-10-19)
+**Current release: 4.3.0** (November 2026) · [what changed](CHANGELOG.md#430---2026-11-01)
+
+[![CI](https://github.com/LaserLloyd/DisPatch_Chat/actions/workflows/ci.yml/badge.svg)](https://github.com/LaserLloyd/DisPatch_Chat/actions/workflows/ci.yml)
 
 [Install](#install) · [Bring your own AI](#bring-your-own-ai) ·
 [Add-ons](#add-ons) · [Deployment](#deployment) · [Security](#security) ·
@@ -16,10 +18,10 @@
 <table>
   <tr>
     <td width="50%"><img src="docs/screenshots/readme/chat.png" alt="DisPatch Chat on the Glacier theme: a conversation with Atlas, the default bot with its shipped avatar, planning dinners for the week"><br><sub><b>Chat.</b> Atlas, the default bot, with its shipped avatar, in the Glacier theme.</sub></td>
-    <td width="50%"><img src="docs/screenshots/readme/settings.png" alt="DisPatch Settings, All settings tab: searchable settings in categories with a Basic and Advanced switch"><br><sub><b>Settings.</b> Every setting in one searchable place, with Basic and Advanced views.</sub></td>
+    <td width="50%"><img src="docs/screenshots/readme/settings.png" alt="DisPatch Settings search: typing &quot;lock&quot; lists matching settings across sections"><br><sub><b>Settings.</b> One search box finds a setting in any section.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/screenshots/readme/people-profiles.png" alt="DisPatch Settings, People and Profiles tab: an Owner, a Member and a Restricted profile"><br><sub><b>People &amp; Profiles.</b> An Owner, Members and Restricted profiles for children and guests.</sub></td>
+    <td width="50%"><img src="docs/screenshots/readme/people-profiles.png" alt="DisPatch Settings, People &amp; Access: profiles with their roles"><br><sub><b>People &amp; Access.</b> Profiles, roles and permissions in one place.</sub></td>
     <td width="50%"><img src="docs/screenshots/readme/tasks.png" alt="DisPatch Tasks page with state, agent, person and date filters and the Assign task button"><br><sub><b>Tasks.</b> Hand work to an agent and follow it here (empty on a fresh install).</sub></td>
   </tr>
 </table>
@@ -44,14 +46,15 @@ no account, no cloud, no telemetry.
 - **A personality for every bot.** Settings → Characters → ⋯ → Personality has ten presets
   (Sleek assistant, Cat-girl, Warm friend, Patient tutor and more) and an editor;
   `{name}` and `{user}` in the text are filled in for each reply.
-- **Profiles and roles.** An Owner, Admins, Members and Restricted profiles for
-  children and guests, each with their own PIN or password, daily budgets, time
-  limits and a device you can bind to them. A Restricted profile can only talk to
-  the characters made for it, by text or, with the voice add-on, by voice.
-- **Ten themes**, eight languages, and a phone-installable PWA with push pings.
+- **Profiles and roles.** Admin, User and Basic profiles, each with an optional
+  PIN or password and private chats (Admins cannot open them). A User makes their
+  own bots, an Admin hands a Basic profile just the household bots it needs, and
+  every new profile gets its own Atlas. **DisPatch** is the shared no-PIN profile
+  that locked and unsigned devices land on. There are no daily limits or budgets.
+- **Thirteen themes**, eight languages, and a phone-installable PWA with push pings.
 - **Pictures in chat** from an image API (MiniMax, OpenAI, xAI Grok or any
   OpenAI-compatible images endpoint) or your own image server, and reaction images.
-  **Image Studio** (an app in the rail, unlocked devices only) makes pictures on
+  **Image Studio** (an app in the rail) makes pictures on
   demand from the same provider, and the lightbox steps through every picture in
   a thread.
 - **One key for everything**: pick MiniMax, OpenAI or xAI, paste one key, and
@@ -60,8 +63,9 @@ no account, no cloud, no telemetry.
   is installed and what each one asks to be allowed to do.
 - **Connections and characters.** One record per model server (a key is stored
   once, in your keyring or a 0600 file, never in a chat's settings), characters that
-  pick a connection, a model, a personality and who may see them, and two starter
-  packs: *Animal Friends* for children and *Assistants*.
+  pick a connection, a model and a personality, and a starter pack of
+  general-purpose *Assistants* and an Animal Friends pack of gentle bots for small children. A User can copy a household bot into their own
+  profile (its setup only, never its chats).
 - **Every setting in one place**, described once (`docs/settings.md`), searchable,
   with Basic and Advanced views and a badge on anything an environment variable sets.
 - **Encrypted backups** on a schedule, a restore that checks before it replaces
@@ -73,8 +77,8 @@ no account, no cloud, no telemetry.
 - **Voice chat**: talk to a thread hands-free, or type on the call screen while
   replies are still spoken. The separate package
   [DisPatch_Voice](https://github.com/LaserLloyd/DisPatch_Voice); a GPU machine
-  for the speech work is optional. It also works on a locked device, on the
-  bots marked safe ([docs/extensions.md](docs/extensions.md#voice)).
+  for the speech work is optional. Cloned voices belong to the profile that made
+  them ([docs/voice.md](docs/voice.md), [docs/extensions.md](docs/extensions.md#voice)).
 - **Tool packages**: a package can register more lookups for the bots through
   `register_live_tools` ([docs/extensions.md](docs/extensions.md)).
 - **Apps**: trusted packages in `apps/<id>/` with their own page, routes and bot
@@ -106,12 +110,14 @@ fresh machine. DisPatch is one Python process with one SQLite file; it needs no 
 **Ports:** `8765` (DisPatch: web UI, REST and WebSocket). It is the only port DisPatch opens. Everything
 else in the [Ports](#ports) table is something it connects to.
 
-A fresh install is closed to the network until the owner account exists. From the machine DisPatch runs
+A fresh install is closed to the network until the first Admin account exists. From the machine DisPatch runs
 on, open <http://localhost:8765> and the setup wizard asks for nothing. From any other device, and from
 a browser talking to a container, the wizard asks for the one-time **setup token** that the server
 prints in its log as `SETUP TOKEN: ...`; each block below says where to read it.
 
 ### Windows
+
+The easiest way is the Windows installer; see [docs/deploy-windows.md](docs/deploy-windows.md).
 
 #### 1. Docker Desktop (simplest)
 
@@ -344,9 +350,8 @@ lose the data by accident.
 
 ### First run
 
-The wizard has six short steps: the owner account, a model server (it looks for StudioForge, LM Studio
-and Ollama, or takes an API key), voice, the family (children get a Restricted profile and the *Animal
-Friends* characters), network exposure, and a checklist. Every step is also available from the command line
+The wizard has six short steps: the first Admin account, a model server (it looks for StudioForge, LM Studio
+and Ollama, or takes an API key), voice, people (User and Basic profiles), network exposure, and a checklist. Every step is also available from the command line
 ([docs/first-run.md](docs/first-run.md)). After that, everything is in the gear menu, in seven sections with one search box: **AI & Connections**
 (the servers you talk to), **Characters**, **People & Access**, **System** (health and backups) and the rest ([docs/settings.md](docs/settings.md),
 [docs/connections.md](docs/connections.md), [docs/characters.md](docs/characters.md),
@@ -393,18 +398,19 @@ meant. A folder without a `chats.db` is refused, never created.
 
 ```text
 users list                                  # names, roles, what each signs in with (never a secret)
-users add <name> [--profile restricted|member|admin|owner]
+users add <name> [--profile basic|user|admin|main-admin]   # 3.x words owner/restricted/member still accepted
 users passwd <name> [--kind pin|password]   # signs that profile out everywhere
-users delete <name> [--yes]                 # never the owner
-owner reset [--yes]                         # lost the owner's password AND PIN: opens setup again
+users delete <name> [--yes]                 # never the main Admin
+admin reset [--yes]                         # lost the first Admin's password AND PIN: opens setup again
 token show | token rotate                   # the machine API key (X-API-Key) for agents and crons
 ```
 
-`users add` makes the lowest profile, Restricted, unless you pass `--profile`; a Member needs a PIN, an
-Admin needs a password (and the owner needs one first), and there is only ever one Owner. The secret comes
-from a hidden prompt, from `--password-stdin` (first line of stdin) or from `--password-env VAR`. "Password"
-means the profile's own credential: a PIN for Members and Restricted profiles, a password for Admins and the
-Owner (`--kind pin` sets the Owner's PIN instead).
+`users add` makes the lowest profile, Basic, unless you pass `--profile`; a User needs a PIN, an
+Admin needs a password (and the first Admin, "owner" on the command line, needs one first), and there is only ever one
+first Admin. The secret comes from a hidden prompt, from `--password-stdin` (first line of stdin) or from
+`--password-env VAR`. "Password" means the profile's own credential: a PIN for Users and Basic profiles, a password for
+Admins (`--kind pin` sets the first Admin's PIN instead). `users delete` deletes the profile's chats, bots and files too,
+after naming the counts.
 
 **Native, from the clone** (Linux, macOS, systemd service):
 
@@ -412,9 +418,9 @@ Owner (`--kind pin` sets the Owner's PIN instead).
 cd DisPatch_Chat/backend
 uv run python -m app users list
 uv run python -m app users passwd Olive                     # prompts, twice, nothing is echoed
-printf '%s\n' "$NEWPW" | uv run python -m app users add Noor --profile member --password-stdin
+printf '%s\n' "$NEWPW" | uv run python -m app users add Noor --profile user --password-stdin
 uv run python -m app users delete Noor --yes
-uv run python -m app owner reset --yes                      # prints a SETUP TOKEN and opens setup
+uv run python -m app admin reset --yes                      # prints a SETUP TOKEN and opens setup
 systemctl --user restart dispatch                           # only needed after a RESET_LOGIN file (below)
 ```
 
@@ -424,8 +430,8 @@ systemctl --user restart dispatch                           # only needed after 
 cd DisPatch_Chat\backend
 uv run python -m app users list
 uv run python -m app users passwd Olive
-uv run python -m app users add Noor --profile member          # prompts for the PIN
-uv run python -m app owner reset --yes
+uv run python -m app users add Noor --profile user          # prompts for the PIN
+uv run python -m app admin reset --yes
 ```
 
 **Docker Compose** (service `app`; for the stack use the same line with
@@ -435,7 +441,7 @@ uv run python -m app owner reset --yes
 docker compose exec app python -m app users list
 docker compose exec app python -m app users passwd Olive                   # prompts on your terminal
 printf '%s\n' "$NEWPW" | docker compose exec -T app python -m app users passwd Olive --password-stdin
-docker compose exec app python -m app owner reset --yes                    # prints a SETUP TOKEN
+docker compose exec app python -m app admin reset --yes                    # prints a SETUP TOKEN
 ```
 
 In PowerShell pipe the same way: `$env:NEWPW | docker compose exec -T app python -m app users passwd Olive --password-stdin`.
@@ -446,9 +452,9 @@ deleted before anything is done, so it cannot repeat. Its first line is one of:
 
 | Contents | What happens |
 | --- | --- |
-| empty | The owner's password, PIN and recovery code are cleared and setup opens again: the log prints a new one-time `SETUP TOKEN` (also written to `SETUP-TOKEN.txt`) and the wizard asks for a new password. Opened in a browser on the same machine (not through a container's published port) the wizard needs no token. |
-| `Olive` | The same, after checking that Olive is the owner. |
-| `Olive:new-password` | Olive's password is set now (everything after the first colon is the password). If the install has no owner, it creates one. |
+| empty | The first Admin's password, PIN and recovery code are cleared and setup opens again: the log prints a new one-time `SETUP TOKEN` (also written to `SETUP-TOKEN.txt`) and the wizard asks for a new password. Opened in a browser on the same machine (not through a container's published port) the wizard needs no token. |
+| `Olive` | The same, after checking that Olive is the first Admin. |
+| `Olive:new-password` | Olive's password is set now (everything after the first colon is the password). If the install has no Admin yet, it creates one. |
 
 ```bash
 # Linux, macOS, bare metal: reset to setup mode, or set a password directly
@@ -474,7 +480,7 @@ opens setup (the environment is no place for a password), and the value is remem
 value to run it again. Remove it afterwards.
 
 **What is reset and what is kept.** Reset: the owner's password, PIN, recovery code, sessions and remembered
-devices (`owner reset`, an empty file, the variable); one profile's PIN or password and sessions (`users
+devices (`admin reset`, an empty file, the variable); one profile's PIN or password and sessions (`users
 passwd`). Kept, always: every chat, every other profile and its PIN, the character roster, settings,
 connections, backups, and the owner's profile row itself (its id, name, picture and history). While the owner
 is unset the install is closed to the network and other profiles cannot sign in until the owner is back.
@@ -487,11 +493,11 @@ Full reference: [docs/accounts.md](docs/accounts.md).
   <tr>
     <td width="50%">
       <img src="docs/screenshots/welcome.png"
-           alt="The first screen of a new install: two chats, Meet Atlas and How DisPatch works, ready to open." />
+           alt="The first screen of a new install: three chats, Meet Atlas, How DisPatch works and Set up add-ons, ready to open." />
     </td>
     <td width="50%">
       <img src="docs/screenshots/ai-models.png"
-           alt="Settings on the AI models tab: choose a provider, paste a key, test it, and connect Atlas." />
+           alt="Settings → AI &amp; Connections: a connection card with Test and Edit, the default connection, the one-provider quick setup and image generation." />
     </td>
   </tr>
   <tr>
@@ -505,7 +511,7 @@ Full reference: [docs/accounts.md](docs/accounts.md).
     </td>
     <td width="50%">
       <img src="docs/screenshots/plugins-tab.png"
-           alt="Settings on the Plugins tab: add-ons, apps and tools, and the built-in lookups." />
+           alt="Settings → Plugins &amp; Apps: the add-ons list with the voice add-on's install command, apps and tools, and the built-in lookups." />
     </td>
   </tr>
   <tr>
@@ -528,36 +534,36 @@ Full reference: [docs/accounts.md](docs/accounts.md).
 ### The rest of the app
 
 A demo install with three fictional assistants — the same app on a desktop and
-on a phone, in a few of the ten themes.
+on a phone, in a few of the thirteen themes.
 
 <table>
   <tr>
     <td width="50%">
       <img src="docs/screenshots/desktop-glacier.png"
-           alt="DisPatch Chat on a desktop browser in the default Glacier theme: a rail of three letter-block bot avatars on the left, the planner bot's thread list, and an open thread where it answers with a day-trip plan as a bulleted list and a sortable comparison table." />
+           alt="DisPatch Chat on a desktop browser in the default Glacier theme: a rail with the Atlas picture and two letter-block bot avatars on the left, the planner bot's thread list, and an open thread where it answers with a week of dinners as a bulleted list and a shopping list." />
     </td>
     <td width="50%">
       <img src="docs/screenshots/desktop-midnight-gold.png"
-           alt="The same app in the Midnight Gold theme, showing a reply with a console code block that has a language label, a wrap toggle and a copy button." />
+           alt="The same dinner-plan chat in the Midnight Gold theme, warm gold on black." />
     </td>
   </tr>
   <tr>
-    <td align="center"><em>Glacier (default) — markdown and sortable tables</em></td>
-    <td align="center"><em>Midnight Gold — code blocks</em></td>
+    <td align="center"><em>Glacier (default) — markdown lists</em></td>
+    <td align="center"><em>Midnight Gold — the same chat in warm gold on black</em></td>
   </tr>
   <tr>
     <td width="50%">
       <img src="docs/screenshots/desktop-checklist.png"
-           alt="A reply in the Forest theme containing an interactive checklist table: four household chores with a checkbox per row and sortable Task, Who and When columns." />
+           alt="A reply in the Glacier theme containing an interactive checklist table: four household chores with a checkbox per row and sortable Task, Who and When columns." />
     </td>
     <td width="50%">
       <img src="docs/screenshots/settings-theme.png"
-           alt="Settings on the Theme tab: a grid of live miniature previews for the six core themes, a More themes row with four more, and a check mark on the active one." />
+           alt="Settings → Appearance: a grid of live miniature previews for the nine core themes, a More themes row with four more, and a check mark on the active one." />
     </td>
   </tr>
   <tr>
     <td align="center"><em>Checklist tables — ticks sync to every device</em></td>
-    <td align="center"><em>Settings → Appearance — ten skins, live previews</em></td>
+    <td align="center"><em>Settings → Appearance — thirteen skins, live previews</em></td>
   </tr>
 </table>
 
@@ -573,7 +579,7 @@ on a phone, in a few of the ten themes.
     </td>
     <td width="33%">
       <img src="docs/screenshots/bot-manager.png"
-           alt="The Settings dialog on the Bots tab, listing four bots with drag handles, Safe, React and Pool toggles, a Change photo button and a per-bot visibility switch." />
+           alt="Settings → Characters: Atlas, Job Board (hidden), Nova and Scout with drag handles, Details and a ⋯ menu." />
     </td>
   </tr>
   <tr>
@@ -583,10 +589,96 @@ on a phone, in a few of the ten themes.
   </tr>
 </table>
 
+## What's new in 4.3
+
+Security fixes from the 3.0 review, agent schedules, and outside sign-in. The full list,
+with the upgrade notes, is in the [changelog](CHANGELOG.md#430---2026-11-01).
+
+- **Only the Owner runs host-level things.** The Owner is the first, protected Admin. Other
+  Admins still run the household (People, Characters, backups, network, plugins), but the
+  coding harness, the local file viewer, agent shell and file tools, server environment
+  keys on connections, outside sign-in and showing the backup recovery key are the Owner's
+  alone. An install with one Admin sees no change. The table is in
+  [docs/security.md](docs/security.md#what-only-the-owner-can-do).
+- **Safer sign-in.** An install nobody has claimed answers only a browser on the same
+  computer. One throttle covers every PIN and password, and your own remembered device can
+  still sign in while someone else is guessing. Forwarded headers are believed only from
+  a proxy you name (`trusted_proxies`, `DISPATCH_TRUSTED_PROXIES`). A brand-new install
+  asks programs on the same computer for the API key too.
+- **Agent schedules.** Tasks → Schedules repeats a task every N minutes, every day or every
+  week ([docs/agents.md](docs/agents.md#schedules)).
+- **Agent limits by default.** Each agent task gets $2.00 and 60 turns, and $10.00 per agent
+  per day, unless the agent has its own limits. Chat turns are never limited by them. An
+  approval nobody answers in 30 minutes is a No.
+- **Shell commands that may run without asking:** a per-agent list of command prefixes
+  (only the Owner adds to it). Every file path an agent touches must be inside its working
+  folder.
+- **Animal Friends starter pack and an Add-a-pack dialog:** eight gentle animal bots for small children, each with a picture and a voice; pick which bots to add, or add all (Settings → Characters → Household).
+- **Two new agent backends,** both off until set up: command-line programs the Owner
+  chooses, and Claude Managed Agents (not verified against the live service).
+- **Outside sign-in** (OpenID Connect), off by default: link a profile to an account at
+  your own identity provider ([docs/oidc.md](docs/oidc.md)).
+- **Backups** carry every stored key, a restore lists the keys you must type again, and the
+  Owner can show the generated recovery key again.
+- **Characters → Mine keeps your order:** drag a bot by its grip or use Move up / Move down.
+  Settings links (`#settings/<section>`) open Settings at that place.
+- A Windows installer (built on Windows runners), a read-only container root with `HOME`
+  on the data volume, and an optional Claude Agent build (`AGENTS_CLAUDE=1`).
+
+## What's new in 4.2
+
+One owner per bot. The full list is in the [changelog](CHANGELOG.md#420---2026-10-26).
+
+- **Every bot has one owner.** Nobody shares a bot, or its chats, with another profile.
+  Bits and the other agent bots belong to the Owner.
+- **Household bots are templates.** Nobody chats with the household version. Each profile
+  it is given to gets its own copy, which follows the household version except for what
+  that person changed; **Reset to household version** puts it back.
+- **Characters has its own page** (Settings → Characters): **Mine** for your own bots and
+  **Household** for Admins, with **Who can use it**, **Share with household** and **Stop
+  sharing**.
+- `GET /api/health/invariants` checks the data rules at every start.
+- A resizable Settings window, and Image Studio with newest first, delete by age and
+  several generations at once.
+
+## What's new in 4.1
+
+Managed bots. The full list is in the [changelog](CHANGELOG.md#410--2026-10-25).
+
+- **A household bot keeps its copies up to date:** name, picture, personality, quick
+  actions and lookups follow it, except what a copy's owner changed. Atlas ships this way,
+  with its guide chats.
+- Deleting your Atlas and adding it back gives a real Atlas again, guide chats included.
+
+## What's new in 4.0
+
+Chat-first profiles. The full list is in the [changelog](CHANGELOG.md#400--2026-10-23).
+
+- **Three roles: Admin, User, Basic.** The first Admin is protected (it cannot be demoted or
+  deleted). A User makes their own bots (by hand or described to an AI), copies household
+  bots and picks backends from the connections an Admin allows. A Basic profile gets only the
+  household bots an Admin adds. PINs and passwords are optional.
+- **Private chats.** A chat belongs to the profile it was had in; other profiles, Admins
+  included, cannot open it in the app. The exception is the shared **DisPatch** profile.
+- **DisPatch, the shared default profile.** Locked and unsigned devices land on it (or on
+  the profile list, if you choose that). A profile button switches to your own profile.
+  A sign-in popup says what is shared and what is private.
+- **Every new profile gets its own Atlas**, and **Reset to default** (Settings → You →
+  Account) wipes a profile's bots and chats and starts it over.
+- **Copying bots** copies setup only (name, picture, personality, voice, backend), never
+  chats. API keys are household connections that every profile's bots may use.
+- **Per-profile voice clones** with DisPatch Voice 1.6 or later.
+- **No Restricted tier, no Safe Mode, no supervision, no daily limits.** The image hard
+  lines stay: adult-only depictions, and no sexual imagery of real, identifiable people.
+- **Built for a year of use.** A daily maintenance task prunes old activity rows, tidies the
+  database and the disk, and an Admin setting keeps generated images forever (the default)
+  or for N months ([docs/maintenance.md](docs/maintenance.md)).
+- A new icon set (ThemeForge 2.0).
+
 ## What's new in 3.1
 
 - **Accounts from the command line, and a way back in.** `python -m app users list | add | passwd | delete`,
-  `owner reset` and `token show | rotate` work on the data directory, locally or with
+  `admin reset` and `token show | rotate` work on the data directory, locally or with
   `docker compose exec app ...`; a `RESET_LOGIN` file or `DISPATCH_RESET_OWNER` is read once at start for
   someone who only has the files. A running server follows a command-line change within a second. See
   [Accounts and lockout recovery](#accounts-and-lockout-recovery).
@@ -597,9 +689,9 @@ on a phone, in a few of the ten themes.
   an owner exists; any other machine finishes setup only with the one-time setup token printed
   in the server log (`docker compose logs app` in Docker). An install that already has a PIN is
   unaffected.
-- **Profiles and roles.** Owner, Admin, Member and Restricted replace "PIN or Safe Mode". Each
-  profile has its own PIN or password, budgets and session timeout, and every route declares the
-  permission it needs.
+- **Profiles and roles.** Owner, Admin, Member and Restricted replaced "PIN or Safe Mode" (4.0
+  renamed them Admin, User and Basic and removed the limited tier). Each profile has its own PIN or
+  password and session timeout, and every route declares the permission it needs.
 - **One settings store.** Every user-facing setting is described once (64 documented keys, see
   [docs/settings.md](docs/settings.md)), kept in `chats.db`, overridable by environment variable
   and editable in its **Settings** section (or found with the search box) or over `GET`/`PATCH /api/settings`.
@@ -628,9 +720,9 @@ on a phone, in a few of the ten themes.
 - **Quick actions** on desktop, and a **Plugins tab** with room for add-ons' own
   Settings tabs. Settings is reordered by how often you use each tab.
 - **Tool packages**: add-ons can register their own lookups.
-- **2.3.4, voice on locked devices:** a Safe-Mode device can talk to a `safe` bot
-  by voice. Every voice turn runs with the same locked rules, and the same daily
-  budget, as a typed Safe-Mode message. Needs DisPatch Voice 1.3.3 or later.
+- **2.3.4, voice on locked devices:** a limited-tier device could talk to a `safe` bot
+  by voice (gone in 4.0, along with the tier: every profile with `use_voice` can call
+  the bots it may use).
 - **2.3.6, Personality:** a preset picker and prompt editor per bot, in
   Settings → Characters (ten presets in `backend/app/personas/`).
 - **2.3.7, integrations:** pictures from MiniMax, OpenAI or xAI Grok; one key
@@ -640,9 +732,9 @@ on a phone, in a few of the ten themes.
 - **2.3.8:** Settings is laid out for a 360px phone.
 - **2.3.9, pictures:** Image Studio, and a lightbox gallery with arrow keys, side
   buttons and swipe.
-- **2.4.0, hide on unlocked devices:** a bot can stay on the locked family tablet
-  and off your own screen; Settings → Appearance → Advanced can bring hidden bots back per device.
-- Web Push pings, real streaming for legacy `api:` bots and Safe-Mode advisors
+- **2.4.0, hide on unlocked devices:** a bot could be kept off the rail; 4.0 keeps the idea as
+  an Admin's `hidden` switch (display only).
+- Web Push pings, real streaming for legacy `api:` bots and advisors
   arrived on the way; the [changelog](CHANGELOG.md) has all of it.
 
 ## What it is
@@ -660,11 +752,11 @@ no message broker, no build step. It runs comfortably on a Raspberry Pi.
 
 ### The shape of it, honestly
 
-A whole household can use one install, and everyone who unlocks it sees the same
-threads, so people really can talk to each other in here. That works, and some
-families use it that way.
+A whole household can use one install. Since 4.0 each profile's chats are its own, and
+the bots are the participants, not other people: this is not a place for people to talk to
+each other.
 
-But it was built first as a **front door to an AI backend** — originally an
+It was built first as a **front door to an AI backend** — originally an
 agent runtime like [OpenClaw](docs/agents.md) running on your own machine — that
 happens to look and feel like the messaging app everyone already knows. The
 bots are participants in the threads, not a feature bolted onto a chat app.
@@ -677,12 +769,11 @@ bot at a model provider's API directly. The agent path is still what you want
 if you need a thing that can *use tools and act on the machine*, and it is
 still the one that has to run on the same host.
 
-Since 3.0 it has **accounts**: an Owner, Admins, Members and Restricted profiles,
-enforced on the server for every route. Conversations are still one shared
-household space (no per-person threads yet); roles decide what each person can
-*do* and which characters they can reach. The design and what is built are in
-[docs/design/multi-user.md](docs/design/multi-user.md); the upgrade that keeps an
-existing install's PIN and history is in [docs/security.md](docs/security.md#upgrading-to-30).
+It has **profiles** (Admin, User, Basic), enforced on the server for every route.
+A conversation belongs to the profile it was had in and Admins cannot open it; roles decide
+what each person can *do* and which bots they can reach. The design history is in
+[docs/design/multi-user.md](docs/design/multi-user.md); the upgrade that keeps an existing
+install's PIN and history is in [docs/security.md](docs/security.md#upgrading-to-40).
 
 ## Features
 
@@ -718,15 +809,17 @@ existing install's PIN and history is in [docs/security.md](docs/security.md#upg
   ([docs/extensions.md](docs/extensions.md))
 
 **Access control**
-- **Profiles and roles**: an Owner, Admins (password), Members (own PIN) and
-  Restricted profiles; sessions idle-expire per role, and a device can be bound to
-  a profile or remembered for a sliding window if you choose
-- A **Restricted** profile — a family tablet on the kitchen counter, a child, a
-  guest — can read and send to the characters made for it, with all media stripped
-  server-side, daily per-profile budgets and time limits; every management route
-  and WebSocket action declares the permission it needs and answers 403 otherwise
-- **One-way file drop**: a Restricted device can send you a file without being
-  able to browse or retrieve anything
+- **Profiles and roles**: Admin, User and Basic; sessions idle-expire per role, and a
+  device can be remembered for a sliding window if you choose. The first Admin cannot
+  be demoted or deleted
+- **Private chats**: a profile's chats and its own bots are visible to that profile
+  only, Admins included. The shared **DisPatch** profile is open to anyone who reaches
+  the app (it can never run agents or clone voices)
+- Every management route and WebSocket action declares the permission it needs and
+  answers 403 otherwise; an Admin can switch individual abilities off (or, for the
+  few that are off by default, on) per profile
+- **File Server**: Basic profiles can upload only; Users also list and download their
+  own files
 
 **Operations**
 - Built-in **host dashboard**: health, storage, database integrity, backup
@@ -737,14 +830,14 @@ existing install's PIN and history is in [docs/security.md](docs/security.md#upg
   an HTML page or a whole static site, a PDF, markdown, a log, an image, a
   video, a folder listing. The server reads the bytes, so it works from a phone
   as well as the desktop. It serves nothing until you name a folder, and never
-  serves secrets, dotfiles or system paths; unlocked sessions only
+  serves secrets, dotfiles or system paths; the Owner (the main Admin) only
 
 **Interface**
 - Eight languages — English, العربية, Deutsch, Español, Français, 日本語,
   Português, 中文 — including full right-to-left layout
-- Ten built-in themes — Glacier (default), Midnight Gold, Forest, Paper,
-  Daylight, Classic Purple, Electric Yellow, Night Red and two LaserLloyd
-  skins — picked per device from Settings → Appearance, each
+- Thirteen built-in themes — Glacier (default), Midnight Gold, Forest, Paper,
+  Daylight, Slate, High Contrast, High Contrast Light, Classic Purple, Electric
+  Yellow, Night Red and two LaserLloyd skins — picked per device from Settings → Appearance, each
   with a live preview. A theme is one fixed skin; there is no separate
   light/dark switch
 - Keyboard-navigable, screen-reader labelled, WCAG AA contrast in every theme
@@ -763,11 +856,12 @@ existing install's PIN and history is in [docs/security.md](docs/security.md#upg
   backend, the **Claude Agent** (Anthropic API key or Bedrock, Google Cloud,
   Foundry credentials), has no such constraint
   ([docs/agents.md](docs/agents.md))
-- **Agents and tasks**: an Owner or Admin publishes configured agents to
-  profiles; people assign them tasks from any chat (or `@agent`), watch a live
-  timeline, answer approval cards (destructive tools always ask), steer or stop
-  them, and see costs labelled as estimates, under per-person daily limits. A
-  Restricted profile never sees any of it
+- **Agents and tasks**: an Admin publishes configured agents to profiles that have
+  been given the ability (off by default for Users and Basic profiles, never on the
+  shared DisPatch profile, with a plain warning that agent bots can run commands on
+  this PC and read anyone's chats); people assign them tasks from any chat (or
+  `@agent`), watch a live timeline, answer approval cards (destructive tools always
+  ask), steer or stop them, and see costs labelled as estimates
 - Agents reply into threads like any other participant, and can push proactive
   messages (a morning briefing, a finished job, an alert)
 - **Entirely optional** — DisPatch is a perfectly good human-to-human chat with
@@ -826,41 +920,38 @@ existing install's PIN and history is in [docs/security.md](docs/security.md#upg
 - **Removed:** the coding-terminal pane. The
   licence is **MIT** (it was AGPL-3.0 before 2026-08-30).
 
-## Why there is a PIN
+## Why there are roles
 
 An agent backend is not a chatbot. It runs real commands on the machine it lives
 on, with your credentials, because that is the entire point of having one.
 
-Which means a child with full access could ask it, perfectly politely, to
+Which means a guest with full access could ask it, perfectly politely, to
 replace your entire website with pictures of ducks. It would. It would do a
 thorough job, and it would tell you cheerfully when it was finished. Nothing in
 that request looks different to an agent from "summarise this email", and by the
 time you read the message the ducks are live.
 
-So roles are not about keeping the family out of the chat. They are about which
+So roles are not about keeping people out of the chat. They are about which
 half of the app is behind a door:
 
 <div align="center">
   <img src="docs/assets/tiers.svg" width="100%"
-       alt="Every role funnels through one server-side gate. A kitchen tablet on a Restricted profile reads and sends to the characters made for it only, media stripped server-side, a one-way file drop, daily per-profile budgets, and 403 on every management route. The Owner's phone, signed in, reaches everything: agents, files, settings, deletion, the host dashboard and the tools." />
+       alt="Every role funnels through one server-side gate. A shared tablet that nobody signed in on lands on the shared DisPatch profile, a User with no PIN: chat, voice, lookups, its own bots and pictures, never agents or management routes. An Admin signed in on a phone reaches everything except other profiles' chats." />
 </div>
 
-**Restricted** (formerly "Safe Mode") — what a kitchen tablet or a child's profile
-gets, signed in or not. Read and send, but only to the characters whose audience
-is *Restricted* or *Everyone*, with media stripped server-side, per-profile daily
-budgets, time limits and quiet hours, and a one-way file drop (they can send you a
-file; they cannot browse or retrieve anything). Every management endpoint answers
-403, and the Owner sees a summary of what the profile did (counts, not content).
+**Basic** gets the household bots an Admin adds, and chat, voice, lookups and file
+upload. Images and voice cloning are off until an Admin switches them on. **User**
+adds its own bots, copies of household bots, images, voice cloning and a File Server
+it can list and download from. **Admin** also runs the household: agents, files, wipe and
+export, the host dashboard, backups, connections, plugins and the other profiles. Since 4.3
+the things that run code or read files on the host (the coding pane, the local file viewer,
+agent shell tools, server environment keys) are the **Owner's** alone: the first,
+protected Admin. Running an agent on the host is its own permission
+(`dispatch_agents`), off by default for Users and Basic profiles and never available to
+the shared DisPatch profile. The full table is in [docs/security.md](docs/security.md#what-each-role-may-do).
 
-**Member, Admin, Owner** — progressively more. A Member chats, uses voice, images
-and the tools you enabled. An Admin also manages characters, connections, plugins
-and the other profiles. The Owner (formerly "Unlocked") also holds host control:
-the full-power agents, files, wipe and export, the host dashboard, and the
-DeepSeek Harness pane (when `dsh` is installed) if you turned it on. Running an
-agent on the host is its own permission (`dispatch_agents`).
-
-The split is enforced on the server, not in the interface — a Restricted device
-that crafts the request by hand gets the same 403 as one that presses the button.
+The split is enforced on the server, not in the interface — a device that crafts
+the request by hand gets the same 403 as one that presses the button.
 That is the invariant to protect if you contribute: every route and WebSocket
 action declares the permission it needs in `backend/app/route_policy.py`, a test
 fails the build if one does not, and a permission problem is never fixed by
@@ -872,9 +963,11 @@ DisPatch ships with no model and talks to no cloud until you tell it to. Making
 it answer takes about a minute and needs no agent stack:
 
 1. Open **⚙ Settings → AI & Connections**.
-2. Choose the bot to connect (Atlas by default, any other direct-API bot, or a
-   new one), pick a provider, paste a key if it needs one, press **Test**, pick a
-   model from the list, press **Connect**.
+2. Press **Add a connection** (or **Set up everything with one provider**), pick
+   a provider, paste a key if it needs one, press **Test**, pick a model from the
+   list and **Save**.
+3. In **Settings → Characters**, open Atlas's **Details** (or any other
+   direct-API bot's) and pick that connection.
 
 That is it. The bot keeps its threads and history and works like every other
 conversation in the app. Behind the scenes this fills in the bot's `advisor:`
@@ -944,10 +1037,13 @@ of what you are trusting:
   history and hands text to agent backends. Transport is TLS; storage is your
   filesystem. Anyone claiming otherwise about an app shaped like this is
   selling something.
-- **Accounts are roles, not walls.** Members share the household's conversations;
-  there is no per-person thread ownership yet, and an agent-backed character runs
-  with your user's rights on the host (hence the separate `dispatch_agents`
-  permission). See [docs/security.md](docs/security.md).
+- **Profiles are privacy, not walls.** A profile's chats are private to it, Admins
+  included, but an Admin has host access and can download backups, and an
+  agent-backed character runs with your user's rights on the host (hence the
+  separate `dispatch_agents` permission). See [docs/security.md](docs/security.md).
+- **The Owner holds the host.** Things that run code or read files on the host
+  computer are the first, protected Admin's alone; other Admins run the household.
+  See [docs/security.md](docs/security.md#what-only-the-owner-can-do).
 - **Privacy mode** lets a device hold nothing locally: no offline cache, no
   saved settings, no persistent session. See
   [docs/security.md](docs/security.md#privacy-mode).
@@ -1004,18 +1100,14 @@ cd backend && uv run pytest -q     # Linux or WSL; on native Windows run a subse
 
 ## Roadmap
 
-3.0 shipped the first half of [the multi-user design](docs/design/multi-user.md):
-profiles, roles, per-profile budgets and the migration that preserves an existing
-install's history. Designed in detail and not yet built:
+4.0 shipped the multi-user design as chat-first profiles: private chats per profile,
+roles, household and personal bots. 4.3 added agent schedules, a command-line agent
+backend and a Claude Managed Agents backend (off by default, not yet verified against the
+live service). Designed in detail and not yet built:
 
-- **Per-conversation access** — today conversations are one shared household
-  space; roles gate actions and characters, not individual threads
-  ([docs/design/multi-user.md](docs/design/multi-user.md), "deferred").
 - **TOTP and passkeys** ([docs/design/remote-access-and-auth.md](docs/design/remote-access-and-auth.md))
   — a second factor and the honest account of where passkeys help and where they
   cause self-hosting pain. Passwords, PINs and recovery codes exist today.
-- **Agents**: Claude Managed Agents (hosted sessions), the generic CLI adapter and
-  scheduled tasks ([docs/agents.md](docs/agents.md), "Known limits").
 
 ## Translating
 

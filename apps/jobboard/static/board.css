@@ -156,6 +156,11 @@ body.jb-page button { cursor: pointer; }
   font-size: 14px; line-height: 1; cursor: pointer;
 }
 .job-chip__remove:hover { color: var(--error-text); }
+/* Touch: the × keeps its look; an invisible ::after makes the tap area 44px tall. */
+@media (max-width: 768px), (hover: none) {
+  .job-chip__remove { position: relative; }
+  .job-chip__remove::after { content: ''; position: absolute; left: -4px; right: -4px; top: 50%; height: 44px; transform: translateY(-50%); }
+}
 
 /* ===================== The thread panel (thread.js) ===================== */
 /* In the shell the panel inherits the chat's type scale, which is sized for

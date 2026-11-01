@@ -2,6 +2,7 @@
   "capabilities": [
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/auth/status"
       ],
@@ -15,6 +16,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/auth/me"
       ],
@@ -28,6 +30,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/auth/unlock"
       ],
@@ -35,12 +38,13 @@
       "machine": [],
       "mcp": null,
       "permission": null,
-      "title": "Sign the Owner in with the install PIN",
+      "title": "Sign the main Admin in with the install PIN",
       "ui": "api.unlock",
       "ws": []
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/auth/login"
       ],
@@ -54,6 +58,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/auth/switch"
       ],
@@ -67,6 +72,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/auth/lock"
       ],
@@ -80,6 +86,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/auth/setup"
       ],
@@ -93,6 +100,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/auth/recover"
       ],
@@ -106,6 +114,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/auth/password"
       ],
@@ -119,6 +128,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/auth/remember-config",
         "POST /api/auth/forget-devices"
@@ -133,20 +143,35 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
-        "GET /api/auth/api-token",
-        "POST /api/auth/api-token"
+        "GET /api/auth/api-token"
       ],
       "id": "auth.api_token",
       "machine": [],
       "mcp": null,
       "permission": "manage_settings",
-      "title": "Manage the machine API key",
+      "title": "Read the machine access key settings",
       "ui": "api.apiTokenInfo",
       "ws": []
     },
     {
       "cli": null,
+      "host": true,
+      "http": [
+        "POST /api/auth/api-token"
+      ],
+      "id": "auth.api_token_rotate",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_settings",
+      "title": "Replace the machine access key",
+      "ui": "api.rotateApiToken",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "host": false,
       "http": [
         "GET /api/people"
       ],
@@ -160,6 +185,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/people"
       ],
@@ -173,6 +199,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "PATCH /api/people/{profile_id}"
       ],
@@ -186,6 +213,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "DELETE /api/people/{profile_id}"
       ],
@@ -199,6 +227,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/people/{profile_id}/pin",
         "DELETE /api/people/{profile_id}/pin"
@@ -213,6 +242,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/people/{profile_id}/password"
       ],
@@ -226,6 +256,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/people/{profile_id}/sign-out"
       ],
@@ -239,21 +270,22 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/people/devices",
-        "PUT /api/people/devices/this",
         "DELETE /api/people/devices/{device_id}"
       ],
       "id": "people.devices",
       "machine": [],
       "mcp": null,
       "permission": "manage_users",
-      "title": "List devices; bind this device to a profile; forget one",
+      "title": "List devices; forget one",
       "ui": "api.devices",
       "ws": []
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/people/activity",
         "GET /api/people/audit"
@@ -268,19 +300,7 @@
     },
     {
       "cli": null,
-      "http": [
-        "GET /api/me/activity"
-      ],
-      "id": "me.activity",
-      "machine": [],
-      "mcp": null,
-      "permission": "use_chat",
-      "title": "My own activity summary (the Restricted disclosure)",
-      "ui": "api.myActivity",
-      "ws": []
-    },
-    {
-      "cli": null,
+      "host": false,
       "http": [
         "GET /api/threads"
       ],
@@ -298,6 +318,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/threads"
       ],
@@ -315,6 +336,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/threads/{thread_id}"
       ],
@@ -330,6 +352,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/threads/{thread_id}/messages"
       ],
@@ -347,6 +370,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "PATCH /api/threads/{thread_id}",
         "DELETE /api/threads/{thread_id}"
@@ -365,6 +389,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/threads/{thread_id}/abort"
       ],
@@ -380,6 +405,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/threads/{thread_id}/read"
       ],
@@ -395,6 +421,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/unread"
       ],
@@ -410,6 +437,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/threads/{thread_id}/messages"
       ],
@@ -427,6 +455,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [],
       "id": "messages.retry",
       "machine": [],
@@ -440,6 +469,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [],
       "id": "messages.regenerate",
       "machine": [],
@@ -454,6 +484,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "DELETE /api/messages/{message_id}"
       ],
@@ -469,6 +500,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "PATCH /api/messages/{message_id}"
       ],
@@ -482,6 +514,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/messages/{message_id}/feedback"
       ],
@@ -495,6 +528,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/upload"
       ],
@@ -503,52 +537,42 @@
         "machine:upload"
       ],
       "mcp": null,
-      "permission": "use_chat",
+      "permission": "attach_files",
       "title": "Attach a picture or file to a chat",
       "ui": "api.upload",
       "ws": []
     },
     {
       "cli": null,
-      "http": [
-        "POST /api/drop"
-      ],
-      "id": "uploads.drop",
-      "machine": [],
-      "mcp": null,
-      "permission": "use_chat",
-      "title": "Drop a file one-way into a chat (the locked side's upload)",
-      "ui": "api.drop",
-      "ws": []
-    },
-    {
-      "cli": null,
+      "host": false,
       "http": [
         "GET /api/search"
       ],
       "id": "search",
       "machine": [],
       "mcp": null,
-      "permission": "view_activity",
-      "title": "Search every conversation",
+      "permission": "use_chat",
+      "title": "Search your own conversations",
       "ui": "api.search",
       "ws": []
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/export"
       ],
       "id": "export",
       "machine": [],
       "mcp": null,
-      "permission": "admin_system",
-      "title": "Export all history",
+      "permission": "manage_history",
+      "title": "Export your own history",
       "ui": "api.exportUrl",
       "ws": []
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/bots"
       ],
@@ -564,6 +588,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/bots/all"
       ],
@@ -577,6 +602,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/bots"
       ],
@@ -590,6 +616,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "PATCH /api/bots/{bot_id}"
       ],
@@ -597,12 +624,13 @@
       "machine": [],
       "mcp": null,
       "permission": "manage_characters",
-      "title": "Change a character (including its audience)",
+      "title": "Change a character (including whether it is hidden)",
       "ui": "api.patchBot",
       "ws": []
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "DELETE /api/bots/{bot_id}"
       ],
@@ -616,6 +644,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "PUT /api/bots/order"
       ],
@@ -629,6 +658,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/bots/{bot_id}/avatar",
         "POST /api/bots/{bot_id}/avatar/restore"
@@ -645,6 +675,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/reactions"
       ],
@@ -660,6 +691,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/reactions",
         "PATCH /api/reactions/{rid}",
@@ -677,6 +709,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/reactions/fire"
       ],
@@ -692,6 +725,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/llm/providers",
         "POST /api/llm/test",
@@ -707,6 +741,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/llm/image",
         "PUT /api/llm/image",
@@ -722,6 +757,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/connections",
         "POST /api/connections",
@@ -744,13 +780,13 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/characters/all",
         "GET /api/characters/personas",
         "PUT /api/characters/order",
         "POST /api/characters",
         "GET /api/characters/{character_id}",
-        "PATCH /api/characters/{character_id}",
         "DELETE /api/characters/{character_id}"
       ],
       "id": "characters.api",
@@ -763,6 +799,67 @@
     },
     {
       "cli": null,
+      "host": false,
+      "http": [
+        "GET /api/characters/manage"
+      ],
+      "id": "characters.manage",
+      "machine": [],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "The Characters page: Mine and Household rows",
+      "ui": "settings.characters",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "host": false,
+      "http": [
+        "PUT /api/me/characters/order"
+      ],
+      "id": "characters.reorder",
+      "machine": [],
+      "mcp": null,
+      "permission": "use_chat",
+      "title": "Reorder my own characters (the rail and Mine)",
+      "ui": "settings.characters",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "host": false,
+      "http": [
+        "PATCH /api/characters/{character_id}"
+      ],
+      "id": "characters.edit",
+      "machine": [],
+      "mcp": null,
+      "permission": "create_characters",
+      "title": "Edit a character: a template, a copy, an own bot or the Owner's agent bot",
+      "ui": "settings.characters",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "host": false,
+      "http": [
+        "GET /api/characters/{character_id}/give-to/preview",
+        "PUT /api/characters/{character_id}/give-to",
+        "POST /api/characters/{character_id}/stop-sharing/preview",
+        "POST /api/characters/{character_id}/stop-sharing",
+        "POST /api/me/characters/{bot_id}/share"
+      ],
+      "id": "characters.sharing",
+      "machine": [],
+      "mcp": null,
+      "permission": "manage_characters",
+      "title": "Who can use a character: give to, stop sharing, share my bot",
+      "ui": "settings.characters",
+      "ws": []
+    },
+    {
+      "cli": null,
+      "host": false,
       "http": [
         "GET /api/characters"
       ],
@@ -778,9 +875,11 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/starter-packs",
-        "POST /api/starter-packs/{pack_id}/install"
+        "POST /api/starter-packs/{pack_id}/install",
+        "GET /api/starter-packs/{pack_id}/pictures/{character_id}"
       ],
       "id": "characters.packs",
       "machine": [],
@@ -792,6 +891,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/settings/schema",
         "GET /api/settings"
@@ -806,6 +906,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "PATCH /api/settings"
       ],
@@ -819,6 +920,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/settings/defaults"
       ],
@@ -832,6 +934,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/wizard"
       ],
@@ -845,6 +948,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/wizard/detect",
         "POST /api/wizard/connection"
@@ -859,6 +963,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/wizard/family"
       ],
@@ -872,6 +977,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/wizard/step/{step}",
         "POST /api/wizard/finish"
@@ -886,6 +992,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/wizard/network"
       ],
@@ -899,6 +1006,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/backups",
         "POST /api/backups",
@@ -918,6 +1026,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/support-bundle"
       ],
@@ -931,6 +1040,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/users/{profile_id}/export",
         "DELETE /api/users/{profile_id}"
@@ -945,6 +1055,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/plugins/manifests"
       ],
@@ -958,6 +1069,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/inject"
       ],
@@ -973,6 +1085,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/daily"
       ],
@@ -988,6 +1101,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/advisor/requests/{rid}/send",
         "POST /api/advisor/requests/{rid}/dismiss"
@@ -1002,6 +1116,7 @@
     },
     {
       "cli": null,
+      "host": true,
       "http": [
         "GET /api/openclaw/sessions",
         "GET /api/openclaw/transcript",
@@ -1010,13 +1125,14 @@
       "id": "agents.openclaw",
       "machine": [],
       "mcp": null,
-      "permission": "manage_agents",
+      "permission": "admin_system",
       "title": "Browse and import OpenClaw sessions",
       "ui": "api.ocSessions",
       "ws": []
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/agents/available"
       ],
@@ -1030,6 +1146,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/agents",
         "POST /api/agents",
@@ -1038,8 +1155,6 @@
         "GET /api/agents/backends",
         "GET /api/agents/settings",
         "PUT /api/agents/settings",
-        "GET /api/agents/profile-budgets",
-        "PUT /api/agents/profile-budgets/{profile_id}",
         "GET /api/agents/usage",
         "POST /api/agents/retention/purge"
       ],
@@ -1053,6 +1168,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/agents/credentials/claude",
         "PUT /api/agents/credentials/claude",
@@ -1071,6 +1187,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/tasks",
         "GET /api/tasks",
@@ -1091,6 +1208,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/approvals/{request_id}",
         "POST /api/tasks/{task_id}/release",
@@ -1106,6 +1224,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/image-jobs",
         "GET /api/image-jobs/{job_id}"
@@ -1122,6 +1241,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/files"
       ],
@@ -1130,52 +1250,56 @@
         "machine:files_list"
       ],
       "mcp": null,
-      "permission": "use_tools",
-      "title": "List the file server",
+      "permission": "files_read",
+      "title": "List your own File Server files",
       "ui": "api.files",
       "ws": []
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/files"
       ],
       "id": "files.upload",
       "machine": [],
       "mcp": null,
-      "permission": "use_tools",
-      "title": "Upload to the file server",
+      "permission": "files_upload",
+      "title": "Upload to your File Server",
       "ui": "api.uploadFile",
       "ws": []
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "DELETE /api/files/{file_id}"
       ],
       "id": "files.delete",
       "machine": [],
       "mcp": null,
-      "permission": "use_tools",
-      "title": "Delete a file",
+      "permission": "use_chat",
+      "title": "Delete one of your own files (File Server: files_read; a chat attachment: manage_history)",
       "ui": "api.deleteFile",
       "ws": []
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/files/wipe"
       ],
       "id": "files.wipe",
       "machine": [],
       "mcp": null,
-      "permission": "admin_system",
-      "title": "Wipe the file server",
+      "permission": "files_read",
+      "title": "Delete your own File Server files up to a date",
       "ui": "api.wipeFiles",
       "ws": []
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/tools"
       ],
@@ -1189,6 +1313,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "PUT /api/tools",
         "POST /api/tools/{tool_id}/refresh"
@@ -1203,6 +1328,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/plugins",
         "PUT /api/plugins/extensions/{ext_id}",
@@ -1218,6 +1344,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "POST /api/push/subscribe",
         "DELETE /api/push/subscribe",
@@ -1233,6 +1360,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/health"
       ],
@@ -1248,6 +1376,23 @@
     },
     {
       "cli": null,
+      "host": false,
+      "http": [
+        "GET /api/health/invariants"
+      ],
+      "id": "system.invariants",
+      "machine": [
+        "machine:health"
+      ],
+      "mcp": null,
+      "permission": "admin_system",
+      "title": "Check the data invariants (ownership model)",
+      "ui": null,
+      "ws": []
+    },
+    {
+      "cli": null,
+      "host": false,
       "http": [
         "GET /api/dashboard",
         "GET /api/dashboard/deep",
@@ -1263,6 +1408,7 @@
     },
     {
       "cli": null,
+      "host": true,
       "http": [
         "GET /api/harness/status",
         "POST /api/harness/jobs",
@@ -1278,6 +1424,7 @@
     },
     {
       "cli": null,
+      "host": true,
       "http": [
         "GET /api/local/roots",
         "GET /api/local/stat",
@@ -1294,6 +1441,7 @@
     },
     {
       "cli": null,
+      "host": false,
       "http": [
         "GET /api/openapi.json"
       ],
@@ -1318,8 +1466,17 @@
     "mcp"
   ],
   "unmapped_routes": [
+    "DELETE /api/agents/schedules/{schedule_id}",
+    "DELETE /api/characters/{character_id}/kit",
+    "DELETE /api/me/avatar",
+    "DELETE /api/me/characters/{bot_id}",
+    "DELETE /api/oidc/links/{profile_id}",
+    "DELETE /api/people/{profile_id}/avatar",
     "GET /",
     "GET /api/advisor/status",
+    "GET /api/agents/claude/routes",
+    "GET /api/agents/cli-presets",
+    "GET /api/agents/schedules",
     "GET /api/apps/imagestudio/chat-images",
     "GET /api/apps/imagestudio/images",
     "GET /api/apps/imagestudio/state",
@@ -1341,6 +1498,8 @@
     "GET /api/bots/{bot_id}/avatar/history/{snapshot_id}",
     "GET /api/bots/{bot_id}/avatar/thumb",
     "GET /api/bots/{bot_id}/models",
+    "GET /api/characters/{character_id}/delete-preview",
+    "GET /api/characters/{character_id}/kit",
     "GET /api/extensions",
     "GET /api/files/{file_id}/download",
     "GET /api/files/{file_id}/raw",
@@ -1359,16 +1518,37 @@
     "GET /api/jobs/{job_id}",
     "GET /api/llm/quicksetup",
     "GET /api/mail/status",
+    "GET /api/maintenance/images/preview",
+    "GET /api/maintenance/retention",
+    "GET /api/maintenance/status",
+    "GET /api/maintenance/storage",
+    "GET /api/me/archive",
+    "GET /api/me/backends",
+    "GET /api/me/characters",
+    "GET /api/me/characters/{bot_id}",
+    "GET /api/me/characters/{bot_id}/delete-preview",
+    "GET /api/me/export",
+    "GET /api/me/personas",
+    "GET /api/me/reset/preview",
     "GET /api/media",
     "GET /api/messages/{message_id}/mood-face",
+    "GET /api/oidc/callback",
+    "GET /api/oidc/config",
+    "GET /api/oidc/links",
+    "GET /api/oidc/start",
+    "GET /api/people/{profile_id}/delete/preview",
+    "GET /api/people/{profile_id}/reset/preview",
+    "GET /api/people/{profile_id}/role/preview",
     "GET /api/plugins/catalog",
     "GET /api/practice-links/{client_id}",
     "GET /api/practice/{path:path}",
+    "GET /api/profile-avatars/{name}",
     "GET /api/quick-actions",
     "GET /api/reactions/pool",
     "GET /api/reactions/prompts",
     "GET /api/reactions/{rid}/image",
     "GET /api/studioforge/status",
+    "GET /api/system/host-check",
     "GET /api/threads/{thread_id}/avatar",
     "GET /api/tools/{tool_id}/status",
     "GET /api/voice/providers",
@@ -1380,8 +1560,11 @@
     "GET /tools/_t/{ticket}/{rel:path}",
     "GET /tools/{tool_id}",
     "GET /tools/{tool_id}/{rel:path}",
+    "PATCH /api/agents/schedules/{schedule_id}",
+    "PATCH /api/me/characters/{bot_id}",
     "PATCH /api/messages/{message_id}/checklist",
     "POST /api/advisor/digest",
+    "POST /api/agents/schedules",
     "POST /api/apps/imagestudio/clear",
     "POST /api/apps/imagestudio/generate",
     "POST /api/apps/jobboard",
@@ -1395,6 +1578,10 @@
     "POST /api/apps/jobboard/{job_id}/vote",
     "POST /api/auth/pin",
     "POST /api/avatar-pool/{bot_id}/refill",
+    "POST /api/backups/recovery-key/reveal",
+    "POST /api/characters/{bot_id}/clone",
+    "POST /api/characters/{bot_id}/clone-to/{profile_id}",
+    "POST /api/characters/{character_id}/kit/push",
     "POST /api/guide/seed",
     "POST /api/harness/jobs/cancel",
     "POST /api/harness/model",
@@ -1414,13 +1601,33 @@
     "POST /api/jobs/{job_id}/tags",
     "POST /api/jobs/{job_id}/vote",
     "POST /api/llm/quicksetup",
+    "POST /api/maintenance/images/restore",
+    "POST /api/maintenance/run",
+    "POST /api/maintenance/storage/refresh",
+    "POST /api/me/avatar",
+    "POST /api/me/characters",
+    "POST /api/me/characters/draft",
+    "POST /api/me/characters/{bot_id}/avatar",
+    "POST /api/me/characters/{bot_id}/reset",
+    "POST /api/me/reset",
+    "POST /api/people/{profile_id}/avatar",
+    "POST /api/people/{profile_id}/delete",
+    "POST /api/people/{profile_id}/reset",
+    "POST /api/people/{profile_id}/role",
     "POST /api/practice/{path:path}",
     "POST /api/reactions/generate",
     "POST /api/reactions/pool/refill",
     "POST /api/recover/transcript",
     "POST /api/threads/{thread_id}/avatar",
+    "PUT /api/agents/cli-presets",
     "PUT /api/avatar-pool/{bot_id}",
     "PUT /api/avatar-pool/{bot_id}/prompts",
+    "PUT /api/characters/{character_id}/kit",
+    "PUT /api/maintenance/retention",
+    "PUT /api/me/archive",
+    "PUT /api/oidc/config",
+    "PUT /api/people/{profile_id}/backends",
+    "PUT /api/people/{profile_id}/household-bots",
     "PUT /api/practice-links/{client_id}",
     "PUT /api/reactions/pool",
     "PUT /api/reactions/prompts"

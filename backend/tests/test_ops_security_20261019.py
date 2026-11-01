@@ -42,39 +42,14 @@ def _bound_tablet(world):
     return owner, mia, tablet
 
 
-def test_device_bound_socket_sees_quiet_hours_set_later(world):
-    _owner, mia, tablet = _bound_tablet(world)
-    with tablet.websocket_connect("/ws") as ws:
-        hello = ws.receive_json()
-        assert hello["type"] == "hello" and hello["profile"]["name"] == "Mia"
-        accounts.update_profile(mia["id"], budgets={"quiet_hours": _inside_now()})  # set afterwards
-        ws.send_json({"type": "get_threads", "bot_id": "alpha"})
-        f = ws.receive_json()
-        assert f["type"] == "error" and f.get("code") == "quiet_hours", f
-
-
-def test_device_bound_socket_drops_a_disabled_profile(world):
-    owner, mia, tablet = _bound_tablet(world)
-    with tablet.websocket_connect("/ws") as ws:
-        assert ws.receive_json()["type"] == "hello"
-        assert owner.patch(f"/api/people/{mia['id']}", json={
-            "disabled": True}).status_code == 200
-        accounts.update_profile(mia["id"], budgets={"quiet_hours": _inside_now()})
-        # Disabled: the device falls back to an anonymous guest, whose own (per-address)
-        # rules apply - not Mia's, and not Mia's identity.
-        ws.send_json({"type": "get_threads", "bot_id": "alpha"})
-        f = ws.receive_json()
-        assert f.get("code") != "quiet_hours", f
-        conn = next(iter(world.main.manager._conns.values()))
-        assert conn["principal"].kind == "anonymous"
-
-
 # S-2 ------------------------------------------------------------------------ #
 
 @pytest.fixture
-def closed_install(monkeypatch):
+def closed_install(monkeypatch, world):
     """The 3.0 default: an unclaimed install is this computer's only."""
     monkeypatch.delenv("DISPATCH_ALLOW_OPEN_INSTALL", raising=False)
+    from _localhost import address_loopback_as_localhost  # 4.3 (#2): Host: localhost
+    address_loopback_as_localhost(world, monkeypatch)
 
 
 def _pin_only_household(world):
@@ -92,7 +67,8 @@ def test_recovery_with_a_household_needs_a_new_pin(world, closed_install):
     assert r.status_code == 409, r.text
     assert r.json()["error"]["code"] == "recovery_needs_new_pin"
     assert policy.claimed() and auth.verify_pin("2468")        # nothing was removed
-    assert world.client(LAN).get("/api/bots").status_code == 200   # the household still works
+    # the household still works: signing in still does (4.0: a signed-out device is nobody)
+    assert world.client(LAN).get("/api/auth/status").json()["claimed"] is True
 
 
 def test_recovery_with_a_new_pin_keeps_the_install_claimed(world, closed_install):
@@ -102,7 +78,7 @@ def test_recovery_with_a_new_pin_keeps_the_install_claimed(world, closed_install
     assert r.status_code == 200, r.text
     assert policy.claimed()
     me = phone.get("/api/auth/me").json()
-    assert (me["kind"], me["role"]) == ("profile", "owner"), me
+    assert (me["kind"], me["role"], me["protected"]) == ("profile", "admin", True), me
     assert phone.get("/api/people").status_code == 200          # straight in, from the network
     assert auth.verify_pin("1357") and not auth.verify_pin("2468")
     assert not auth.verify_recovery(code)                        # the used code is spent
@@ -127,5 +103,5 @@ def test_setup_claims_a_credential_less_owner_row(world, closed_install):
     r = local.post("/api/auth/setup", json={"password": "fresh-owner-pass1"})
     assert r.status_code == 200, r.text
     assert policy.claimed()
-    assert len([p for p in accounts.list_profiles() if p.role == "owner"]) == 1
+    assert len([p for p in accounts.list_profiles() if p.protected]) == 1
     assert world.login(world.client(LAN), name="Owner", password="fresh-owner-pass1").status_code == 200  # scrub-ok: throwaway test fixture

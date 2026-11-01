@@ -62,10 +62,14 @@ if [ "$(id -u)" = "0" ]; then
         chown -R "$PUID:$PGID" "$DATA_DIR"
     fi
 
-    # `--user 0:0` leaves HOME=/root, which the dropped user cannot read (the app
-    # then dies on /root/.local/share/...). Point HOME at the image user's home.
-    chown "$PUID:$PGID" /home/app 2>/dev/null || true
-    export HOME=/home/app
+    # HOME lives on the data volume (the image sets HOME=/data/home). `--user 0:0`
+    # with an explicit HOME=/root would leave the dropped user a home it cannot
+    # read, so a HOME outside the data directory falls back to $DATA_DIR/home.
+    # Create it if missing and chown that ONE directory (never recursively).
+    case "${HOME:-}" in "$DATA_DIR"/*) ;; *) HOME="$DATA_DIR/home" ;; esac
+    export HOME
+    if [ ! -d "$HOME" ]; then (umask 077 && mkdir -p "$HOME"); fi
+    chown "$PUID:$PGID" "$HOME"
     exec setpriv --reuid="$PUID" --regid="$PGID" --init-groups --inh-caps=-all -- "$0" "$@"
 fi
 
@@ -91,6 +95,29 @@ if [ ! -w "$DATA_DIR" ]; then
     log " Full explanation: docs/deploy-docker.md § Volume permissions"
     log "-----------------------------------------------------------------"
     die "data directory not writable"
+fi
+
+# HOME (issue #38). The image sets HOME=/data/home so that everything written
+# to ~ (the voice add-on's rig token, the Claude Agent SDK's ~/.claude, Python's
+# user caches) lands on the volume and a read-only root works. Create it only
+# when it is missing, owner-only; an existing one is left exactly as it is.
+if [ -n "${HOME:-}" ] && [ ! -d "$HOME" ]; then
+    (umask 077 && mkdir -p "$HOME") \
+        || log "WARNING: could not create HOME=${HOME}; anything that writes to ~ will fail"
+fi
+
+# Compatibility: before 4.3 HOME was /home/app, and docs/deploy-docker.md told
+# people to mount an agent runtime's state there (/home/app/.openclaw). The image
+# no longer has /home/app, so anything found there was mounted on purpose: link
+# each entry into the new HOME unless HOME already has one of that name.
+if [ -d /home/app ] && [ "$HOME" != "/home/app" ] && [ -w "$HOME" ]; then
+    for entry in /home/app/.[!.]* /home/app/*; do
+        [ -e "$entry" ] || continue
+        name="${entry##*/}"
+        if [ ! -e "$HOME/$name" ] && [ ! -L "$HOME/$name" ]; then
+            ln -s "$entry" "$HOME/$name" && log "linked legacy mount $entry -> $HOME/$name"
+        fi
+    done
 fi
 
 # Upload spool. FastAPI's UploadFile spools multipart bodies to TMPDIR before
@@ -200,7 +227,7 @@ if [ -n "${OPENCLAW_BIN:-}" ] && [ ! -x "${OPENCLAW_BIN}" ]; then
     log "WARNING: OPENCLAW_BIN=${OPENCLAW_BIN} is not an executable file in this container. Agent replies will fail with a clear error; chat itself is unaffected. See docs/deploy-docker.md § Agents in a container."
 fi
 
-log "data=${DATA_DIR} uid=$(id -u) gid=$(id -g) tmp=${TMPDIR}"
+log "data=${DATA_DIR} uid=$(id -u) gid=$(id -g) tmp=${TMPDIR} home=${HOME:-}"
 
 # -----------------------------------------------------------------------------
 # 5. Hand over

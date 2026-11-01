@@ -1,8 +1,8 @@
 // Settings: its sections, the old tab ids that still lead to them, and the
 // search box that finds any setting by name.
 //
-// 3.2 replaced the thirteen-tab strip with seven sections in two groups (you,
-// the household) plus one for add-ons. Every id the strip used to have is an
+// 3.2 replaced the thirteen-tab strip with sections in two groups (4.0: four for
+// you, five for the household) plus one for add-ons. Every id the strip used to have is an
 // ALIAS here, so a caller written against the old tabs (a pinned Theme button,
 // the voice add-on's settings.open('voice'), a deep link in a guide) lands on
 // the section that holds the same controls now. `section#anchor` opens a
@@ -12,16 +12,20 @@
 // searchSettings) so the tests need no DOM; mountSettingsSearch is the DOM half.
 // Nothing runs at import time.
 
-import { el } from './util.js?v=20';
+import { el } from './util.js?v=23';
+import { renderAccountReset } from './account-reset.js?v=5';
+import { renderProfilePicture } from './profile-picture.js?v=6';
+import { renderPeoplePerms } from './people-perms.js?v=8';
 
-/** The sections, in nav order. `group`: you (this person / device), household
- *  (Owner and Admin), addons (tabs an add-on adds; none built in). `perm` is
+/** The sections, in nav order. `group`: you (this person / device), bots (Characters),
+ *  household
+ *  (Admins), addons (tabs an add-on adds; none built in). `perm` is
  *  what main.js asks sessionCan()/canAdmin() before showing one. */
 export const SECTIONS = [
   { id: 'appearance', group: 'you', icon: 'palette', label: 'settings.sec_appearance', perm: null },
   { id: 'account', group: 'you', icon: 'user', label: 'settings.sec_account', perm: null },
   { id: 'voice', group: 'you', icon: 'mic', label: 'settings.sec_voice', perm: 'voice' },
-  { id: 'characters', group: 'household', icon: 'bots', label: 'settings.sec_characters', perm: 'admin' },
+  { id: 'characters', group: 'bots', icon: 'bots', label: 'settings.sec_characters', perm: 'use_chat' },
   { id: 'connections', group: 'household', icon: 'plug', label: 'settings.sec_connections', perm: 'admin' },
   { id: 'people', group: 'household', icon: 'users', label: 'settings.sec_people', perm: 'admin' },
   { id: 'plugins', group: 'household', icon: 'tools', label: 'settings.sec_plugins', perm: 'admin' },
@@ -30,11 +34,40 @@ export const SECTIONS = [
 
 export const SECTION_IDS = SECTIONS.map((s) => s.id);
 
+/** 4.3 FX1: may this session open Settings -> Characters? Mine is every chatting profile's: a
+ *  Basic (use_chat, no create_characters) reorders its own bots and parks them in Tools & more
+ *  there (on a phone it is the only way; the rail drag is desktop only). What a row offers is the
+ *  server's `actions`, so Basic gets no editor and no Household. `can(perm)` = main.js sessionCan. */
+export function charactersSectionAllowed(can) {
+  if (typeof can !== 'function') return false;
+  try {
+    return !!(can('create_characters') || can('manage_characters') || can('use_chat'));
+  } catch { return false; }
+}
+
+/** 4.0 chat-first profiles: what the new modules add to a section when it mounts.
+ *  main.js setSettingsTab() calls runSectionHooks(id, pane, deps) once per mount, after
+ *  the section's own code, so a package fills its part of a section by editing ITS module
+ *  only (account-reset.js: Account; people-perms.js: People; characters-page.js is mounted by main.js, not hooked). */
+export const SECTION_HOOKS = Object.freeze({
+  account: [renderAccountReset, renderProfilePicture],
+  people: [renderPeoplePerms],
+});
+
+/** Run the SECTION_HOOKS of section `id` against its pane. One failing hook is logged and
+ *  never stops the section or the others. */
+export function runSectionHooks(id, pane, deps = {}) {
+  for (const fn of SECTION_HOOKS[id] || []) {
+    try { fn(pane, deps); } catch (e) { console.warn(`settings: ${id} hook failed`, e); }
+  }
+}
+
 /** Every tab id Settings has ever had (2.x / 3.0 / 3.1), and where it lives now.
  *  This is the compatibility contract for add-ons and old links: an id here
  *  keeps working, and none of them may be claimed by an add-in tab. */
 export const TAB_ALIASES = Object.freeze({
   bots: 'characters',
+  mybots: 'characters#mine',      // 4.2: My bots became the Mine tab of Characters
   reactions: 'characters#reactions',
   theme: 'appearance',
   device: 'appearance',
@@ -79,7 +112,6 @@ export const STATIC_ROWS = [
   { section: 'appearance', anchor: 'language', label: 'settings.language', terms: 'locale translate' },
   { section: 'appearance', anchor: 'avatar-style', label: 'settings.avatar_style', terms: 'minimal pictures names sidebar' },
   { section: 'appearance', anchor: 'menu-bar', label: 'settings.dev_bar', terms: 'pin shortcut link button rail' },
-  { section: 'appearance', anchor: 'hidden-bots', label: 'settings.show_hidden', terms: 'hidden characters rail', perm: 'admin' },
   { section: 'account', anchor: 'notice', label: 'host_notice.title', terms: 'privacy private stored host encrypted who can read' },
   { section: 'account', anchor: 'signin', label: 'acct.signin_title', terms: 'pin password change remove sign in' },
   { section: 'account', anchor: 'signin', label: 'settings.lock_now', terms: 'lock sign out' },
@@ -87,19 +119,23 @@ export const STATIC_ROWS = [
   { section: 'account', anchor: 'pictures', label: 'settings.dev_pictures', terms: 'no-image nim privacy mode hide pictures' },
   { section: 'account', anchor: 'recovery', label: 'settings.recovery', terms: 'export restore backup messages' },
   { section: 'account', anchor: 'about', label: 'about.title', terms: 'version source licence' },
+  { section: 'account', anchor: 'reset', label: 'reset.title', terms: 'reset default wipe delete bots chats start over' },
+  { section: 'account', anchor: 'mydata', label: 'reset.my_data', terms: 'export download chats backup' },
+  { section: 'characters', anchor: 'mine', label: 'cpage.find_mine', terms: 'my bots characters create build ai copy personality voice' },
+  { section: 'characters', anchor: 'household', label: 'cpage.find_household', terms: 'templates household share give copies who can use', perm: 'manage_characters' },
   { section: 'voice', anchor: '', label: 'settings.sec_voice', terms: 'speech microphone talk tts stt' },
-  { section: 'characters', anchor: 'roster', label: 'settings.sec_characters', terms: 'bots order rename avatar photo remove add', perm: 'admin' },
-  { section: 'characters', anchor: 'add', label: 'chars.add', terms: 'new starter pack', perm: 'admin' },
+  { section: 'characters', anchor: 'roster', label: 'settings.sec_characters', terms: 'bots order rename avatar photo remove add hide pictures lookups agent' },
+  { section: 'characters', anchor: 'add', label: 'chars.add', terms: 'new starter pack', perm: 'manage_characters' },
   { section: 'characters', anchor: 'reactions', label: 'settings.tab_reactions', terms: 'reaction images moods pool', perm: 'admin' },
   { section: 'characters', anchor: 'avatar-pools', label: 'settings.pool_section', terms: 'avatar pool faces', perm: 'admin' },
   { section: 'connections', anchor: 'list', label: 'cxn.title', terms: 'server model provider key api', perm: 'admin' },
   { section: 'connections', anchor: 'quick-setup', label: 'integrations.qs_title', terms: 'one key provider setup', perm: 'admin' },
   { section: 'connections', anchor: 'images', label: 'integrations.img_title', terms: 'image generation pictures', perm: 'admin' },
   { section: 'connections', anchor: 'agents', label: 'agents.tab', terms: 'agent backend claude openclaw secrets', perm: 'admin' },
-  { section: 'people', anchor: 'people', label: 'people.title', terms: 'profiles add person member admin restricted', perm: 'admin' },
-  { section: 'people', anchor: 'device', label: 'people.device_title', terms: 'this device open as bind', perm: 'admin' },
+  { section: 'people', anchor: 'people', label: 'people.title', terms: 'profiles add person user basic admin permissions household bots backends reset', perm: 'admin' },
+  { section: 'people', anchor: 'device', label: 'people.devices_title', terms: 'remembered devices forget signed in', perm: 'admin' },
   { section: 'people', anchor: 'signin-rules', label: 'people.rules_title', terms: 'auto-lock timeout remember session', perm: 'admin' },
-  { section: 'people', anchor: 'restricted-limits', label: 'people.limits_title', terms: 'restricted quota daily limits', perm: 'admin' },
+  { section: 'people', anchor: 'lock-target', label: 'lock.target_title', terms: 'locked lock screen default profile shared profile list', perm: 'admin' },
   { section: 'people', anchor: 'machine', label: 'people.machine_title', terms: 'api key token machine trust', perm: 'admin' },
   { section: 'people', anchor: 'activity', label: 'people.activity_title', terms: 'audit log activity', perm: 'admin' },
   { section: 'plugins', anchor: 'addons', label: 'plugins.addons_title', terms: 'extension add-on voice', perm: 'admin' },
@@ -137,9 +173,13 @@ export function buildSearchIndex({ t = (k) => k, allowed = () => true, schema = 
     out.push({ section: r.section, anchor: r.anchor, label, where: sectionLabel(r.section),
       hay: fold(`${label} ${r.terms || ''} ${sectionLabel(r.section)}`) });
   }
+  // A schema setting a section draws with its own control under the same name (the "When
+  // locked, show" picker is a static row AND people.lock_target) is listed once.
+  const seen = new Set(out.map((e) => `${e.section}|${fold(e.label)}`));
   for (const def of (schema && schema.settings) || []) {
     const { id, anchor } = schemaTarget(def);
     if (!allowed(id, 'admin')) continue;
+    if (seen.has(`${id}|${fold(def.label)}`)) continue;
     out.push({ section: id, anchor: `key:${def.key}`, label: def.label, where: sectionLabel(id),
       hay: fold(`${def.label} ${def.description || ''} ${def.key} ${def.section || ''} ${anchor}`) });
   }
@@ -318,5 +358,146 @@ export function createRevealer({ isActive = () => true, reveal = revealAnchor } 
       return true;
     },
     end,
+  };
+}
+
+// ------------------------------------------------------------------ the URL (4.3 #27)
+//
+// Settings has an address: `#settings`, `#settings/<section>` and
+// `#settings/<section>/<anchor>` (an old tab id works as the section, as
+// everywhere else). The hash is only ever written with history.replaceState, so
+// opening and closing Settings adds no history entry and Back leaves the app
+// exactly as it did before. Other hashes (the voice add-on's `#voice/...`, a
+// tool's `#tool=<id>`) are never written over or cleared.
+
+const HASH_RE = /^#?settings(?:\/(.*))?$/;
+const SECTION_SEG_RE = /^[a-z]{1,32}$/;
+/** What an anchor from a URL may look like: a data-anchor name or key:<schema key>. */
+const ANCHOR_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/;
+/** The mark the route leaves in history.state on an entry whose URL it wrote. */
+const HASH_MARK = 'dpSettingsHash';
+
+const decodeSeg = (s) => { try { return decodeURIComponent(s); } catch { return null; } };
+
+/** '#settings/people/machine' -> { section, anchor, target, known }; null when the hash is
+ *  not a Settings one at all. `target` is what setSettingsTab takes (null = the default
+ *  section). A section that is not one of SECTIONS (after the old-id aliases) comes back
+ *  as the default with known: false. Nothing from the hash is returned unless it matched
+ *  SECTION_IDS or ANCHOR_RE, so callers may use it as an id (never as HTML). */
+export function parseSettingsHash(hash) {
+  const m = HASH_RE.exec(String(hash == null ? '' : hash));
+  if (!m) return null;
+  const segs = (m[1] || '').split('/');
+  const def = (known) => ({ section: null, anchor: '', target: null, known });
+  if (!segs[0]) return def(true);
+  const raw = decodeSeg(segs[0]);
+  const seg = raw == null ? '' : raw.toLowerCase();
+  if (!SECTION_SEG_RE.test(seg)) return def(false);
+  let rawAnchor = segs.length > 1 && segs[1] ? decodeSeg(segs[1]) : '';
+  if (rawAnchor == null || !ANCHOR_RE.test(rawAnchor)) rawAnchor = '';
+  let { id, anchor } = resolveSettingsTarget(rawAnchor ? `${seg}#${rawAnchor}` : seg);
+  if (!SECTION_IDS.includes(id)) return def(false);
+  if (!ANCHOR_RE.test(anchor || '')) anchor = '';
+  return { section: id, anchor, target: anchor ? `${id}#${anchor}` : id, known: true };
+}
+
+const hashOf = (url) => { const s = String(url || ''); const i = s.indexOf('#'); return i < 0 ? '' : s.slice(i); };
+
+/**
+ * The Settings hash route. deps:
+ *   open(target)     open Settings on target ('people#machine'; null = the default section)
+ *   close()          close Settings (the hash was removed by hand)
+ *   isSignedIn()     may Settings open now? false = keep the link for after sign-in
+ *   onReady(fn)      optional: subscribe fn to "the app is ready" (the hello frame);
+ *                    without it the caller calls route.apply() itself
+ *   allowed(id)      optional: may this session see section id? no -> the default section
+ *   notify(reason)   optional: 'unknown' when the link named no section (the caller toasts)
+ *   win              the window (tests pass a fake)
+ * -> { apply(), opened(id, anchor), closed(), dispose() }
+ *   apply()   open the kept link, if any and signed in (call on every hello: it runs once)
+ *   opened()  Settings now shows section id (null = the phone's list): writes the hash
+ *   closed()  Settings closed: removes the hash
+ */
+export function settingsHashRoute({
+  open, close, isSignedIn = () => true, onReady = null, allowed = () => true,
+  notify = () => {}, win = globalThis.window,
+} = {}) {
+  const loc = win.location;
+  const hist = win.history;
+  let pending = parseSettingsHash(loc.hash);
+  let isOpen = false;
+  const safe = (fn, ...args) => {
+    try {
+      const r = fn && fn(...args);
+      if (r && typeof r.catch === 'function') r.catch((e) => console.warn('settings link:', e));
+    } catch (e) { console.warn('settings link:', e); }
+  };
+  const marked = () => !!(hist.state && typeof hist.state === 'object' && hist.state[HASH_MARK]);
+  const write = (h) => {
+    const s = hist.state;
+    const next = s && typeof s === 'object' ? { ...s, [HASH_MARK]: true } : { [HASH_MARK]: true };
+    hist.replaceState(next, '', `${loc.pathname}${loc.search}${h}`);
+  };
+  const isForeign = (h) => !!h && h !== '#' && !parseSettingsHash(h);
+
+  function apply() {
+    if (!pending) return false;
+    let ok = false;
+    try { ok = !!isSignedIn(); } catch { ok = false; }
+    if (!ok) return false;
+    const p = pending;
+    pending = null;
+    let target = p.target;
+    if (!p.known) safe(notify, 'unknown');
+    else if (p.section) {
+      let may = false;
+      try { may = !!allowed(p.section); } catch { may = false; }
+      if (!may) target = null;
+    }
+    safe(open, target);
+    return true;
+  }
+
+  function onHash(ev) {
+    const h = loc.hash;
+    const p = parseSettingsHash(h);
+    if (p) {
+      // Back/Forward onto an entry this route wrote (or one pushed on top of it, which
+      // copies the URL): history, not a request. Never reopen; a closed Settings drops it.
+      if (marked()) { if (!isOpen) write(''); return; }
+      pending = p;
+      apply();
+      return;
+    }
+    if (!isForeign(h) && isOpen && parseSettingsHash(hashOf(ev && ev.oldURL))) safe(close);
+  }
+
+  win.addEventListener('hashchange', onHash);
+  if (typeof onReady === 'function') onReady(apply);
+
+  return {
+    apply,
+    opened(id = null, anchor = '') {
+      isOpen = true;
+      const cur = loc.hash;
+      if (isForeign(cur)) return;
+      const sec = SECTION_IDS.includes(id) ? id : null;
+      const a = sec && ANCHOR_RE.test(anchor || '') ? anchor : '';
+      const want = sec ? `#settings/${sec}${a ? `/${a}` : ''}` : '#settings';
+      // Also mark an entry that already holds the hash (a page loaded on the link, or
+      // boot's replaceState({view}) dropping the mark): the phone's section pushes an
+      // entry on top of it, and when the closer pops that one the hash must read as
+      // history here, not as a fresh link that reopens Settings (4.3 FX1).
+      if (cur !== want || !marked()) write(want);
+    },
+    closed() {
+      // Only a Settings this route saw open: the app hides the (already hidden) modal on
+      // boot, at the sign-in gate and on every reboot, and a link still waiting for
+      // sign-in must survive that.
+      const was = isOpen;
+      isOpen = false;
+      if (was && !pending && parseSettingsHash(loc.hash)) write('');
+    },
+    dispose() { win.removeEventListener('hashchange', onHash); },
   };
 }

@@ -14,8 +14,8 @@ import asyncio
 import json
 
 import pytest
-from _extfake import KNOBS, ext_env, install, thread_for  # noqa: F401
-from test_advisor import _hooks, _run_with_reply, adv_env  # noqa: F401
+from _extfake import KNOBS, ext_env, install, thread_for
+from test_advisor import _hooks, _run_with_reply, adv_env
 
 from app import advisor, config, extensions, main
 
@@ -79,10 +79,9 @@ def test_the_owner_turn_still_dispatches_research(adv_env, monkeypatch):
 
 
 def test_dispatch_off_restricts_nothing_else():
-    cfg = advisor.AdvisorConfig.from_bot(config.Bot(id="adv", name="Sage", advisor=dict(ADV)))
+    cfg = advisor.AdvisorConfig.from_bot(config.Bot(id="adv", name="Nova", advisor=dict(ADV)))
     off = cfg.dispatch_off()
     assert off.can_dispatch is False and cfg.can_dispatch is True
-    assert off.locked is False                       # tools_locked etc. do not apply
     assert off.offered_tools() == cfg.offered_tools()
 
 
@@ -95,7 +94,7 @@ def hh(ext_env, monkeypatch):
     from fastapi.testclient import TestClient
     c, _ = ext_env
     extensions._ext_callers.clear(); extensions._ext_last_closed.clear()
-    config.upsert_bot(config.Bot(id="adv", name="Sage", advisor=dict(ADV)))
+    config.upsert_bot(config.Bot(id="adv", name="Nova", advisor=dict(ADV)))
     install()
     r = c.post("/api/auth/setup", json={"name": "Olive", "password": "owner-pass1", "new_pin": "2468"})
     assert r.status_code == 200, r.text
@@ -190,7 +189,7 @@ def test_the_advisor_backend_receives_the_flag(monkeypatch):
     monkeypatch.setattr(main, "_with_thread_model_prefs", no_prefs)
     monkeypatch.setattr(main, "_compose_agent_text", compose)
     monkeypatch.setattr(main.config, "get_bot",
-                        lambda b: config.Bot(id="adv", name="Sage", advisor=dict(ADV)))
+                        lambda b: config.Bot(id="adv", name="Nova", advisor=dict(ADV)))
     asyncio.run(main._run_agent_turn("t", "adv", "x", main.TurnOptions(dispatch=False)))
     asyncio.run(main._run_agent_turn("t", "adv", "x", main.TurnOptions()))
     assert calls[0].get("dispatch") is False and "dispatch" not in calls[1]
@@ -202,8 +201,9 @@ def test_the_advisor_backend_receives_the_flag(monkeypatch):
 
 def test_handoff_send_and_dismiss_need_dispatch_agents(hh):
     c, member = hh
-    # Every permission those routes asked for before, but not dispatch_agents.
-    k = member(grants=["approve_agent_actions", "manage_characters"])
+    # Every permission those routes asked for before, but not dispatch_agents. (4.0: a User can
+    # no longer be granted manage_characters at all; approve_agent_actions is grantable.)
+    k = member(grants=["approve_agent_actions"])
     me = k.get("/api/auth/me").json()["permissions"]
     assert "approve_agent_actions" in me and "dispatch_agents" not in me
     for verb in ("send", "dismiss"):

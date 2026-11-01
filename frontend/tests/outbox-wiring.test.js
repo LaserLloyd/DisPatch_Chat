@@ -150,15 +150,15 @@ test('the socket replay is wired to onOpen, not only to onReconnect', () => {
     + 'the first connect, which is the one boot gets');
 });
 
-test('goSafe wipes the unlocked tier BEFORE it reboots', () => {
-  const goSafe = MAIN.slice(MAIN.indexOf('async function goSafe('));
-  assert.ok(goSafe, 'main.js must define goSafe');
-  const wipe = goSafe.indexOf('wipeTier(TIER_FULL)');
-  const reboot = goSafe.indexOf('await reboot()');
+test('lockToTarget wipes the local store BEFORE it reboots', () => {
+  const lock = MAIN.slice(MAIN.indexOf('async function lockToTarget('));
+  assert.ok(lock, 'main.js must define lockToTarget');
+  const wipe = lock.indexOf('wipeTier(TIER_FULL)');
+  const reboot = lock.indexOf('await reboot()');
   assert.ok(wipe > 0,
-    'goSafe must wipe the unlocked tier of the local store — a locked device '
-    + 'that merely cannot READ the cache is still carrying it');
-  assert.ok(reboot > 0, 'goSafe must reboot');
+    'lockToTarget must wipe the local store — the next person on this device '
+    + 'must not carry the previous profile\'s drafts, outbox and cached rows');
+  assert.ok(reboot > 0, 'lockToTarget must reboot');
   assert.ok(wipe < reboot,
     'the wipe must happen BEFORE reboot(), which re-runs startApp() and reloads '
     + 'the store; wiping afterwards races the session that is meant to be clean');

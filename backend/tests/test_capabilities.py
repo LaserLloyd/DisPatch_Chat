@@ -93,3 +93,21 @@ def test_no_cli_or_mcp_surface_exists_yet():
     # it is not an API client and no capability maps to it.
     cli_src = (ROOT / "backend" / "app" / "cli.py").read_text(encoding="utf-8")
     assert "capabilities" not in cli_src and "python -m app users" in cli_src
+
+
+def test_host_capabilities_match_the_route_tables_host_flag():
+    """4.3 host tier (INT-1): a capability is marked host (Owner only) exactly when one of its
+    routes is a host row in route_policy, and then every one of its routes is."""
+    wrong = []
+    for c in capabilities.CAPABILITIES:
+        flags = {_req(m, p).host for (m, p) in c.http if _req(m, p) is not None}
+        if not flags:
+            continue
+        if len(flags) > 1:
+            wrong.append(f"{c.id}: mixes host and household routes")
+        elif c.host != flags.pop():
+            wrong.append(f"{c.id}: capability host={c.host}, routes say otherwise")
+    assert not wrong, wrong
+    assert capabilities.by_id()["system.harness"].host
+    assert capabilities.by_id()["system.local_viewer"].host
+    assert capabilities.by_id()["system.harness"].as_dict()["host"] is True

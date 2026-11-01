@@ -1,0 +1,24 @@
+event: session.status_running
+data: {"type": "session.status_running", "id": "sevt_21", "processed_at": "2026-10-31T00:00:01Z"}
+
+event: agent.tool_use
+data: {"type": "agent.tool_use", "id": "sevt_22", "processed_at": "2026-10-31T00:00:02Z", "name": "bash", "input": {"command": "ls"}, "evaluated_permission": "ask"}
+
+event: session.status_idle
+data: {"type": "session.status_idle", "id": "sevt_23", "processed_at": "2026-10-31T00:00:02Z", "stop_reason": {"type": "requires_action", "event_ids": ["sevt_22"]}}
+
+event: user.tool_confirmation
+data: {"type": "user.tool_confirmation", "id": "sevt_24", "processed_at": "2026-10-31T00:00:03Z", "tool_use_id": "sevt_22", "result": "allow"}
+
+event: session.status_running
+data: {"type": "session.status_running", "id": "sevt_25", "processed_at": "2026-10-31T00:00:03Z"}
+
+event: agent.tool_result
+data: {"type": "agent.tool_result", "id": "sevt_26", "processed_at": "2026-10-31T00:00:03Z", "tool_use_id": "sevt_22", "is_error": false, "content": [{"type": "text", "text": "README.md"}]}
+
+event: agent.message
+data: {"type": "agent.message", "id": "sevt_27", "processed_at": "2026-10-31T00:00:04Z", "content": [{"type": "text", "text": "One file."}]}
+
+event: session.status_idle
+data: {"type": "session.status_idle", "id": "sevt_28", "processed_at": "2026-10-31T00:00:04Z", "stop_reason": {"type": "end_turn"}}
+

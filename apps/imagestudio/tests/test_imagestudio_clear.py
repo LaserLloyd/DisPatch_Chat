@@ -14,8 +14,9 @@ from app import config
 BASE = "/api/apps/imagestudio"
 
 
-def _seed(n: int) -> list[dict]:
-    """``n`` ledger rows, oldest first, each with its file in the media store."""
+def _seed(n: int, owner: str | None = None) -> list[dict]:
+    """``n`` ledger rows, oldest first, each with its file in the media store (``owner``: the
+    rows' ``owner_profile_id``; none = a 3.x row, which is the protected Admin's)."""
     led_dir = config.DATA_DIR / "apps-data" / "imagestudio"
     led_dir.mkdir(parents=True, exist_ok=True)
     config.MEDIA_DIR.mkdir(parents=True, exist_ok=True)
@@ -28,6 +29,8 @@ def _seed(n: int) -> list[dict]:
                      "provider": "minimax", "model": "image-01", "ratio": "1:1",
                      "seed": None, "optimizer": False, "reference": False, "batch": "b",
                      "created_at": f"2026-10-19T10:00:{i:02d}+00:00", "day": "2026-10-19"})
+        if owner:
+            rows[-1]["owner_profile_id"] = owner
     with (led_dir / "images.jsonl").open("a", encoding="utf-8") as f:
         f.write("".join(json.dumps(r) + "\n" for r in rows))
     return rows
@@ -138,31 +141,34 @@ def test_unknown_ids_and_bad_orders_are_refused(world):
     assert _file(rows[0])
 
 
-def test_a_member_may_clear_but_not_without_manage_history(world):
+def test_a_user_may_clear_their_own_but_not_without_manage_history(world):
     owner = world.create_owner()
-    world.person(owner, "Max", "member", pin="5555")
-    world.person(owner, "Nia", "member", pin="6666", denies=["manage_history"])
-    rows = _seed(3)
+    max_p = world.person(owner, "Max", "member", pin="5555")
+    nia_p = world.person(owner, "Nia", "member", pin="6666", denies=["manage_history"])
+    rows = _seed(3, nia_p["id"])
     nia = world.client()
     assert world.login(nia, name="Nia", pin="6666").status_code == 200
     assert nia.get(BASE + "/state").json()["can_clear"] is False, "the page hides the action too"
     assert owner.get(BASE + "/state").json()["can_clear"] is True
     r = nia.post(BASE + "/clear", json={"id": rows[2]["id"], "order": "newest"})
     assert r.status_code == 403
-    assert len(_ids(owner)) == 3 and all(_file(x) for x in rows)
+    assert len(_ids(nia)) == 3 and all(_file(x) for x in rows)
+    mine = _seed(2, max_p["id"])
     max_ = world.client()
     assert world.login(max_, name="Max", pin="5555").status_code == 200
-    assert max_.post(BASE + "/clear", json={"id": rows[0]["id"], "order": "newest"}).status_code == 200
-    assert len(_ids(owner)) == 2
+    # 4.0: another profile's picture is "already gone" for this caller (its own ledger)
+    assert max_.post(BASE + "/clear", json={"id": rows[0]["id"], "order": "newest"}).status_code == 404
+    assert max_.post(BASE + "/clear", json={"id": mine[0]["id"], "order": "newest"}).status_code == 200
+    assert len(_ids(max_)) == 1 and len(_ids(nia)) == 3
 
 
-def test_restricted_and_signed_out_callers_never_reach_it(world):
+def test_basic_and_signed_out_callers_never_reach_it(world):
     owner = world.create_owner()
-    world.person(owner, "Mia", "restricted")
+    world.person(owner, "Mia", "basic")
     rows = _seed(2)
-    kid = world.client()
-    assert world.login(kid, name="Mia").status_code == 200
-    assert kid.post(BASE + "/clear", json={"id": rows[1]["id"], "order": "newest"}).status_code == 403
+    bea = world.client()
+    assert world.login(bea, name="Mia").status_code == 200
+    assert bea.post(BASE + "/clear", json={"id": rows[1]["id"], "order": "newest"}).status_code == 403
     assert world.client().post(BASE + "/clear", json={"id": rows[1]["id"], "order": "newest"}).status_code in (401, 403)
     assert len(_ids(owner)) == 2 and all(_file(x) for x in rows)
 
@@ -176,3 +182,90 @@ def test_state_says_who_may_set_up_a_provider(world):
     assert world.login(max_, name="Max", pin="5555").status_code == 200
     assert owner.get(BASE + "/state").json()["can_configure"] is True
     assert max_.get(BASE + "/state").json()["can_configure"] is False
+
+
+# ---- Delete by age: POST /clear {since: all|hour|day} (the window is the server's clock) ----
+
+def _age(rows, minutes_ago_list):
+    """Re-stamp ``rows`` (and the ledger) so row i was made minutes_ago_list[i] minutes ago."""
+    from datetime import UTC, datetime, timedelta
+    led = config.DATA_DIR / "apps-data" / "imagestudio" / "images.jsonl"
+    stamp = {r["id"]: (datetime.now(UTC) - timedelta(minutes=m)).isoformat()
+             for r, m in zip(rows, minutes_ago_list, strict=True)}
+    out = []
+    for line in led.read_text().splitlines():
+        row = json.loads(line)
+        if row["id"] in stamp:
+            row["created_at"] = stamp[row["id"]]
+        out.append(json.dumps(row))
+    led.write_text("\n".join(out) + "\n")
+
+
+def test_since_hour_removes_only_the_recent_ones(world):
+    owner = world.create_owner()
+    rows = _seed(4)
+    _age(rows, [3000, 90, 30, 5])
+    r = owner.post(BASE + "/clear", json={"since": "hour", "dry_run": True})
+    assert r.status_code == 200 and r.json()["count"] == 2
+    r = owner.post(BASE + "/clear", json={"since": "hour", "expect": 2})
+    assert r.status_code == 200 and r.json()["deleted"] == 2 and r.json()["files"] == 2
+    assert _ids(owner) == [rows[0]["id"], rows[1]["id"]]
+    assert [_file(x) for x in rows] == [True, True, False, False]
+
+
+def test_since_day_and_all(world):
+    owner = world.create_owner()
+    rows = _seed(4)
+    _age(rows, [3000, 1000, 30, 5])
+    assert owner.post(BASE + "/clear", json={"since": "day", "dry_run": True}).json()["count"] == 3
+    assert owner.post(BASE + "/clear", json={"since": "day"}).json()["deleted"] == 3
+    assert _ids(owner) == [rows[0]["id"]]
+    assert owner.post(BASE + "/clear", json={"since": "all"}).json()["deleted"] == 1
+    assert _ids(owner) == [] and not any(_file(x) for x in rows)
+
+
+def test_since_never_touches_another_profiles_pictures(world):
+    owner = world.create_owner()
+    max_p = world.person(owner, "Max", "member", pin="5555")
+    mine = _seed(2, max_p["id"])
+    theirs = _seed(3)                        # the Owner's (unstamped 3.x rows)
+    _age(mine + theirs, [5, 6, 7, 8, 9])
+    max_ = world.client()
+    assert world.login(max_, name="Max", pin="5555").status_code == 200
+    plan = max_.post(BASE + "/clear", json={"since": "all", "dry_run": True}).json()
+    assert plan["count"] == 2
+    assert max_.post(BASE + "/clear", json={"since": "all", "expect": 2}).json()["deleted"] == 2
+    assert _ids(max_) == [] and len(_ids(owner)) == 3
+    assert [_file(x) for x in mine + theirs] == [False, False, True, True, True]
+
+
+def test_since_keeps_a_chat_picture_file(world):
+    owner = world.create_owner()
+    rows = _seed(2)
+    tid = owner.post("/api/threads", json={"bot_id": "main"}).json()["id"]
+    assert owner.post("/api/inject", json={"thread_id": tid, "role": "assistant", "content": "x",
+                                           "media_url": rows[0]["url"]}).status_code == 200
+    r = owner.post(BASE + "/clear", json={"since": "all"})
+    assert r.json() == {"deleted": 2, "files": 1, "in_chat": 1}
+    assert [_file(x) for x in rows] == [True, False]
+
+
+def test_since_expect_mismatch_and_bad_input(world):
+    owner = world.create_owner()
+    rows = _seed(3)
+    assert owner.post(BASE + "/clear", json={"since": "all", "expect": 2}).status_code == 409
+    assert owner.post(BASE + "/clear", json={"since": "week"}).status_code == 422
+    assert owner.post(BASE + "/clear", json={}).status_code == 422
+    assert owner.post(BASE + "/clear", json={"since": "all", "id": rows[0]["id"], "order": "newest"}).status_code == 422
+    assert len(_ids(owner)) == 3 and all(_file(x) for x in rows)
+
+
+def test_since_needs_manage_history_and_a_session(world):
+    owner = world.create_owner()
+    world.person(owner, "Nia", "member", pin="6666", denies=["manage_history"])
+    rows = _seed(2)
+    nia = world.client()
+    assert world.login(nia, name="Nia", pin="6666").status_code == 200
+    assert nia.post(BASE + "/clear", json={"since": "all"}).status_code == 403
+    assert world.client(origin=False).post(BASE + "/clear", json={"since": "all"}).status_code in (401, 403)
+    assert len(_ids(owner)) == 2 and all(_file(x) for x in rows)

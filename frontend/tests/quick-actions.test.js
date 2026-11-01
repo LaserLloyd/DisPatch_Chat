@@ -230,7 +230,7 @@ test('sendMessage puts the action id in the WS frame, and clears the pill after 
 
 test('main.js renders the tag, switches chips by viewport, and handles bad_action', () => {
   assert.match(MAIN, /actionTagEl\(msg\.metadata\)/);
-  assert.match(MAIN, /!state\.decoy && !isMobile\(\)\) \? quickWelcomeChips\(\)/);
+  assert.match(MAIN, /!isMobile\(\)\) \? quickWelcomeChips\(\)/);
   assert.match(MAIN, /data\.code === 'bad_action'/);
   assert.match(MAIN, /wireQuickActions\(\{ announce \}\)/);
   assert.match(MAIN, /api\.quickActions/);
@@ -311,7 +311,7 @@ function setupUp() {
   return win;
 }
 
-test('"Upload a file" heads the ⚡ menu and opens the attach flow; the paperclip folds into ⚡', dom, async () => {
+test('"Upload a file" heads the ⚡ menu and opens the attach flow; the paperclip stays beside ⚡', dom, async () => {
   setupUp();
   const m = await load();
   m.wireQuickActions();
@@ -319,7 +319,7 @@ test('"Upload a file" heads the ⚡ menu and opens the attach flow; the papercli
   let opened = 0;
   m.setUpload(() => { opened++; });
   assert.equal($('quick-btn').hidden, false);
-  assert.ok($('attach-btn').classList.contains('qa-folded'), 'one button in the bar, not two');
+  assert.equal($('attach-btn').classList.contains('qa-folded'), false, 'the paperclip stays visible (4.3 Fable)');
   m.openQuickMenu();
   const items = [...$('quick-menu').querySelectorAll('[role="menuitem"]')];
   assert.equal(items[0].dataset.upload, '1', 'upload is the first item');
@@ -330,7 +330,7 @@ test('"Upload a file" heads the ⚡ menu and opens the attach flow; the papercli
   assert.equal($('quick-menu').hidden, true, 'the menu closes');
 });
 
-test('a bot with quick actions off keeps a standalone paperclip; switching back folds it again', dom, async () => {
+test('a bot with quick actions off keeps the paperclip; switching back keeps it too', dom, async () => {
   setupUp();
   const m = await load();
   m.setActions(ACTIONS);
@@ -339,7 +339,7 @@ test('a bot with quick actions off keeps a standalone paperclip; switching back 
   assert.equal($('quick-btn').hidden, true);
   assert.equal($('attach-btn').classList.contains('qa-folded'), false, 'upload stays reachable');
   m.setAllowed(true);
-  assert.ok($('attach-btn').classList.contains('qa-folded'));
+  assert.equal($('attach-btn').classList.contains('qa-folded'), false);
   m.setUpload(null);
   assert.equal($('attach-btn').classList.contains('qa-folded'), false, 'no upload in ⚡ -> the paperclip is back');
 });
@@ -373,7 +373,7 @@ test('the empty chat leads with an "Upload to chat" chip that opens the attach f
 
 test('main.js hands the paperclip flow to ⚡; the strings exist in all eight locales', () => {
   assert.match(MAIN, /setQuickUpload\(\(\) => \{ if \(!dom\['attach-btn'\]\.disabled\) dom\['file-input'\]\.click\(\); \}\);/);
-  assert.match(CSS, /\.attach-btn\.qa-folded \{ display: none !important; \}/);
+  assert.doesNotMatch(CSS, /\.attach-btn\.qa-folded \{ display: none/);
   for (const f of readdirSync(join(STATIC, 'locales')).filter((x) => x.endsWith('.json'))) {
     const q = JSON.parse(readFileSync(join(STATIC, 'locales', f), 'utf8')).quick;
     for (const k of ['upload', 'upload_title', 'upload_chip']) assert.ok(q[k] && q[k].trim(), `${f}: quick.${k}`);
@@ -390,5 +390,5 @@ test('with no served actions the empty chat still gets the "Upload to chat" chip
   assert.deepEqual([...out[0].querySelectorAll('.qa-chip')].map((b) => b.dataset.upload), ['1']);
   m.setUpload(null);
   assert.deepEqual(m.welcomeChips(), []);
-  assert.match(MAIN, /if \(\(!quick\.length \|\| !quickActionList\(\)\.length\) && !state\.decoy && quickOk\)/);
+  assert.match(MAIN, /if \(\(!quick\.length \|\| !quickActionList\(\)\.length\) && quickOk\)/);
 });

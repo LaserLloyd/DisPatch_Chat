@@ -24,9 +24,9 @@
 // (here) are each one constant, and a test reads them: re-point the add-on
 // repo's `v1` tag at each 1.x release and every install command follows.
 
-import { t } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
-import { SOURCE_URL, VOICE_REPO_URL } from './about.js?v=22';
+import { t } from './i18n.js?v=5';
+import { el } from './util.js?v=23';
+import { SOURCE_URL, VOICE_REPO_URL } from './about.js?v=26';
 
 export { VOICE_REPO_URL };
 /** The moving tag that always names the latest 1.x release (SPEC §3.4). */

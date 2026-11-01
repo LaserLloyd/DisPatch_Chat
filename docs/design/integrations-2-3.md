@@ -1,5 +1,9 @@
 # DisPatch 2.3.7 — integrations
 
+> **Historical design note (3.x).** It uses the 3.x access words Safe Mode, locked device, Restricted
+> and Owner. 4.0 replaced them with Admin, User and Basic profiles and private chats; see
+> [../security.md](../security.md) for how access works now. Everything else here is kept as written.
+
 *Design note, 2026-10-14. The brief: "we need to clarify how to connect various
 services to this thing. Image generation? Can we just link into some standard API
 such as MiniMax? … list repos it works with … a simple way to add these into the

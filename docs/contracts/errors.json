@@ -22,7 +22,7 @@
       "code": "agent_backend_rejected",
       "docs": "agent_backend_rejected",
       "fix": "The backend cannot do this (for example steer a running OpenClaw turn). Stop the task or wait for it to finish.",
-      "message": "The agent backend refused that request.",
+      "message": "The agent can't do that right now.",
       "patterns": [
         "The agent backend refused that request."
       ],
@@ -32,11 +32,21 @@
       "code": "agent_backend_unavailable",
       "docs": "agent_backend_unavailable",
       "fix": "Check Settings, Agents, Backends: OpenClaw must run on this machine, and the Claude Agent needs an API key and the optional agents-claude extra.",
-      "message": "The agent backend is not available.",
+      "message": "Agents can't run right now.",
       "patterns": [
-        "The agent backend is not available."
+        "Agents can't run right now."
       ],
       "status": 503
+    },
+    {
+      "code": "agent_bot_protected",
+      "docs": "agent_bot_protected",
+      "fix": "Reset keeps agent and app bots. Only the Owner can delete one, on purpose, with a confirmation.",
+      "message": "An agent bot cannot be deleted from Mine.",
+      "patterns": [
+        "An agent bot cannot be deleted from Mine; it stays with the Owner."
+      ],
+      "status": 409
     },
     {
       "code": "agent_budget_exhausted",
@@ -47,6 +57,16 @@
         "This agent's budget for today is used up."
       ],
       "status": 429
+    },
+    {
+      "code": "agent_create_owner_only",
+      "docs": "agent_create_owner_only",
+      "fix": "Ask the Owner to create it, or make a direct character instead.",
+      "message": "Only the Owner can make a bot that runs an agent on the DisPatch computer.",
+      "patterns": [
+        "Only the Owner can make a bot that runs an agent on the DisPatch computer."
+      ],
+      "status": 403
     },
     {
       "code": "agent_credentials_invalid",
@@ -72,9 +92,9 @@
       "code": "agent_gateway_down",
       "docs": "agent_gateway_down",
       "fix": "Start the OpenClaw gateway, or switch the character to a direct provider.",
-      "message": "The agent gateway is not connected",
+      "message": "The agents' server (OpenClaw) isn't running. Try again later.",
       "patterns": [
-        "The agent gateway is not connected"
+        "The agents' server (OpenClaw) isn't running. Try again later."
       ],
       "status": 503
     },
@@ -111,10 +131,10 @@
     {
       "code": "agent_needs_owner",
       "docs": "agent_needs_owner",
-      "fix": "Ask the Owner. Running repository hooks, starting local MCP programs and unattended destructive tools are host-level powers.",
-      "message": "Only the Owner can give an agent that capability.",
+      "fix": "Ask the Owner. Shell and file-editing tools, fewer always-ask tools, programs on the DisPatch computer, unattended tools, a stored secret sent to another computer and working in a folder on the DisPatch computer are the Owner's alone.",
+      "message": "Only the Owner can give an agent this power: {}",
       "patterns": [
-        "Only the Owner can give an agent that capability."
+        "Only the Owner can give an agent this power: {}"
       ],
       "status": 403
     },
@@ -129,13 +149,24 @@
       "status": 404
     },
     {
+      "code": "agent_owner_only",
+      "docs": "agent_owner_only",
+      "fix": "Agent and app bots are the Owner's alone; make a bot with its own AI connection for anyone else.",
+      "message": "This bot runs an agent, which only the Owner may use.",
+      "patterns": [
+        "This bot runs an agent, which only the Owner may use."
+      ],
+      "status": 409
+    },
+    {
       "code": "agents_only",
       "docs": "agents_only",
       "fix": "This endpoint is for agents holding the API key; a signed-in person cannot call it.",
       "message": "Only agents may fire reactions",
       "patterns": [
         "Only agents may fire reactions",
-        "Only agents may call this."
+        "Only agents may call this.",
+        "Only the image server calls this"
       ],
       "status": 403
     },
@@ -148,6 +179,16 @@
         "API key required"
       ],
       "status": 401
+    },
+    {
+      "code": "approval_expired",
+      "docs": "approval_expired",
+      "fix": "The task went on without that step. Run it again if it is still needed.",
+      "message": "That approval request timed out and was answered No.",
+      "patterns": [
+        "That approval request timed out and was answered No."
+      ],
+      "status": 409
     },
     {
       "code": "approval_not_found",
@@ -170,6 +211,48 @@
       "status": 422
     },
     {
+      "code": "archive_invalid",
+      "docs": "archive_invalid",
+      "fix": "Send months as null (off) or a whole number from 1 to 120.",
+      "message": "months must be a whole number from 1 to 120.",
+      "patterns": [
+        "months must be a whole number from 1 to 120."
+      ],
+      "status": 422
+    },
+    {
+      "code": "archived_not_bool",
+      "docs": "archived_not_bool",
+      "fix": "Send archived as true (archive the chat) or false (move it back).",
+      "message": "archived must be true or false",
+      "patterns": [
+        "archived must be true or false"
+      ],
+      "status": 400
+    },
+    {
+      "code": "avatar_crop_invalid",
+      "docs": "avatar_crop_invalid",
+      "fix": "Send crop_x, crop_y and crop_size together, each a fraction of the picture (crop_size above 0), or none of them.",
+      "message": "The face square must be given as fractions from 0 to 1.",
+      "patterns": [
+        "The face square must be given as fractions from 0 to 1."
+      ],
+      "status": 422
+    },
+    {
+      "code": "avatar_invalid",
+      "docs": "avatar_invalid",
+      "fix": "Send a PNG, JPEG or WebP picture.",
+      "message": "That file is not a picture DisPatch can read.",
+      "patterns": [
+        "That file is not a picture DisPatch can read.",
+        "No picture was sent.",
+        "A picture must be a raster image."
+      ],
+      "status": 422
+    },
+    {
       "code": "avatar_not_capturable",
       "docs": "avatar_not_capturable",
       "fix": "The state conflicts with the request; reload and retry.",
@@ -187,7 +270,8 @@
       "patterns": [
         "Avatar not found",
         "No such avatar snapshot",
-        "No avatar snapshot for this thread"
+        "No avatar snapshot for this thread",
+        "No such picture"
       ],
       "status": 404
     },
@@ -232,6 +316,28 @@
       "status": 400
     },
     {
+      "code": "avatar_too_large",
+      "docs": "avatar_too_large",
+      "fix": "Send a smaller picture.",
+      "message": "The picture is too large (25 MB at most).",
+      "patterns": [
+        "The picture is too large (25 MB at most).",
+        "The picture has too many pixels.",
+        "The picture is too large (5 MB at most)."
+      ],
+      "status": 413
+    },
+    {
+      "code": "avatar_upload_only",
+      "docs": "avatar_upload_only",
+      "fix": "Upload the picture (Settings, Account) or send an emoji or a few letters.",
+      "message": "A picture is set by uploading it, not by naming a path.",
+      "patterns": [
+        "A picture is set by uploading it, not by naming a path."
+      ],
+      "status": 422
+    },
+    {
       "code": "avatar_write_failed",
       "docs": "avatar_write_failed",
       "fix": "This is a server fault; check the logs (Settings > System) and retry.",
@@ -252,14 +358,44 @@
       "status": 422
     },
     {
+      "code": "backend_not_allowed",
+      "docs": "backend_not_allowed",
+      "fix": "Ask an Admin to allow the connection for this profile in People.",
+      "message": "Your profile may not choose a bot's backend.",
+      "patterns": [
+        "Your profile may not choose a bot's backend.",
+        "This profile may not use that connection."
+      ],
+      "status": 403
+    },
+    {
       "code": "backend_unavailable",
       "docs": "backend_unavailable",
       "fix": "ComfyUI is starting or briefly down. DisPatch retries.",
-      "message": "The image backend is unavailable.",
+      "message": "The image computer isn't ready yet. DisPatch tries again.",
       "patterns": [
         "The image backend is unavailable."
       ],
       "status": 503
+    },
+    {
+      "code": "backends_invalid",
+      "docs": "backends_invalid",
+      "fix": "Send {\"allowed\": [connection ids]} or {} for every connection.",
+      "message": "backends must be an object.",
+      "patterns": [
+        "backends must be an object.",
+        "backends.allowed must be a list of connection ids."
+      ],
+      "status": 422
+    },
+    {
+      "code": "backends_unknown_connection",
+      "docs": "backends_unknown_connection",
+      "fix": "Use a connection id from GET /api/connections.",
+      "message": "Unknown connection.",
+      "patterns": [],
+      "status": 422
     },
     {
       "code": "backup_confirm_required",
@@ -316,6 +452,16 @@
       "message": "Bad request.",
       "patterns": [],
       "status": 400
+    },
+    {
+      "code": "basic_no_bots",
+      "docs": "basic_no_bots",
+      "fix": "Ask an Admin to add household bots to this profile, or to make it a User.",
+      "message": "A Basic profile uses the bots an Admin gives it; it has none of its own.",
+      "patterns": [
+        "A Basic profile uses the bots an Admin gives it; it has none of its own."
+      ],
+      "status": 422
     },
     {
       "code": "before_invalid",
@@ -411,14 +557,14 @@
       "status": 409
     },
     {
-      "code": "budgets_invalid",
-      "docs": "budgets_invalid",
-      "fix": "Use whole numbers in range; quiet hours look like 20:30-07:00.",
-      "message": "A budget value is invalid.",
+      "code": "budget_reserved",
+      "docs": "budget_reserved",
+      "fix": "Wait for a running task to finish, or raise the daily limit in Settings > Agents.",
+      "message": "Today's spending limit is already reserved by tasks that are running.",
       "patterns": [
-        "A budget value is invalid."
+        "Today's spending limit is already reserved by tasks that are running."
       ],
-      "status": 400
+      "status": 429
     },
     {
       "code": "captioner_unavailable",
@@ -489,6 +635,16 @@
       "status": 400
     },
     {
+      "code": "cli_preset_invalid",
+      "docs": "cli_preset_invalid",
+      "fix": "Give each preset an id, a kind and the absolute path of an executable on this computer.",
+      "message": "That command-line preset is not valid.",
+      "patterns": [
+        "That command-line preset is not valid."
+      ],
+      "status": 422
+    },
+    {
       "code": "client_id_invalid",
       "docs": "client_id_invalid",
       "fix": "Check the request and resend it.",
@@ -502,11 +658,21 @@
       "code": "client_quota",
       "docs": "client_quota",
       "fix": "Too many renders from this client are already in flight. They drain by themselves.",
-      "message": "Too many image renders in flight.",
+      "message": "Too many pictures are being made. Wait for some to finish.",
       "patterns": [
         "Too many image renders in flight."
       ],
       "status": 429
+    },
+    {
+      "code": "confirm_required",
+      "docs": "confirm_required",
+      "fix": "Show the chat count (GET /api/me/characters/{id}/delete-preview), then repeat the delete with ?confirm=true.",
+      "message": "Deleting this bot also deletes your chats with it. Confirm to go on.",
+      "patterns": [
+        "Deleting this bot also deletes your chats with it. Confirm to go on."
+      ],
+      "status": 409
     },
     {
       "code": "conflict",
@@ -520,7 +686,7 @@
       "code": "connection_blocked_target",
       "docs": "connection_blocked_target",
       "fix": "The address is link-local or a cloud metadata address. An admin can allow it with the setting connections.allow_private_targets.",
-      "message": "That address is blocked",
+      "message": "DisPatch isn't allowed to use that address",
       "patterns": [],
       "status": 403
     },
@@ -536,7 +702,7 @@
       "code": "connection_in_use",
       "docs": "connection_in_use",
       "fix": "Point those characters at another connection first, then delete this one.",
-      "message": "That connection is used by a character",
+      "message": "A bot still uses that connection",
       "patterns": [],
       "status": 409
     },
@@ -650,9 +816,9 @@
       "code": "csrf_origin",
       "docs": "csrf_origin",
       "fix": "The request came from a page on a different origin. Use DisPatch's own page, or call the API without browser headers.",
-      "message": "Cross-origin request refused",
+      "message": "Refused: this didn't come from DisPatch's own page. Open DisPatch at its usual address and try again.",
       "patterns": [
-        "Cross-origin request refused",
+        "Refused: this didn't come from DisPatch's own page. Open DisPatch at its usual address and try again.",
         "cross-origin request refused"
       ],
       "status": 403
@@ -668,22 +834,22 @@
       "status": 403
     },
     {
-      "code": "daily_limit",
-      "docs": "daily_limit",
-      "fix": "This profile or device reached today's limit. It resets at local midnight; the Owner can raise it.",
-      "message": "Daily limit reached on this device",
+      "code": "cursor_invalid",
+      "docs": "cursor_invalid",
+      "fix": "Pass back the next_cursor value a previous page returned, unchanged, or leave cursor out for the first page.",
+      "message": "Invalid cursor",
       "patterns": [
-        "Daily limit reached on this device"
+        "Invalid cursor"
       ],
-      "status": 429
+      "status": 400
     },
     {
       "code": "daily_upload_limit",
       "docs": "daily_upload_limit",
-      "fix": "Today's upload allowance is used. It resets at local midnight; the Owner can raise it.",
-      "message": "Daily upload limit reached — try again tomorrow or unlock",
+      "fix": "Programs holding the API key may upload 200 MB a day together (the machine guard, people have no limit). It resets at local midnight; an Admin can change it in Settings > People & Access > Machines.",
+      "message": "Daily machine upload limit reached — try again tomorrow",
       "patterns": [
-        "Daily upload limit reached — try again tomorrow or unlock"
+        "Daily machine upload limit reached — try again tomorrow"
       ],
       "status": 429
     },
@@ -728,14 +894,42 @@
       "status": 409
     },
     {
-      "code": "device_bind_role",
-      "docs": "device_bind_role",
-      "fix": "Bind a Member or Restricted profile. Admins and the Owner always sign in with their credential.",
-      "message": "A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential.",
+      "code": "default_profile_no_credential",
+      "docs": "default_profile_no_credential",
+      "fix": "Pick another default profile in Settings > People first.",
+      "message": "The shared default profile cannot have a PIN or password. Pick another default profile in Settings > People first.",
       "patterns": [
-        "A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential."
+        "The shared default profile cannot have a PIN or password. Pick another default profile in Settings > People first."
       ],
       "status": 409
+    },
+    {
+      "code": "delete_stale",
+      "docs": "delete_stale",
+      "fix": "Fetch the delete preview again and confirm with its new token.",
+      "message": "What would be deleted has changed. Look at the numbers again before confirming.",
+      "patterns": [],
+      "status": 409
+    },
+    {
+      "code": "draft_failed",
+      "docs": "draft_failed",
+      "fix": "Try again, or describe the bot in more detail.",
+      "message": "The AI did not return a usable bot. Try again, or add more detail.",
+      "patterns": [
+        "The AI did not return a usable bot. Try again, or add more detail."
+      ],
+      "status": 502
+    },
+    {
+      "code": "draft_unavailable",
+      "docs": "draft_unavailable",
+      "fix": "Add a connection in Settings → AI & Connections, or ask an Admin to allow one for your profile.",
+      "message": "No AI connection is available for building a bot.",
+      "patterns": [
+        "No AI connection is available for building a bot."
+      ],
+      "status": 503
     },
     {
       "code": "empty_file",
@@ -766,6 +960,16 @@
         "endpoint is required"
       ],
       "status": 400
+    },
+    {
+      "code": "env_key_owner_only",
+      "docs": "env_key_owner_only",
+      "fix": "Ask the Owner, or paste the key itself into the connection instead.",
+      "message": "Only the Owner can use a key stored on the DisPatch computer for a connection.",
+      "patterns": [
+        "Only the Owner can use a key stored on the DisPatch computer for a connection."
+      ],
+      "status": 403
     },
     {
       "code": "extension_not_found",
@@ -852,19 +1056,9 @@
       "code": "forbidden",
       "docs": "forbidden",
       "fix": "You are not allowed to do this; sign in as a profile with permission.",
-      "message": "Forbidden",
+      "message": "You aren't allowed to do that.",
       "patterns": [
         "Forbidden"
-      ],
-      "status": 403
-    },
-    {
-      "code": "force_needs_session",
-      "docs": "force_needs_session",
-      "fix": "Sign in first; --force is not available to a machine.",
-      "message": "force needs an unlocked session",
-      "patterns": [
-        "force needs an unlocked session"
       ],
       "status": 403
     },
@@ -909,10 +1103,41 @@
       "status": 502
     },
     {
+      "code": "give_to_invalid",
+      "docs": "give_to_invalid",
+      "fix": "Send give_to as \"everyone\" or a list of profile ids that exist.",
+      "message": "give_to must be \"everyone\" or a list of profiles.",
+      "patterns": [
+        "give_to must be \"everyone\" or a list of profiles.",
+        "Unknown profile in give_to."
+      ],
+      "status": 422
+    },
+    {
+      "code": "give_to_required",
+      "docs": "give_to_required",
+      "fix": "Open the character's \"Who can use it\" list; it previews the change and asks you to confirm.",
+      "message": "A bot can't be taken away here. Use its Who can use it list, which shows what happens to the copy first.",
+      "patterns": [
+        "cannot be taken away here: use the character's \"Who can use it\" (give-to) preview, which shows what happens to the copy and its chats."
+      ],
+      "status": 409
+    },
+    {
+      "code": "give_to_stale",
+      "docs": "give_to_stale",
+      "fix": "Fetch the give-to preview again and confirm with its new token.",
+      "message": "Who gets this bot has changed. Look at the numbers again before confirming.",
+      "patterns": [
+        "Who gets this bot has changed. Look at the numbers again before confirming."
+      ],
+      "status": 409
+    },
+    {
       "code": "gpu_leased",
       "docs": "gpu_leased",
       "fix": "The image server's GPU is booked by someone else. DisPatch retries a render or agent lease; a benchmark lease is not waited out. Come back later.",
-      "message": "The image server's GPU is leased.",
+      "message": "The image computer is busy with other work. Try again later.",
       "patterns": [
         "The image server's GPU is leased."
       ],
@@ -927,6 +1152,16 @@
         "That guide is already in your chats"
       ],
       "status": 409
+    },
+    {
+      "code": "guide_force_signin",
+      "docs": "guide_force_signin",
+      "fix": "Re-seeding a guide over an existing chat (force) is for a signed-in Admin; a program with the API key can only add a missing guide.",
+      "message": "force needs a signed-in session",
+      "patterns": [
+        "force needs a signed-in session"
+      ],
+      "status": 403
     },
     {
       "code": "guide_needs_atlas",
@@ -959,6 +1194,47 @@
       "status": 400
     },
     {
+      "code": "host_not_allowed",
+      "docs": "host_not_allowed",
+      "fix": "Open DisPatch by one of its own addresses, or add this name to allowed_hosts in security.yaml (Settings > System > Network), or set host_check: log and restart.",
+      "message": "This DisPatch does not answer to that address.",
+      "patterns": [],
+      "status": 421
+    },
+    {
+      "code": "host_owner_only",
+      "docs": "host_owner_only",
+      "fix": "Ask the Owner to do it.",
+      "message": "Only the Owner can do this, because it runs programs or reads files on the DisPatch computer.",
+      "patterns": [
+        "Only the Owner can do this, because it runs programs or reads files on the DisPatch computer."
+      ],
+      "status": 403
+    },
+    {
+      "code": "household_bots_invalid",
+      "docs": "household_bots_invalid",
+      "fix": "Send \"all\" or a list of household character ids (GET /api/bots/all).",
+      "message": "household_bots must be \"all\" or a list of character ids.",
+      "patterns": [
+        "household_bots must be \"all\" or a list of character ids."
+      ],
+      "status": 422
+    },
+    {
+      "code": "household_invalid",
+      "docs": "household_invalid",
+      "fix": "Send \"all\" (Users only) or a list of household bot ids; Admins use every household bot.",
+      "message": "household_bots must be a list of bot ids.",
+      "patterns": [
+        "household_bots must be a list of bot ids.",
+        "Unknown household bot {}.",
+        "An Admin uses every household bot.",
+        "A Basic profile gets an explicit list of bots, not all of them."
+      ],
+      "status": 422
+    },
+    {
       "code": "image_dimensions_too_large",
       "docs": "image_dimensions_too_large",
       "fix": "Check the request and resend it.",
@@ -967,6 +1243,26 @@
         "Image dimensions too large (max 64 megapixels)"
       ],
       "status": 400
+    },
+    {
+      "code": "image_minor_sexual",
+      "docs": "image_minor_sexual",
+      "fix": "Describe adult characters only. This rule cannot be switched off.",
+      "message": "That picture can't be made: images show adults only, and nothing sexual can involve anyone under 18. Rewrite the request with adult characters.",
+      "patterns": [
+        "That picture can't be made: images show adults only, and nothing sexual can involve anyone under 18. Rewrite the request with adult characters."
+      ],
+      "status": 422
+    },
+    {
+      "code": "image_real_person_sexual",
+      "docs": "image_real_person_sexual",
+      "fix": "Remove the real person's name or likeness, or describe an original character. This rule cannot be switched off.",
+      "message": "That picture can't be made: sexual images of real, identifiable people aren't allowed. Remove the real person's name or likeness, or describe an original character instead.",
+      "patterns": [
+        "That picture can't be made: sexual images of real, identifiable people aren't allowed. Remove the real person's name or likeness, or describe an original character instead."
+      ],
+      "status": 422
     },
     {
       "code": "image_request_failed",
@@ -991,10 +1287,10 @@
     {
       "code": "image_unavailable",
       "docs": "image_unavailable",
-      "fix": "Configure an image provider in Settings > AI & Connections > Image generation.",
-      "message": "Image generation isn't configured",
+      "fix": "Set up picture making in Settings → AI & Connections → Image generation.",
+      "message": "Picture making isn't set up (Settings → AI & Connections → Image generation)",
       "patterns": [
-        "Image generation isn't configured",
+        "Picture making isn't set up (Settings → AI & Connections → Image generation)",
         "No image generator is set up for this bot",
         "Image CLI not available on this box"
       ],
@@ -1023,12 +1319,22 @@
     {
       "code": "imagestudio_cannot_delete_pictures",
       "docs": "imagestudio_cannot_delete_pictures",
-      "fix": "Ask the Owner or an Admin; deleting needs the manage_history permission.",
+      "fix": "Ask an Admin; deleting needs the manage_history permission.",
       "message": "Your profile cannot delete pictures",
       "patterns": [
         "Your profile cannot delete pictures"
       ],
       "status": 403
+    },
+    {
+      "code": "imagestudio_clear_pick_one",
+      "docs": "imagestudio_clear_pick_one",
+      "fix": "Send a picture id with its order, or a time range, not both and not neither.",
+      "message": "Give either a picture id with its order, or a time range",
+      "patterns": [
+        "Give either a picture id with its order, or a time range"
+      ],
+      "status": 422
     },
     {
       "code": "imagestudio_generation_running_clear",
@@ -1069,6 +1375,16 @@
         "That picture is already gone"
       ],
       "status": 404
+    },
+    {
+      "code": "imagestudio_picture_needs_order",
+      "docs": "imagestudio_picture_needs_order",
+      "fix": "Send the picture's order from the page along with its id.",
+      "message": "A picture id needs the page's order",
+      "patterns": [
+        "A picture id needs the page's order"
+      ],
+      "status": 422
     },
     {
       "code": "imagestudio_pictures_changed",
@@ -1372,6 +1688,36 @@
       "status": 400
     },
     {
+      "code": "kit_chat_invalid",
+      "docs": "kit_chat_invalid",
+      "fix": "Give every household chat a title and a body.",
+      "message": "A chat needs a title and some text.",
+      "patterns": [
+        "A chat needs a title and some text."
+      ],
+      "status": 422
+    },
+    {
+      "code": "kit_not_found",
+      "docs": "kit_not_found",
+      "fix": "Turn on managed copies for the bot first (Settings -> Characters -> Copies & chats).",
+      "message": "This bot has no copies to manage.",
+      "patterns": [
+        "This bot has no copies to manage."
+      ],
+      "status": 404
+    },
+    {
+      "code": "kit_shipped",
+      "docs": "kit_shipped",
+      "fix": "Atlas's copies are always kept up to date; switch \"Give every profile a copy\" off instead.",
+      "message": "This bot's copies are managed by DisPatch itself.",
+      "patterns": [
+        "This bot's copies are managed by DisPatch itself."
+      ],
+      "status": 409
+    },
+    {
       "code": "list_index_invalid",
       "docs": "list_index_invalid",
       "fix": "Check the request and resend it.",
@@ -1382,6 +1728,38 @@
       "status": 400
     },
     {
+      "code": "lock_target_admin",
+      "docs": "lock_target_admin",
+      "fix": "Make another profile the default first (Settings → People & Access → Default profile), or give the person a profile of their own.",
+      "message": "This is the default profile everyone lands on without signing in, so it can't be an Admin.",
+      "patterns": [
+        "This is the default profile everyone lands on without signing in, so it can't be an Admin."
+      ],
+      "status": 422
+    },
+    {
+      "code": "lock_target_fence",
+      "docs": "lock_target_fence",
+      "fix": "Grant it to a profile of its own, or make another profile the default first.",
+      "message": "This is the default profile everyone lands on without signing in, so agent bots and voice cloning stay off for it.",
+      "patterns": [
+        "This is the default profile everyone lands on without signing in, so agent bots and voice cloning stay off for it."
+      ],
+      "status": 422
+    },
+    {
+      "code": "lock_target_invalid",
+      "docs": "lock_target_invalid",
+      "fix": "Choose a User or Basic profile with no PIN or password that exists and isn't turned off, or the sign-in screen.",
+      "message": "Pick a profile that exists and isn't turned off.",
+      "patterns": [
+        "Pick a profile that exists and isn't turned off.",
+        "An Admin can't be the default profile: it would open without a PIN or password on every device.",
+        "A profile with a PIN or password can't be the default profile: it would open without it on every device. Pick one with no PIN or password."
+      ],
+      "status": 422
+    },
+    {
       "code": "machine_scope_denied",
       "docs": "machine_scope_denied",
       "fix": "Send an API key whose machine scopes include the one shown in required_permission (security.yaml machine_scopes).",
@@ -1390,6 +1768,32 @@
         "This API key is not allowed to call that endpoint."
       ],
       "status": 403
+    },
+    {
+      "code": "maintenance_blocked",
+      "docs": "maintenance_blocked",
+      "fix": "Wait for the backup or the box maintenance to finish; the task retries on its own every 30 minutes.",
+      "message": "The clean-up is paused while a backup or other upkeep runs.",
+      "patterns": [],
+      "status": 409
+    },
+    {
+      "code": "maintenance_running",
+      "docs": "maintenance_running",
+      "fix": "Wait for it to finish (GET /api/maintenance/status), then run it again if you still need to.",
+      "message": "A maintenance run is already in progress.",
+      "patterns": [
+        "A maintenance run is already in progress."
+      ],
+      "status": 409
+    },
+    {
+      "code": "maintenance_step_unknown",
+      "docs": "maintenance_step_unknown",
+      "fix": "Use the step names a dry run (POST /api/maintenance/run with dry_run: true) lists.",
+      "message": "Unknown maintenance step.",
+      "patterns": [],
+      "status": 422
     },
     {
       "code": "max_tokens_invalid",
@@ -1443,6 +1847,16 @@
       "status": 503
     },
     {
+      "code": "no_generated_key",
+      "docs": "no_generated_key",
+      "fix": "Use the passphrase you set when you turned on scheduled backups.",
+      "message": "This backup uses a passphrase you chose, so there is no generated key to show.",
+      "patterns": [
+        "This backup uses a passphrase you chose, so there is no generated key to show."
+      ],
+      "status": 404
+    },
+    {
       "code": "not_a_checklist",
       "docs": "not_a_checklist",
       "fix": "Check the request and resend it.",
@@ -1463,6 +1877,16 @@
       "status": 400
     },
     {
+      "code": "not_copyable",
+      "docs": "not_copyable",
+      "fix": "Only direct-API household bots can be copied.",
+      "message": "This bot runs on an agent and cannot be copied.",
+      "patterns": [
+        "This bot runs on an agent and cannot be copied."
+      ],
+      "status": 422
+    },
+    {
       "code": "not_found",
       "docs": "not_found",
       "fix": "Check the address.",
@@ -1473,6 +1897,26 @@
       "status": 404
     },
     {
+      "code": "not_managed",
+      "docs": "not_managed",
+      "fix": "Only a copy of a household-managed bot (Atlas, or a bot an Admin manages) can be reset to its default.",
+      "message": "This bot is not kept up to date by your household.",
+      "patterns": [
+        "This bot is not kept up to date by your household."
+      ],
+      "status": 422
+    },
+    {
+      "code": "not_shareable",
+      "docs": "not_shareable",
+      "fix": "Share one of your own direct bots; copies, agent bots and other people's bots cannot be shared.",
+      "message": "Only a bot of your own that runs on a direct connection can be shared.",
+      "patterns": [
+        "Only a bot of your own that runs on a direct connection can be shared."
+      ],
+      "status": 422
+    },
+    {
       "code": "nothing_to_change",
       "docs": "nothing_to_change",
       "fix": "Check the request and resend it.",
@@ -1481,6 +1925,106 @@
         "Nothing to change"
       ],
       "status": 400
+    },
+    {
+      "code": "oidc_config_invalid",
+      "docs": "oidc_config_invalid",
+      "fix": "Check the issuer address (https://), the client id and the scopes (they must include openid).",
+      "message": "The sign-in provider settings are not valid.",
+      "patterns": [
+        "The sign-in provider settings are not valid."
+      ],
+      "status": 422
+    },
+    {
+      "code": "oidc_disabled",
+      "docs": "oidc_disabled",
+      "fix": "Ask the Owner to set it up in Settings, or sign in with your PIN or password.",
+      "message": "Sign-in with an outside provider is not turned on.",
+      "patterns": [
+        "Sign-in with an outside provider is not turned on."
+      ],
+      "status": 404
+    },
+    {
+      "code": "oidc_failed",
+      "docs": "oidc_failed",
+      "fix": "Try again. If it keeps failing, sign in with your PIN or password and ask the Owner to check the provider settings.",
+      "message": "Sign-in with the outside provider did not work.",
+      "patterns": [
+        "Sign-in with the outside provider did not work."
+      ],
+      "status": 401
+    },
+    {
+      "code": "oidc_last_credential",
+      "docs": "oidc_last_credential",
+      "fix": "Unlink the outside sign-in first, or keep a PIN or password.",
+      "message": "Keep a PIN or password on the Owner profile while an outside sign-in is linked to it.",
+      "patterns": [
+        "Keep a PIN or password on the Owner profile while an outside sign-in is linked to it."
+      ],
+      "status": 422
+    },
+    {
+      "code": "oidc_link_conflict",
+      "docs": "oidc_link_conflict",
+      "fix": "Unlink it from the other profile first, or link a different account.",
+      "message": "That outside account is already linked to another profile.",
+      "patterns": [
+        "That outside account is already linked to another profile."
+      ],
+      "status": 409
+    },
+    {
+      "code": "oidc_link_forbidden",
+      "docs": "oidc_link_forbidden",
+      "fix": "Only an enabled, personal profile can be linked; the shared profile cannot.",
+      "message": "This profile cannot be linked to an outside sign-in.",
+      "patterns": [
+        "This profile cannot be linked to an outside sign-in."
+      ],
+      "status": 403
+    },
+    {
+      "code": "oidc_not_linked",
+      "docs": "oidc_not_linked",
+      "fix": "Sign in with your PIN or password, then link the account from your profile.",
+      "message": "That outside account is not linked to a profile here.",
+      "patterns": [
+        "That outside account is not linked to a profile here."
+      ],
+      "status": 401
+    },
+    {
+      "code": "oidc_provider_unreachable",
+      "docs": "oidc_provider_unreachable",
+      "fix": "Check the issuer address and that the provider is reachable from this computer, then try again.",
+      "message": "Could not read the sign-in provider's settings.",
+      "patterns": [
+        "Could not read the sign-in provider's settings."
+      ],
+      "status": 502
+    },
+    {
+      "code": "oidc_public_url_required",
+      "docs": "oidc_public_url_required",
+      "fix": "Set the Public address (DISPATCH_PUBLIC_URL) to the https:// address people use, then turn it on.",
+      "message": "Outside sign-in needs an https public address for DisPatch.",
+      "patterns": [
+        "Outside sign-in needs an https public address for DisPatch."
+      ],
+      "status": 422
+    },
+    {
+      "code": "order_invalid",
+      "docs": "order_invalid",
+      "fix": "Reload the list and move the bot again.",
+      "message": "The new order lists a bot twice or is not a list of bot ids.",
+      "patterns": [
+        "The new order lists a bot twice or is not a list of bot ids."
+      ],
+      "status": 422
     },
     {
       "code": "owner_exists",
@@ -1495,22 +2039,26 @@
     {
       "code": "owner_immutable",
       "docs": "owner_immutable",
-      "fix": "The owner's role cannot be changed, disabled or deleted here.",
-      "message": "The owner's role cannot be changed.",
+      "fix": "The Owner's profile type can't be changed, turned off or deleted.",
+      "message": "The Owner's profile type can't be changed.",
       "patterns": [
-        "The owner's role cannot be changed.",
+        "The Owner's profile type can't be changed.",
         "The owner cannot be deleted.",
-        "The owner cannot be disabled."
+        "The owner cannot be disabled.",
+        "The Owner's profile type and limits can't be changed.",
+        "The Owner can't be deleted.",
+        "The Owner changes their own PIN in Settings → Account."
       ],
       "status": 409
     },
     {
       "code": "owner_required",
       "docs": "owner_required",
-      "fix": "Create the owner account first (Settings > Account).",
-      "message": "Create the owner account first.",
+      "fix": "Create the Owner profile first (Settings → Account).",
+      "message": "Create the Owner profile first.",
       "patterns": [
-        "Create the owner account first."
+        "Create the Owner profile first.",
+        "Create the Owner profile first (Settings → Account)."
       ],
       "status": 409
     },
@@ -1539,7 +2087,7 @@
       "code": "password_required",
       "docs": "password_required",
       "fix": "Set the owner's password first (Settings > Account).",
-      "message": "Set a password for the owner first.",
+      "message": "Set a password for the Owner first.",
       "patterns": [
         "Set a password for the owner first."
       ],
@@ -1548,10 +2096,10 @@
     {
       "code": "password_role",
       "docs": "password_role",
-      "fix": "Only the Owner and Admins have a password; Members and Restricted profiles use a PIN.",
-      "message": "Only the Owner and Admins have a password; Members and Restricted profiles use a PIN.",
+      "fix": "Only Admins have a password; User and Basic profiles use a PIN.",
+      "message": "Only Admins have a password; User and Basic profiles use a PIN.",
       "patterns": [
-        "Only the Owner and Admins have a password; Members and Restricted profiles use a PIN."
+        "Only Admins have a password; User and Basic profiles use a PIN."
       ],
       "status": 409
     },
@@ -1582,7 +2130,7 @@
     {
       "code": "permission_denied",
       "docs": "permission_denied",
-      "fix": "Ask an Admin or the Owner to grant your profile the permission shown in required_permission.",
+      "fix": "Ask an Admin to grant your profile the permission shown in required_permission.",
       "message": "Your profile does not have permission to do that.",
       "patterns": [
         "Your profile does not have permission to do that."
@@ -1592,7 +2140,7 @@
     {
       "code": "permissions_invalid",
       "docs": "permissions_invalid",
-      "fix": "Use the permission names from docs/contracts/permissions.json; a Restricted profile can never hold a management permission.",
+      "fix": "Use the permission names from docs/contracts/permissions.json; a profile can only be granted what its type allows (contracts.permissions ROLE_GRANTABLE).",
       "message": "A permission is invalid.",
       "patterns": [
         "A permission is invalid."
@@ -1600,10 +2148,20 @@
       "status": 400
     },
     {
+      "code": "personal_needs_direct",
+      "docs": "personal_needs_direct",
+      "fix": "Give the character a connection in its editor (personal characters run on a direct backend only).",
+      "message": "This bot has no AI connection, so it can't answer. Pick one in Settings → Characters → Details.",
+      "patterns": [
+        "This character has no direct AI connection, so it cannot answer."
+      ],
+      "status": 409
+    },
+    {
       "code": "pin_invalid",
       "docs": "pin_invalid",
       "fix": "Choose a PIN of at least 4 characters.",
-      "message": "Pin invalid.",
+      "message": "That PIN isn't valid.",
       "patterns": [],
       "status": 400
     },
@@ -1720,10 +2278,10 @@
     {
       "code": "profile_conflict",
       "docs": "profile_conflict",
-      "fix": "Choose a different name; there is only ever one owner.",
-      "message": "That profile could not be created (duplicate name or second owner).",
+      "fix": "Choose a different name.",
+      "message": "That profile couldn't be created: another profile already has that name.",
       "patterns": [
-        "That profile could not be created (duplicate name or second owner)."
+        "That profile couldn't be created: another profile already has that name."
       ],
       "status": 409
     },
@@ -1768,9 +2326,19 @@
       "status": 404
     },
     {
+      "code": "profile_required",
+      "docs": "profile_required",
+      "fix": "Sign in to a profile; machine callers and open installs have no profile of their own.",
+      "message": "Sign in to a profile first.",
+      "patterns": [
+        "Sign in to a profile first."
+      ],
+      "status": 409
+    },
+    {
       "code": "profile_role_invalid",
       "docs": "profile_role_invalid",
-      "fix": "Use owner, admin, member or restricted.",
+      "fix": "Use admin, user or basic (the 3.x words owner, member and restricted are still accepted as input).",
       "message": "Unknown role {}.",
       "patterns": [
         "Unknown role {}."
@@ -1818,20 +2386,10 @@
       "status": 422
     },
     {
-      "code": "quiet_hours",
-      "docs": "quiet_hours",
-      "fix": "This profile is not available at this time of day. Ask the Owner to change quiet hours.",
-      "message": "This profile is not available right now.",
-      "patterns": [
-        "This profile is not available right now."
-      ],
-      "status": 403
-    },
-    {
       "code": "rate_limited",
       "docs": "rate_limited",
       "fix": "Slow down and retry after a moment.",
-      "message": "Rate limited.",
+      "message": "Too many requests. Wait a moment, then try again.",
       "patterns": [],
       "status": 429
     },
@@ -1866,10 +2424,11 @@
     {
       "code": "remember_device_required",
       "docs": "remember_device_required",
-      "fix": "Sign out and in again with \"Remember this device\" ticked to get notifications.",
-      "message": "Notifications need a remembered device: lock, then unlock with \"Remember this device\" ticked.",
+      "fix": "Sign out and in again with \"Keep this device signed in\" ticked to get notifications.",
+      "message": "Notifications need a remembered device: sign out, then sign in again with \"Keep this device signed in\" ticked.",
       "patterns": [
-        "Notifications need a remembered device: lock, then unlock with \"Remember this device\" ticked."
+        "Notifications need a remembered device: sign out, then sign in again with \"Keep this device signed in\" ticked.",
+        "Notifications need a signed-in, remembered device."
       ],
       "status": 403
     },
@@ -1894,6 +2453,32 @@
       "status": 409
     },
     {
+      "code": "reset_stale",
+      "docs": "reset_stale",
+      "fix": "Fetch the reset preview again and confirm with its new token.",
+      "message": "What would be deleted has changed. Look at the numbers again before confirming.",
+      "patterns": [
+        "What would be deleted has changed. Look at the numbers again before confirming."
+      ],
+      "status": 409
+    },
+    {
+      "code": "retention_invalid",
+      "docs": "retention_invalid",
+      "fix": "Send setting keys from GET /api/maintenance/retention with values in range (months 1 to 120, time HH:MM).",
+      "message": "That retention setting is not valid.",
+      "patterns": [],
+      "status": 422
+    },
+    {
+      "code": "role_change_stale",
+      "docs": "role_change_stale",
+      "fix": "Fetch the role-change preview again and confirm with its new token.",
+      "message": "What would be deleted has changed. Look at the numbers again before confirming.",
+      "patterns": [],
+      "status": 409
+    },
+    {
       "code": "route_undeclared",
       "docs": "route_undeclared",
       "fix": "This is a bug: the endpoint has no declared permission. Report it; it is refused until it has one.",
@@ -1904,12 +2489,52 @@
       "status": 403
     },
     {
-      "code": "safe_mode",
-      "docs": "safe_mode",
-      "fix": "Sign in as a profile that is allowed to do this (Settings > People & Access), or ask the Owner. Restricted profiles and signed-out devices can only chat with characters made for them.",
-      "message": "Unlock for full access",
+      "code": "routes_unavailable",
+      "docs": "routes_unavailable",
+      "fix": "Set the environment variables it names on the server, then restart DisPatch.",
+      "message": "That way of connecting Claude isn't set up on the DisPatch computer.",
       "patterns": [
-        "Unlock for full access"
+        "That sign-in route for the Claude agent is not set up on this server."
+      ],
+      "status": 503
+    },
+    {
+      "code": "schedule_invalid",
+      "docs": "schedule_invalid",
+      "fix": "Use every_minutes (15 or more), daily_at HH:MM or weekly_day_at {day, at}, and a known time zone.",
+      "message": "That schedule is not valid.",
+      "patterns": [
+        "That schedule is not valid."
+      ],
+      "status": 422
+    },
+    {
+      "code": "schedule_limit",
+      "docs": "schedule_limit",
+      "fix": "Delete a schedule you no longer need, then add the new one.",
+      "message": "A profile can have at most 20 schedules.",
+      "patterns": [
+        "A profile can have at most 20 schedules."
+      ],
+      "status": 409
+    },
+    {
+      "code": "schedule_not_found",
+      "docs": "schedule_not_found",
+      "fix": "Reload the list; the schedule may have been deleted.",
+      "message": "Unknown schedule.",
+      "patterns": [
+        "Unknown schedule."
+      ],
+      "status": 404
+    },
+    {
+      "code": "schedule_owner_only",
+      "docs": "schedule_owner_only",
+      "fix": "Ask the profile that made the schedule to change it.",
+      "message": "Only the schedule's own profile can change it; an Admin may only switch it off or delete it.",
+      "patterns": [
+        "Only the schedule's own profile can change it; an Admin may only switch it off or delete it."
       ],
       "status": 403
     },
@@ -1951,30 +2576,31 @@
     {
       "code": "setup_forbidden",
       "docs": "setup_forbidden",
-      "fix": "Open DisPatch on the computer it runs on, or send the one-time setup token from the server log.",
-      "message": "Setup is only allowed from this computer or with the setup token.",
+      "fix": "Open DisPatch on the computer it runs on, or send the one-time setup code from its log.",
+      "message": "Set up DisPatch on the computer it runs on, or use the setup code from its log.",
       "patterns": [
-        "Setup is only allowed from this computer or with the setup token."
+        "Set up DisPatch on the computer it runs on, or use the setup code from its log."
       ],
       "status": 403
     },
     {
       "code": "setup_required",
       "docs": "setup_required",
-      "fix": "Open DisPatch on the computer it runs on, or finish setup with the one-time setup token printed in the server log (POST /api/auth/setup).",
-      "message": "This DisPatch has no owner yet. Open it on the computer it runs on, or finish setup with the one-time setup token from the server log.",
+      "fix": "Open DisPatch on the computer it runs on, or finish setup with the one-time setup code printed in its log (POST /api/auth/setup).",
+      "message": "This DisPatch has no Owner yet. Open it on the computer it runs on, or finish setup with the one-time setup code from its log.",
       "patterns": [
-        "This DisPatch has no owner yet. Open it on the computer it runs on, or finish setup with the one-time setup token from the server log."
+        "This DisPatch has no Owner yet. Open it on the computer it runs on, or finish setup with the one-time setup code from its log."
       ],
       "status": 403
     },
     {
       "code": "signin_required",
       "docs": "signin_required",
-      "fix": "Pick your profile and enter your PIN or password. The owner can allow signed-out use with anonymous_access: restricted in security.yaml.",
+      "fix": "Pick your profile on the sign-in screen (with its PIN or password if it has one). Unsigned devices land on the default profile only when an Admin has set one (Settings, People: lock target).",
       "message": "Sign in to continue.",
       "patterns": [
-        "Sign in to continue."
+        "Sign in to continue.",
+        "Sign in first: forgetting devices keeps this session."
       ],
       "status": 401
     },
@@ -1995,6 +2621,16 @@
       "message": "Unknown starter pack",
       "patterns": [],
       "status": 404
+    },
+    {
+      "code": "stop_sharing_stale",
+      "docs": "stop_sharing_stale",
+      "fix": "Fetch the stop-sharing preview again and confirm with its new token.",
+      "message": "Who has a copy of this bot has changed. Look at the numbers again before confirming.",
+      "patterns": [
+        "Who has a copy of this bot has changed. Look at the numbers again before confirming."
+      ],
+      "status": 409
     },
     {
       "code": "storage_limit",
@@ -2028,14 +2664,24 @@
       "status": 409
     },
     {
-      "code": "task_thread_not_allowed",
-      "docs": "task_thread_not_allowed",
-      "fix": "Assign the task from a chat with a character that only Members and above can see, or from the Tasks page.",
-      "message": "Tasks cannot be assigned from a chat that Restricted profiles can read.",
+      "code": "template_has_no_copy",
+      "docs": "template_has_no_copy",
+      "fix": "Post to the id of the copy, or give the Owner a copy of the household bot (Settings → Characters → Who can use it).",
+      "message": "That's a household bot and the Owner has no copy of it.",
       "patterns": [
-        "Tasks cannot be assigned from a chat that Restricted profiles can read."
+        "That's a household bot and the Owner has no copy of it."
       ],
       "status": 409
+    },
+    {
+      "code": "template_not_chattable",
+      "docs": "template_not_chattable",
+      "fix": "Open your own copy of the character (the response names it as copy_id when you have one); templates are shared settings, not chats.",
+      "message": "That's a household bot. Chat with your own copy of it.",
+      "patterns": [
+        "That's a household bot. Chat with your own copy of it."
+      ],
+      "status": 403
     },
     {
       "code": "test_flag_invalid",
@@ -2111,16 +2757,6 @@
       "status": 500
     },
     {
-      "code": "time_limit",
-      "docs": "time_limit",
-      "fix": "This profile has used today's time. Ask the Owner to change the limit, or try tomorrow.",
-      "message": "Today's time for this profile is used up.",
-      "patterns": [
-        "Today's time for this profile is used up."
-      ],
-      "status": 403
-    },
-    {
       "code": "title_required",
       "docs": "title_required",
       "fix": "Check the request and resend it.",
@@ -2134,11 +2770,20 @@
       "code": "too_many_attempts",
       "docs": "too_many_attempts",
       "fix": "Wait the number of seconds in retry_after, then try again.",
-      "message": "Too many attempts — wait {}s.",
+      "message": "Too many tries. Wait {} seconds, then try again.",
       "patterns": [
-        "Too many attempts — wait {}s."
+        "Too many tries. Wait {} seconds, then try again.",
+        "Too many sign-in tries. Wait {} seconds, then try again."
       ],
       "status": 429
+    },
+    {
+      "code": "too_many_bots",
+      "docs": "too_many_bots",
+      "fix": "Delete one of your bots first.",
+      "message": "A profile can have at most {} bots",
+      "patterns": [],
+      "status": 409
     },
     {
       "code": "too_many_entries",
@@ -2149,6 +2794,16 @@
         "too many entries"
       ],
       "status": 400
+    },
+    {
+      "code": "too_many_sessions",
+      "docs": "too_many_sessions",
+      "fix": "Sign out of this profile on a device you no longer use (Settings → People & Access → Sign out everywhere), then try again.",
+      "message": "This profile stays signed in on too many devices. Sign out on one of them (or ask an Admin to sign it out everywhere), then try again.",
+      "patterns": [
+        "This profile stays signed in on too many devices. Sign out on one of them (or ask an Admin to sign it out everywhere), then try again."
+      ],
+      "status": 429
     },
     {
       "code": "tool_not_found",
@@ -2224,10 +2879,10 @@
     {
       "code": "unlock_first",
       "docs": "unlock_first",
-      "fix": "Sign in as the owner first, then retry.",
-      "message": "Unlock with your PIN first",
+      "fix": "Sign in as the Owner first, then try again.",
+      "message": "Sign in as the Owner first",
       "patterns": [
-        "Unlock with your PIN first"
+        "Sign in as the Owner first"
       ],
       "status": 403
     },
@@ -2241,6 +2896,36 @@
         "That file isn't a readable image"
       ],
       "status": 415
+    },
+    {
+      "code": "use_delete_route",
+      "docs": "use_delete_route",
+      "fix": "GET /api/people/{id}/delete/preview, then POST /api/people/{id}/delete with its token.",
+      "message": "Delete a profile with POST /api/people/{id}/delete (preview the counts first).",
+      "patterns": [
+        "Delete a profile with POST /api/people/{id}/delete (preview the counts first)."
+      ],
+      "status": 409
+    },
+    {
+      "code": "use_household_route",
+      "docs": "use_household_route",
+      "fix": "Send the list to PUT /api/people/{id}/household-bots.",
+      "message": "Set the household bots with PUT /api/people/{id}/household-bots.",
+      "patterns": [
+        "Set the household bots with PUT /api/people/{id}/household-bots."
+      ],
+      "status": 409
+    },
+    {
+      "code": "use_role_route",
+      "docs": "use_role_route",
+      "fix": "GET /api/people/{id}/role/preview, then POST /api/people/{id}/role with its token.",
+      "message": "Change a profile's type with POST /api/people/{id}/role (preview first).",
+      "patterns": [
+        "Change a profile's type with POST /api/people/{id}/role (preview first)."
+      ],
+      "status": 409
     },
     {
       "code": "validation_error",
@@ -2261,10 +2946,20 @@
       "status": 422
     },
     {
+      "code": "voice_not_allowed",
+      "docs": "voice_not_allowed",
+      "fix": "Pick a built-in voice or one of your own (or a household) cloned voice.",
+      "message": "That voice is not available to you.",
+      "patterns": [
+        "That voice is not available to you."
+      ],
+      "status": 422
+    },
+    {
       "code": "wizard_owner_required",
       "docs": "wizard_owner_required",
-      "fix": "Finish step 1 of the setup wizard (the owner account) before this step.",
-      "message": "Create the owner account first",
+      "fix": "Finish step 1 of the setup wizard (the Owner profile) before this step.",
+      "message": "Create the Owner profile first: DisPatch won't open to your network until it has one.",
       "patterns": [],
       "status": 409
     },

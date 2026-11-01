@@ -129,10 +129,26 @@ CREATE TABLE IF NOT EXISTS agent_settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- 4.3 (#11): money a starting task sets aside from its agent's per-day cap, so two tasks
+-- that start at once cannot both count on the same remaining budget. ``base_usd`` is the
+-- task's lifetime cost when it reserved (a resumed task spent money in earlier runs); the
+-- part of a reservation still outstanding is ``usd - (tasks.cost_usd - base_usd)``.
+-- Released on every terminal path and swept at boot.
+CREATE TABLE IF NOT EXISTS agent_reservations (
+    task_id    TEXT PRIMARY KEY,
+    agent_id   TEXT NOT NULL,
+    owner      TEXT NOT NULL DEFAULT '',
+    day        TEXT NOT NULL,
+    usd        REAL NOT NULL,
+    base_usd   REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_reservations_agent ON agent_reservations(agent_id, day);
 """
 
 #: The tables this module owns, children first (the migration's dry run lists them).
-TABLES = ("agent_settings", "agent_spend", "approvals", "task_events", "tasks", "agents")
+TABLES = ("agent_reservations", "agent_settings", "agent_spend", "approvals", "task_events", "tasks", "agents")
 
 TERMINAL = ("succeeded", "failed", "cancelled")
 ACTIVE = ("running", "awaiting_approval")
@@ -146,6 +162,13 @@ SETTING_DEFAULTS: dict[str, Any] = {
     "agents.retention_days": 30,
     "agents.max_concurrent": 4,
     "agents.claude.auth_route": "api_key",
+    # 4.3 (Phase 0 contract; read by WP-A6 / WP-A8, nothing reads them before that)
+    "agents.default_max_usd": 2.0,
+    "agents.default_max_turns": 60,
+    "agents.default_max_usd_per_day": 10.0,
+    "agents.approval_timeout_s": 1800,
+    "agents.managed.enabled": False,
+    "agents.cli.presets": [],
 }
 
 _lock = threading.RLock()
@@ -223,27 +246,6 @@ def all_settings() -> dict[str, Any]:
     for r in rows:
         out[r["key"]] = _j(r["value"], SETTING_DEFAULTS.get(r["key"]))
     return out
-
-
-def profile_budget(profile_id: str) -> dict[str, Any]:
-    """The per-profile agent budget (USD/day, max turns, wall-clock, token cap), {} if none."""
-    v = get_setting(f"profile_budget:{profile_id}", default={})
-    return v if isinstance(v, dict) else {}
-
-
-def set_profile_budget(profile_id: str, budget: dict[str, Any] | None) -> None:
-    if not budget:
-        with _lock, connect() as con:
-            con.execute("DELETE FROM agent_settings WHERE key=?", (f"profile_budget:{profile_id}",))
-        return
-    set_setting(f"profile_budget:{profile_id}", budget)
-
-
-def all_profile_budgets() -> dict[str, dict]:
-    with connect() as con:
-        rows = con.execute("SELECT key,value FROM agent_settings "
-                           "WHERE key LIKE 'profile_budget:%'").fetchall()
-    return {r["key"].split(":", 1)[1]: _j(r["value"], {}) for r in rows}
 
 
 # --------------------------------------------------------------------------- #
@@ -398,23 +400,6 @@ def list_tasks(*, owner: str | None = None, states: list[str] | None = None,
     return [_task_row(r) for r in rows]
 
 
-def count_tasks(*, states: list[str] | None = None, kind: str | None = None,
-                exclude_kind: str | None = None) -> int:
-    where, args = ["1=1"], []
-    if states:
-        where.append(f"state IN ({','.join('?' * len(states))})")
-        args.extend(states)
-    if kind:
-        where.append("kind=?")
-        args.append(kind)
-    if exclude_kind:
-        where.append("kind != ?")
-        args.append(exclude_kind)
-    with connect() as con:
-        return int(con.execute(f"SELECT COUNT(*) FROM tasks WHERE {' AND '.join(where)}",
-                               args).fetchone()[0])
-
-
 def nonterminal_tasks() -> list[dict[str, Any]]:
     with connect() as con:
         rows = con.execute("SELECT * FROM tasks WHERE state NOT IN ('succeeded','failed','cancelled') "
@@ -445,14 +430,6 @@ def task_by_advisor_request(rid: str) -> dict[str, Any] | None:
 def event_row(task_id: str, ev: dict[str, Any]) -> tuple:
     return (task_id, int(ev["seq"]), float(ev.get("ts") or 0.0), str(ev["type"]),
             json.dumps(ev, separators=(",", ":")))
-
-
-def append_events(rows: list[tuple]) -> None:
-    if not rows:
-        return
-    with _lock, connect() as con:
-        con.executemany("INSERT OR IGNORE INTO task_events (task_id,seq,ts,type,data) "
-                        "VALUES (?,?,?,?,?)", rows)
 
 
 def list_events(task_id: str, after_seq: int = -1, limit: int = 5000) -> list[dict[str, Any]]:
@@ -541,6 +518,144 @@ def add_spend(agent_id: str, profile: str, usd: float = 0.0, tokens: int = 0, tu
               tasks: int = 0, day: str | None = None) -> None:
     with _lock, connect() as con:
         _add_spend(con, day or today(), agent_id, profile, usd, tokens, turns, tasks)
+
+
+# --------------------------------------------------------------------------- #
+# Reservations against the per-day caps (4.3, #11)
+# --------------------------------------------------------------------------- #
+
+_OUTSTANDING = ("MAX(0, r.usd - MAX(0, COALESCE(t.cost_usd, 0) - r.base_usd))")
+
+
+def _reserved_others(con: sqlite3.Connection, agent_id: str, day: str, exclude: str | None) -> float:
+    r = con.execute(
+        f"SELECT COALESCE(SUM({_OUTSTANDING}), 0) AS s FROM agent_reservations r "
+        "LEFT JOIN tasks t ON t.task_id = r.task_id "
+        "WHERE r.agent_id=? AND r.day=? AND r.task_id != ?", (agent_id, day, exclude or "")).fetchone()
+    return float(r["s"] or 0.0)
+
+
+def reserved_by_others(agent_id: str, exclude: str | None = None, day: str | None = None) -> float:
+    """What other tasks of ``agent_id`` still hold aside today (their outstanding part)."""
+    with connect() as con:
+        return _reserved_others(con, agent_id, day or today(), exclude)
+
+
+def try_reserve(task_id: str, agent_id: str, owner: str, *, day_cap: float, want: float | None,
+                base_usd: float = 0.0, wait_ok: bool = True) -> tuple[str, float]:
+    """Set money aside for ``task_id`` from ``agent_id``'s per-day cap, atomically.
+
+    ``want`` is the task's own cap (None: it takes whatever is left). Returns
+    ``("ok", amount)``, ``("wait", 0)`` when other tasks' reservations stand in the way (they
+    settle when they end; the caller queues), or ``("exhausted", 0)`` when nothing is left
+    and nobody else holds any. A task that already holds a reservation keeps it.
+    """
+    day = today()
+    with _lock, connect() as con:
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            have = con.execute("SELECT usd FROM agent_reservations WHERE task_id=?", (task_id,)).fetchone()
+            if have is not None:
+                con.execute("COMMIT")
+                return "ok", float(have["usd"])
+            spent_row = con.execute("SELECT usd FROM agent_spend WHERE day=? AND kind='agent' AND subject=?",
+                                    (day, agent_id)).fetchone()
+            spent = float(spent_row["usd"]) if spent_row else 0.0
+            others = _reserved_others(con, agent_id, day, task_id)
+            avail = round(day_cap - spent - others, 6)
+            need = want if want is not None else avail
+            if avail <= 0 or need > avail:
+                if others > 0 and wait_ok:
+                    con.execute("COMMIT")
+                    return "wait", 0.0
+                if avail <= 0:
+                    con.execute("COMMIT")
+                    return "exhausted", 0.0
+                need = avail                           # nobody else holds any: run with what is left
+            con.execute("INSERT INTO agent_reservations (task_id,agent_id,owner,day,usd,base_usd,created_at) "
+                        "VALUES (?,?,?,?,?,?,?)", (task_id, agent_id, owner or "", day, float(need),
+                                                   float(base_usd or 0.0), now_iso()))
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+        con.execute("COMMIT")
+    return "ok", float(need)
+
+
+def release_reservation(task_id: str) -> bool:
+    with _lock, connect() as con:
+        cur = con.execute("DELETE FROM agent_reservations WHERE task_id=?", (task_id,))
+    return cur.rowcount > 0
+
+
+def release_reservations_except(keep: set[str] | frozenset[str] = frozenset()) -> int:
+    """The boot sweep: drop every reservation whose task is not running in this process."""
+    with _lock, connect() as con:
+        rows = con.execute("SELECT task_id FROM agent_reservations").fetchall()
+        gone = [r["task_id"] for r in rows if r["task_id"] not in keep]
+        for tid in gone:
+            con.execute("DELETE FROM agent_reservations WHERE task_id=?", (tid,))
+    return len(gone)
+
+
+def list_reservations() -> list[dict[str, Any]]:
+    with connect() as con:
+        rows = con.execute("SELECT * FROM agent_reservations ORDER BY created_at, rowid").fetchall()
+    return [{"task_id": r["task_id"], "agent_id": r["agent_id"], "owner": r["owner"], "day": r["day"],
+             "usd": r["usd"], "base_usd": r["base_usd"], "created_at": r["created_at"]} for r in rows]
+
+
+def op_reservation_release(task_id: str) -> Op:
+    def run(con: sqlite3.Connection) -> None:
+        con.execute("DELETE FROM agent_reservations WHERE task_id=?", (task_id,))
+    return run
+
+
+# --------------------------------------------------------------------------- #
+# Approval decisions that must not race (4.3, #34)
+# --------------------------------------------------------------------------- #
+
+
+def decide_approval(request_id: str, decision: str, scope: str | None, decided_by: str | None) -> bool:
+    """Record a decision ONLY if none is recorded yet. True when this call recorded it."""
+    with _lock, connect() as con:
+        cur = con.execute("UPDATE approvals SET decision=?, scope=?, decided_by=?, decided_at=? "
+                          "WHERE request_id=? AND decision IS NULL",
+                          (decision, scope, decided_by, now_iso(), request_id))
+    return cur.rowcount == 1
+
+
+def set_approval_decision(request_id: str, decision: str) -> None:
+    """Correct a decision THIS process just recorded (the backend refused to apply it)."""
+    with _lock, connect() as con:
+        con.execute("UPDATE approvals SET decision=?, decided_at=? WHERE request_id=?",
+                    (decision, now_iso(), request_id))
+
+
+def undo_approval_decision(request_id: str) -> None:
+    """Take back a decision THIS process just recorded: the backend could not take the answer
+    for a passing reason, so the request is pending again and a person may answer it again."""
+    with _lock, connect() as con:
+        con.execute("UPDATE approvals SET decision=NULL, scope=NULL, decided_by=NULL, decided_at=NULL "
+                    "WHERE request_id=?", (request_id,))
+
+
+def pending_approvals() -> list[dict[str, Any]]:
+    with connect() as con:
+        rows = con.execute("SELECT * FROM approvals WHERE decision IS NULL ORDER BY requested_at, rowid").fetchall()
+    return [_approval_row(r) for r in rows]
+
+
+def expire_stale_approvals(older_than_s: float, *, now: datetime | None = None) -> int:
+    """The boot sweep: a pending approval whose task is over, or that has waited longer than
+    the timeout, is ``expired`` (never one that already has a decision)."""
+    cutoff = ((now or datetime.now(UTC)) - timedelta(seconds=max(0.0, older_than_s))).isoformat(timespec="seconds")
+    with _lock, connect() as con:
+        cur = con.execute(
+            "UPDATE approvals SET decision='expired', decided_at=? WHERE decision IS NULL AND "
+            "(requested_at < ? OR task_id NOT IN (SELECT task_id FROM tasks WHERE state IN "
+            "('running','awaiting_approval')))", (now_iso(), cutoff))
+    return cur.rowcount
 
 
 # --------------------------------------------------------------------------- #
@@ -677,6 +792,8 @@ def redacted_summary() -> dict[str, Any]:
         spend = [{"kind": r["kind"], "usd_estimate": round(r["usd"], 4), "tasks": r["tasks"]}
                  for r in con.execute("SELECT kind, SUM(usd) AS usd, SUM(tasks) AS tasks FROM agent_spend "
                                       "WHERE day=? GROUP BY kind", (today(),)).fetchall()]
+        res = con.execute("SELECT COUNT(*) AS n, COALESCE(SUM(usd), 0) AS usd FROM agent_reservations").fetchone()
+        reservations = {"open": int(res["n"]), "usd_estimate": round(float(res["usd"]), 4)}
     agents = []
     for a in list_agents():
         spec = a["spec"] if isinstance(a["spec"], dict) else {}
@@ -693,4 +810,5 @@ def redacted_summary() -> dict[str, Any]:
     settings = dict(all_settings().items())
     return {"agents": agents, "tasks_by_state": by_state, "tasks_by_backend": by_backend,
             "task_events": events, "approvals": approvals, "spend_today": spend,
+            "reservations": reservations, "approvals_waiting": int(approvals.get("pending", 0)),
             "settings": settings, "prompts_included": False}

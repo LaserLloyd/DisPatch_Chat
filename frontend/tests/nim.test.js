@@ -78,21 +78,22 @@ test('isMediaOnly: tolerates a malformed attachment', () => {
 });
 
 // --- the ratchet -----------------------------------------------------------
-// canDisableNim(decoy), where decoy === (pinSet && !authenticated).
+// canDisableNim(locked), where locked === (the install has a lock && nobody is signed in on this device).
 
-test('canDisableNim: an unlocked session may turn NIM off', () => {
-  // Being unlocked IS the credential — no second prompt.
+test('canDisableNim: a signed-in profile may turn NIM off', () => {
+  // Being signed in IS the credential — no second prompt.
   assert.equal(canDisableNim(false), true);
 });
 
-test('canDisableNim: a locked Safe-Mode session may NOT', () => {
-  // This is the case the whole feature exists for: the handed-over tablet.
-  assert.equal(canDisableNim(true), false);
+test('canDisableNim: anyone may switch it back off (the ratchet is gone, 2026-10-24)', () => {
+  // maintainer: "allow any user to change modes" - the shared PIN-less profile and the
+  // lock screen were stranded with no pictures.
+  assert.equal(canDisableNim(true), true);
 });
 
-test('canDisableNim: with no PIN set, NIM stays reversible', () => {
-  // decoy is false when pinSet is false, so this is the same branch as
-  // "unlocked" — asserted separately because it is a distinct product rule
+test('canDisableNim: with no lock on the install, NIM stays reversible', () => {
+  // locked is false when the install has no lock, so this is the same branch as
+  // "signed in" — asserted separately because it is a distinct product rule
   // and someone will eventually try to "fix" it into a lockout.
   assert.equal(canDisableNim(false), true);
 });

@@ -20,7 +20,7 @@ be told its ``root_path`` (a change to MailForge's own ``ui.run()`` wiring)
 to emit sub-path-relative URLs, which is out of scope for a same-evening
 integration. So this module follows the pattern already shipped for the
 DeepSeek Harness pane (``app/harness.py`` + the ``harness-frame`` iframe):
-DisPatch returns the (loopback-only, unlocked-session-only) launch URL, and
+DisPatch returns the (loopback-only, signed-in-session-only) launch URL, and
 the browser iframes MailForge directly. The one-time launcher key therefore
 does appear in the iframe's own address (never in DisPatch's page URL, never
 in DisPatch's history) — the same trade DisPatch already made for dsh. What
@@ -28,8 +28,8 @@ reaches the browser after that first navigation is MailForge's own signed
 session cookie, scoped to MailForge's origin.
 
 Every route here is full-session only (see ``_require_mail`` in main.py) and
-belongs in ``_decoy_blocked`` — a Safe-Mode / no-PIN caller must never learn
-the port, let alone the key.
+is refused to a signed-out caller (``_signed_out_blocked``) — only a profile holding
+use_tools:mail may learn the port, let alone the key.
 """
 
 from __future__ import annotations

@@ -58,12 +58,55 @@ marker exists afterwards), plus `test_ag_cli_adapter.py` for the M3 preset (`--b
   rejected at construction unless an admin names the tool in `unattended_allow`.
 - Approval ids are single use and checked; an interrupt, cancel or budget stop denies
   every pending request of that task.
-- Not done yet: path-scoping and Bash allow-listing as a `PreToolUse` hook, which is
-  where policy that must apply to *every* call belongs (§5 item 8). Until it exists the
-  boundary for allowed tools is the workspace plus the allowlist.
+- **Tool policy (4.3, #8).** Policy that must apply to *every* call lives in
+  `backend/app/agents/tool_policy.py`, `decide(tool, input, ws_root, bash_allow)`: one pure
+  function used by the worker's `PreToolUse` hook (which sees every call, auto-approved tools
+  included, in all three modes) and by the parent's `can_use_tool` path (`decide_permission`).
+  The hook never answers "allow", which would skip `can_use_tool`; it answers deny, ask, or
+  the keep-alive.
+  - **Paths.** Checked keys: `file_path` (Read, Write, Edit, MultiEdit), `notebook_path`,
+    `path` (Glob, Grep, LS; absent means the workspace root), and the fixed folder part of a
+    Glob `pattern` or Grep `glob`. Anything that resolves outside the workspace (symlinks and
+    `..` followed) is denied with a reason the agent sees; `~` paths are refused.
+  - **Bash.** `approval_policy.bash_allow` is a list of command prefixes. A command runs
+    without asking only when it matches one prefix as a whole single command: any of
+    `;`, `&`, `|`, a backtick, `<`, `>`, a newline, CR, NUL, `$(` or `${` anywhere, even
+    inside quotes, makes it not match (it then asks). Everything else asks (interactive) or is denied (unattended, plan); an empty
+    list means every Bash call asks. A prefix `"git "` still allows every git subcommand and
+    option (`git -c core.pager=...`): choose prefixes narrowly (`"git status"`). Bash
+    arguments are not path-checked (`cat /etc/passwd` with the prefix `cat ` runs).
+  - In interactive mode Bash and PowerShell are never pre-allowed (`allowed_tools`), so each
+    command reaches the parent.
+  - A worker started without a policy block (an older parent) applies the strictest one: its
+    cwd as the workspace, an empty allow-list, the mode from `permission_mode`.
+- **Approvals time out (4.3, #11).** A request nobody answers within
+  `agents.approval_timeout_s` (default 1800 s) is denied and recorded `expired`. Two answers to
+  one request race safely: a per-request lock plus a conditional update let exactly one win;
+  the other gets 404 `approval_not_found` and the audit row keeps the first decision (#34).
 
 Tests: `test_ag_interface.py`, `test_ag_fake.py`, `contract/test_ag_contract.py`
 (approval round trip, deny, single use, destructive scope), `test_ag_claude_options.py`.
+
+### Who may grant host-level powers (4.3, #30)
+
+Every Admin holds `admin_system`, so since 4.3 the grants that amount to running code on the
+host, or sending a host secret elsewhere, need the **protected Admin** (the Owner,
+`principal.is_protected`); an Admin with `manage_agents` otherwise cannot give an agent host
+code:
+
+- `Bash`, `BashOutput`, `KillShell`, `Edit`, `MultiEdit`, `Write`, `NotebookEdit` in the tool
+  allow-list (glob entries such as `*` count);
+- removing any tool from `always_ask` (for a new agent: anything narrower than the shipped
+  default list), and an interactive agent with an empty `always_ask`;
+- every added or changed `bash_allow` entry;
+- stdio MCP, privileged MCP, `unattended_allow`, `trust_repo_settings`;
+- a header secret sent to a server that is not `localhost`, `127.0.0.1` or `::1` (literals
+  only: `foo.localhost` is remote, #37);
+- `repo_path` on `POST /api/tasks`;
+- the command-line presets (`/api/agents/cli-presets`, host tier).
+
+Grants are compared grant by grant against the stored spec, so an Admin may edit an agent the
+Owner approved (name, description, the unchanged grants) or narrow it without re-granting.
 
 ## 3. Quarantine: readers do not hold privileged tools
 
@@ -97,8 +140,19 @@ Test: `test_ag_interface.py`.
 - Subagent fan-out is capped through `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` and
   `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` (the SDK enforces the spawn cap from CLI 2.1.217;
   R-COST).
-- The budget stop is a hard stop and is *not* resumable. Per-day limits need a spend
+- The budget stop is a hard stop and is *not* resumable. Per-day limits use a spend
   ledger the integration layer owns (`spent_today_usd`).
+- **Default limits (4.3, #10).** A task whose agent sets no limit gets
+  `agents.default_max_usd` ($2.00), `agents.default_max_turns` (60) and
+  `agents.default_max_usd_per_day` ($10.00). Only runs with `kind == "task"` get them (chat
+  turns and the advisor's hand-off are exempt), and the USD ones only on backends whose
+  capabilities say `cost_reporting == "usd"`. The limits a run was held to are recorded in
+  its spec.
+- **Reservations (4.3, #11).** A starting task reserves its per-task cap (or what is left
+  today) against the agent's daily cap in `agent_reservations`, so concurrent starts cannot
+  overspend; the outstanding part is `usd - (tasks.cost_usd - base_usd)`. Reservations
+  settle on every terminal path and are swept at startup. A task waiting for an approval
+  gives its slot back; at most 2 × `agents.max_concurrent` tasks may wait at once.
 - All costs are labelled estimates; never bill from them.
 
 Tests: `test_ag_interface.py`, `contract/test_ag_contract.py` (budget stop, wall clock),
@@ -120,9 +174,15 @@ Tests: `test_ag_interface.py`, `contract/test_ag_contract.py` (budget stop, wall
   secrets, plus anything shaped like an Anthropic key); the agent loggers carry a
   redacting filter that also scrubs exception text; support-bundle dumps
   (`support_dump()`) omit prompts, instructions and environment values.
-- Known limit: on Windows `chmod 0600` only toggles the read-only bit, so the secrets
-  file relies on the ACL inherited from the per-user data directory. Prefer the keyring
-  there. Another limit: enabling DEBUG logging for the `websockets` library logs frame
+- Private files: since 4.3 the secrets file is made private with `fsperm.ensure_private`
+  after every write (mode 0600 on POSIX, an owner-only ACL on Windows). The keyring is still
+  preferred where one is usable.
+- Cloud routes (4.3, #9): a fixed allow-list of variable names per route is copied from the
+  server environment and handed to the worker over stdin (`secret_env`), never argv; names
+  that look like keys, secrets, tokens or passwords are registered with the redactor. See
+  [backends.md](backends.md#provider-routes).
+- Backups (4.3, #35): the agent secrets travel inside encrypted archives with the other
+  stored keys ([../backups.md](../backups.md)). Another limit: enabling DEBUG logging for the `websockets` library logs frame
   heads; do not do that in production.
 
 Tests: `test_ag_no_secret_leaks.py` seeds a fake key and checks events, logs, exception
@@ -189,4 +249,7 @@ Policy date in RESEARCH.md C3 needs a counsel re-read.
    own transcripts in the agent's home are not DisPatch's to delete.
 6. **OpenClaw approvals and budgets are weaker** than the Claude backend's (no approval
    round trip; token/turn caps are post-hoc). Capabilities say so.
-7. **Windows secrets file** depends on directory ACLs (section 5).
+7. **Approved shell prefixes are text matches.** `bash_allow` does not inspect arguments;
+   a broad prefix allows more than it looks like (section 2).
+8. **Claude cloud routes and Managed Agents are unverified live**: tested with fake
+   environments and recorded streams only.

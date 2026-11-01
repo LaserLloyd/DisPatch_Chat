@@ -20,9 +20,10 @@
 // Sort is per-paint (like markdown.js's generic table sort): the persisted
 // state is checkbox state + check order, exactly what the feature promises to
 // survive a reload.
-import { api } from './api.js?v=35';
-import { t } from './i18n.js?v=4';
-import { cellSortValue, compareCells } from './markdown.js?v=34';
+import { api } from './api.js?v=37';
+import { spriteIcon } from './util.js?v=23';
+import { t } from './i18n.js?v=5';
+import { cellSortValue, compareCells } from './markdown.js?v=37';
 
 // The checkbox column is always column 0; data columns start at 1.
 const CHECK_COL = 0;
@@ -126,7 +127,7 @@ function installWidget(widget, { checked, readonly, messageId, listIndex = 0 }) 
     th.className = 'cl-check';
     th.setAttribute('scope', 'col');
     th.setAttribute('aria-label', t ? t('checklist.done') : 'Completed');
-    th.textContent = '✓';
+    th.append(spriteIcon('check', 14));
     headRow.insertBefore(th, headRow.cells[0]);
     Array.from(headRow.cells).forEach((cell, i) => {
       if (i === CHECK_COL) return;
@@ -202,7 +203,7 @@ function installWidget(widget, { checked, readonly, messageId, listIndex = 0 }) 
 
 /** Install checkboxes + interaction on every ```checklist table under `root`.
  *  Called once per rendered message bubble, with the message for its id and
- *  persisted state. `readonly` (Safe Mode) renders the checkboxes disabled. */
+ *  persisted state. `readonly` renders a read-only view (checkboxes disabled). */
 export function installChecklists(root, { message, readonly = false } = {}) {
   if (!root) return;
   const stored = message?.metadata?.checklist || {};

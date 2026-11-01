@@ -1,4 +1,4 @@
-"""Pool identity, pool-yaml concurrency and the Safe-Mode edges around them.
+"""Pool identity, pool-yaml concurrency and the edges around them.
 
 These pin the review findings of 2026-08-29: one id must mean exactly one
 picture (and keep meaning it after a fire), a refill round must not write back
@@ -196,49 +196,6 @@ def test_a_card_added_during_a_heal_is_not_erased(rx):
     assert added, "the concurrent add never ran"
     assert reactions.load().by_id(added[0].id) is not None, \
         "heal_pack erased a card added while it was running"
-
-
-# --------------------------------------------------------------------------- #
-# 3. Safe Mode and the shared spent/ store
-# --------------------------------------------------------------------------- #
-
-
-def test_an_unsafe_bots_spent_image_is_not_safe_mode_visible(rx):
-    """spent/ is shared and no longer records who fired a blob. "Some pool is
-    safe" therefore published EVERY spent picture — including the unsafe bot's,
-    which a locked device could then fetch."""
-    _enable_reactions(COMPANION)
-    _drop("aa11.png", folder="mad")                       # main: unsafe pool
-    _drop("bb22.png", folder="mad", bot_id=COMPANION)     # companion: safe pool
-    st = reactions.pool_load(COMPANION)
-    st.config.safe = True
-    reactions.pool_save(st, COMPANION)
-
-    mine = reactions.pool_file_id("mad", "aa11.png")
-    theirs = reactions.pool_file_id("mad", "bb22.png")
-    assert reactions.pool_consume(mine) is True
-    reactions.invalidate()
-
-    ids = reactions.safe_ids()
-    assert mine not in ids, "an unsafe bot's fired image became Safe-Mode visible"
-    assert theirs in ids, "the safe bot's own ready image is still visible"
-    r = reactions.get_for_display(mine, bot_id=COMPANION)
-    assert r is not None and r.safe is False, \
-        "the spent blob inherited the queried pool's safe flag"
-
-
-def test_a_spent_image_stays_safe_when_every_pool_agrees(rx):
-    """The conservative rule must not cost the ordinary single-pool install
-    its trace pictures."""
-    st = reactions.pool_load()
-    st.config.safe = True
-    reactions.pool_save(st)
-    _drop("cc33.png", folder="mad")
-    rid = reactions.pool_file_id("mad", "cc33.png")
-    assert reactions.pool_consume(rid) is True
-    reactions.invalidate()
-    assert rid in reactions.safe_ids()
-    assert reactions.get_for_display(rid).safe is True
 
 
 # --------------------------------------------------------------------------- #

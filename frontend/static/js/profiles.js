@@ -1,55 +1,33 @@
-// Pure helpers for DisPatch Chat 3.0 "profiles, roles and policy".
+// Pure helpers for the profile model (4.0, "chat-first profiles"): three profile types,
+// Admin, User and Basic, one of the Admins being the protected first Admin.
 //
 // No DOM, no fetch, no imports: everything here is a function of its arguments,
-// so frontend/tests/people.test.js can drive it under plain node. The DOM
-// halves live in people.js (Settings -> People & Profiles) and signin.js (the
-// lock screen tiles, first-run setup, the Restricted banner).
+// so frontend/tests/profiles.test.js can drive it under plain node. The DOM
+// halves live in people.js (Settings -> People) and signin.js (the sign-in
+// tiles, first-run setup, the rail chip).
 //
-// NOTHING in this file is a security decision. The server enforces every role,
-// budget and permission; these helpers only decide what the UI OFFERS, so a
-// Member is not shown an admin tab that could only 403.
+// NOTHING in this file is a security decision. The server enforces every role and
+// permission; these helpers only decide what the UI OFFERS, so a User is not shown an
+// admin tab that could only 403.
 
-export const ROLES = ['owner', 'admin', 'member', 'restricted'];
-const RANK = { restricted: 0, member: 1, admin: 2, owner: 3 };
+const RANK = { basic: 0, user: 1, admin: 2 };
 
 export const roleRank = (role) => (role in RANK ? RANK[role] : -1);
 
-/** The role the UI should act as, from a /api/auth/status or /api/auth/me body.
- *  A server that predates 3.0 sends no `role`: derive it the way 2.x worked
- *  (decoy = locked/limited, otherwise the operator). */
+/** The role the UI acts as, from a /api/auth/status or /api/auth/me body. The server says
+ *  admin | user | basic; anything else (a server that predates 4.0, a missing field) reads as
+ *  the lowest type, so the UI never offers more than the server will allow. */
 export function normalizeRole(s) {
-  if (s && typeof s.role === 'string' && s.role in RANK) return s.role;
-  return s && s.decoy ? 'restricted' : 'owner';
+  return s && typeof s.role === 'string' && s.role in RANK ? s.role : 'basic';
 }
 
-export const isAdminRole = (role) => role === 'owner' || role === 'admin';
-export const isRestrictedRole = (role) => role === 'restricted';
-
-/** Mirrors the server's rule (people_api._may_manage): the Owner and every Admin
- *  manage every profile except THE Owner's (nobody may lock the owner out). */
-export function canManage(actorRole, targetRole) {
-  if (isAdminRole(actorRole)) return roleRank(targetRole) >= 0 && targetRole !== 'owner';
-  return false;
-}
-
-/** Roles a create/edit form may offer. Admin only for the Owner or an Admin, and only once
- *  the Owner has a password of their own (the server answers 409
- *  `password_required` otherwise). `adminBlocked` says why it is missing so the
- *  form can explain rather than silently omit it. */
-export function roleOptions(actorRole, ownerHasPassword) {
-  const options = ['member', 'restricted'];
-  let adminBlocked = null;
-  if (!isAdminRole(actorRole)) adminBlocked = 'not_owner';
-  else if (!ownerHasPassword) adminBlocked = 'owner_needs_password';
-  else options.unshift('admin');
-  return { options, adminBlocked };
-}
+export const isAdminRole = (role) => role === 'admin';
 
 // ---- Sign-in ---------------------------------------------------------------
 
 /** What a lock-screen tile asks for. credential is "password" | "pin_or_password"
  *  | "pin" | "none". `modes` lists the inputs on offer, first = the default; a
- *  Restricted profile with no PIN needs nothing at all and signs in at once. */
+ *  profile with no credential (the shared default) needs nothing at all and signs in at once. */
 export function credentialModes(kind) {
   switch (kind) {
     case 'password': return ['password'];
@@ -68,38 +46,72 @@ export function credentialOptions(mode, secret, remember = false) {
   return o;
 }
 
-/** Should the lock overlay show profile tiles, or stay the 2.x PIN keypad?
- *  The keypad stays when the only profile is the Owner and the install has a
- *  PIN: there is nobody to pick and a PIN is what the keypad takes. (The
- *  server's lock-screen list calls the Owner "pin_or_password" whether or not a
- *  password exists, so the PIN's existence is read from pin_set instead.) An
- *  Owner with no PIN gets the tile, because only a password can sign them in.
- *  An older server sends no `profiles` at all -> keypad. Accepts the raw
- *  status body (pin_set) or main.js's state.auth (pinSet). */
+/** Should the sign-in overlay show profile tiles, or stay the 2.x PIN keypad?
+ *  The keypad stays when the only profile is the protected Admin and the install has a PIN:
+ *  there is nobody to pick and a PIN is what the keypad takes. (The server's profile list calls
+ *  that Admin "pin_or_password" whether or not a password exists, so the PIN's existence is read
+ *  from pin_set instead.) A protected Admin with no PIN gets the tile, because only a password
+ *  can sign them in. An older server sends no `profiles` at all -> keypad. Accepts the raw status
+ *  body (pin_set) or main.js's state.auth (pinSet). */
 export function signInMode(status) {
   const profiles = status && Array.isArray(status.profiles) ? status.profiles : [];
   if (!status || !status.claimed || !profiles.length) return 'keypad';
   const pinSet = !!(status.pin_set ?? status.pinSet);
   const only = profiles.length === 1 ? profiles[0] : null;
-  if (only && only.role === 'owner' && (only.credential === 'pin' || (pinSet && only.credential === 'pin_or_password'))) return 'keypad';
+  if (only && only.protected && (only.credential === 'pin' || (pinSet && only.credential === 'pin_or_password'))) return 'keypad';
   return 'tiles';
 }
 
-/** Tiles in display order: Owner first, then by role, then name. */
+/** Tiles in display order: the shared default profile first (where a lock lands), then the
+ *  protected Admin, then by type, then name. */
 export function sortTiles(profiles) {
+  const lead = (p) => (p.shared ? 2 : p.protected ? 1 : 0);
   return [...(profiles || [])].sort((a, b) =>
-    (roleRank(b.role) - roleRank(a.role)) || String(a.name).localeCompare(String(b.name)));
+    (lead(b) - lead(a)) || (roleRank(b.role) - roleRank(a.role)) || String(a.name).localeCompare(String(b.name)));
 }
 
 /** How to draw a profile's picture. `avatar` is server data: an image is only
  *  accepted as a same-origin path ("/..."), a short string is drawn as a glyph
- *  (an emoji), anything else falls back to the name's first letter. */
-export function avatarSpec(profile) {
+ *  (an emoji), anything else falls back to the name's first letter. With `noImages`
+ *  (No-Image Mode) a path falls back to the initial too. */
+export function avatarSpec(profile, { noImages = false } = {}) {
   const a = profile && typeof profile.avatar === 'string' ? profile.avatar.trim() : '';
-  if (/^\/(?![/\\])[^\s"'<>]*$/.test(a)) return { kind: 'img', src: a };
-  if (a && [...a].length <= 4) return { kind: 'glyph', text: a };
+  // No-Image Mode: a picture is never requested; the name's initial stands in for it.
+  const isPath = /^\/(?![/\\])[^\s"'<>]*$/.test(a);
+  if (isPath && !noImages) return { kind: 'img', src: a };
+  if (a && !isPath && [...a].length <= 4) return { kind: 'glyph', text: a };
+  // The install's default profile ("DisPatch") wears the app mark while it has no picture
+  // of its own (server: default_picture "mark"). It is drawn inline by markNode(), so it
+  // costs no download and No-Image Mode keeps it.
+  if (profile && profile.default_picture === 'mark') return { kind: 'mark' };
   const name = (profile && profile.name ? String(profile.name).trim() : '') || '?';
   return { kind: 'initial', text: [...name][0].toUpperCase() };
+}
+
+/** The DisPatch mark (favicon.svg's artwork: the speech-bubble "D" holding the brass house)
+ *  as an inline <svg> for a round or rounded avatar frame: the navy fills the whole square
+ *  (the frame's border-radius clips it) and the drawing is scaled to 90 % so the bubble's
+ *  tail stays inside a circle. A solid navy, not favicon.svg's gradient: a gradient id
+ *  repeated across many copies resolves to the first one, which may be hidden. Keep the two
+ *  paths in step with favicon.svg (a test compares them). */
+export function markNode(cls = '') {
+  const NS = 'http://www.w3.org/2000/svg';
+  const mk = (name, attrs) => {
+    const n = document.createElementNS(NS, name);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    return n;
+  };
+  const svg = mk('svg', { viewBox: '0 0 64 64', class: `${cls} profile-mark`.trim(),
+    'aria-hidden': 'true', focusable: 'false' });
+  const g = mk('g', { transform: 'translate(3.2 3.2) scale(0.9)' });
+  g.append(
+    mk('path', { d: 'M16.5 14.5 H32 A18.5 17 0 0 1 32 48.5 H24.5 L16 54 L16.5 48.5 Z', fill: 'none',
+      stroke: '#f2ebdd', 'stroke-width': '3.2', 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }),
+    mk('path', { d: 'M33.2 23.7 L41.5 30.6 Q42.1 31.1 42.1 31.9 V39.1 Q42.1 40.1 41.1 40.1 H25.3 Q24.3 40.1 24.3 39.1 V31.9 Q24.3 31.1 24.9 30.6 Z M30.9 40.1 V35.6 a2.3 2.3 0 0 1 4.6 0 V40.1 Z',
+      fill: '#c9a35b', 'fill-rule': 'evenodd' }),
+  );
+  svg.append(mk('rect', { width: '64', height: '64', fill: '#151a2b' }), g);
+  return svg;
 }
 
 // ---- Throttle countdown ----------------------------------------------------
@@ -144,136 +156,11 @@ export function createCountdown({ seconds, onTick, onDone, now = Date.now,
   };
 }
 
-// ---- Budgets ---------------------------------------------------------------
-
-const COUNT_KEYS = { turns: 'turns', threads: 'threads', feedback: 'feedback', uploadMb: 'upload_mb' };
-
-export const EMPTY_BUDGET_FORM = Object.freeze({
-  minutes: '', quietStart: '', quietEnd: '', turns: '', threads: '', feedback: '', uploadMb: '', sessionMinutes: '',
-});
-
-/** "20:30-07:00" -> {start:"20:30", end:"07:00"}; anything else -> empty pair. */
-export function parseQuietHours(s) {
-  const m = /^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/.exec(String(s || ''));
-  if (!m) return { start: '', end: '' };
-  const pad = (h, mm) => `${String(h).padStart(2, '0')}:${mm}`;
-  return { start: pad(m[1], m[2]), end: pad(m[3], m[4]) };
-}
-
-export function formatQuietHours(start, end) {
-  return start && end ? `${start}-${end}` : '';
-}
-
-/** A profile row (GET /api/people) -> the strings the edit form shows. */
-export function budgetsToForm(person) {
-  const b = (person && person.budgets) || {};
-  const q = parseQuietHours(b.quiet_hours);
-  const str = (v) => (Number.isInteger(v) ? String(v) : '');
-  const secs = person && Number.isInteger(person.session_timeout) ? person.session_timeout : null;
-  return {
-    minutes: str(b.minutes_per_day),
-    quietStart: q.start,
-    quietEnd: q.end,
-    turns: str(b.turns),
-    threads: str(b.threads),
-    feedback: str(b.feedback),
-    uploadMb: str(b.upload_mb),
-    sessionMinutes: secs ? String(Math.round(secs / 60)) : '',
-  };
-}
-
-const wholeNumber = (v) => /^\d+$/.test(String(v).trim());
-
-/** The edit form -> the API payload. An empty field means "the install
- *  default", so it is ABSENT from `budgets`. Returns {budgets, session_timeout,
- *  errors} where errors maps a form field to a short code the UI turns into a
- *  localized message; when errors is non-empty nothing should be sent. */
-export function formToBudgets(form) {
-  const f = { ...EMPTY_BUDGET_FORM, ...(form || {}) };
-  const budgets = {};
-  const errors = {};
-  const mins = String(f.minutes).trim();
-  if (mins !== '') {
-    if (!wholeNumber(mins) || Number(mins) < 1 || Number(mins) > 1440) errors.minutes = 'range_1_1440';
-    else budgets.minutes_per_day = Number(mins);
-  }
-  for (const [field, key] of Object.entries(COUNT_KEYS)) {
-    const v = String(f[field]).trim();
-    if (v === '') continue;
-    if (!wholeNumber(v) || Number(v) > 100000) errors[field] = 'range_0_100000';
-    else budgets[key] = Number(v);
-  }
-  const hasStart = !!f.quietStart;
-  const hasEnd = !!f.quietEnd;
-  if (hasStart !== hasEnd) errors.quiet = 'both_times';
-  else if (hasStart) {
-    if (f.quietStart === f.quietEnd) errors.quiet = 'same_times';
-    else budgets.quiet_hours = formatQuietHours(f.quietStart, f.quietEnd);
-  }
-  let session_timeout;
-  const sm = String(f.sessionMinutes).trim();
-  if (sm !== '') {
-    // The server accepts 60 s .. 30 days.
-    if (!wholeNumber(sm) || Number(sm) < 1 || Number(sm) > 43200) errors.sessionMinutes = 'range_1_43200';
-    else session_timeout = Number(sm) * 60;
-  }
-  return { budgets, session_timeout, errors };
-}
-
-/** Body for POST /api/people. Throws nothing: returns {body, errors}. */
-export function createPayload(form) {
-  const errors = {};
-  const name = String(form.name || '').trim();
-  if (!name) errors.name = 'required';
-  const role = form.role;
-  const body = { name, role };
-  if (role === 'member') {
-    if (!form.pin || String(form.pin).length < 4) errors.pin = 'min_4';
-    else body.pin = String(form.pin);
-  } else if (role === 'restricted') {
-    if (form.pin) {
-      if (String(form.pin).length < 4) errors.pin = 'min_4'; else body.pin = String(form.pin);
-    }
-  } else if (role === 'admin') {
-    if (!form.password || String(form.password).length < 8) errors.password = 'min_8';
-    else body.password = String(form.password);
-  }
-  if (form.avatar) body.avatar = String(form.avatar).trim();
-  const b = formToBudgets(form);
-  Object.assign(errors, b.errors);
-  if (Object.keys(b.budgets).length) body.budgets = b.budgets;
-  if (b.session_timeout) body.session_timeout = b.session_timeout;
-  return { body, errors };
-}
-
-/** Body for PATCH /api/people/{id}: only what changed against `person`. */
-export function patchPayload(person, form) {
-  const errors = {};
-  const patch = {};
-  const name = String(form.name || '').trim();
-  if (!name) errors.name = 'required';
-  else if (name !== person.name) patch.name = name;
-  if (form.role && form.role !== person.role && person.role !== 'owner') patch.role = form.role;
-  const avatar = String(form.avatar || '').trim();
-  if (avatar !== (person.avatar || '')) patch.avatar = avatar;
-  const b = formToBudgets(form);
-  Object.assign(errors, b.errors);
-  const before = JSON.stringify(sortedEntries(person.budgets || {}));
-  if (JSON.stringify(sortedEntries(b.budgets)) !== before) patch.budgets = b.budgets;
-  if (b.session_timeout && b.session_timeout !== person.session_timeout) patch.session_timeout = b.session_timeout;
-  if (typeof form.disabled === 'boolean' && form.disabled !== !!person.disabled) patch.disabled = form.disabled;
-  return { patch, errors };
-}
-
-function sortedEntries(o) {
-  return Object.entries(o).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-}
-
 // ---- Activity (counts only, never message content) -------------------------
 
-export const ACTIVITY_COLUMNS = ['login', 'turn', 'thread', 'upload', 'feedback', 'limit_hit'];
+export const ACTIVITY_COLUMNS = ['login', 'turn', 'thread', 'upload', 'feedback'];
 
-/** summary.days -> rows newest first, at most `days` of them, with the six
+/** summary.days -> rows newest first, at most `days` of them, with the five
  *  columns filled (0 where absent) and a total. */
 export function activityRows(summary, days = 7) {
   const list = summary && Array.isArray(summary.days) ? summary.days : [];
@@ -298,66 +185,20 @@ export function activityTotals(rows) {
   return totals;
 }
 
-/** Today's usage against the limits, for the Restricted profile's own panel.
- *  `today` is the server's usage_daily map (active_seconds, upload_bytes,
- *  action:turn ...); `limits` its budgets. A line with no limit still shows
- *  what was used. */
-export function usageLines(today, limits) {
-  const u = today || {};
-  const l = limits || {};
-  const pick = (...keys) => { for (const k of keys) if (Number.isFinite(u[k])) return u[k]; return 0; };
-  const lines = [
-    { key: 'minutes', used: Math.floor(pick('active_seconds') / 60), limit: Number.isInteger(l.minutes_per_day) ? l.minutes_per_day : null },
-    { key: 'turns', used: pick('action:turn', 'turn', 'turns'), limit: Number.isInteger(l.turns) ? l.turns : null },
-    { key: 'threads', used: pick('action:thread', 'thread', 'threads'), limit: Number.isInteger(l.threads) ? l.threads : null },
-    { key: 'feedback', used: pick('action:feedback', 'feedback'), limit: Number.isInteger(l.feedback) ? l.feedback : null },
-    { key: 'upload_mb', used: Math.round(pick('upload_bytes') / (1024 * 1024) * 10) / 10, limit: Number.isInteger(l.upload_mb) ? l.upload_mb : null },
-  ];
-  return lines.map((x) => ({ ...x, over: x.limit != null && x.limit > 0 && x.used >= x.limit }));
-}
-
-// ---- Policy refusals --------------------------------------------------------
-
-/** 403 error.code values that mean "this profile may not use the app right
- *  now" rather than "you lack a permission". Value = locale key stem. */
-export const BLOCK_NOTICES = {
-  time_limit: 'notice.time_limit',
-  quiet_hours: 'notice.quiet_hours',
-};
-
-export const blockNoticeKey = (code) => BLOCK_NOTICES[code] || null;
-
-/** A /ws error frame (`{type:'error', code?, error?}`) -> what the UI does.
- *  'safe_mode' = the session is Restricted, 'permission_denied' = a plain
- *  refusal toast, time_limit/quiet_hours = the full-screen notice. */
-export function wsErrorKind(frame) {
-  const code = frame && (frame.code || (frame.error && frame.error.code));
-  if (code === 'time_limit' || code === 'quiet_hours') return { kind: 'notice', code };
-  if (code === 'safe_mode') return { kind: 'restricted', code };
-  if (code === 'permission_denied') return { kind: 'denied', code };
-  return { kind: 'plain', code: code || null };
-}
-
-// ---- Device binding ---------------------------------------------------------
-
-/** Profiles a browser can be opened as: Members and Restricted only (the
- *  server refuses to bind an Admin or the Owner), never a disabled one. */
-export function bindableProfiles(profiles) {
-  return (profiles || []).filter((p) => (p.role === 'member' || p.role === 'restricted') && !p.disabled);
-}
-
 // ---- Characters ("bots") ----------------------------------------------------
 
-/** Who sees a character: 'all' | 'members' | 'restricted'. Derived from the two
- *  switches (safe = "Show to Restricted profiles", hide_unlocked = "not on the
- *  Owner's rail") so the caption follows a click before Save; falls back to the
- *  server's own `audience` when the flags are absent. restricted = safe &&
- *  hide_unlocked, all = safe && !hide_unlocked, members = !safe. */
-export function audienceOf(bot) {
-  if (bot && typeof bot.safe === 'boolean') {
-    if (!bot.safe) return 'members';
-    return bot.hide_unlocked ? 'restricted' : 'all';
-  }
-  const a = bot && bot.audience;
-  return a === 'all' || a === 'members' || a === 'restricted' ? a : 'members';
+/** Is this character the signed-in profile's own (private to it), or a household one? The server
+ *  stamps `scope` on every character record it sends. */
+export const isMineBot = (bot) => !!bot && bot.scope === 'personal';
+
+/** The rail's two groups, Mine and Household, from the characters a profile may list. Household
+ *  characters the profile owns a copy of (`cloned_from`) are left out: the copy stands for them, so
+ *  the rail never shows the same name twice. (Their threads still open by link.) `bots` keeps its
+ *  order; nothing is dropped from the data, only from the groups. */
+export function railGroups(bots) {
+  const list = Array.isArray(bots) ? bots : [];
+  const copied = new Set(list.filter((b) => isMineBot(b) && b.cloned_from).map((b) => b.cloned_from));
+  const mine = list.filter(isMineBot);
+  const household = list.filter((b) => !isMineBot(b) && !copied.has(b.id));
+  return { mine, household };
 }

@@ -1,4 +1,4 @@
-"""Security-gate regression tests: the Safe-Mode (decoy) middleware matrix,
+"""Security-gate regression tests: the signed-out middleware matrix,
 media redaction, the loopback/api_token split on the inbound endpoints, and
 the fail-closed handling of a corrupt security.yaml.
 
@@ -15,7 +15,7 @@ import stat
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth, avatar_snapshots, config, main
+from app import auth, avatar_snapshots, config, main, policy
 from app.database import Database
 
 SAFE_BOTS = {"alpha", "beta", "Atlas"}     # finalized two-tier roster
@@ -79,15 +79,15 @@ def _set_api_token(token: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Decoy 403 matrix (PIN set, no session)
+# Signed-out 401/403 matrix (PIN set, no session)
 # --------------------------------------------------------------------------- #
 
-DECOY_BLOCKED = [
+SIGNED_OUT_BLOCKED = [
     ("GET", "/api/media?path=/etc/hosts"),
     # GET /api/files moved to the INBOUND set 2026-08-14 (same migration as
     # the avatar routes below): agents need the list to map an upload to its
     # blob on disk. Browser-403 and remote-401 are pinned in
-    # test_inbound_thread_mgmt.py; downloads stay decoy-blocked here.
+    # test_inbound_thread_mgmt.py; downloads stay blocked for a signed-out caller here.
     ("GET", "/api/files/some-id/download"),
     ("GET", "/api/files/some-id/raw"),
     ("GET", "/api/export"),
@@ -125,7 +125,7 @@ DECOY_BLOCKED = [
     ("PUT", "/api/plugins/livetools"),
     ("GET", "/static/avatars/nova.png"),          # non-safe bot's avatar
     # Apps (docs/design/2026-09-25-apps.md). An unknown app id is not on the
-    # machine surface, so a sessionless caller is plain Safe Mode; a known,
+    # machine surface, so a sessionless caller is plainly signed out; a known,
     # non-safe app's STATIC page is never a machine surface either.
     ("GET", "/api/apps"),
     ("GET", "/api/apps/x/y"),
@@ -142,38 +142,12 @@ DECOY_BLOCKED = [
 ]
 
 
-@pytest.mark.parametrize("method,path", DECOY_BLOCKED)
-def test_decoy_blocked_matrix(gate_env, method, path):
+@pytest.mark.parametrize("method,path", SIGNED_OUT_BLOCKED)
+def test_signed_out_blocked_matrix(gate_env, method, path):
     client = gate_env()
-    auth.set_pin("1234")                 # PIN set, never unlocked -> decoy
+    auth.set_pin("1234")                 # PIN set, never signed in -> signed out
     r = client.request(method, path)
-    assert r.status_code == 403, f"{method} {path} -> {r.status_code}"
-
-
-def test_decoy_nonsafe_bot_threads_403_safe_bot_200(gate_env):
-    # Browser-shaped (Origin header): thread routes are machine-inbound since
-    # 2026-08-14, so a bare request models an agent, not the locked tab this
-    # test is about. A remote machine with no token gets 401 fail-closed
-    # (pinned in test_inbound_thread_mgmt.py).
-    client = gate_env()
-    auth.set_pin("1234")
-    hdrs = {"origin": "http://testserver"}
-    assert client.get("/api/threads", params={"bot_id": "main"},
-                      headers=hdrs).status_code == 403
-    r = client.get("/api/threads", params={"bot_id": "alpha"}, headers=hdrs)
-    assert r.status_code == 200
-    # Safe-bot avatars stay viewable in the locked view (200 if the file
-    # exists; the point is the gate does NOT 403 them).
-    assert client.get("/static/avatars/alpha.svg").status_code != 403
-
-
-def test_decoy_bots_list_is_filtered_to_safe_set(gate_env):
-    client = gate_env()
-    auth.set_pin("1234")
-    r = client.get("/api/bots")
-    assert r.status_code == 200
-    ids = {b["id"] for b in r.json()["bots"]}
-    assert ids == SAFE_BOTS, ids
+    assert r.status_code in (401, 403), f"{method} {path} -> {r.status_code}"
 
 
 def test_unlocked_session_reaches_gated_paths(gate_env):
@@ -184,60 +158,6 @@ def test_unlocked_session_reaches_gated_paths(gate_env):
     assert client.get("/api/bots/all").status_code == 200
     assert client.get("/api/export").status_code == 200
     assert client.get("/api/threads", params={"bot_id": "main"}).status_code == 200
-
-
-def test_decoy_upload_daily_quota(gate_env, monkeypatch):
-    """Decoy uploads are allowed but capped by a per-client daily byte quota;
-    full sessions have no quota."""
-    client = gate_env()
-    auth.set_pin("1234")
-    monkeypatch.setattr(main, "DECOY_UPLOAD_QUOTA", 1024)
-    main._decoy_upload_used.clear()
-    payload = b"x" * 700
-    files = {"file": ("a.png", payload, "image/png")}
-    assert client.post("/api/upload", files=files).status_code == 200
-    # Second upload crosses the 1KB budget mid-stream -> 429 (and does NOT
-    # count against the budget, since nothing was stored).
-    r = client.post("/api/upload", files={"file": ("b.png", payload, "image/png")})
-    assert r.status_code == 429, r.text
-    # Exhaust the budget exactly, then any further upload is refused up front.
-    assert client.post("/api/upload",
-                       files={"file": ("b2.png", b"x" * 324, "image/png")}).status_code == 200
-    r = client.post("/api/upload", files={"file": ("c.png", b"y", "image/png")})
-    assert r.status_code == 429
-    # A full session is not subject to the decoy quota.
-    assert client.post("/api/auth/unlock", json={"pin": "1234"}).status_code == 200
-    assert client.post("/api/upload", files={"file": ("d.png", payload, "image/png")}).status_code == 200
-    main._decoy_upload_used.clear()
-
-
-# --------------------------------------------------------------------------- #
-# Media redaction for decoy views
-# --------------------------------------------------------------------------- #
-
-
-def test_decoy_messages_are_media_redacted(gate_env):
-    client = gate_env()
-    auth.set_pin("1234")
-    _set_api_token("tok-123")
-    # Inject (as a token-bearing remote caller) a media-carrying message into a
-    # SAFE bot's daily thread, then read it back as a decoy session.
-    r = client.post("/api/inject", headers={"X-API-Key": "tok-123"}, json={
-        "bot_id": "alpha", "role": "assistant",
-        "content": "look [[media:/media/abc.png|cap]] done",
-        "media_url": "/media/abc.png",
-    })
-    assert r.status_code == 200, r.text
-    tid = r.json()["thread_id"]
-    # Browser-shaped: the locked tab's view (a bare GET is a machine now).
-    r = client.get(f"/api/threads/{tid}/messages",
-                   headers={"origin": "http://testserver"})
-    assert r.status_code == 200
-    msgs = r.json()["messages"]
-    assert msgs, "expected the injected message"
-    for m in msgs:
-        assert m["media_url"] is None
-        assert "[[media:" not in (m["content"] or "")
 
 
 # --------------------------------------------------------------------------- #
@@ -287,7 +207,7 @@ def test_corrupt_security_yaml_fails_closed(gate_env):
     cfg = auth.load()
     assert cfg.pin_set is True
     assert auth.verify_pin("1234") is False
-    assert client.get("/api/bots/all").status_code == 403
+    assert client.get("/api/bots/all").status_code in (401, 403)
     assert client.post("/api/auth/unlock", json={"pin": "1234"}).status_code == 401
     # Recovery codes can't bypass the lockdown either.
     assert auth.verify_recovery("LC-AAAA-AAAA") is False
@@ -315,7 +235,7 @@ def test_lockdown_revokes_sessions_already_minted(gate_env):
     auth.load()                                   # trips the lockdown branch
     assert auth._sessions == {}, "an already-unlocked device kept full access"
     assert not auth.TRUSTED_PATH.exists()
-    assert client.get("/api/bots/all").status_code == 403
+    assert client.get("/api/bots/all").status_code in (401, 403)
 
 
 def test_empty_security_yaml_fails_closed(gate_env):
@@ -351,7 +271,7 @@ def test_security_yaml_written_0600(gate_env):
     "/static/avatars/backup-20260708/nova.png",          # nested under the live dir
     "/static/avatars/backup-20260708/alpha.svg",         # nested + safe basename
 ])
-def test_decoy_avatar_backup_paths_all_403(gate_env, path):
+def test_signed_out_avatar_backup_paths_all_403(gate_env, path):
     """Stale avatars.backup-<date>/ copies under /static/ used to serve every
     non-safe bot's face to a sessionless client, because the gate matched only
     the literal /static/avatars/ prefix. The rule is structural now: anything
@@ -359,11 +279,11 @@ def test_decoy_avatar_backup_paths_all_403(gate_env, path):
     directory may serve without a session."""
     client = gate_env()
     auth.set_pin("1234")
-    assert client.get(path).status_code == 403, path
+    assert client.get(path).status_code in (401, 403), path
 
 
-def test_decoy_live_safe_avatar_still_serves(gate_env):
-    """The tightening must not cost Safe Mode the pictures it may render."""
+def test_signed_out_live_avatar_still_serves(gate_env):
+    """The tightening must not cost a signed-out device the pictures it may render."""
     client = gate_env()
     auth.set_pin("1234")
     assert client.get("/static/avatars/alpha.svg").status_code != 403
@@ -388,7 +308,7 @@ def test_api_docs_routes_do_not_exist(gate_env, path):
     disabled in this deployment — for locked AND unlocked alike."""
     client = gate_env()
     auth.set_pin("1234")
-    assert client.get(path).status_code == 404          # Safe Mode: not there
+    assert client.get(path).status_code == 404          # signed out: not there
     assert client.post("/api/auth/unlock", json={"pin": "1234"}).status_code == 200
     assert client.get(path).status_code == 404          # full session: still not
 
@@ -402,16 +322,16 @@ BROWSER = {"Sec-Fetch-Site": "same-origin", "Origin": "http://testserver"}
 
 
 def test_locked_browser_on_loopback_cannot_inject(gate_env):
-    """The idle auto-lock drops THIS box's own tab to Safe Mode. The inbound
+    """The idle auto-lock signs THIS box's own tab out. The inbound
     write endpoints' loopback exemption is for MACHINES — a sessionless browser
     must not be able to post content (or `:react:` markers) into any thread."""
     tab = gate_env(client_addr=("127.0.0.1", 51000))
     auth.set_pin("1234")
     r = tab.post("/api/inject", headers=BROWSER,
                  json={"bot_id": "alpha", "content": "hi"})
-    assert r.status_code == 403, r.text
+    assert r.status_code in (401, 403), r.text
     assert tab.post("/api/daily", headers=BROWSER,
-                    json={"bot_id": "alpha"}).status_code == 403
+                    json={"bot_id": "alpha"}).status_code in (401, 403)
 
 
 def test_locked_browser_on_loopback_cannot_post_thread_message(gate_env):
@@ -426,11 +346,11 @@ def test_locked_browser_on_loopback_cannot_post_thread_message(gate_env):
     # …while the same box's locked tab is refused on the same route.
     tab = agent  # same client, now sending browser headers and no session
     assert tab.post(f"/api/threads/{tid}/messages", headers=BROWSER,
-                    json={"content": "from a locked tab"}).status_code == 403
+                    json={"content": "from a locked tab"}).status_code in (401, 403)
 
 
 def test_unlocked_browser_may_still_use_inbound_writes(gate_env):
-    """A full session (family member driving the app) is not a decoy — the
+    """A signed-in session (a person driving the app) is not signed out — the
     browser re-check must not lock out legitimate session-carrying tabs."""
     client = gate_env(client_addr=("127.0.0.1", 51002))
     auth.set_pin("1234")
@@ -518,7 +438,7 @@ def test_avatar_routes_refuse_a_remote_caller_with_no_token(gate_env, method, pa
 def test_avatar_routes_refuse_a_locked_browser_on_loopback(gate_env, method, path):
     """The hazard the inbound exemption creates, closed.
 
-    The idle auto-lock drops THIS box's own tab to Safe Mode, and that tab is
+    The idle auto-lock signs THIS box's own tab out, and that tab is
     on loopback — so the exemption that lets an agent through would have let
     the locked tab through with it, and any page able to reach 127.0.0.1.
     Browsers stamp Sec-Fetch-*; agents and curl do not.
@@ -540,7 +460,7 @@ def test_avatar_routes_refuse_a_locked_browser_on_loopback(gate_env, method, pat
         kwargs["json"] = {"snapshot_id": "deadbeefdeadbeef.png"}
 
     r = client.request(method, path, **kwargs)
-    assert r.status_code == 403, f"locked browser reached {method} {path} -> {r.status_code}"
+    assert r.status_code in (401, 403), f"locked browser reached {method} {path} -> {r.status_code}"
 
 
 def test_an_on_box_agent_CAN_read_and_restore_an_avatar(gate_env):
@@ -588,71 +508,7 @@ def test_history_full_res_refuses_a_locked_browser_even_for_a_safe_bot(gate_env)
     assert hist.get("avatars"), "the seeded snapshot did not reach the history"
     sid = hist["avatars"][0]["id"]
     r = client.get(f"/api/bots/{main_bot}/avatar/history/{sid}?full=1", headers=headers)
-    assert r.status_code == 403, f"locked browser pulled full-res history: {r.status_code}"
-
-
-def test_rest_thread_create_is_metered_for_a_locked_device(gate_env, monkeypatch):
-    """Safe Mode is view+send, but a locked device may start conversations under
-    a daily budget — the WS path charges it. The REST endpoint must too, or it
-    is an unmetered way to create unlimited threads. Regression."""
-    monkeypatch.setattr(main, "DECOY_THREAD_QUOTA", 2)
-    main._decoy_action_used.clear()          # global daily budget — isolate from other tests
-    client = gate_env(("127.0.0.1", 51000))
-    auth.set_pin("1234")
-    headers = {"Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors",
-               "Origin": "http://127.0.0.1:8765"}
-    bot = next(b.id for b in config.load_bots() if b.safe)
-    codes = [client.post("/api/threads", json={"bot_id": bot}, headers=headers).status_code
-             for _ in range(3)]
-    assert codes[:2] == [200, 200], f"metered budget denied early: {codes}"
-    assert codes[2] == 429, f"locked device created past its budget: {codes}"
-
-
-# --------------------------------------------------------------------------- #
-# Safe-Mode turn budget: retry costs the same as send
-# --------------------------------------------------------------------------- #
-
-
-def test_ws_retry_is_metered_for_a_locked_device(gate_env, monkeypatch):
-    """`retry` re-runs the model on the last user message — exactly one turn.
-    It used to skip the daily Safe-Mode budget that `send` charges, so a locked
-    tab could loop it for unlimited model turns. Regression."""
-    monkeypatch.setattr(main, "DECOY_TURN_QUOTA", 1)
-    main._decoy_action_used.clear()
-    turns: list[tuple] = []
-
-    # A Safe-Mode retry carries TurnOptions(locked=True) since 2026-10-13.
-    async def fake_turn(thread_id, bot_id, text, opts=None):
-        turns.append((thread_id, bot_id, text, opts))
-
-    monkeypatch.setattr(main, "run_agent_turn", fake_turn)
-
-    client = gate_env(("127.0.0.1", 51001))
-    _set_api_token("tok-retry")
-    r = client.post("/api/inject", headers={"X-API-Key": "tok-retry"},
-                    json={"bot_id": "alpha", "role": "user", "content": "hello"})
-    assert r.status_code == 200, r.text
-    tid = r.json()["thread_id"]
-    auth.set_pin("1234")                      # PIN set, never unlocked -> decoy
-
-    frames = []
-    with client.websocket_connect("/ws") as ws:
-        assert ws.receive_json()["decoy"] is True     # the "hello" frame
-        ws.send_json({"type": "retry", "thread_id": tid})
-        ws.send_json({"type": "retry", "thread_id": tid})
-        ws.send_json({"type": "ping"})                # sentinel: replies "pong"
-        while True:
-            f = ws.receive_json()
-            if f.get("type") == "pong":
-                break
-            frames.append(f)
-
-    refusals = [f for f in frames if f.get("type") == "error"
-                and "limit" in (f.get("message") or "").lower()]
-    assert refusals, f"second retry was not refused: {frames}"
-    assert len(turns) == 1, f"budget did not cap the retries: {turns}"
-    assert turns[0][3] is not None and turns[0][3].locked is True, (
-        "a locked device's retry must run its turn locked")
+    assert r.status_code in (401, 403), f"locked browser pulled full-res history: {r.status_code}"
 
 
 # --------------------------------------------------------------------------- #
@@ -666,12 +522,12 @@ def test_quota_ip_ignores_forwarding_headers_from_a_remote_peer(monkeypatch):
     X-Forwarded-For itself with a same-origin fetch(). Only the socket peer
     counts unless the peer is loopback (where Tailscale Serve lands)."""
     remote = "192.0.2.77"
-    assert main._quota_ip({}, remote) == remote
-    assert main._quota_ip({"x-forwarded-for": "203.0.113.9"}, remote) == remote
-    assert main._quota_ip({"forwarded": "for=203.0.113.9"}, remote) == remote
-    assert main._quota_ip({"x-real-ip": "203.0.113.9"}, remote) == remote
+    assert policy.quota_ip({}, remote) == remote
+    assert policy.quota_ip({"x-forwarded-for": "203.0.113.9"}, remote) == remote
+    assert policy.quota_ip({"forwarded": "for=203.0.113.9"}, remote) == remote
+    assert policy.quota_ip({"x-real-ip": "203.0.113.9"}, remote) == remote
     # Forged values must all land in the SAME bucket — one quota, not many.
-    keys = {main._quota_ip({"x-forwarded-for": f"203.0.113.{i}"}, remote)
+    keys = {policy.quota_ip({"x-forwarded-for": f"203.0.113.{i}"}, remote)
             for i in range(10)}
     assert keys == {remote}, "forged XFF values minted extra quota buckets"
 
@@ -680,41 +536,23 @@ def test_quota_ip_still_splits_the_household_behind_local_serve(monkeypatch):
     """Tailscale Serve is the only fronting layer and it connects from
     loopback; there, one shared household bucket would be the worse failure."""
     proxy = "127.0.0.1"
-    assert main._quota_ip({}, proxy) == proxy                     # direct
-    assert main._quota_ip({"x-forwarded-for": "203.0.113.9"}, proxy) == "203.0.113.9"
+    assert policy.quota_ip({}, proxy) == proxy                     # direct
+    assert policy.quota_ip({"x-forwarded-for": "203.0.113.9"}, proxy) == "203.0.113.9"
     # Rightmost entry only: that is the hop the trusted proxy itself appended;
     # everything to its left is client-supplied and would let a caller pick
     # its own quota bucket.
-    assert main._quota_ip(
+    assert policy.quota_ip(
         {"x-forwarded-for": "203.0.113.9, 192.0.2.77"}, proxy) == "192.0.2.77"
     # IPv6, bracketed and with a port.
-    assert main._quota_ip({"x-forwarded-for": "[2001:db8::5]:443"}, proxy) == "2001:db8::5"
+    assert policy.quota_ip({"x-forwarded-for": "[2001:db8::5]:443"}, proxy) == "2001:db8::5"
     # Junk falls back to the peer rather than minting an arbitrary key.
-    assert main._quota_ip({"x-forwarded-for": "not-an-ip"}, proxy) == proxy
+    assert policy.quota_ip({"x-forwarded-for": "not-an-ip"}, proxy) == proxy
     # No forwarding evidence at all: nothing to read.
-    assert main._quota_ip({"x-real-ip": "203.0.113.9"}, proxy) == proxy
-
-
-def test_two_devices_behind_one_proxy_get_separate_thread_budgets(gate_env, monkeypatch):
-    monkeypatch.setattr(main, "DECOY_THREAD_QUOTA", 1)
-    main._decoy_action_used.clear()
-    client = gate_env(("127.0.0.1", 51002))
-    auth.set_pin("1234")
-    bot = next(b.id for b in config.load_bots() if b.safe)
-
-    def make(xff):
-        return client.post("/api/threads", json={"bot_id": bot}, headers={
-            "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors",
-            "Origin": "http://127.0.0.1:8765", "X-Forwarded-For": xff,
-        }).status_code
-
-    assert make("203.0.113.9") == 200
-    assert make("203.0.113.9") == 429, "the device's own budget did not apply"
-    assert make("203.0.113.10") == 200, "a second device shared the first's budget"
+    assert policy.quota_ip({"x-real-ip": "203.0.113.9"}, proxy) == proxy
 
 
 # --------------------------------------------------------------------------- #
-# Apps: a locked BROWSER gets the decoy on a real app's API at both prefixes
+# Apps: a signed-out BROWSER is refused on a real app's API at both prefixes
 # (a sessionless non-browser caller is a machine there — 401 remote, allowed
 # on loopback — which apps/jobboard/tests/test_jobboard_api.py pins).
 # --------------------------------------------------------------------------- #
@@ -723,10 +561,10 @@ def test_two_devices_behind_one_proxy_get_separate_thread_budgets(gate_env, monk
     ("GET", "/api/jobs"), ("POST", "/api/jobs/find"), ("GET", "/api/jobs/months"),
     ("GET", "/api/apps/jobboard"), ("POST", "/api/apps/jobboard/abc/vote"),
 ])
-def test_locked_browser_gets_decoy_on_app_api(gate_env, method, path):
+def test_signed_out_browser_is_refused_on_app_api(gate_env, method, path):
     client = gate_env(("127.0.0.1", 50000))
     auth.set_pin("1234")
     r = client.request(method, path, headers={"origin": "http://127.0.0.1:8765"},
                        **({"json": {}} if method == "POST" else {}))
-    assert r.status_code == 403, (method, path, r.status_code)
-    assert r.json().get("decoy") is True
+    assert r.status_code in (401, 403), (method, path, r.status_code)
+    assert r.json()["error"]["code"] == "signin_required"

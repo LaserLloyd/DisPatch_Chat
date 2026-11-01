@@ -62,7 +62,7 @@ async function freshTools() {
  *  desktop rail, ONE Tools button with a popup (the "desktop rail" cases). */
 function wire(mod, over = {}) {
   const rec = { opened: [], closedWith: [], restored: [], sidebar: 0, toasts: [], navigated: [], threads: [] };
-  const state = { decoy: false, selectedBotId: 'main', activeThreadId: 't-1', ...over.state };
+  const state = { selectedBotId: 'main', activeThreadId: 't-1', ...over.state };
   const flags = { harness: true, studioforge: true, mail: true, practice: false, ...over.flags };
   mod.wireTools({
     state,
@@ -74,7 +74,7 @@ function wire(mod, over = {}) {
     },
     openThread: (id, opts) => rec.threads.push([id, opts]),
     closeToolPanes: (except) => rec.closedWith.push(except),
-    builtinOn: (f) => !state.decoy && !!flags[f],
+    builtinOn: (f) => !!flags[f],
     builtinDot: (f) => (f === 'harness' ? 'harness-sidedot harness-running' : ''),
     restoreView: (p) => rec.restored.push(p),
     renderSidebar: () => { rec.sidebar += 1; mod.renderToolRail(); },
@@ -168,7 +168,8 @@ test('menu rows: the theme\'s line icons, typed emoji kept, the active row marke
   assert.equal(mod.toolIconName({ kind: 'static', icon: 'chart' }), 'chart');
   assert.equal(mod.toolIconName({ kind: 'static', icon: 'nope' }), null);
   assert.equal(mod.toolIconName({ kind: 'static', icon: '' }), null);
-  assert.equal(mod.toolGlyph({ kind: 'static' }).textContent, '🧩', 'no icon at all → the default glyph');
+  assert.ok(String(mod.toolGlyph({ kind: 'static' }).querySelector('use').getAttribute('href')).endsWith('#puzzle'),
+    'no icon at all → the puzzle icon');
   // The open tool's row is marked the way a bot tile is.
   row('benchmark').click();
   pointerClick(win, win.document.getElementById('tools-menu-btn'));
@@ -185,20 +186,6 @@ test('rail: a backend without /api/tools still shows the builtins', { skip: dom.
   wire(mod);
   await mod.loadTools();
   assert.deepEqual(listedIds(win), ['deepseek-harness', 'studioforge-panel', 'mail-panel']);
-});
-
-test('Safe Mode: only safe static/url tools, never a builtin', { skip: dom.skip }, async () => {
-  const win = setup();
-  const mod = await freshTools();
-  wire(mod, { state: { decoy: true, selectedBotId: null } });
-  await mod.loadTools();
-  assert.deepEqual(listedIds(win), ['family-page']);
-  // And no refresh control, even if the tool had one.
-  mod.openTool('family-page');
-  assert.ok(win.document.getElementById('tool-refresh').classList.contains('hidden'));
-  // Deep links are unlocked-only.
-  win.location.hash = '#tool=family-page';
-  assert.equal(mod.openFromHash(), false);
 });
 
 test('opening a static tool: full-page, strict sandbox, served path, refresh shown', { skip: dom.skip }, async () => {
@@ -384,7 +371,7 @@ test('serializeTools sends only schema fields; builtins only id/kind/enabled', {
   assert.deepEqual(out[0], { id: 'deepseek-harness', kind: 'builtin', enabled: true });
   assert.deepEqual(out[1], { id: 'studioforge-panel', kind: 'builtin', enabled: false });
   const bench = out.find((x) => x.id === 'benchmark');
-  assert.deepEqual(Object.keys(bench).sort(), ['enabled', 'entry', 'icon', 'id', 'kind', 'root', 'safe', 'title']);
+  assert.deepEqual(Object.keys(bench).sort(), ['enabled', 'entry', 'icon', 'id', 'kind', 'root', 'title']);
   assert.equal('has_refresh' in bench, false);
   assert.equal('builtin_feature' in bench, false);
 });
@@ -397,7 +384,7 @@ test('Settings → Tools: table, add, toggle, PUT, inline 422', { skip: dom.skip
   // Real English strings for this case, so the hint's {path} is checkable.
   const en = JSON.parse(readFileSync(join(STATIC, 'locales', 'en.json'), 'utf8'));
   routes['GET /static/locales/en.json'] = () => [200, en];
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   const pane = doc.createElement('div');   // the Tools table's host inside Settings → Plugins
   doc.getElementById('spane-plugins').append(pane);
@@ -502,16 +489,6 @@ test('an app entry that points outside /apps/<id>/ is ignored', { skip: dom.skip
   mod.openTool('jobboard');
   assert.equal(win.document.getElementById('tool-frame').getAttribute('src'), '/apps/jobboard/',
     'an unsandboxed frame only ever holds our own origin');
-});
-
-test('Safe Mode: a non-safe app has no tile, no pane and owns no bot', { skip: dom.skip }, async () => {
-  const win = setup();
-  const mod = await freshTools();
-  wire(mod, { state: { decoy: true, selectedBotId: null } });
-  await mod.loadTools();
-  assert.equal(listedIds(win).includes('jobboard'), false);
-  assert.equal(mod.openTool('jobboard'), false);
-  assert.equal(mod.appForBot('jobboard'), null);
 });
 
 test('appForBot: the enabled app that owns a roster bot (case-insensitive)', { skip: dom.skip }, async () => {
@@ -682,7 +659,10 @@ test('desktop rail: one Tools button, no tiles; its popup lists every enabled to
   assert.equal(btn.getAttribute('aria-haspopup'), 'menu');
   assert.equal(btn.getAttribute('aria-controls'), 'tools-menu');
   assert.equal(btn.getAttribute('aria-expanded'), 'false');
-  assert.equal(btn.getAttribute('aria-label'), 'Tools — open the tools menu');
+  // axe label-content-name-mismatch: the name is the visible label; the hint moved to aria-description.
+  assert.equal(btn.getAttribute('aria-label'), 'Tools');
+  assert.ok(btn.getAttribute('aria-label').includes(btn.querySelector('.bot-name-label').textContent), 'name contains the visible label');
+  assert.equal(btn.getAttribute('aria-description'), 'Tools — open the tools menu');
   assert.equal(btn.querySelector('.bot-name-tip').textContent, 'Tools');
   assert.ok(btn.querySelector('.tool-avatar-icon svg.rail-icon'), 'a line icon, not a glyph');
   assert.ok(btn.querySelector('.bot-status-dot.tools-sidedot.running'), 'worst-of dot from groupState');
@@ -814,12 +794,11 @@ test('desktop rail: the dot is worst-of, and the button hides with nothing to sh
   await mod.loadTools();
   assert.ok(win.document.querySelector('#tools-menu-btn .bot-status-dot.tools-sidedot.error'));
 
-  // Safe Mode: parked bots are ignored and only safe tools count.
+  // Nothing to show (no tools, no parked bots): the button hides.
   win = setup();
   routes['GET /api/tools'] = () => [200, { tools: [] }];
   mod = await freshTools();
-  wire(mod, { mobile: false, state: { decoy: true, selectedBotId: null } });
-  mod.setParkedBots([{ id: 'parked-1', name: 'Parked Pal', dot: '', open: () => {} }]);
+  wire(mod, { mobile: false, state: { selectedBotId: null } });
   await mod.loadTools();
   assert.equal(win.document.getElementById('tool-list').hidden, true);
   assert.equal(win.document.getElementById('tools-menu-btn'), null);
@@ -885,7 +864,7 @@ test('crossing the breakpoint re-lays the one control out (rail button ⇄ phone
   let mobile = false;
   // Wired by hand: this case needs a viewport it can switch.
   const d = {
-    state: { decoy: false, selectedBotId: 'main', activeThreadId: 't-1' },
+    state: { selectedBotId: 'main', activeThreadId: 't-1' },
     openers: {}, closeToolPanes: () => {}, builtinOn: () => true, builtinDot: () => '',
     groupState: () => '', restoreView: () => {}, renderSidebar: () => mod.renderToolRail(),
     isMobile: () => mobile, navigate: () => {}, toast: () => {}, isBotId: () => false,
@@ -1010,7 +989,7 @@ test('tool state: over 16 KB (or not JSON) is refused and the stored state kept'
   assert.ok(win.localStorage.getItem('dispatch-tool-state:benchmark'));
 });
 
-test('rail buttons moved into the popup: the button shows as "Tools & more" (even with no tools), rows are menu items, a click closes it, Restricted ignores them', { skip: dom.skip }, async () => {
+test('rail buttons moved into the popup: the button shows as "Tools & more" (even with no tools), rows are menu items, a click closes it', { skip: dom.skip }, async () => {
   let win = setup();
   routes['GET /api/tools'] = () => [200, { tools: [] }];
   let mod = await freshTools();
@@ -1036,16 +1015,6 @@ test('rail buttons moved into the popup: the button shows as "Tools & more" (eve
   fs.click();
   assert.equal(clicked, 1, 'it does what it does on the bar');
   assert.equal(doc.getElementById('tools-menu').hidden, true, 'and the popup closes');
-
-  win = setup();
-  routes['GET /api/tools'] = () => [200, { tools: [] }];
-  mod = await freshTools();
-  wire(mod, { mobile: false, state: { decoy: true, selectedBotId: null } });
-  const fs2 = win.document.getElementById('fs-chip');
-  fs2.classList.remove('hidden');
-  win.document.getElementById('tools-more').append(fs2);
-  await mod.loadTools();
-  assert.equal(win.document.getElementById('tools-menu-btn'), null, 'Restricted: no popup for rail buttons');
 });
 
 test('phone sheet: a tap in the profile chip\'s menu (opened from the sheet) reaches it, then the sheet closes', { skip: dom.skip }, async () => {

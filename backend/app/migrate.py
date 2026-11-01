@@ -42,11 +42,55 @@ Steps (each idempotent; ``schema_migrations`` in chats.db records what ran):
                        subscriptions record their device's profile; ones whose device is no
                        longer remembered (dead already) are dropped. Additive: a 3.x binary
                        ignores the new columns
+``010_profiles``       (4.0 chat-first profiles, BUILD-PLAN-v2 §1.6; minimal and additive, never
+                       raises, no table rebuild, no revert) profiles get ``household_bots``;
+                       security.yaml gets ``lock_target`` / ``default_profile`` (exactly one
+                       PIN-less Restricted profile with ``anonymous_access: restricted`` becomes
+                       the default profile, as a User; otherwise ``lock_target: profile_list``;
+                       ``--default-profile <id|name>`` picks it explicitly); config.yaml
+                       ``hide_unlocked`` -> ``hidden`` and a character ``profiles`` list folds into
+                       those profiles' ``household_bots``, then is cleared. The default profile
+                       becomes a User whose ``household_bots`` = the non-agent bots it could
+                       reach; every other Restricted profile stays Restricted (Basic) with the
+                       same computed list. Members, Admins and the Owner keep ``"all"``. Roles and
+                       lists are raw writes: nobody is signed out. Always recorded on its first
+                       run, even with nothing to change, so the auto-run rule never fires later
+``011_scale``          (4.0 scale and retention, BUILD-PLAN-v2 §1.13; additive, idempotent)
+                       the maintenance tables (``maintenance_runs``,
+                       ``media_refs``, ``media_expired``, ``storage_stats``,
+                       ``maintenance_state``, ``generated_media``), ``profiles.archive_after_months`` (NULL = off),
+                       the indexes of ``database.SCALE_INDEXES`` (per-owner thread lists and
+                       unread, File Server, foreign-key children, the time columns the daily
+                       maintenance prunes by), ``messages.owner_profile_id`` (the thread's
+                       owner) and the search index rebuilt with it (owner-scoped search),
+                       ``media_refs`` backfilled from every message,
+                       and ``auto_vacuum = INCREMENTAL`` made real by one ``VACUUM`` (the one
+                       long step on a large database; logged). Recorded when it ran
+
+``012_templates``      (4.2 one owner per bot, live templates; PLAN-v2 section 5) agent / app / legacy-api
+                       bots become the protected Admin's personal bots (ids unchanged, so every cron
+                       and machine caller keeps working) and so does Sage (``advisor``, an own bot);
+                       every other household direct bot becomes a template with ``give_to``
+                       derived from 4.1 (Atlas / a kit with auto_clone: everyone; else the profiles
+                       whose explicit ``household_bots`` names it, that have chats on it or already
+                       hold a copy; ``"all"`` never expands). An existing copy is linked to its
+                       template (``overrides`` = only what its owner could have changed and still
+                       differs, plus ``picture`` when its face file is its own); a missing copy is
+                       made through ``profiles_service.make_copy``; each owner's threads on a
+                       template (a NULL owner = the Admin) move to that owner's copy with their image
+                       jobs and advisor-ledger rows; the Admin's deleted-copy marks are cleared; every
+                       guide/kit chat a moved thread already holds is recorded as delivered (never
+                       posted twice); explicit ``household_bots`` lists lose personal ids. Threads on
+                       retired bot ids are not touched. ``--own <id>=<profile>`` makes a direct bot
+                       one profile's own bot instead of a template. The backup also holds ``bot-kits/``
+                       and ``advisor.db`` and an ``012-created.json`` manifest (the copies and
+                       pictures it made) that ``--restore`` removes. Idempotent; never runs before 010
 
 Backup: before the first applied step, ``<data>/backups/<version>-<UTC stamp>/`` gets a
 consistent copy of chats.db (the SQLite backup API, WAL-safe), config.yaml, security.yaml,
-trusted-devices.yaml, push-subscriptions.json and the Image Studio ledger
-(apps-data/imagestudio/images.jsonl). The newest five are kept. ``--restore <dir>`` puts
+trusted-devices.yaml, push-subscriptions.json, the Image Studio ledger
+(apps-data/imagestudio/images.jsonl) and prompt files (prompts*.json), quick-actions.yaml and
+voice-acks.yaml. The newest three are kept (``KEEP_BACKUPS``). ``--restore <dir>`` puts
 them back.
 """
 
@@ -54,26 +98,34 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import copy
 import logging
 import re
 import shutil
 import sqlite3
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
 
 from . import accounts, agents_store, auth, config, connections, settings_store, tool_manifests
+from .contracts.permissions import Role
 
 log = logging.getLogger("local-chat.migrate")
 
-TARGET_VERSION = "4.0.0"
-KEEP_BACKUPS = 5
+TARGET_VERSION = "4.2.0"
+#: Pre-migration copies kept (the maintenance task trims to the same number nightly).
+KEEP_BACKUPS = 3
 #: ``<version>-YYYYMMDD-HHMMSS``; the container entrypoint writes the same shape with the
 #: previous image version in front (``3.0.0-b1-...``, ``dev-...``), kept in one list here.
-_BACKUP_DIR_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+-]*-\d{8}-\d{6}$")
+#: ``pre-restore-<stamp>`` is a restore's own copy (``backups.py``), never one of these (4.3, #36).
+_BACKUP_DIR_RE = re.compile(r"^(?!pre-restore-)[0-9A-Za-z][0-9A-Za-z.+-]*-\d{8}-\d{6}$")
+#: The secret store's file (connection keys, agent secrets) - copied by ``backup`` (4.3, N-14),
+#: with a record of whether it existed so ``restore`` can put it back or remove it.
+SECRETS_REL = "agents/secrets.json"
+SECRETS_STATE = "secrets-state.json"
 
 
 @dataclass
@@ -89,6 +141,8 @@ class Report:
     backup: Path | None = None
     dry_run: bool = False
     ownership: OwnershipPlan | None = None
+    profiles: ProfilesPlan | None = None
+    templates: TemplatesPlan | None = None
 
     @property
     def pending(self) -> bool:
@@ -111,7 +165,13 @@ def _db_file() -> Path:
 
 
 def _ro_uri(path: Path) -> str:
-    return path.resolve().as_uri() + "?mode=ro"
+    """Read-only URI. A WAL database that was closed cleanly has no ``-wal``/``-shm`` beside
+    it, and a plain read-only open would CREATE both (the dry run must leave the directory
+    byte-identical): with neither present nobody has it open, so it is opened immutable."""
+    uri = path.resolve().as_uri() + "?mode=ro"
+    if not Path(str(path) + "-wal").exists() and not Path(str(path) + "-shm").exists():
+        uri += "&immutable=1"
+    return uri
 
 
 def _table_names(path: Path) -> set[str]:
@@ -139,7 +199,7 @@ def _has_owner_row(path: Path) -> bool:
         return False
     con = sqlite3.connect(_ro_uri(path), uri=True)
     try:
-        return con.execute("SELECT 1 FROM profiles WHERE role='owner'").fetchone() is not None
+        return con.execute(f"SELECT 1 FROM profiles WHERE {accounts.PROTECTED_ROW_SQL}").fetchone() is not None
     finally:
         con.close()
 
@@ -168,11 +228,13 @@ class MigrateError(ValueError):
     """A migration option that cannot be honoured (an unknown character or profile)."""
 
 
-def plan(*, assign: dict[str, str] | None = None, all_to_owner: bool = False) -> Report:
+def plan(*, assign: dict[str, str] | None = None, all_to_owner: bool = False,
+         default_profile: str | None = None, own: dict[str, str] | None = None) -> Report:
     """What ``run`` would do, computed from the files as they are. Writes nothing.
 
     ``assign`` / ``all_to_owner`` are the 009_ownership overrides (``--assign``,
-    ``--all-to-owner``)."""
+    ``--all-to-owner``); ``default_profile`` is 010_profiles' ``--default-profile``;
+    ``own`` is 012_templates' ``--own <bot>=<profile>``."""
     rep = Report(dry_run=True)
     dbp = _db_file()
     have = _table_names(dbp)
@@ -257,7 +319,475 @@ def plan(*, assign: dict[str, str] | None = None, all_to_owner: bool = False) ->
                             owner_pending="002_owner_from_pin" in {a.step for a in rep.actions})
         rep.actions.extend(Action("009_ownership", line) for line in p9.lines())
         rep.ownership = p9
+
+    if "010_profiles" not in done:
+        p10 = profiles_plan(default_profile=default_profile)
+        rep.actions.extend(Action("010_profiles", line) for line in p10.lines())
+        rep.profiles = p10
+
+    if "011_scale" not in done:
+        rep.actions.extend(Action("011_scale", line) for line in scale_plan())
+
+    # 012 reads what 010 writes (household_bots, the profile roles): never before it.
+    if "012_templates" not in done and ("010_profiles" in done
+                                        or any(a.step == "010_profiles" for a in rep.actions)):
+        t12 = templates_plan(own=own)
+        lines = t12.lines() or ["nothing to change (recorded so the step never runs again)"]
+        rep.actions.extend(Action("012_templates", line) for line in lines)
+        rep.templates = t12
     return rep
+
+
+# --------------------------------------------------------------------------- #
+# 010_profiles (4.0 chat-first profiles): WP-MIG implements both halves
+# --------------------------------------------------------------------------- #
+
+
+@dataclass
+class ProfileRow:
+    """One profile as 010 leaves it."""
+    id: str
+    name: str
+    old_stored: str              # the profiles.role word today (display only)
+    new_stored: str              # the word 010 leaves there
+    new_role: Role
+    protected: bool
+    household: str | list[str]   # "all" or the list of household bot ids
+    is_default: bool = False
+    write: bool = False          # does 010 UPDATE this row?
+
+
+@dataclass
+class ProfilesPlan:
+    add_column: bool = False
+    rows: list[ProfileRow] = field(default_factory=list)
+    default_id: str | None = None
+    default_name: str = ""
+    default_reason: str = ""
+    gains: list[str] = field(default_factory=list)
+    lock_target: str = "profile_list"
+    sec_exists: bool = False
+    sec_changes: list[tuple[str, object, object]] = field(default_factory=list)
+    hidden: list[str] = field(default_factory=list)          # bot ids that get hidden: true
+    folds: list[tuple[str, list[str]]] = field(default_factory=list)   # (bot id, profile ids)
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def config_changes(self) -> bool:
+        return bool(self.hidden or self.folds)
+
+    def lines(self) -> list[str]:
+        out: list[str] = []
+        if self.add_column:
+            out.append("add column: profiles.household_bots (default \"all\")")
+        width = max((len(r.name) for r in self.rows), default=0)
+        for r in self.rows:
+            role = r.new_role.value + (" (protected)" if r.protected else "")
+            if r.new_role is Role.ADMIN:
+                hb = "every household bot (Admin)"
+            elif r.household == "all":
+                hb = "all"
+            else:
+                hb = ", ".join(r.household) if r.household else "none"
+            out.append(f"profile {r.name!r:<{width + 2}} {r.old_stored} -> {role} -> household: {hb}"
+                       + ("  [default profile]" if r.is_default else ""))
+        if self.default_id:
+            out.append(f"default profile: {self.default_name} ({self.default_reason}); unsigned "
+                       "devices and the lock screen land on it with no PIN, and everyone who uses "
+                       "it shares its bots and chats")
+            out.append(f"{self.default_name} gains: " + (", ".join(self.gains) if self.gains else
+                       "nothing (it already was a User)")
+                       + "; never on the default profile: agent bots, voice cloning")
+        else:
+            out.append(f"no default profile ({self.default_reason})"
+                       + ("; the lock screen shows the profile list" if self.sec_exists else ""))
+        for bid in self.hidden:
+            out.append(f"character {bid!r}: hide_unlocked -> hidden")
+        for bid, pids in self.folds:
+            names = [self._name(p) for p in pids]
+            out.append(f"character {bid!r}: profile list [{', '.join(names)}] folded into "
+                       "household_bots, then cleared")
+        for key, old, new in self.sec_changes:
+            out.append(f"security.yaml: {key}: {_show(old)} -> {_show(new)}")
+        out.extend(self.notes)
+        return out                   # never empty: the lock-target line is always there
+
+    def _name(self, pid: str) -> str:
+        return next((r.name for r in self.rows if r.id == pid), pid)
+
+
+def _show(v) -> str:
+    return "(unset)" if v is None else str(v)
+
+
+def _base_bots() -> dict[str, config.Bot]:
+    return {b.id: b for b in getattr(config, "DEFAULT_BOTS", [])}
+
+
+def _bot_3x(entry: dict, base: config.Bot | None) -> config.Bot:
+    """A roster entry with the 3.x access fields resolved exactly as ``config.load_bots``
+    resolves them (audience over the legacy flags, the shipped default as fallback)."""
+    flags = config.reconcile_flags(entry.get("audience"), config.fold_visible(
+        entry.get("visible"),
+        bool(entry.get("safe", base.safe if base else False)),
+        bool(entry.get("hide_unlocked", base.hide_unlocked if base else False))))
+    raw_profiles = entry.get("profiles")
+    return config.Bot(
+        id=str(entry["id"]), name=str(entry.get("name") or entry["id"]),
+        profiles=[str(x) for x in raw_profiles if isinstance(x, str)]
+        if isinstance(raw_profiles, list) else [],
+        scope=config.parse_scope(entry.get("scope")), **flags)
+
+
+def _is_agent_entry(entry: dict) -> bool:
+    """An OpenClaw (gateway) bot: neither the direct ``advisor:`` backend nor an ``api:`` block.
+    Neither falls back to a shipped default (``config.load_bots`` reads them raw too)."""
+    return not isinstance(entry.get("api"), dict) and not (
+        isinstance(entry.get("advisor"), dict) and entry.get("advisor"))
+
+
+def _reach_3x(pid: str, bots: list[tuple[config.Bot, dict]]) -> list[str]:
+    """The household bots a 3.x Restricted profile ``pid`` could reach (audience all or
+    restricted, and ``pid`` in the character's profile list when it has one), minus agent bots
+    (a Basic profile reaches those only with dispatch_agents, which 010 never grants)."""
+    return [b.id for b, e in bots
+            if b.scope == "household" and b.safe and (not b.profiles or pid in b.profiles)
+            and not _is_agent_entry(e)]
+
+
+def _raw_security() -> tuple[bool, dict | None]:
+    """(file exists, parsed mapping or None). Read raw: auth.load() may WRITE."""
+    sec = Path(auth.SECURITY_PATH)
+    if not sec.exists():
+        return False, None
+    try:
+        parsed = yaml.safe_load(sec.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return True, None
+    return True, parsed if isinstance(parsed, dict) else {}
+
+
+def _resolve_default(ref: str, profiles: list[accounts.Profile]) -> accounts.Profile:
+    p = _resolve_profile(ref, profiles, flag="--default-profile")
+    if p.role is Role.ADMIN:
+        raise MigrateError(f"--default-profile: {p.name} is an Admin; the default profile is a "
+                           "shared profile everyone lands on without a PIN")
+    if p.has_pin or p.has_password:
+        raise MigrateError(f"--default-profile: {p.name} has a PIN or password; the default "
+                           "profile is opened without one (remove it first)")
+    if p.disabled:
+        raise MigrateError(f"--default-profile: {p.name} is disabled")
+    return p
+
+
+def profiles_plan(*, default_profile: str | None = None) -> ProfilesPlan:
+    """Read-only: what 010_profiles would do to the data directory as it is now.
+
+    Never raises on its own data (anything ambiguous gets ``lock_target: profile_list``); an
+    explicit ``default_profile`` that is unknown, an Admin, has a credential or is disabled
+    raises :class:`MigrateError` (the CLI's exit 2)."""
+    from .contracts import permissions as perms
+
+    out = ProfilesPlan()
+    dbp = _db_file()
+    have = _table_names(dbp)
+    if "profiles" in have:
+        con = sqlite3.connect(_ro_uri(dbp), uri=True)
+        try:
+            out.add_column = "household_bots" not in _columns(con, "profiles")
+        finally:
+            con.close()
+    profiles = _ro_profiles(dbp)
+    by_id = {p.id: p for p in profiles}
+    owner = next((p for p in profiles if p.protected), None)
+
+    base = _base_bots()
+    entries = _raw_roster() or []
+    bots = [(_bot_3x(e, base.get(str(e["id"]))), e) for e in entries]
+
+    # -- 2. the default profile and the lock target --------------------------------------
+    sec_exists, raw_sec = _raw_security()
+    out.sec_exists = sec_exists
+    raw = raw_sec or {}
+    anon = "none" if str(raw.get("anonymous_access") or "").strip().lower() == "none" else "restricted"
+    chosen: accounts.Profile | None = None
+    if default_profile is not None:
+        chosen = _resolve_default(default_profile, profiles)
+        if not sec_exists or raw_sec is None:
+            raise MigrateError("--default-profile: this install has no readable security.yaml "
+                               "(an open install has no lock screen)")
+        out.default_reason = "--default-profile"
+    elif str(raw.get("lock_target") or "").strip().lower() == "default_profile" \
+            and raw.get("default_profile") is not None:
+        hit = by_id.get(str(raw.get("default_profile")).strip())
+        if hit is not None and hit.role is not Role.ADMIN and not hit.disabled \
+                and not (hit.has_pin or hit.has_password):
+            chosen, out.default_reason = hit, "already named in security.yaml"
+        else:
+            out.default_reason = "security.yaml names a default profile that can't be one"
+    elif not sec_exists or raw_sec is None:
+        out.default_reason = ("no security.yaml: an open install" if not sec_exists
+                              else "security.yaml could not be read")
+    elif owner is None:
+        out.default_reason = "no Owner yet: an open install"
+    elif anon == "none":
+        out.default_reason = "anonymous_access: none (unsigned devices saw only the sign-in screen)"
+    else:
+        cands = [p for p in profiles if p.role is Role.BASIC and not p.disabled
+                 and not p.has_pin and not p.has_password]
+        if len(cands) == 1:
+            chosen = cands[0]
+            out.default_reason = ("the only PIN-less Restricted profile, and unsigned devices "
+                                  "already had Restricted access")
+        else:
+            out.default_reason = (f"{len(cands)} PIN-less Restricted profiles, so no guess"
+                                  if cands else "no PIN-less Restricted profile")
+    if chosen is not None:
+        out.default_id, out.default_name = chosen.id, chosen.name
+        out.lock_target = "default_profile"
+
+    if sec_exists and raw_sec is not None:
+        # Written explicitly even when the value is the default, so the Admin can see it.
+        old_lt = str(raw["lock_target"]).strip().lower() if raw.get("lock_target") else None
+        old_dp = str(raw["default_profile"]).strip() if raw.get("default_profile") else None
+        if "lock_target" not in raw or old_lt != out.lock_target:
+            out.sec_changes.append(("lock_target", old_lt, out.lock_target))
+        if "default_profile" not in raw or old_dp != out.default_id:
+            out.sec_changes.append(("default_profile", old_dp, out.default_id))
+
+    # -- 1. household_bots, roles ---------------------------------------------------------
+    for p in profiles:
+        old = accounts.stored_role(p.role, protected=p.protected)
+        is_default = p.id == out.default_id
+        role, household, write = p.role, p.household_bots, out.add_column
+        if p.role is Role.BASIC:
+            if household == "all":                      # not computed yet (010 writes lists)
+                household, write = _reach_3x(p.id, bots), True
+            if is_default:
+                role, write = Role.USER, True
+        out.rows.append(ProfileRow(
+            id=p.id, name=p.name, old_stored=old,
+            new_stored=accounts.stored_role(role, protected=p.protected), new_role=role,
+            protected=p.protected, household=household, is_default=is_default, write=write))
+
+    if chosen is not None:
+        before = perms.effective_permissions(chosen.role, chosen.grants, chosen.denies)
+        after = perms.effective_permissions(Role.USER, chosen.grants, chosen.denies, lock_target=True)
+        out.gains = sorted(str(x) for x in after - before)
+
+    # -- 3. config.yaml ---------------------------------------------------------------------
+    rows = {r.id: r for r in out.rows}
+    for b, e in bots:
+        if b.hide_unlocked and not e.get("hidden"):
+            out.hidden.append(b.id)
+        if not b.profiles:
+            continue
+        out.folds.append((b.id, list(b.profiles)))
+        for pid in b.profiles:
+            r = rows.get(pid)
+            if r is None:
+                out.notes.append(f"NOTE: character {b.id!r} lists an unknown profile {pid!r} "
+                                 "(dropped)")
+            elif r.new_role is not Role.ADMIN and isinstance(r.household, list) \
+                    and b.id not in r.household:
+                out.notes.append(f"NOTE: character {b.id!r} lists {r.name}, who could not use it "
+                                 "before; not added to its household bots")
+        wider = [r.name for r in out.rows if r.new_role is Role.USER and r.household == "all"
+                 and r.id not in b.profiles]
+        if wider:
+            out.notes.append(f"NOTE: character {b.id!r} was limited to its profile list; with "
+                             f"the list cleared, {', '.join(wider)} (household: all) can use it too")
+    return out
+
+
+def apply_profiles(*, default_profile: str | None = None) -> None:
+    """Apply 010_profiles (the backup was taken by ``run``). Re-planned here, after 001-009.
+
+    Order, so an interrupted run resumes correctly: security.yaml first (a re-run reads the
+    default profile back from it), then the profiles rows in one transaction (lists are only
+    computed for rows still on "all"), then config.yaml (the profile lists the computation
+    reads are cleared last). Raw writes, no epoch bump: no session, device or remembered
+    device is signed out or touched."""
+    pp = profiles_plan(default_profile=default_profile)
+    if pp.sec_changes and pp.sec_exists:
+        cfg = auth.load()
+        cfg.lock_target = pp.lock_target
+        cfg.default_profile = pp.default_id
+        auth._write(cfg)
+        auth._bust_cache()
+    import json
+    writes = [r for r in pp.rows if r.write]
+    if pp.add_column or writes:
+        with accounts.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            try:
+                if "household_bots" not in _columns(con, "profiles"):
+                    con.execute("ALTER TABLE profiles ADD COLUMN household_bots TEXT DEFAULT '\"all\"'")
+                for r in writes:
+                    con.execute("UPDATE profiles SET role = ?, household_bots = ? WHERE id = ?",
+                                (r.new_stored, json.dumps(r.household), r.id))
+                accounts._bump_rev(con)
+                con.execute("COMMIT")
+            except BaseException:
+                con.execute("ROLLBACK")
+                raise
+        accounts.invalidate()
+    if pp.config_changes:
+        roster = _raw_roster()
+        if roster is not None:
+            hide = set(pp.hidden)
+            fold = {bid for bid, _ in pp.folds}
+            for e in roster:
+                bid = str(e["id"])
+                if bid in hide:
+                    e["hidden"] = True
+                if bid in fold:
+                    e.pop("profiles", None)
+            config._write_bots(roster)
+
+
+# --------------------------------------------------------------------------- #
+# 011_scale (4.0 scale and retention, BUILD-PLAN-v2 §1.13)
+# --------------------------------------------------------------------------- #
+
+#: maintenance_state key of the media_refs watermark: the highest messages.rowid already
+#: folded into media_refs (the nightly job continues from there).
+MEDIA_REFS_WATERMARK = "media_refs.rowid"
+#: Rows per backfill batch (one short transaction each).
+_SCALE_BATCH = 5000
+#: SQLite's PRAGMA auto_vacuum value for INCREMENTAL.
+_AUTO_VACUUM_INCREMENTAL = 2
+
+
+def scale_plan() -> list[str]:
+    """What 011 would do, read only (the dry run)."""
+    from . import database
+    dbp = _db_file()
+    lines: list[str] = []
+    tables = _table_names(dbp)
+    new_tables = [t for t in ("maintenance_runs", "media_refs", "media_expired", "storage_stats",
+                              "maintenance_state", "generated_media") if t not in tables]
+    if new_tables:
+        lines.append("create tables: " + ", ".join(new_tables))
+    if not dbp.exists():
+        lines.append("add column: profiles.archive_after_months (NULL = off)")
+        lines.append(f"indexes: {len(database.SCALE_INDEXES)} (as their tables are created)")
+        return lines
+    con = sqlite3.connect(_ro_uri(dbp), uri=True)
+    try:
+        if "profiles" not in tables or "archive_after_months" not in _columns(con, "profiles"):
+            lines.append("add column: profiles.archive_after_months (NULL = off: no chat is archived)")
+        drift = database.scale_index_drift(con)
+        new = [n for _t, n, _d, why in drift if why == "missing"]
+        stale = [n for _t, n, _d, why in drift if why == "stale"]
+        if new:
+            lines.append(f"create {len(new)} index(es): " + ", ".join(new))
+        if stale:
+            lines.append(f"rebuild {len(stale)} index(es) an older build defined differently: "
+                         + ", ".join(stale))
+        ref = database._reference_shapes()
+        odd = [t for t in ref if t in tables and database._table_shape(con, t) != ref[t]]
+        if odd:
+            lines.append("bring table(s) to the 4.0 shape: " + ", ".join(sorted(odd)))
+        if "messages" in tables:
+            n = con.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            lines.append(f"backfill media_refs from {n} message(s)")
+        if database.fts_needs_upgrade(con):
+            lines.append("message search: messages get their thread's owner and the search index "
+                         "is rebuilt with it (a profile's search ranks only its own messages)")
+        mode = con.execute("PRAGMA auto_vacuum").fetchone()[0]
+        if mode != _AUTO_VACUUM_INCREMENTAL:
+            size = dbp.stat().st_size
+            lines.append(f"auto_vacuum -> INCREMENTAL: one VACUUM of chats.db ({size / 1e6:.1f} MB)")
+    finally:
+        con.close()
+    if not lines:
+        lines.append("record the step (nothing left to change)")
+    return lines
+
+
+def _backfill_media_refs(con: sqlite3.Connection) -> int:
+    """Fold every message's /media/ references into media_refs, in rowid batches; set the
+    watermark. Re-runnable: last_ref_at only moves forward."""
+    from . import database
+    if "messages" not in database.sqlite_tables(con):
+        return 0
+    row = con.execute("SELECT value FROM maintenance_state WHERE key = ?",
+                      (MEDIA_REFS_WATERMARK,)).fetchone()
+    last = int(row[0]) if row and str(row[0]).isdigit() else 0
+    names_total = 0
+    while True:
+        rows = con.execute(
+            "SELECT rowid, media_url, content, metadata, created_at FROM messages "
+            "WHERE rowid > ? ORDER BY rowid LIMIT ?", (last, _SCALE_BATCH)).fetchall()
+        if not rows:
+            break
+        refs: dict[str, str] = {}
+        for rid, media_url, content, metadata, created in rows:
+            last = rid
+            for name in database.media_names_in(media_url, content, metadata):
+                if created and created > refs.get(name, ""):
+                    refs[name] = created
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            con.executemany(
+                "INSERT INTO media_refs (name, last_ref_at) VALUES (?, ?) "
+                "ON CONFLICT(name) DO UPDATE SET last_ref_at = "
+                "MAX(media_refs.last_ref_at, excluded.last_ref_at)", list(refs.items()))
+            con.execute("INSERT INTO maintenance_state (key, value) VALUES (?, ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        (MEDIA_REFS_WATERMARK, str(last)))
+            con.execute("COMMIT")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+        names_total += len(refs)
+    return names_total
+
+
+def apply_scale() -> None:
+    """Apply 011_scale (``run`` took the backup). Every part is idempotent, so an interrupted
+    run simply runs again on the next start."""
+    import time
+
+    from . import database
+    dbp = _db_file()
+    accounts.refuse_live_db_under_pytest(dbp)
+    with accounts.connect():             # the accounts tables (and the archive column) exist
+        pass
+    con = sqlite3.connect(str(dbp), timeout=30, isolation_level=None)
+    try:
+        con.execute("PRAGMA busy_timeout=30000")
+        if "archive_after_months" not in _columns(con, "profiles"):
+            with contextlib.suppress(sqlite3.OperationalError):     # a racing writer added it
+                con.execute("ALTER TABLE profiles ADD COLUMN archive_after_months INTEGER")
+        col = {r[1]: (r[2] or "").upper() for r in con.execute("PRAGMA table_info(profiles)")}
+        if col.get("archive_after_months") != "INTEGER":
+            # Only an INTEGER column has ever been written; anything else is not ours.
+            raise MigrateError("profiles.archive_after_months exists with another type "
+                               f"({col.get('archive_after_months')!r}); restore the backup")
+        t0 = time.monotonic()
+        built = database.ensure_scale_schema(con)
+        log.info("011_scale: %d index(es) built in %.1f s", built, time.monotonic() - t0)
+        t0 = time.monotonic()
+        fts = database.ensure_owner_fts(con)
+        log.info("011_scale: owner-scoped search index %s in %.1f s", fts, time.monotonic() - t0)
+        t0 = time.monotonic()
+        names = _backfill_media_refs(con)
+        log.info("011_scale: media_refs backfilled (%d name(s)) in %.1f s", names,
+                 time.monotonic() - t0)
+        if con.execute("PRAGMA auto_vacuum").fetchone()[0] != _AUTO_VACUUM_INCREMENTAL:
+            size = dbp.stat().st_size
+            log.info("011_scale: auto_vacuum -> INCREMENTAL, VACUUM of %.1f MB (one time)",
+                     size / 1e6)
+            t0 = time.monotonic()
+            con.execute(f"PRAGMA auto_vacuum = {_AUTO_VACUUM_INCREMENTAL}")
+            con.execute("VACUUM")
+            con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+            log.info("011_scale: VACUUM done in %.1f s (%.1f MB now)", time.monotonic() - t0,
+                     dbp.stat().st_size / 1e6)
+    finally:
+        con.close()
 
 
 # --------------------------------------------------------------------------- #
@@ -344,8 +874,17 @@ def _bot_of(entry: dict) -> config.Bot:
 
 
 def _could_use(bot: config.Bot, prof: accounts.Profile) -> bool:
-    from . import characters, policy
-    return characters.may_use(bot, policy.profile_principal(prof))
+    """Could ``prof`` use ``bot`` under the 3.x rules 009 was written against (audience, then
+    the profile list; Admins everything)? Frozen here on purpose: 4.0's ``characters.may_use``
+    asks other questions (household lists, personal bots), and 009's never-widen rule is
+    about what a profile could read BEFORE the upgrade."""
+    if prof.role is Role.ADMIN:
+        return True
+    if bot.profiles and prof.id not in bot.profiles:
+        return False
+    if prof.role is Role.BASIC:
+        return bot.audience in ("all", "restricted")
+    return True
 
 
 def _default_target(bot: config.Bot | None, by_id: dict[str, accounts.Profile],
@@ -355,14 +894,15 @@ def _default_target(bot: config.Bot | None, by_id: dict[str, accounts.Profile],
         return None, "character no longer in the roster"
     if len(bot.profiles) == 1:
         p = by_id.get(bot.profiles[0])
-        if p is not None and p.role != "owner" and not p.disabled and _could_use(bot, p):
+        if p is not None and not p.protected and not p.disabled and _could_use(bot, p):
             return p, f"only {p.name} may use it"
     if bot.audience == "restricted" and anon is not None and _could_use(bot, anon):
         return anon, f"made for Restricted profiles; {anon.name} is the only Restricted profile"
     return None, "default"
 
 
-def _resolve_profile(ref: str, profiles: list[accounts.Profile]) -> accounts.Profile:
+def _resolve_profile(ref: str, profiles: list[accounts.Profile], *,
+                     flag: str = "--assign") -> accounts.Profile:
     want = ref.strip()
     hit = next((p for p in profiles if p.id == want), None) \
         or next((p for p in profiles if p.name.casefold() == want.casefold()), None)
@@ -370,7 +910,7 @@ def _resolve_profile(ref: str, profiles: list[accounts.Profile]) -> accounts.Pro
         pre = [p for p in profiles if p.id.startswith(want)]
         hit = pre[0] if len(pre) == 1 else None
     if hit is None:
-        raise MigrateError(f"--assign: no profile {ref!r} (use its name or id)")
+        raise MigrateError(f"{flag}: no profile {ref!r} (use its name or id)")
     return hit
 
 
@@ -433,11 +973,11 @@ def ownership_plan(*, assign: dict[str, str] | None = None, all_to_owner: bool =
     have = _table_names(dbp)
     profiles = _ro_profiles(dbp)
     by_id = {p.id: p for p in profiles}
-    owner = next((p for p in profiles if p.role == "owner"), None)
+    owner = next((p for p in profiles if p.protected), None)
     out.owner_name = (f"{owner.name} (Owner)" if owner is not None else
                       "the Owner" if owner_pending else
                       "nobody yet (the Owner, once one is created)")
-    restricted = [p for p in profiles if p.role == "restricted" and not p.disabled]
+    restricted = [p for p in profiles if p.role is Role.BASIC and not p.disabled]
     anon = restricted[0] if len(restricted) == 1 else None
 
     roster = _raw_roster() or []
@@ -486,17 +1026,17 @@ def ownership_plan(*, assign: dict[str, str] | None = None, all_to_owner: bool =
         bot = _bot_of(e) if e is not None else None
         if bot_id.lower() in overrides:
             p = overrides[bot_id.lower()]
-            note = "" if (p.role == "owner" or bot is None or _could_use(bot, p)) else \
+            note = "" if (p.protected or bot is None or _could_use(bot, p)) else \
                 f"; NOTE: {p.name} could not use this character before"
             target, reason = p, f"--assign{note}"
         elif all_to_owner:
             target, reason = None, "--all-to-owner"
         else:
             target, reason = _default_target(bot, by_id, anon)
-        if target is not None and target.role == "owner":
+        if target is not None and target.protected:
             target = None
         tid = target.id if target is not None else (owner.id if owner is not None else None)
-        name = (f"{target.name} ({target.role.capitalize()})" if target is not None
+        name = (f"{target.name} ({target.role.value.capitalize()})" if target is not None
                 else out.owner_name)
         out.assignments.append(Assignment(bot_id, n, tid, name, reason))
     if nfiles:
@@ -554,6 +1094,499 @@ def _apply_ownership(p9: OwnershipPlan) -> None:
             push._save_subs(subs)
 
 
+# --------------------------------------------------------------------------- #
+# 012_templates (4.2: one owner per bot, live templates; PLAN-v2 section 5)
+# --------------------------------------------------------------------------- #
+
+#: The one id that is Owner-personal AND direct: Sage's corpus and digest are keyed on it.
+OWNER_OWN_BOTS = ("advisor",)
+#: Manifest of what 012 creates (bot ids, avatar files, files that did not exist), next to the
+#: backup (or in the data dir with --no-backup); ``restore`` removes what it lists.
+CREATED_MANIFEST = "012-created.json"
+#: Retired bot ids: threads on them are left exactly as they are.
+_META_PICKED = "provider0_picked"
+
+
+@dataclass
+class TemplatesPlan:
+    """What 012 will do, computed from the files as they are (read-only). ``entries`` are the
+    raw roster edits; ``make`` the copies made through ``profiles_service.make_copy``."""
+    admin: str | None = None
+    owner_bots: list[str] = field(default_factory=list)       # agent/app/legacy-api -> the admin
+    own: dict[str, str] = field(default_factory=dict)         # direct bot -> its one profile
+    templates: dict[str, str | list] = field(default_factory=dict)   # new template -> give_to
+    link: list[tuple[str, str, dict]] = field(default_factory=list)  # (copy, template, overrides)
+    unlink: list[str] = field(default_factory=list)           # a second copy in one profile
+    make: list[tuple[str, str]] = field(default_factory=list)        # (profile, template)
+    repoint: list[tuple[str, str, str, int]] = field(default_factory=list)  # (tpl, copy|"", owner, n)
+    clear_removed: list[tuple[str, str]] = field(default_factory=list)
+    lists: dict[str, list[str]] = field(default_factory=dict)        # profile -> household_bots
+    notes: list[str] = field(default_factory=list)
+    names: dict[str, str] = field(default_factory=dict)
+    skipped: bool = False
+
+    @property
+    def pending(self) -> bool:
+        return bool(self.owner_bots or self.own or self.templates or self.link or self.unlink
+                    or self.make or self.repoint or self.clear_removed or self.lists)
+
+    def lines(self) -> list[str]:
+        n = lambda pid: self.names.get(pid, pid)     # noqa: E731
+        out: list[str] = []
+        if self.admin is None and not self.skipped:
+            out.append("no protected Admin yet: agent bots stay household until the install is "
+                       "claimed; the claim makes them the Admin's")
+        out += [f"{b!r}: agent/app bot -> personal to {n(self.admin or '')}" for b in self.owner_bots]
+        out += [f"{b!r}: own bot of {n(p)} (no template)" for b, p in self.own.items()]
+        for t, gt in self.templates.items():
+            who = gt if isinstance(gt, str) else (", ".join(n(x) for x in gt) or "nobody yet")
+            out.append(f"{t!r}: becomes a template, given to {who}")
+        for cid, t, ov in self.link:
+            out.append(f"copy {cid!r}: linked to template {t!r}"
+                       + (f", keeps own {', '.join(sorted(ov))}" if ov else ""))
+        out += [f"copy {c!r}: a second copy in one profile, becomes an own bot" for c in self.unlink]
+        out += [f"{n(p)}: new copy of {t!r}" for p, t in self.make]
+        for t, cid, o, k in self.repoint:
+            out.append(f"{n(o)}: {k} chat(s) on {t!r} -> " + (f"copy {cid!r}" if cid else "its new copy"))
+        out += [f"{n(p)}: forget the deleted-copy mark for {t!r}" for p, t in self.clear_removed]
+        out += [f"{n(p)}: household_bots -> {', '.join(v) or '(none)'} (history only)"
+                for p, v in self.lists.items()]
+        out += [f"note: {x}" for x in self.notes]
+        return out
+
+
+def _ro_threads(path: Path) -> list[tuple[str, str | None, str]]:
+    """(bot id, owner profile id | None, thread id) for every thread; read-only."""
+    if "threads" not in _table_names(path):
+        return []
+    con = sqlite3.connect(_ro_uri(path), uri=True)
+    try:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(threads)")}
+        if not {"id", "bot_id", "owner_profile_id"} <= cols:
+            return []
+        return [(r[0], r[1], r[2]) for r in
+                con.execute("SELECT bot_id, owner_profile_id, id FROM threads")]
+    finally:
+        con.close()
+
+
+def _picture_hash(path: Path | None) -> str:
+    import hashlib
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest() if path and path.is_file() else ""
+    except OSError:
+        return ""
+
+
+def _link_overrides(b: config.Bot, tpl: config.Bot, prof: accounts.Profile | None) -> dict:
+    """The ``overrides`` a pre-4.2 copy keeps when it is linked to ``tpl``: only what its owner
+    could have changed in 4.1 (name, emoji, description, colour, quick actions, a voice, the
+    personality, lookups on/off, the connection/model) and still differs from the template - and,
+    when the 4.1 kit recorded a baseline, from that baseline. Everything else the 4.1 copy path
+    dropped (lookup, fallbacks, image_jobs ...) follows the template again. ``picture`` is set when
+    the copy's face file differs from the one the template hands out."""
+
+    from . import backends_policy, kits, personas
+    ov: dict = {}
+    base = b.kit_baseline if isinstance(b.kit_baseline, dict) else None
+
+    def changed(key: str, cur, want) -> bool:
+        if cur == want:
+            return False
+        return base is None or key not in base or base.get(key) != cur
+    for f in ("name", "emoji", "description", "color", "quick_actions"):
+        cur, want = getattr(b, f), getattr(tpl, f)
+        if changed(f, cur, want):
+            ov[f] = cur
+    if b.voice and b.voice != tpl.voice:
+        ov["voice"] = b.voice
+    adv: dict = {}
+    mine, theirs = (b.advisor or {}), (tpl.advisor or {})
+    ptxt, pwant = personas.current(b)[0] if mine.get("persona") else "", \
+        personas.current(tpl)[0] if theirs.get("persona") else ""
+    if mine.get("persona") != theirs.get("persona") and changed("persona", ptxt, pwant):
+        adv["persona"] = mine.get("persona")
+    if (mine.get("tools"), mine.get("tools_picked")) != (theirs.get("tools"), theirs.get("tools_picked")) \
+            and changed("tools", config.direct_tools_on(b), config.direct_tools_on(tpl)):
+        adv["tools"] = mine.get("tools", False)
+        adv["tools_picked"] = mine.get("tools_picked")
+    m0 = (mine.get("providers") or [None])[0]
+    t0 = (theirs.get("providers") or [None])[0]
+    ident = ("provider", "connection", "model", "base_url")
+    if isinstance(m0, dict) and (not isinstance(t0, dict)
+                                 or any(m0.get(k) != t0.get(k) for k in ("connection", "model"))):
+        # the copy's own connection (also when the template has no provider at all): only the
+        # identity of the provider is the copy's; extra_body / max_tokens ... follow the template
+        adv["provider0"] = {k: m0[k] for k in ident if k in m0}
+        tconn = str((t0 or {}).get("connection") or "")
+        if prof is None or not tconn or backends_policy.permits(prof, tconn):
+            ov[_META_PICKED] = True           # a choice the policy did not force
+    if adv:
+        ov["advisor"] = adv
+    src = kits.picture_source(tpl.id)
+    mine_face = Path(config.AVATAR_DIR) / b.avatar if b.avatar else None
+    if _picture_hash(mine_face) != _picture_hash(src):
+        ov["picture"] = True
+    return ov
+
+
+def templates_plan(*, own: dict[str, str] | None = None) -> TemplatesPlan:
+    """What 012_templates does (PLAN-v2 section 5). Writes nothing."""
+    from . import characters, kits
+    tp = TemplatesPlan()
+    dbp = _db_file()
+    if not Path(config.CONFIG_PATH).exists() or "profiles" not in _table_names(dbp):
+        tp.skipped = True
+        tp.notes.append("the profiles are created by the earlier steps; 012 is planned after them")
+        return tp
+    profiles = _ro_profiles(dbp)
+    by_id = {p.id: p for p in profiles}
+    tp.names = {p.id: p.name for p in profiles}
+    admin = next((p for p in profiles if p.protected), None)
+    tp.admin = admin.id if admin else None
+    bots = config.load_bots()
+    threads = _ro_threads(dbp)
+    chats: dict[tuple[str, str], list[str]] = {}
+    for bid, owner, tid in threads:
+        o = owner or tp.admin
+        if o:
+            chats.setdefault((bid, o), []).append(tid)
+    chat_owners: dict[str, set[str]] = {}
+    for (bid, o) in chats:
+        chat_owners.setdefault(bid, set()).add(o)
+    state = kits._read_state()
+    removed = state.get("removed", {})
+
+    own = dict(own or {})
+    for bid, ref in list(own.items()):
+        if not any(b.id == bid for b in bots):
+            raise MigrateError(f"--own: no character {bid!r}")
+        own[bid] = _resolve_profile(ref, profiles, flag="--own").id
+
+    household = [b for b in bots if b.scope == "household" and not b.template]
+    # 1. owner bots
+    for b in household:
+        kind = characters.backend_kind(b)
+        if kind != "direct":
+            if b.give_to is not None:
+                tp.notes.append(f"{b.id!r} runs on an agent but carries give_to; left alone (R1)")
+            elif tp.admin:
+                tp.owner_bots.append(b.id)
+        elif b.give_to is None and tp.admin and b.id in OWNER_OWN_BOTS and b.id not in own:
+            own[b.id] = tp.admin
+    for bid in tp.owner_bots:
+        others = {o: len(t) for (cb, o), t in chats.items() if cb == bid and o != tp.admin}
+        if others:
+            who = ", ".join(f"{tp.names.get(o, o)} ({n})" for o, n in sorted(others.items()))
+            tp.notes.append(
+                f"{bid!r} becomes the Owner's personal bot (R1): chats other profiles have with it "
+                f"stay in place but only the Owner can open them any more: {who}")
+    tp.own = {k: v for k, v in own.items()
+              if any(b.id == k and b.scope == "household" and b.give_to is None for b in bots)}
+    for bid in own:
+        b = next((x for x in bots if x.id == bid), None)
+        if b is not None and b.scope == "household" and b.give_to is not None:
+            raise MigrateError(f"--own: {bid!r} is already a template")
+    # 2. templates: every other household direct bot
+    existing = {b.id: b for b in bots if b.scope == "household" and b.is_template}
+    explicit: dict[str, set[str]] = {}
+    for p in profiles:
+        if isinstance(p.household_bots, list):
+            for bid in p.household_bots:
+                explicit.setdefault(bid, set()).add(p.id)
+    copies_by: dict[tuple[str, str], list[config.Bot]] = {}
+    for b in bots:
+        if b.scope == "personal":
+            tid = kits.kit_id_of(b)
+            if tid:
+                copies_by.setdefault((b.owner_profile, tid), []).append(b)
+    candidates: list[str] = []
+    for b in household:
+        if characters.backend_kind(b) != "direct" or b.give_to is not None or b.id in tp.own:
+            continue
+        hh = kits.load_household(b.id) or {}
+        if b.id == firstrun_atlas_id() or hh.get("auto_clone"):
+            gt: str | list = "everyone"
+        else:
+            ids = set(explicit.get(b.id, set())) | chat_owners.get(b.id, set())
+            ids |= {o for (o, tid) in copies_by if tid == b.id}
+            gt = [p.id for p in profiles if p.id in ids]
+        tp.templates[b.id] = gt
+        sole = chat_owners.get(b.id, set())
+        if len(sole) == 1 and explicit.get(b.id, set()) <= sole and b.id != firstrun_atlas_id() \
+                and gt != "everyone":
+            candidates.append(b.id)
+    if candidates:
+        tp.notes.append("could be one profile's own bot (chats from one profile only): "
+                        + ", ".join(candidates) + "; they become templates unless "
+                        "--own <id>=<profile> says otherwise")
+    templates = {**existing, **dict.fromkeys(tp.templates)}
+
+    def give_of(tid: str):
+        return tp.templates[tid] if tid in tp.templates else existing[tid].give_to
+
+    def entitled(p: accounts.Profile, tid: str) -> bool:
+        g = give_of(tid)
+        return not p.disabled and (g == "everyone" or (isinstance(g, list) and p.id in g))
+
+    # 3. copies: link the existing one, make the missing one
+    taken: dict[tuple[str, str], str] = {}        # (profile, template) -> copy id | "" (to be made)
+    for (pid, tid), found in copies_by.items():
+        if tid not in templates:
+            continue
+        if pid not in by_id:
+            tp.notes.append(f"copy {found[0].id!r} belongs to no profile; left alone")
+            continue
+        tpl = next(b for b in bots if b.id == tid)
+        linked = [c for c in found if c.template]
+        keep = linked[0] if linked else found[0]
+        taken[(pid, tid)] = keep.id
+        for extra in found:
+            if extra.id == keep.id:
+                continue
+            if extra.template:
+                tp.notes.append(f"{extra.id!r} is a second linked copy of {tid!r} for one profile; "
+                                "left alone (invariant I5 will say so)")
+            else:
+                tp.unlink.append(extra.id)
+        if not keep.template:
+            tp.link.append((keep.id, tid, _link_overrides(keep, tpl, by_id[pid])))
+    for tid in templates:
+        for p in profiles:
+            if (p.id, tid) in taken:
+                continue
+            has_chats = (tid, p.id) in chats
+            gone = tid in set(removed.get(p.id, [])) and not p.protected
+            if (entitled(p, tid) and not gone) or has_chats:
+                tp.make.append((p.id, tid))
+                taken[(p.id, tid)] = ""
+                if has_chats and not entitled(p, tid):
+                    tp.notes.append(f"{p.name} has chats on {tid!r} without being given it; "
+                                    "it gets a copy so the chats have an owner")
+    # 4. re-point
+    for tid in templates:
+        for o in sorted(chat_owners.get(tid, set())):
+            if o in by_id:
+                tp.repoint.append((tid, taken.get((o, tid), ""), o, len(chats[(tid, o)])))
+            else:
+                tp.notes.append(f"{len(chats[(tid, o)])} chat(s) on {tid!r} belong to a deleted profile; left")
+    # 5. kit state: the admin's deleted-copy marks
+    if tp.admin:
+        for tid in removed.get(tp.admin, []):
+            if tid in templates:
+                tp.clear_removed.append((tp.admin, tid))
+    # 6. legacy lists: an explicit list loses personal ids and becomes the derived one
+    for p in profiles:
+        if not isinstance(p.household_bots, list):
+            continue                       # "all" names no personal id and nothing to strip
+        want = sorted(tid for tid in templates if (p.id, tid) in taken)
+        if sorted(p.household_bots) != want:
+            tp.lists[p.id] = want
+    return tp
+
+
+def firstrun_atlas_id() -> str:
+    from . import firstrun
+    return firstrun.BOT_ID
+
+
+_SEED_FILE = re.compile(r"(?:^|:)([A-Za-z0-9_.-]+\.md)(?::|$)")
+_SEED_REV = re.compile(r":r(\d+)(?::|$)")
+
+
+def _seed_chat(kit_chats, source: str):
+    """``(kit chat, revision posted | None)`` for a seeded thread's source id (``guide:<bot>:<file>``,
+    ``firstrun:<file>``, ``guide:atlas:<pid>:<file>[:r<rev>]``, ``kit:<copy>:<chat>:<rev>``), or
+    ``(None, None)``."""
+    parts = source.split(":")
+    if parts[0] == "kit" and len(parts) >= 3:
+        chat = next((c for c in kit_chats if c.id == parts[2]), None)
+        rev = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None
+        return chat, rev
+    if parts[0] in ("guide", "firstrun"):
+        m = _SEED_FILE.search(source)
+        if m:
+            chat = next((c for c in kit_chats if c.file == m.group(1)), None)
+            r = _SEED_REV.search(source)
+            return chat, int(r.group(1)) if r else None
+    return None, None
+
+
+class _Created:
+    """The manifest of what 012 creates (``012-created.json``), rewritten after every step so a
+    crash leaves it true; ``restore`` removes what it lists."""
+
+    def __init__(self, path: Path, absent: list[str]) -> None:
+        import json
+        self.path = path
+        self.doc: dict = {"bots": [], "avatars": [], "absent": absent}
+        # A re-run after a crash continues the first run's manifest: what that run made must
+        # still be undone by the backup it was taken against.
+        if path.is_file():
+            try:
+                old = json.loads(path.read_text(encoding="utf-8"))
+                for k in ("bots", "avatars", "absent"):
+                    self.doc[k] = sorted(set(old.get(k, [])) | set(self.doc[k])) if k == "absent" \
+                        else list(dict.fromkeys([*old.get(k, []), *self.doc[k]]))
+            except (OSError, ValueError, AttributeError):
+                pass
+        self.flush()
+
+    def flush(self) -> None:
+        import json
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.doc, indent=1, sort_keys=True), encoding="utf-8")
+        tmp.replace(self.path)
+
+    def add_bot(self, bot_id: str, avatars: list[str]) -> None:
+        self.doc["bots"].append(bot_id)
+        self.doc["avatars"].extend(a for a in avatars if a not in self.doc["avatars"])
+        self.flush()
+
+
+def apply_templates(*, own: dict[str, str] | None = None,
+                    backup_dir: Path | None = None) -> TemplatesPlan:
+    """Carry out 012 (PLAN-v2 section 5), re-planned from the files as they are now. Order:
+    roster (one raw write), then the extra copies, then the kit state, then chats.db, then the
+    legacy lists. Every step finds its own earlier work, so a crash re-runs cleanly."""
+    from . import kits, profiles_service
+    with profiles_service.LOCK:
+        tp = templates_plan(own=own)
+        if tp.skipped or not tp.pending:
+            return tp
+        data = Path(config.DATA_DIR)
+        absent = [rel for rel, p in _backed_up_files()
+                  if not p.exists() and rel.startswith(f"{kits.KIT_DIR_NAME}/")]
+        if not (kits.kit_dir() / kits.STATE_NAME).exists():
+            absent.append(f"{kits.KIT_DIR_NAME}/{kits.STATE_NAME}")
+        man = _Created((backup_dir or data) / CREATED_MANIFEST, sorted(set(absent)))
+        original = copy.deepcopy(_raw_roster() or [])
+        if tp.owner_bots or tp.own or tp.templates or tp.link or tp.unlink:
+            roster = _raw_roster() or []
+            loaded = {b.id: b for b in config.load_bots()}
+            for bid, b in loaded.items():        # a shipped default not in the file yet
+                if not any(str(e["id"]) == bid for e in roster):
+                    roster.append(config._bot_entry(b))
+            by_entry = {str(e["id"]): i for i, e in enumerate(roster)}
+            for bid in tp.owner_bots:
+                roster[by_entry[bid]].update(scope="personal", owner_profile=tp.admin)
+            for bid, pid in tp.own.items():
+                roster[by_entry[bid]].update(scope="personal", owner_profile=pid)
+            for bid, gt in tp.templates.items():
+                roster[by_entry[bid]]["give_to"] = gt if isinstance(gt, str) else list(gt)
+            for cid, tid, ov in tp.link:
+                b2 = replace(loaded[cid], template=tid, overrides=ov, kit_version="", kit_baseline=None)
+                b2.resolved_view = config._view(b2)        # store exactly these overrides
+                roster[by_entry[cid]] = config._bot_entry(b2, loaded[tid])
+            for cid in tp.unlink:
+                roster[by_entry[cid]].pop("cloned_from", None)
+                roster[by_entry[cid]].pop("pack", None)
+            config._write_bots(roster)
+            config._invalidate_bots_cache()
+        for pid, tid in tp.make:
+            prof = accounts.get_profile(pid)
+            if prof is None:
+                continue
+            before = {f.name for f in Path(config.AVATAR_DIR).glob("*")} if Path(config.AVATAR_DIR).is_dir() else set()
+            bot, cleared = profiles_service.make_copy(prof, tid)
+            if cleared:
+                # The voice check needs the add-on host, which a CLI run does not have: keep the
+                # template's voice here. The start-up reconcile (reconcile_copies) clears it for
+                # an owner who really may not use it.
+                tpl_voice = config.get_bot(tid).voice
+                bot = config.update_bot(bot.id, lambda b, v=tpl_voice: replace(b, voice=v)) or bot
+            after = {f.name for f in Path(config.AVATAR_DIR).glob("*")} if Path(config.AVATAR_DIR).is_dir() else set()
+            man.add_bot(bot.id, sorted(after - before))
+        _restore_unknown_keys(original)
+        _apply_kit_state(tp)
+        for tid, _cid, owner, _n in tp.repoint:
+            mine = profiles_service.copy_of(owner, tid)
+            if mine is not None:
+                profiles_service.repoint_threads(tid, mine.id, owner)
+        if tp.lists:
+            import json
+            with accounts.connect() as con:
+                con.execute("BEGIN IMMEDIATE")
+                try:
+                    for pid, lst in tp.lists.items():
+                        con.execute("UPDATE profiles SET household_bots = ? WHERE id = ?",
+                                    (json.dumps(lst), pid))
+                    accounts._bump_rev(con)
+                    con.execute("COMMIT")
+                except BaseException:
+                    con.execute("ROLLBACK")
+                    raise
+            accounts.invalidate()
+        if backup_dir is None:
+            man.path.unlink(missing_ok=True)       # --no-backup: nothing will ever restore from it
+        return tp
+
+
+def _known_entry_keys() -> set[str]:
+    """Every key ``config._bot_entry`` can write (a Bot with each optional field set, both forms)."""
+    full = config.Bot(id="x", name="x", profiles=["p"], pack="p", description="d", scope="personal",
+                      owner_profile="o", cloned_from="c", kit_version="v", kit_baseline={}, hidden=True,
+                      give_to=[], api={"a": 1}, advisor={"a": 1})
+    linked = replace(full, template="t", overrides={"name": "n"}, resolved_view=None)
+    return set(config._bot_entry(full)) | set(config._bot_entry(linked)) | {"template", "overrides"}
+
+
+def _restore_unknown_keys(original: list[dict]) -> None:
+    """The copies were made through the roster writer, which re-serialises every entry from the
+    fields this version knows: a key it does not know (an add-on's) would be gone. Put those back
+    from the roster as it was before 012 touched it (like 006 and 010, nothing unknown is dropped)."""
+    known = _known_entry_keys()
+    roster = _raw_roster()
+    if roster is None:
+        return
+    now = {str(e["id"]): e for e in roster}
+    changed = False
+    for old in original:
+        cur = now.get(str(old["id"]))
+        if cur is None:
+            continue
+        for k, v in old.items():
+            if k not in known and k not in cur:
+                cur[k] = v
+                changed = True
+    if changed:
+        config._write_bots(roster)
+        config._invalidate_bots_cache()
+
+
+def _apply_kit_state(tp: TemplatesPlan) -> None:
+    """The kit state: the Admin's deleted-copy marks forgotten, and every guide/kit chat a thread
+    that is about to move already holds recorded as delivered to its copy (BL-5: no second post)."""
+    from . import kits, profiles_service
+    for pid, tid in tp.clear_removed:
+        kits.clear_removed(pid, tid)
+    dbp = _db_file()
+    if not tp.repoint or "messages" not in _table_names(dbp):
+        return
+    con = sqlite3.connect(_ro_uri(dbp), uri=True)
+    try:
+        for tid, _cid, owner, _n in tp.repoint:
+            mine = profiles_service.copy_of(owner, tid)
+            kit = kits.get_kit(tid)
+            if mine is None or kit is None:
+                continue
+            where, params = profiles_service._owner_clause(owner)
+            rows = con.execute(
+                "SELECT m.source_id FROM messages m JOIN threads t ON t.id = m.thread_id "
+                f"WHERE t.bot_id = ? AND {where.replace('owner_profile_id', 't.owner_profile_id')} "
+                "AND m.source_id IS NOT NULL", [tid, *params]).fetchall()
+            for (src,) in rows:
+                chat, rev = _seed_chat(kit.chats, str(src))
+                if chat is not None:
+                    kits._update_state(lambda doc, c=chat, s=str(src), r=rev, cid=mine.id: doc["delivered"]
+                                       .setdefault(cid, {}).setdefault(
+                                           c.id, {"rev": r if r is not None else c.rev, "source": s}))
+    finally:
+        con.close()
+
+
+
 def _copy_entry(e: dict) -> dict:
     import copy
     return copy.deepcopy(e)
@@ -574,12 +1607,36 @@ PUSH_SUBS_REL = "push-subscriptions.json"
 IMAGE_LEDGER_REL = "apps-data/imagestudio/images.jsonl"
 
 
-def _backed_up_files() -> list[tuple[str, Path]]:
-    """(name inside the backup, live path) for every file besides chats.db."""
+#: 010_profiles' additions to the set (BUILD-PLAN-v2 §1.6 step 4): files the 4.0 profile code
+#: rewrites per profile, so the pre-upgrade copy is the one a hard rollback wants.
+QUICK_ACTIONS_REL = "quick-actions.yaml"
+VOICE_ACKS_REL = "voice-acks.yaml"
+IMAGE_PROMPTS_GLOB = "apps-data/imagestudio/prompts*.json"
+#: 012_templates' additions: ``bot-kits/`` (state.json + household kits) and the advisor ledger.
+ADVISOR_DB_REL = "advisor.db"
+
+
+def _backed_up_files(prompts_from: Path | None = None) -> list[tuple[str, Path]]:
+    """(name inside the backup, live path) for every file besides chats.db. The Image Studio
+    prompt files (``prompts.json``, ``prompts-<profile>.json``) are found by globbing
+    ``prompts_from`` (default: the data directory; ``restore`` passes the backup)."""
     data = Path(config.DATA_DIR)
-    return [("config.yaml", Path(config.CONFIG_PATH)), ("security.yaml", Path(auth.SECURITY_PATH)),
-            ("trusted-devices.yaml", Path(auth.TRUSTED_PATH)),
-            (PUSH_SUBS_REL, data / PUSH_SUBS_REL), (IMAGE_LEDGER_REL, data / IMAGE_LEDGER_REL)]
+    out = [("config.yaml", Path(config.CONFIG_PATH)), ("security.yaml", Path(auth.SECURITY_PATH)),
+           ("trusted-devices.yaml", Path(auth.TRUSTED_PATH)),
+           (PUSH_SUBS_REL, data / PUSH_SUBS_REL), (IMAGE_LEDGER_REL, data / IMAGE_LEDGER_REL),
+           (QUICK_ACTIONS_REL, data / QUICK_ACTIONS_REL), (VOICE_ACKS_REL, data / VOICE_ACKS_REL)]
+    root = Path(prompts_from) if prompts_from is not None else data
+    for f in sorted(root.glob(IMAGE_PROMPTS_GLOB)):
+        if f.is_file():
+            rel = f.relative_to(root).as_posix()
+            out.append((rel, data / rel))
+    # 012_templates: the kit state + household kits, and the advisor ledger (re-pointed rows)
+    out.append((ADVISOR_DB_REL, data / ADVISOR_DB_REL))
+    for f in sorted((root / "bot-kits").rglob("*")):
+        if f.is_file():
+            rel = f.relative_to(root).as_posix()
+            out.append((rel, data / rel))
+    return out
 
 
 def backup(version: str = TARGET_VERSION) -> Path:
@@ -603,14 +1660,105 @@ def backup(version: str = TARGET_VERSION) -> Path:
     for rel, p in _backed_up_files():
         if p.exists():
             (dest / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(p, dest / rel)
+            if p.suffix == ".db":                      # a live WAL database: the backup API
+                s2 = sqlite3.connect(_ro_uri(p), uri=True)
+                d2 = sqlite3.connect(str(dest / rel))
+                try:
+                    s2.backup(d2)
+                finally:
+                    d2.close()
+                    s2.close()
+            else:
+                shutil.copy2(p, dest / rel)
             with contextlib.suppress(OSError):
                 (dest / rel).chmod(0o600)
+    _backup_secrets(dest)
     kept = sorted((d for d in root.iterdir() if d.is_dir() and _BACKUP_DIR_RE.match(d.name)),
                   key=lambda d: d.name[-15:])            # by stamp, whatever version is in front
     for old in kept[:-KEEP_BACKUPS]:
+        if (old / CREATED_MANIFEST).is_file():
+            continue                                     # the pre-4.2 backup of an unfinished 012
         shutil.rmtree(old, ignore_errors=True)
     return dest
+
+
+def _backup_secrets(dest: Path) -> None:
+    """Copy ``agents/secrets.json`` (0600, in a 0700 folder) and record whether it existed."""
+    import json
+
+    from . import backups
+    live = Path(config.DATA_DIR) / SECRETS_REL
+    existed = live.is_file()
+    if existed:
+        (dest / "agents").mkdir(exist_ok=True)
+        backups.make_private(dest / "agents", directory=True)
+        shutil.copy2(live, dest / SECRETS_REL)
+        backups.make_private(dest / SECRETS_REL)
+    (dest / SECRETS_STATE).write_text(json.dumps({SECRETS_REL: existed}), encoding="utf-8")
+    backups.make_private(dest / SECRETS_STATE)
+
+
+def _restore_secrets(src: Path) -> list[str]:
+    """Put ``agents/secrets.json`` back from the backup, or remove it when the backup recorded
+    that it did not exist. A backup from before 4.3 recorded nothing: the file is left alone."""
+    import json
+
+    from . import backups
+    live = Path(config.DATA_DIR) / SECRETS_REL
+    if (src / SECRETS_REL).is_file():
+        live.parent.mkdir(parents=True, exist_ok=True)
+        backups.make_private(live.parent, directory=True)
+        tmp = live.with_name(live.name + ".restore-new")
+        shutil.copy2(src / SECRETS_REL, tmp)
+        backups.make_private(tmp)
+        tmp.replace(live)
+        return [SECRETS_REL]
+    try:
+        state = json.loads((src / SECRETS_STATE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if isinstance(state, dict) and state.get(SECRETS_REL) is False and live.is_file():
+        live.unlink()
+        return [f"removed {SECRETS_REL}"]
+    return []
+
+
+def pinned_backup() -> Path | None:
+    """The backup an earlier, unfinished 012 run was taken against (it holds the 012 manifest):
+    a re-run reuses it instead of backing up the half-migrated state, and rotation never drops it."""
+    root = Path(config.BACKUP_DIR)
+    if not root.is_dir():
+        return None
+    found = sorted((d for d in root.iterdir() if d.is_dir() and _BACKUP_DIR_RE.match(d.name)
+                    and (d / CREATED_MANIFEST).is_file()), key=lambda d: d.name[-15:])
+    return found[0] if found else None
+
+
+def _undo_created(src: Path) -> list[str]:
+    """Remove what 012 created (its manifest sits in the backup): the pictures of the copies it
+    made and files that did not exist when the backup was taken. The copies themselves go with
+    the restored config.yaml."""
+    import json
+    man = src / CREATED_MANIFEST
+    if not man.is_file():
+        return []
+    try:
+        doc = json.loads(man.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    gone: list[str] = []
+    data = Path(config.DATA_DIR).resolve()
+    for name in doc.get("avatars", []):
+        f = Path(config.AVATAR_DIR) / str(name)
+        if f.parent == Path(config.AVATAR_DIR) and f.is_file():
+            f.unlink()
+            gone.append(f"removed picture {name}")
+    for rel in doc.get("absent", []):
+        f = (data / str(rel)).resolve()
+        if data in f.parents and f.is_file():
+            f.unlink()
+            gone.append(f"removed {rel}")
+    return gone
 
 
 def restore(src: Path) -> list[str]:
@@ -619,7 +1767,7 @@ def restore(src: Path) -> list[str]:
     if not src.is_dir():
         raise FileNotFoundError(f"{src} is not a backup directory")
     restored = []
-    for name, target in (("chats.db", _db_file()), *_backed_up_files()):
+    for name, target in (("chats.db", _db_file()), *_backed_up_files(prompts_from=src)):
         f = src / name
         if f.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -632,6 +1780,9 @@ def restore(src: Path) -> list[str]:
             from . import backups
             backups.make_private(Path(target))
             restored.append(name)
+    restored += _restore_secrets(src)
+    restored += _undo_created(src)
+    config._invalidate_bots_cache()
     accounts.reset_for_tests()
     settings_store.reset_schema_cache()
     connections.reset_schema_cache()
@@ -678,21 +1829,27 @@ def _apply_connections() -> None:
 
 
 def run(*, dry_run: bool = False, take_backup: bool = True,
-        assign: dict[str, str] | None = None, all_to_owner: bool = False) -> Report:
+        assign: dict[str, str] | None = None, all_to_owner: bool = False,
+        default_profile: str | None = None, own: dict[str, str] | None = None) -> Report:
     """Apply (or, with ``dry_run``, just describe) every pending step."""
     if not dry_run:
         # A restore staged from the app (Settings > System > Backups) is applied now, before the
         # database is opened and before anything below looks at the files.
         from . import backups
         backups.apply_pending_restore()
-    rep = plan(assign=assign, all_to_owner=all_to_owner)
+    rep = plan(assign=assign, all_to_owner=all_to_owner, default_profile=default_profile, own=own)
     rep.dry_run = dry_run
     if dry_run:
         return rep
     # Even when nothing is pending, make sure the schema exists and is recorded.
     if rep.actions and take_backup and _has_user_data():
-        rep.backup = backup()
-        log.info("pre-migration backup written to %s", rep.backup)
+        pinned = pinned_backup() if any(a.step == "012_templates" for a in rep.actions) else None
+        if pinned is not None:
+            rep.backup = pinned
+            log.info("012 re-run: keeping the pre-migration backup %s", pinned)
+        else:
+            rep.backup = backup()
+            log.info("pre-migration backup written to %s", rep.backup)
     steps = {a.step for a in rep.actions}
     accounts.reset_for_tests()                       # re-read the files as they are now
     with accounts.connect():                         # creates the tables
@@ -726,6 +1883,18 @@ def run(*, dry_run: bool = False, take_backup: bool = True,
         # Re-planned now: 002 may just have created the Owner the chats default to.
         _apply_ownership(ownership_plan(assign=assign, all_to_owner=all_to_owner))
     _record("009_ownership")
+    if "010_profiles" in steps:
+        # Recorded only when it ran. plan() always lists 010 until it is recorded, so in
+        # practice it runs (and is recorded) on the first start of every data directory.
+        apply_profiles(default_profile=default_profile)
+        _record("010_profiles")
+    if "011_scale" in steps:
+        apply_scale()
+        _record("011_scale")
+    if "012_templates" in steps:
+        # Re-planned inside, after 001-011: the profiles and owners it reads now exist.
+        apply_templates(own=own, backup_dir=rep.backup)
+        _record("012_templates")
     rep.applied = sorted(steps)
     return rep
 
@@ -733,6 +1902,18 @@ def run(*, dry_run: bool = False, take_backup: bool = True,
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
+
+
+def _is_current_default(wanted: str) -> bool:
+    """Is ``wanted`` (an id or a name) the lock-target default profile already?"""
+    from . import accounts, auth
+    with contextlib.suppress(Exception):
+        cfg = auth.load()
+        if cfg.lock_target != "default_profile" or not cfg.default_profile:
+            return False
+        prof = accounts.get_profile(cfg.default_profile)
+        return bool(prof) and wanted.strip() in (prof.id, prof.name)
+    return False
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -747,6 +1928,12 @@ def main(argv: list[str] | None = None) -> int:
                          "(a name or id); repeatable")
     ap.add_argument("--all-to-owner", action="store_true",
                     help="009_ownership: give every existing chat to the Owner")
+    ap.add_argument("--default-profile", metavar="ID_OR_NAME",
+                    help="010_profiles: the profile unsigned devices and the lock screen land on "
+                         "(sets lock_target: default_profile); refused once 010 has run")
+    ap.add_argument("--own", action="append", default=[], metavar="CHARACTER=PROFILE",
+                    help="012_templates: make the direct household CHARACTER that profile's own bot "
+                         "instead of a template; repeatable")
     args = ap.parse_args(argv)
     if args.data_dir:
         _repoint(Path(args.data_dir))
@@ -768,9 +1955,30 @@ def main(argv: list[str] | None = None) -> int:
         print("009_ownership has already run on this data directory; --assign and --all-to-owner "
               "only shape that first run (restore its backup to run it again)", file=sys.stderr)
         return 2
+    if args.default_profile and "010_profiles" in _applied_ids(_db_file()):
+        if _is_current_default(args.default_profile):
+            # The same command run again (a deploy wrapper that always passes it): a no-op.
+            print("010_profiles has already run; the default profile is already "
+                  f"{args.default_profile!r}", file=sys.stderr)
+            args.default_profile = None
+        else:
+            print("010_profiles has already run on this data directory; --default-profile only shapes "
+                  "that first run (change the lock target in People & Access instead)", file=sys.stderr)
+            return 2
+    own: dict[str, str] = {}
+    for item in args.own:
+        bot, sep, prof = item.partition("=")
+        if not sep or not bot.strip() or not prof.strip():
+            print(f"--own wants CHARACTER=PROFILE, got {item!r}", file=sys.stderr)
+            return 2
+        own[bot.strip()] = prof.strip()
+    if own and "012_templates" in _applied_ids(_db_file()):
+        print("012_templates has already run; --own only shapes that first run", file=sys.stderr)
+        own = {}
     try:
         rep = run(dry_run=args.dry_run, take_backup=not args.no_backup,
-                  assign=assign or None, all_to_owner=args.all_to_owner)
+                  assign=assign or None, all_to_owner=args.all_to_owner,
+                  default_profile=args.default_profile, own=own or None)
     except MigrateError as e:
         print(str(e), file=sys.stderr)
         return 2
@@ -785,6 +1993,11 @@ def _repoint(data_dir: Path) -> None:
     config.DATA_DIR = data_dir
     config.CONFIG_PATH = data_dir / "config.yaml"
     config.BACKUP_DIR = data_dir / "backups"
+    config.DB_PATH = data_dir / "chats.db"
+    config.MEDIA_DIR = data_dir / "media"
+    config.FILES_DIR = data_dir / "files"
+    config.LOG_DIR = data_dir / "logs"
+    config.AVATAR_DIR = data_dir / "avatars"      # 012 writes pictures: never into another dir
     auth.SECURITY_PATH = data_dir / "security.yaml"
     auth.RECOVERY_PATH = data_dir / "RECOVERY-CODE.txt"
     auth.TRUSTED_PATH = data_dir / "trusted-devices.yaml"

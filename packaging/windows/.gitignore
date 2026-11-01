@@ -1,0 +1,3 @@
+# Build inputs and outputs of the Windows installer (see README.md).
+build/
+Output/

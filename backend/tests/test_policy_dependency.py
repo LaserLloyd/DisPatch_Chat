@@ -46,14 +46,17 @@ def test_the_dependency_refuses_without_the_permission_on_a_bare_app(world):
     member = world.client()
     world.login(member, profile_id=max_["id"], pin="5555")
 
-    assert _client(world).get("/settings").status_code == 403                  # nobody signed in
-    assert _client(world).get("/chat").status_code == 200                      # Restricted may chat
+    assert _client(world).get("/settings").status_code in (401, 403)           # nobody signed in
+    assert _client(world).get("/chat").status_code in (401, 403)               # 4.0: nobody holds nothing
+    assert _client(world, kid).get("/chat").status_code == 200                 # a Basic profile chats
     assert _client(world, kid).get("/settings").status_code == 403
     r = _client(world, member).get("/settings")
     assert r.status_code == 403 and "permission" in r.json()["detail"].lower()
     assert _client(world, owner).get("/settings").status_code == 200
-    # A parametrised permission is satisfied by the blanket one (Member, Owner), not by Restricted.
-    assert _client(world, member).get("/tool").status_code == 200
+    # A parametrised permission is satisfied by the blanket one (the Owner), not by a User or a
+    # Basic profile (4.0: tool panels are Admin-only).
+    assert _client(world, owner).get("/tool").status_code == 200
+    assert _client(world, member).get("/tool").status_code == 403
     assert _client(world, kid).get("/tool").status_code == 403
 
 

@@ -57,18 +57,20 @@ test('dashboard: a permission 403 (an Admin on the Owner\'s Health tab) is not a
   assert.equal(n, 0);
 });
 
-test('dashboard: a real downgrade (403 decoy) still hands off to the lock handler', dom, async () => {
-  const n = await mountWith(403, { detail: 'Unlock for full access', decoy: true });
+test('dashboard: a real downgrade (403 locked) still hands off to the lock handler', dom, async () => {
+  const n = await mountWith(403, { detail: 'Sign in to continue', locked: true });
   assert.equal(n, 1);
 });
 
 test('main.js imports the fixed dashboard at a new ?v=', () => {
-  assert.match(MAIN, /from '\.\/dashboard\.js\?v=10'/);
+  assert.match(MAIN, /from '\.\/dashboard\.js\?v=13'/);
 });
 
 test('main.js: since 2026-10-19 Health is an Admin\'s tab too (Admins hold admin_system)', () => {
   assert.match(MAIN, /const OWNER_TABS = \[\];/);
-  assert.match(MAIN, /const isHostRole = \(\) => canAdmin\(\);/);
+  // 4.3 A14: isHostRole is the protected Admin's (host tier); Health is not gated on it.
+  assert.match(MAIN, /const isHostRole = \(\) => canAdmin\(\) && !!state\.auth\.protected;/);
+  assert.match(MAIN, /if \(!canAdmin\(\)\) unmountDashboard\(\);/);
 });
 
 // S-4 ---------------------------------------------------------------------------
@@ -76,8 +78,10 @@ test('main.js: since 2026-10-19 Health is an Admin\'s tab too (Admins hold admin
 test('main.js: Settings opens for a Member without the character list, on a tab they have', () => {
   const fn = MAIN.slice(MAIN.indexOf('async function openBotManager('), MAIN.indexOf('async function closeBotManager('));
   assert.ok(fn.length > 0);
-  assert.match(fn, /if \(canAdmin\(\)\) \{\s+try \{\s+const r = await api\.allBots\(\);/);
-  assert.match(fn, /bmBots = \[\];\s+if \(tab && CHARACTER_TABS\.includes\(resolveSettingsTarget\(tab\)\.id\)\) tab = null;/);
+  // 4.3: no roster fetch at all (the Characters page loads its own rows), so nothing can 403 a User.
+  assert.ok(!/api\.allBots\(\)/.test(fn));
+  // 4.2: Characters is everyone's page (Mine tab), so a Member keeps the tab they asked for.
+  assert.ok(!/CHARACTER_TABS/.test(fn));
   // 3.2: everyone's first section is Appearance (a Member has it; the household ones are the admins').
   assert.match(MAIN, /const homeSettingsTab = \(\) => 'appearance';/);
   // A hidden section falls back to the home section, not to Characters.
@@ -86,7 +90,7 @@ test('main.js: Settings opens for a Member without the character list, on a tab 
 
 // S-5 ---------------------------------------------------------------------------
 
-test('main.js: the local viewer section is built for the Owner and Admins (admin_system)', () => {
+test('main.js: the local viewer section is built for the host tier only (4.3 A14: the protected Admin)', () => {
   assert.match(MAIN, /if \(isHostRole\(\) && filesBody\) filesBody\.append\(viewerSection\(\)\);/);
   assert.match(MAIN, /if \(filesGroup\) filesGroup\.hidden = !isHostRole\(\);/);
 });

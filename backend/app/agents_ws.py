@@ -12,12 +12,15 @@ acts over HTTP, which is gated and audited per route):
 
 Audience (the whole of the privacy rule for these frames):
 
-* an Owner or Admin (and the open, unclaimed install) sees every task;
-* a profile sees its OWN tasks, and only while it still holds ``dispatch_agents``;
-* a Restricted socket, a machine and a socket that has not finished its handshake NEVER
-  receive them - three independent layers: the audience predicate below, the redactor in
-  ``main.redact_for_decoy`` (these types are in ``_DECOY_FRAME_DENY``), and the fact that
-  the frames bypass the observers that feed add-ons (``ConnectionManager.broadcast_where``).
+* a profile sees its OWN tasks, and only while it still holds ``dispatch_agents`` - the Owner
+  and Admins included (4.0: before it an Owner or Admin saw everyone's task timelines and
+  approval cards; a task is a person's work, like a chat). What an Admin keeps is the
+  aggregate spend per day (``GET /api/agents/usage``), never a task's content;
+* the open, unclaimed install sees every task (everyone is the Owner);
+* a machine and a socket that has not finished its handshake NEVER receive them - three
+  independent layers: the audience predicate below, the scoper in
+  ``main.scope_frame_for_principal`` (a principal-less socket gets no task frame), and the fact
+  that the frames bypass the observers that feed add-ons (``ConnectionManager.broadcast_where``).
 
 Sequence numbers (``event.seq``) are the replay cursor: a client that sees a gap refetches
 ``GET /api/tasks/{id}/events?after_seq=<last seen>``.
@@ -49,12 +52,14 @@ def may_see_task(principal: Any, owner: str) -> bool:
     kind = getattr(principal, "kind", "")
     if kind == "open":
         return True
-    if kind != "profile" or getattr(principal, "is_restricted", True):
+    if kind != "profile":
         return False
-    if principal.is_operator:
-        return True
-    return bool(owner) and getattr(principal, "profile_id", None) == owner \
-        and principal.can(Permission.DISPATCH_AGENTS)
+    me = getattr(principal, "profile_id", None)
+    if owner == "owner" and getattr(principal, "is_protected", False):
+        # A task dispatched while the install was still open ("owner") is the protected Admin's.
+        owner = me
+    # 4.0: a task is its dispatcher's, Admins included (no Admin short-circuit).
+    return bool(owner) and me == owner and principal.can(Permission.DISPATCH_AGENTS)
 
 
 def summary(task: dict) -> dict:

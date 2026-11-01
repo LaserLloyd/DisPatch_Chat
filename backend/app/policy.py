@@ -8,11 +8,11 @@ satisfy this requirement?* - answered by :func:`authorize`, and exactly one plac
 every route and WebSocket action declares its answer (``app/route_policy.py``).
 ``tests/test_route_table.py`` fails the build if a route is missing from it.
 
-Principals
-----------
-``profile``    a signed-in person: Owner, Admin, Member or Restricted
-``anonymous``  nobody signed in on an installation that has an owner: **Restricted**
-               (this is the old "Safe Mode": the door is open to look, nothing more)
+Principals (4.0)
+----------------
+``profile``    a signed-in person: an Admin (the first one is *protected*), a User or a
+               Basic profile - or, on an unsigned device, the lock-target default profile
+               (:func:`unsigned`, ``via="default"``)
 ``machine``    an agent, cron or the image rig, holding named :class:`MachineScope`s.
                Identity is a *credential* (the install's ``api_token``). Network
                position - being on loopback - only counts while the owner leaves
@@ -21,12 +21,19 @@ Principals
 ``open``       a brand-new install with no owner and no PIN, reached from this
                machine. Everything is allowed - exactly the 2.x "no PIN" behaviour -
                until the owner account is created (``POST /api/auth/setup``).
+
+Nobody (4.0): an unsigned device on an install whose lock target is the profile list (or
+whose default profile is gone) is :func:`nobody` - not a principal kind but the absence of
+one (``kind="none"``). It holds nothing; every non-public route answers it 401
+``signin_required`` and the client shows the sign-in screen with the profile tiles. The 3.x
+``anonymous`` guest and device binding are gone, and so is the Restricted tier: a Basic
+profile is an ordinary profile whose role holds fewer permissions (``contracts.permissions``),
+refused only by the named permission a route or handler asks for.
 """
 
 from __future__ import annotations
 
 import functools
-import re
 import threading
 from collections import OrderedDict
 from collections.abc import Iterable
@@ -39,21 +46,20 @@ from starlette.routing import Match, Mount
 from . import accounts, auth, config
 from .contracts.permissions import (
     MACHINE_DEFAULT_SCOPES,
-    RESTRICTED_NEVER,
-    ROLE_PERMISSIONS,
     TOOL_PREFIX,
     MachineScope,
     Permission,
     Role,
-    is_valid_permission,
+)
+from .contracts.permissions import (
+    effective_permissions as _table_permissions,
 )
 
 SESSION_COOKIE = "lc_session"
 DEVICE_COOKIE = "lc_device"
 
-#: What every denied browser sees for a Restricted caller: the 2.x wording, so the
-#: frontend's lock handling and every existing client keep working.
-UNLOCK_DETAIL = "Unlock for full access"
+#: What a caller is told when its profile lacks the permission a route needs.
+DENIED_DETAIL = "Your profile does not have permission to do that."
 
 
 # --------------------------------------------------------------------------- #
@@ -70,16 +76,23 @@ class Requirement:
     public: bool = False                   # no credential needed (explicit PUBLIC marker)
     authenticated: bool = False            # any signed-in profile, whatever its role
     #: The role may lack ``permission`` and still reach the handler, which then MUST
-    #: narrow the answer to what the principal may see (a Restricted profile lists
-    #: only audience=restricted|all characters, only ``safe`` tools). The G5 test
-    #: exercises every scoped route with a Restricted session.
+    #: narrow the answer to what the principal may see (only the characters
+    #: ``characters.may_use`` allows, only the tools its ``use_tools:<id>`` grants name).
     scoped: bool = False
     note: str = ""
     #: What a signed-in person is told when the route is machine-only.
     denied_detail: str = ""
-    #: A Restricted caller is refused even though its role holds ``permission`` (the voice
-    #: add-on's user reads: a locked device has its own, reduced view).
-    not_restricted: bool = False
+    #: 4.0 ownership: which owned thing the route's path parameter names, and so which owner
+    #: check the handler runs - ``thread`` | ``message`` | ``character`` | ``file`` | ``task``
+    #: - or ``none: <why>`` for a parameter that is not a per-profile resource. Set from
+    #: ``route_policy.OWNER_SCOPED``; ``tests/test_route_table.py`` fails a parameterised
+    #: route without it.
+    owner_scoped: str = ""
+    #: 4.3 host tier: the route runs code, reads files or exposes a secret of the computer
+    #: DisPatch runs on, so only the protected Admin (the Owner) may call it
+    #: (``Principal.is_host``). ``authorize`` refuses everyone else with 403 ``host_owner_only``,
+    #: machines included, and a host route never lets a non-holder through as ``scoped``.
+    host: bool = False
 
     @property
     def machine_only(self) -> bool:
@@ -98,8 +111,10 @@ class Requirement:
             d["machine"] = list(self.machine)
         if self.scoped:
             d["scoped"] = True
-        if self.not_restricted:
-            d["not_restricted"] = True
+        if self.owner_scoped:
+            d["owner_scoped"] = self.owner_scoped
+        if self.host:
+            d["host"] = True
         if self.note:
             d["note"] = self.note
         return d
@@ -109,11 +124,11 @@ PUBLIC = Requirement(public=True)
 
 
 def R(permission: Permission | str | None = None, *, machine: Iterable[MachineScope | str] = (),
-      scoped: bool = False, note: str = "", not_restricted: bool = False) -> Requirement:
+      scoped: bool = False, note: str = "", host: bool = False) -> Requirement:
     perm = permission.value if isinstance(permission, Permission) else permission
     return Requirement(permission=perm,
                        machine=tuple(m.value if isinstance(m, MachineScope) else m for m in machine),
-                       scoped=scoped, note=note, not_restricted=not_restricted)
+                       scoped=scoped, note=note, host=host)
 
 
 def public(note: str) -> Requirement:
@@ -129,37 +144,54 @@ AUTHENTICATED = Requirement(authenticated=True)
 # --------------------------------------------------------------------------- #
 
 
-def effective_permissions(profile: accounts.Profile) -> frozenset[str]:
-    """Role set + the profile's grants - its denies, within the role's ceiling."""
-    role = Role(profile.role)
-    base = {p.value for p in ROLE_PERMISSIONS[role]}
-    if role is Role.OWNER:
-        return frozenset(base)                       # the owner cannot be restricted
-    for g in profile.grants:
-        if not is_valid_permission(g):
-            continue
-        if role is Role.RESTRICTED and g in {p.value for p in RESTRICTED_NEVER}:
-            continue
-        if g == Permission.ADMIN_SYSTEM.value and role is not Role.ADMIN:
-            continue                                  # host control is the Owner's and the Admins', never a grant
-        base.add(g)
-    for d in profile.denies:
-        base.discard(d)
-    return frozenset(base)
+def is_lock_target(profile: accounts.Profile | None,
+                   cfg: auth.SecurityConfig | None = None) -> bool:
+    """Is ``profile`` the current lock target - the default profile every unsigned device
+    and every lock lands on (``lock_target: default_profile`` + ``default_profile: <id>``
+    in security.yaml)? Such a profile is shared by everyone who can reach the port, so the
+    lock-target fence (``contracts.permissions.LOCK_TARGET_FENCE``) applies to it."""
+    if profile is None:
+        return False
+    cfg = cfg or auth.load()
+    return cfg.lock_target == "default_profile" and bool(cfg.default_profile) \
+        and cfg.default_profile == profile.id
+
+
+def default_picture(profile: accounts.Profile | None,
+                    cfg: auth.SecurityConfig | None = None) -> str:
+    """The picture a profile wears while it has none of its own: ``"mark"`` (the DisPatch app
+    mark, drawn inline by the client) for the install's default profile - the shared one a
+    fresh install names "DisPatch" - whether or not it is the lock target right now; ``""``
+    for everyone else (the client draws the initial)."""
+    if profile is None:
+        return ""
+    cfg = cfg or auth.load()
+    return "mark" if cfg.default_profile and cfg.default_profile == profile.id else ""
+
+
+def effective_permissions(profile: accounts.Profile,
+                          cfg: auth.SecurityConfig | None = None) -> frozenset[str]:
+    """The profile's role table (``contracts.permissions.effective_permissions``: defaults +
+    grants within the grantable column - denies; an Admin holds everything) with the
+    lock-target fence applied when ``profile`` is the current lock target."""
+    return _table_permissions(profile.role, profile.grants, profile.denies,
+                              lock_target=is_lock_target(profile, cfg))
 
 
 @dataclass(frozen=True)
 class Principal:
-    kind: str                                   # profile | anonymous | machine | open
-    role: str | None = None                     # owner|admin|member|restricted (None for machine)
+    kind: str                                   # profile | machine | open (| none: nobody)
+    role: str | None = None                     # a Role value: admin | user | basic (None for machine)
     profile_id: str | None = None
     name: str = ""
     permissions: frozenset[str] = frozenset()
     machine_scopes: frozenset[str] = frozenset()
     session_token: str | None = None
     device_id: str | None = None
-    via: str = ""                               # cookie | device | api_token | loopback | callback | open | anonymous
+    via: str = ""                               # cookie | default | api_token | loopback | callback | open | unsigned
     profile: accounts.Profile | None = field(default=None, compare=False, repr=False)
+    #: The first Admin (accounts.Profile.protected). An open install counts as protected too.
+    protected: bool = False
 
     # -- classification ---------------------------------------------------- #
     @property
@@ -167,18 +199,21 @@ class Principal:
         return self.kind == "machine"
 
     @property
-    def is_restricted(self) -> bool:
-        """The old "decoy": Safe Mode, a locked device, a Restricted profile."""
-        return self.kind == "anonymous" or self.role == Role.RESTRICTED.value
+    def is_admin(self) -> bool:
+        """An Admin session (protected or not), or an open install. (3.x ``is_operator``.)"""
+        return self.kind == "open" or self.role == Role.ADMIN.value
 
     @property
-    def is_operator(self) -> bool:
-        """The old "operator": an Owner or Admin session, or an open install."""
-        return self.kind == "open" or self.role in (Role.OWNER.value, Role.ADMIN.value)
+    def is_protected(self) -> bool:
+        """THE protected first Admin (3.x ``is_owner``), or an open install."""
+        return self.kind == "open" or (self.kind == "profile" and self.protected)
 
     @property
-    def is_owner(self) -> bool:
-        return self.kind == "open" or self.role == Role.OWNER.value
+    def is_host(self) -> bool:
+        """May run host-level things (4.3 host tier: the coding harness, the local file viewer,
+        the MailForge/practice proxies, copying a host file into a chat): the protected Admin
+        or an open install. Never a machine, never a second Admin."""
+        return self.is_protected
 
     @property
     def signed_in(self) -> bool:
@@ -201,19 +236,19 @@ class Principal:
         return self.kind == "machine" and s in self.machine_scopes
 
     def summary(self) -> dict:
-        return {"kind": self.kind, "role": self.role, "profile_id": self.profile_id,
-                "name": self.name, "via": self.via,
+        return {"kind": self.kind, "role": self.role, "protected": self.protected,
+                "profile_id": self.profile_id, "name": self.name, "via": self.via,
                 "permissions": sorted(self.permissions) if self.kind != "open" else ["*"]}
 
 
-def anonymous(device_id: str | None = None) -> Principal:
-    return Principal(kind="anonymous", role=Role.RESTRICTED.value, name="Guest",
-                     permissions=frozenset(p.value for p in ROLE_PERMISSIONS[Role.RESTRICTED]),
-                     device_id=device_id, via="anonymous")
+def nobody(device_id: str | None = None) -> Principal:
+    """No principal: an unsigned device with no lock-target default profile to land on (or a
+    capability URL, which carries its own credential). Holds nothing."""
+    return Principal(kind="none", name="", device_id=device_id, via="unsigned")
 
 
 def open_principal() -> Principal:
-    return Principal(kind="open", role=Role.OWNER.value, name="Owner", via="open")
+    return Principal(kind="open", role=Role.ADMIN.value, name="Owner", via="open", protected=True)
 
 
 def machine_principal(via: str, scopes: Iterable[str] | None = None) -> Principal:
@@ -223,9 +258,9 @@ def machine_principal(via: str, scopes: Iterable[str] | None = None) -> Principa
 
 def profile_principal(profile: accounts.Profile, *, token: str | None = None,
                       device_id: str | None = None, via: str = "cookie") -> Principal:
-    return Principal(kind="profile", role=profile.role, profile_id=profile.id, name=profile.name,
+    return Principal(kind="profile", role=profile.role.value, profile_id=profile.id, name=profile.name,
                      permissions=effective_permissions(profile), session_token=token,
-                     device_id=device_id, via=via, profile=profile)
+                     device_id=device_id, via=via, profile=profile, protected=profile.protected)
 
 
 def for_session(sess: Any, device_id: str | None = None) -> Principal | None:
@@ -237,11 +272,12 @@ def for_session(sess: Any, device_id: str | None = None) -> Principal | None:
     if pid is None:
         # A session minted before accounts existed (or before the owner row was
         # created): the Owner. With no owner row yet it is an owner with no profile.
-        owner = accounts.get_owner()
+        owner = accounts.get_protected_admin()
         if owner is None:
-            return Principal(kind="profile", role=Role.OWNER.value, name="Owner",
-                             permissions=frozenset(p.value for p in ROLE_PERMISSIONS[Role.OWNER]),
-                             session_token=token, device_id=device_id, via="cookie")
+            return Principal(kind="profile", role=Role.ADMIN.value, name="Owner",
+                             permissions=_table_permissions(Role.ADMIN),
+                             session_token=token, device_id=device_id, via="cookie",
+                             protected=True)
         return profile_principal(owner, token=token, device_id=device_id)
     prof = accounts.get_profile(pid)
     if prof is None or prof.disabled or prof.epoch != getattr(sess, "epoch", 0):
@@ -249,12 +285,32 @@ def for_session(sess: Any, device_id: str | None = None) -> Principal | None:
     return profile_principal(prof, token=token, device_id=device_id)
 
 
-def for_device(device_id: str | None) -> Principal | None:
-    """A device bound to a default profile opens as that profile - capped at Member."""
-    prof = accounts.default_profile_for_device(device_id)
-    if prof is None or prof.role in (Role.OWNER.value, Role.ADMIN.value):
+def unsigned(cfg: auth.SecurityConfig | None = None) -> Principal | None:
+    """Who an unsigned device is (4.0, BUILD-PLAN-v2 §1.4): the lock-target default profile,
+    or nobody.
+
+    With ``lock_target: default_profile`` and a ``default_profile`` that exists and is
+    enabled -> that profile, as a ``profile`` principal with ``via="default"`` (shared by
+    everyone who reaches the port: the lock-target fence keeps agents and voice cloning off
+    it). Otherwise ``None``: the caller shows the sign-in screen with the profile tiles.
+    No device binding is consulted (4.0 removes it). The five unsigned sites ask it: main
+    ``auth_gate``, ``websocket_endpoint`` (handshake and re-check), the extensions thread
+    socket and ``_session_live_fn``."""
+    cfg = cfg or auth.load()
+    if cfg.lock_target != "default_profile" or not cfg.default_profile:
         return None
-    return profile_principal(prof, device_id=device_id, via="device")
+    prof = accounts.get_profile(cfg.default_profile)
+    if prof is None or prof.disabled:
+        return None
+    if prof.has_pin or prof.has_password:
+        # A PIN an Admin set on the default profile afterwards is honoured: unsigned devices
+        # get the sign-in screen instead of opening it without the PIN.
+        return None
+    if prof.role is Role.ADMIN:
+        # Both writers refuse this pairing (auth.check_lock_target, profiles_service.change_role);
+        # should any other path produce it, no unsigned device is ever an Admin.
+        return None
+    return profile_principal(prof, via="default")
 
 
 # --------------------------------------------------------------------------- #
@@ -274,6 +330,12 @@ class Decision:
 
 ALLOW = Decision(True)
 
+#: The refusal a host-tier route gives a caller that holds its permission but is not the Owner
+#: (``contracts/error_catalog.json`` ``host_owner_only``; the in-handler second locks raise the
+#: same text so the catalog's pattern maps them to the same code).
+HOST_DETAIL = "Only the Owner can do this, because it runs programs or reads files on the DisPatch computer."
+HOST_DENIED = Decision(False, 403, "host_owner_only", HOST_DETAIL, required="host")
+
 
 def authorize(principal: Principal, req: Requirement) -> Decision:
     """The one decision function. Pure: no I/O, no request."""
@@ -283,31 +345,30 @@ def authorize(principal: Principal, req: Requirement) -> Decision:
         return Decision(True, scoped=False)
     need = req.permission or (",".join(req.machine) if req.machine else "")
     if principal.kind == "machine":
-        if any(principal.has_scope(m) for m in req.machine):
+        # 4.3 host tier: never a machine, whatever scope a row might list by mistake.
+        if not req.host and any(principal.has_scope(m) for m in req.machine):
             return ALLOW
         return Decision(False, 403, "machine_scope_denied",
                         "This API key is not allowed to call that endpoint.", required=need)
+    if principal.kind == "none":
+        return Decision(False, 401, "signin_required", "Sign in to continue.",
+                        required=need or "authenticated")
     if req.authenticated:
         if principal.signed_in:
-            return ALLOW
-        return Decision(False, 403, "safe_mode", UNLOCK_DETAIL, required="authenticated")
+            return HOST_DENIED if req.host and not principal.is_host else ALLOW
+        return Decision(False, 403, "permission_denied", DENIED_DETAIL, required="authenticated")
     if req.permission is None:
         # machine-only route, or a declaration bug: no human role satisfies it.
-        if principal.is_restricted:
-            return Decision(False, 403, "safe_mode", UNLOCK_DETAIL, required=need)
         return Decision(False, 403, "agents_only" if req.machine else "route_undeclared",
                         (req.denied_detail or "Only agents may call this.") if req.machine
-                        else UNLOCK_DETAIL, required=need)
-    if req.not_restricted and principal.is_restricted:
-        return Decision(False, 403, "safe_mode", UNLOCK_DETAIL, required=req.permission)
+                        else "This endpoint has no access policy.", required=need)
     if principal.can(req.permission):
+        if req.host and not principal.is_host:
+            return HOST_DENIED
         return ALLOW
-    if req.scoped:
+    if req.scoped and not req.host:
         return Decision(True, scoped=True)
-    if principal.is_restricted:
-        return Decision(False, 403, "safe_mode", UNLOCK_DETAIL, required=req.permission)
-    return Decision(False, 403, "permission_denied",
-                    "Your profile does not have permission to do that.", required=req.permission)
+    return Decision(False, 403, "permission_denied", DENIED_DETAIL, required=req.permission)
 
 
 # --------------------------------------------------------------------------- #
@@ -324,16 +385,13 @@ class Policy:
 
     # compat names for the old booleans
     @property
-    def restricted(self) -> bool:
-        return self.principal.is_restricted
-
-    @property
     def machine(self) -> bool:
         return self.principal.is_machine
 
     @property
     def operator(self) -> bool:
-        return self.principal.is_operator
+        """Compat name: an Admin (``Principal.is_admin``)."""
+        return self.principal.is_admin
 
     def can(self, permission: Permission | str) -> bool:
         return self.principal.can(permission)
@@ -342,27 +400,15 @@ class Policy:
         if not self.principal.can(permission):
             raise denied(self.principal, permission, detail)
 
-    def require_signed_in(self) -> None:
-        if not self.principal.signed_in:
-            raise denied(self.principal, "authenticated")
+    def require_protected(self) -> None:
+        """Only the protected first Admin (3.x ``require_owner``)."""
+        if not self.principal.is_protected:
+            raise denied(self.principal, "protected_admin")
 
-    def require_owner(self) -> None:
-        if not self.principal.is_owner:
-            raise denied(self.principal, "owner")
-
-    def can_use_tool(self, tool_id: str, *, safe: bool = False) -> bool:
-        """Blanket ``use_tools``, an explicit ``use_tools:<id>`` grant, or - for the
-        Restricted role only - a tool the owner flagged ``safe: true``."""
-        p = self.principal
-        if p.can(tool_permission(tool_id)):
-            return True
-        return bool(safe) and p.is_restricted
-
-    def allowed_bot_ids(self, all_bots: Iterable[config.Bot]) -> set[str]:
-        """Characters this principal may see and talk to (audience filter)."""
-        if self.principal.is_restricted:
-            return {b.id for b in all_bots if b.audience in ("all", "restricted")}
-        return {b.id for b in all_bots}
+    def can_use_tool(self, tool_id: str) -> bool:
+        """Blanket ``use_tools`` or an explicit ``use_tools:<id>`` grant (Admins only in 4.0:
+        tool panels are never in a User's or Basic profile's column)."""
+        return self.principal.can(tool_permission(tool_id))
 
 
 def tool_permission(tool_id: str) -> str:
@@ -371,10 +417,7 @@ def tool_permission(tool_id: str) -> str:
 
 def denied(principal: Principal, required: Permission | str, detail: str | None = None) -> HTTPException:
     req = required.value if isinstance(required, Permission) else required
-    if principal.is_restricted:
-        exc = HTTPException(403, detail or UNLOCK_DETAIL)
-    else:
-        exc = HTTPException(403, detail or "Your profile does not have permission to do that.")
+    exc = HTTPException(403, detail or DENIED_DETAIL)
     exc.required_permission = req          # type: ignore[attr-defined]
     return exc
 
@@ -391,8 +434,6 @@ def of(request: Request) -> Policy:
     # honour the 2.x flags if something set them, else derive from the cookies.
     if getattr(state, "machine", False):
         pol = Policy(machine_principal("state"))
-    elif getattr(state, "decoy", False):
-        pol = Policy(anonymous())
     else:
         cfg = auth.load()
         if not claimed(cfg):
@@ -400,7 +441,7 @@ def of(request: Request) -> Policy:
         else:
             sess = getattr(state, "session", None) or auth.get_session(
                 request.cookies.get(SESSION_COOKIE))
-            pol = Policy(for_session(sess) or anonymous())
+            pol = Policy(for_session(sess) or unsigned(cfg) or nobody())
     try:
         state.policy = pol
     except Exception:
@@ -452,6 +493,65 @@ def is_loopback_origin(request_client_host: str | None, proxied: bool) -> bool:
     return ip_is_loopback(request_client_host or "") and not proxied
 
 
+def _host_name(host_header: str | None) -> str:
+    """The name part of a Host header (no port, no IPv6 brackets), lower case."""
+    host = (host_header or "").strip().lower()
+    if host.startswith("["):
+        return host[1:].split("]", 1)[0]
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
+def loopback_host(host_header: str | None) -> bool:
+    """Did the client address us by a loopback name - ``localhost``, ``127.x``, ``[::1]``,
+    any port? A DNS-rebinding page (``evil.example`` re-pointed at 127.0.0.1) still sends
+    its own name, which is how it is told apart from a browser on this machine."""
+    name = _host_name(host_header)
+    return name == "localhost" or name == "::1" or ip_is_loopback(name)
+
+
+_SAFE = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def local_setup_request(host_header: str | None, origin: str | None, sec_fetch_site: str | None,
+                        peer: str | None, proxied: bool, *, method: str = "POST") -> bool:
+    """May this request act on an install nobody has claimed yet? (4.3, #2)
+
+    The one predicate the HTTP gate, ``/ws`` and the extension socket share. Without
+    ``DISPATCH_ALLOW_OPEN_INSTALL`` the caller must be this machine - a loopback peer with no
+    proxy in front - AND have addressed us by a loopback Host name. With the switch on the
+    Host is not checked (an open LAN install, by the owner's choice). Either way a request
+    that is not a plain read (``method`` other than GET/HEAD/OPTIONS; a WebSocket handshake
+    passes ``"WS"``) needs an Origin that is absent or equal to the Host, and a
+    ``Sec-Fetch-Site`` that is not ``cross-site`` / ``same-site``: another site's page must
+    never drive the open install."""
+    if not allow_open_install():
+        if not is_loopback_origin(peer, proxied):
+            return False
+        if not loopback_host(host_header):
+            return False
+    if (method or "").upper() not in _SAFE:
+        if origin is not None:
+            from urllib.parse import urlparse
+            o = urlparse(origin).netloc.lower()
+            h = (host_header or "").strip().lower()
+            if not o or not h or o != h:
+                return False
+        if (sec_fetch_site or "").strip().lower() in ("cross-site", "same-site"):
+            return False
+    return True
+
+
+def local_setup_of(request: Any, *, method: str | None = None) -> bool:
+    """:func:`local_setup_request` for a Starlette Request or WebSocket."""
+    headers = request.headers
+    client = getattr(request, "client", None)
+    return local_setup_request(
+        headers.get("host"), headers.get("origin"), headers.get("sec-fetch-site"),
+        client.host if client else "",
+        any(headers.get(h) for h in PROXY_MARKER_HEADERS),
+        method=method or getattr(request, "method", "GET"))
+
+
 # --------------------------------------------------------------------------- #
 # Route lookup
 # --------------------------------------------------------------------------- #
@@ -474,6 +574,11 @@ class RouteIndex:
                 self._cache.move_to_end(key)
                 return hit
         out = self._match(method, path)
+        from . import extensions
+        if extensions.owns_path(path):
+            # An add-on route's requirement depends on what the add-on declared (4.0: the
+            # voice_lab tier while it registers owned clones): never cached.
+            return out
         with _lookup_lock:
             self._cache[key] = out
             while len(self._cache) > 4096:
@@ -509,22 +614,10 @@ class RouteIndex:
         return (None, req) if req is not None else (None, None)
 
 
-def clear_route_cache(index: RouteIndex | None) -> None:
-    if index is not None:
-        with _lookup_lock:
-            index._cache.clear()
-
-
 # --------------------------------------------------------------------------- #
 # Small helpers shared by the gate
 # --------------------------------------------------------------------------- #
 
-_PERM_RE = re.compile(r"^[a-z_]+(:[A-Za-z0-9_.-]+)?$")
-
-
-@functools.lru_cache(maxsize=256)
-def valid_permission_name(name: str) -> bool:
-    return bool(_PERM_RE.match(name)) and is_valid_permission(name)
 
 
 # --------------------------------------------------------------------------- #
@@ -548,23 +641,76 @@ def proxied_request(request: Request) -> bool:
 
 
 def ip_is_loopback(host: str) -> bool:
-    return bool(host) and (host in ("127.0.0.1", "::1", "::ffff:127.0.0.1") or host.startswith("127."))
+    """Is ``host`` a loopback ADDRESS (127.0.0.0/8, ::1, an IPv4-mapped 127.x)? Parsed, never
+    prefix-matched: a DNS name such as ``127.0.0.1.nip.io`` is a name, not loopback (4.3 INT-3:
+    the prefix test let a rebinding page claim an unclaimed install)."""
+    import ipaddress
+    if not host:
+        return False
+    try:
+        addr = ipaddress.ip_address(host.split("%", 1)[0])
+    except ValueError:
+        return False
+    mapped = getattr(addr, "ipv4_mapped", None)
+    return bool(addr.is_loopback or (mapped is not None and mapped.is_loopback))
 
 
-def loopback_socket(request: Request) -> bool:
-    return ip_is_loopback(request.client.host if request.client else "")
+@functools.lru_cache(maxsize=32)
+def _proxy_networks(spec: tuple[str, ...]) -> tuple:
+    import ipaddress
+    import logging
+    nets = []
+    for item in spec:
+        try:
+            nets.append(ipaddress.ip_network(item.strip(), strict=False))
+        except ValueError:
+            logging.getLogger("dispatch.policy").warning(
+                "trusted_proxies: %r is not an address or CIDR range; ignored", item)
+    return tuple(nets)
+
+
+def trusted_proxy_specs() -> tuple[str, ...]:
+    """The configured proxy ranges: security.yaml ``trusted_proxies`` plus the env
+    ``DISPATCH_TRUSTED_PROXIES`` (comma separated). Loopback is implied, not listed."""
+    env = str(config.env("TRUSTED_PROXIES", "") or "")
+    items = [x.strip() for x in env.split(",") if x.strip()]
+    try:
+        items += [str(x).strip() for x in (auth.load().trusted_proxies or []) if str(x).strip()]
+    except Exception:
+        pass
+    return tuple(items)
+
+
+def trusted_proxy_peer(peer: str | None) -> bool:
+    """Is the socket peer a proxy whose forwarding headers we believe? (4.3, #5)
+
+    Loopback always (Tailscale Serve connects from there), plus the configured ranges. The
+    ONE predicate behind :func:`quota_ip` and :func:`request_is_https`."""
+    if ip_is_loopback(peer or ""):
+        return True
+    specs = trusted_proxy_specs()
+    if not specs:
+        return False
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address((peer or "").strip().split("%", 1)[0])
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return any(ip.version == n.version and ip in n for n in _proxy_networks(specs))
 
 
 def quota_ip(headers, peer: str) -> str:
-    """The identity an anonymous device's budget and throttle are charged to.
+    """The identity an unsigned device's throttle is charged to.
 
-    The socket peer, and ONLY the socket peer, unless the peer is loopback: a bucket
-    is a fresh ALLOWANCE, so honouring a caller-writable ``X-Forwarded-For`` would let
-    one device mint as many allowances as it likes. Tailscale Serve is the only thing
-    that ever fronts the app and it connects from loopback, so there (and only there)
-    the RIGHTMOST forwarded value - the one the proxy itself appended - is believed."""
+    The socket peer, and ONLY the socket peer, unless the peer is a trusted proxy
+    (:func:`trusted_proxy_peer`: loopback, or a configured range): a bucket is a fresh
+    ALLOWANCE, so honouring a caller-writable ``X-Forwarded-For`` would let one device mint
+    as many allowances as it likes. Behind a trusted proxy the RIGHTMOST forwarded value -
+    the one the proxy itself appended - is believed."""
     import ipaddress
-    if ip_is_loopback(peer):
+    if trusted_proxy_peer(peer):
         last = (headers.get("x-forwarded-for") or "").split(",")[-1].strip()
         if last.startswith("[") and "]" in last:
             last = last[1:last.index("]")]
@@ -582,16 +728,387 @@ def request_quota_ip(request: Request) -> str:
     return quota_ip(getattr(request, "headers", None) or {}, client.host if client else "?")
 
 
+# --------------------------------------------------------------------------- #
+# Host allow-list (4.3 Fable): DNS rebinding against a CLAIMED install
+# --------------------------------------------------------------------------- #
+#
+# A rebinding page (``evil.example`` re-pointed at this machine's LAN, tailnet or loopback
+# address) reaches DisPatch with its OWN name in the Host header. On a claimed install it would
+# land on the PIN-less default profile, and CSRF would not stop it (its Origin equals its own
+# Host). So the Host's name is compared with the names this machine answers to. ``log`` (the
+# default) counts and logs a stranger and lets it through; ``enforce`` refuses it (421, a
+# WebSocket is closed). The gate is ``main._HostAllowList``; the predicate is
+# :func:`host_allowed`.
+
+HOST_CHECK_MODES = ("log", "enforce")
+#: How long the machine's names and interface addresses are trusted before a re-read.
+HOST_FACTS_TTL = 60.0
+UNEXPECTED_HOSTS_MAX = 50
+UNEXPECTED_LOG_EVERY = 3600.0
+_HOST_MAX_LEN = 255
+_HOST_ENTRY_RE = None    # compiled lazily (see _valid_host_entry)
+_SIOCGIFADDR = 0x8915
+
+
+def _now() -> float:
+    import time
+    return time.time()
+
+
+def _canon_ip(name: str) -> str | None:
+    """``name`` as a canonical address string (an IPv4-mapped v6 as its v4), else None."""
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address((name or "").strip().strip("[]").split("%", 1)[0])
+    except ValueError:
+        return None
+    mapped = getattr(ip, "ipv4_mapped", None)
+    return str(mapped if mapped is not None else ip)
+
+
+def _hostnames() -> set[str]:
+    """This machine's own names, lower case: ``socket.gethostname()`` and its FQDN."""
+    import socket
+    out: set[str] = set()
+    h = (socket.gethostname() or "").strip().lower().rstrip(".")
+    if h:
+        out.add(h)
+        try:
+            fq = (socket.getfqdn(h) or "").strip().lower().rstrip(".")
+        except OSError:
+            fq = ""
+        # getfqdn answers "localhost"-ish names on a box whose hosts file maps the name to
+        # 127.0.1.1; those are allowed anyway and never a useful FQDN.
+        if fq and not fq.startswith("localhost"):
+            out.add(fq)
+    return out
+
+
+def _real_interface_addresses() -> set[str]:
+    """Every address of this machine's interfaces, standard library only (never a shell).
+
+    Linux: IPv6 from ``/proc/net/if_inet6``, IPv4 per interface with SIOCGIFADDR. Anywhere
+    else (or when that finds no IPv4): ``getaddrinfo(gethostname())``."""
+    import ipaddress
+    import socket
+    out: set[str] = set()
+    try:
+        with open("/proc/net/if_inet6", encoding="ascii") as f:
+            for line in f:
+                hexaddr = (line.split() or [""])[0]
+                if len(hexaddr) == 32:
+                    out.add(str(ipaddress.IPv6Address(bytes.fromhex(hexaddr))))
+    except (OSError, ValueError):
+        pass
+    v4 = False
+    try:
+        import fcntl
+        import struct
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            for _idx, ifname in socket.if_nameindex():
+                try:
+                    res = fcntl.ioctl(s.fileno(), _SIOCGIFADDR,
+                                      struct.pack("256s", ifname.encode("utf-8", "replace")[:15]))
+                except OSError:
+                    continue                      # an interface with no IPv4 address
+                out.add(socket.inet_ntoa(res[20:24]))
+                v4 = True
+        finally:
+            s.close()
+    except (ImportError, OSError, AttributeError):
+        pass
+    if not v4:
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None):
+                c = _canon_ip(str(info[4][0]))
+                if c:
+                    out.add(c)
+        except (OSError, UnicodeError):
+            pass
+    return out
+
+
+def _interface_addresses() -> set[str]:
+    """The enumerator the allow-list uses (tests replace it)."""
+    return _real_interface_addresses()
+
+
+_facts_lock = threading.Lock()
+_facts: dict[str, Any] = {"ts": None, "names": frozenset(), "addrs": frozenset(), "gen": 0,
+                          "thread": None}
+
+
+def refresh_host_facts() -> None:
+    """Re-read this machine's names and interface addresses now. On any error the part that
+    failed keeps what it had (a Wi-Fi drop must never empty the list)."""
+    import logging
+    lg = logging.getLogger("dispatch.policy")
+    names, addrs = _facts["names"], _facts["addrs"]
+    try:
+        names = frozenset(n for n in _hostnames() if n)
+    except Exception as e:
+        lg.warning("host check: reading this machine's name failed (%s); keeping the last one", e)
+    try:
+        addrs = frozenset(c for a in _interface_addresses() if (c := _canon_ip(str(a))))
+    except Exception as e:
+        lg.warning("host check: reading this machine's addresses failed (%s); keeping the last ones", e)
+    with _facts_lock:
+        _facts.update(ts=_now(), names=names, addrs=addrs, gen=_facts["gen"] + 1)
+
+
+def _ensure_host_facts() -> None:
+    """First use reads synchronously; after HOST_FACTS_TTL a background thread re-reads while
+    requests keep using the previous answer."""
+    if _facts["ts"] is None:
+        refresh_host_facts()
+        return
+    if _now() - _facts["ts"] < HOST_FACTS_TTL:
+        return
+    with _facts_lock:
+        t = _facts["thread"]
+        if t is not None and t.is_alive():
+            return
+        _facts["ts"] = _now()                   # one refresh per period, even if it is slow
+        t = threading.Thread(target=refresh_host_facts, name="host-facts", daemon=True)
+        _facts["thread"] = t
+    t.start()
+
+
+def _wait_host_refresh(timeout: float = 5.0) -> None:
+    t = _facts["thread"]
+    if t is not None:
+        t.join(timeout)
+
+
+def host_check_mode() -> str:
+    """``log`` (default) or ``enforce``: ``DISPATCH_HOST_CHECK`` wins over security.yaml
+    ``host_check``; a value that is neither is ignored (a typo never loosens the file)."""
+    env = str(config.env("HOST_CHECK", "") or "").strip().lower()
+    if env in HOST_CHECK_MODES:
+        return env
+    try:
+        mode = str(auth.load().host_check or "log").strip().lower()
+    except Exception:
+        mode = "log"
+    return mode if mode in HOST_CHECK_MODES else "log"
+
+
+def _valid_host_entry(entry: str) -> bool:
+    """An ``allowed_hosts`` entry: an address, a DNS name, or ``*.`` + a DNS name."""
+    import re
+    global _HOST_ENTRY_RE
+    if _HOST_ENTRY_RE is None:
+        _HOST_ENTRY_RE = re.compile(r"^(\*\.)?[a-z0-9_]([a-z0-9_-]*[a-z0-9_])?(\.[a-z0-9_]([a-z0-9_-]*[a-z0-9_])?)*$")
+    e = (entry or "").strip().lower().rstrip(".")
+    if not e or len(e) > _HOST_MAX_LEN:
+        return False
+    if _canon_ip(e) is not None:
+        return True
+    return bool(_HOST_ENTRY_RE.match(e))
+
+
+def normalize_host_entries(raw: Iterable[Any]) -> list[str]:
+    """Clean an ``allowed_hosts`` list; ValueError names the first entry that is not a name,
+    an address or ``*.name``."""
+    out: list[str] = []
+    for item in raw or []:
+        e = str(item).strip()
+        if not e:
+            continue
+        if not _valid_host_entry(e):
+            raise ValueError(f"{e!r} is not a host name, an address or *.name")
+        if e not in out:
+            out.append(e)
+    return out
+
+
+def _extra_host_entries() -> list[str]:
+    env = str(config.env("ALLOWED_HOSTS", "") or "")
+    items = [x.strip() for x in env.split(",") if x.strip()]
+    try:
+        items += [str(x).strip() for x in (auth.load().allowed_hosts or []) if str(x).strip()]
+    except Exception:
+        pass
+    return items
+
+
+def _url_host(url: str) -> str:
+    from urllib.parse import urlparse
+    try:
+        return (urlparse((url or "").strip()).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return ""
+
+
+@dataclass(frozen=True)
+class _HostRules:
+    names: frozenset          # exact names and canonical addresses
+    suffixes: tuple           # ".example.com" from "*.example.com"
+    ts_prefixes: tuple        # "<hostname>." (matches its Tailscale Serve name)
+    shorts: tuple             # this machine's short names, for the report
+
+
+_rules_cache: dict[str, Any] = {"key": None, "rules": None}
+
+
+def _host_rules() -> _HostRules:
+    import ipaddress
+    _ensure_host_facts()
+    extra = tuple(_extra_host_entries())
+    proxies = trusted_proxy_specs()
+    public = str(config.env("PUBLIC_URL", "") or "")
+    callback = str(config.env("CALLBACK_BASE", "") or "")
+    key = (_facts["gen"], extra, proxies, public, callback)
+    if _rules_cache["key"] == key:
+        return _rules_cache["rules"]
+    names: set[str] = {"localhost"}
+    shorts: set[str] = set()
+    for n in _facts["names"]:
+        names.add(n)
+        short = n.split(".", 1)[0]
+        if short:
+            shorts.add(short)
+    for s in shorts:
+        names.add(s)
+        names.add(f"{s}.local")
+    names |= set(_facts["addrs"])
+    for url in (public, callback):
+        h = _url_host(url)
+        if h:
+            names.add(_canon_ip(h) or h)
+    for spec in proxies:
+        try:
+            net = ipaddress.ip_network(spec.strip(), strict=False)
+        except ValueError:
+            continue
+        if net.prefixlen == net.max_prefixlen:
+            names.add(_canon_ip(str(net.network_address)) or str(net.network_address))
+    suffixes: list[str] = []
+    for e in extra:
+        e = e.strip().lower().rstrip(".")
+        if e.startswith("*."):
+            if len(e) > 2 and _valid_host_entry(e):
+                suffixes.append(e[1:])
+            continue
+        e = e.strip("[]")
+        c = _canon_ip(e)
+        if c is not None:
+            names.add(c)
+        elif _valid_host_entry(e):
+            names.add(e)
+    rules = _HostRules(frozenset(names), tuple(suffixes), tuple(f"{s}." for s in sorted(shorts)),
+                       tuple(sorted(shorts)))
+    _rules_cache.update(key=key, rules=rules)
+    return rules
+
+
+def host_allowed(host_header: str | None) -> bool:
+    """Does the Host header name this machine? Loopback names and addresses, this machine's
+    hostname (short, FQDN, ``.local``, its Tailscale Serve name ``<hostname>.<tailnet>``), every interface
+    address, the public URL / callback base, a trusted proxy written as one address, and the
+    configured ``allowed_hosts`` (``*.name`` = any name under it). Port and case are ignored;
+    an empty Host (HTTP/1.0) is not allowed."""
+    name = _host_name(host_header).rstrip(".")
+    if not name or len(name) > _HOST_MAX_LEN:
+        return False
+    if name == "localhost" or ip_is_loopback(name):
+        return True
+    rules = _host_rules()
+    ip = _canon_ip(name)
+    if ip is not None:
+        return ip in rules.names
+    if name in rules.names:
+        return True
+    if any(name.endswith(s) and len(name) > len(s) for s in rules.suffixes):
+        return True
+    for p in rules.ts_prefixes:
+        if name.startswith(p):
+            rest = name[len(p):]
+            if rest.endswith(".ts.net") and len(rest) > len(".ts.net"):  # scrub-ok: Tailscale's own domain suffix
+                return True
+    return False
+
+
+_unexpected_lock = threading.Lock()
+_unexpected: OrderedDict = OrderedDict()   # name -> {"count", "last_seen", "logged"}
+
+
+def _shown_name(host_header: str | None) -> str:
+    name = _host_name(host_header).rstrip(".")[:_HOST_MAX_LEN]
+    return "".join(ch for ch in name if ch.isprintable())
+
+
+def note_unexpected_host(host_header: str | None) -> None:
+    """Count a Host this machine does not answer to (the last UNEXPECTED_HOSTS_MAX names) and
+    log it at most once per name per hour."""
+    import logging
+    name = _shown_name(host_header)
+    now = _now()
+    with _unexpected_lock:
+        row = _unexpected.pop(name, None) or {"count": 0, "last_seen": 0.0, "logged": None}
+        row["count"] += 1
+        row["last_seen"] = now
+        _unexpected[name] = row
+        while len(_unexpected) > UNEXPECTED_HOSTS_MAX:
+            _unexpected.popitem(last=False)
+        due = row["logged"] is None or now - row["logged"] >= UNEXPECTED_LOG_EVERY
+        if due:
+            row["logged"] = now
+    if due:
+        logging.getLogger("dispatch.policy").warning(
+            "host check (%s): a request named this server %r, which is not one of its own "
+            "addresses. If that is how people reach DisPatch, add it to allowed_hosts in "
+            "security.yaml (Settings > System > Network).", host_check_mode(), name or "(no Host)")
+
+
+def unexpected_hosts() -> list[dict]:
+    """Most recent first: ``{name, count, last_seen}`` (epoch seconds)."""
+    with _unexpected_lock:
+        rows = [{"name": n, "count": r["count"], "last_seen": r["last_seen"]}
+                for n, r in _unexpected.items()]
+    rows.reverse()
+    return rows
+
+
+def host_check_report() -> dict:
+    """What Settings > System shows: the mode, the names this machine answers to, and the
+    strangers seen since the server started."""
+    rules = _host_rules()
+    # fe80:: link-local addresses are allowed but never typed into a browser: not shown.
+    answers = sorted(n for n in rules.names if not n.startswith("fe80:"))
+    answers += [f"*{s}" for s in rules.suffixes]
+    answers += [f"{p}<tailnet>.ts.net" for p in rules.ts_prefixes]  # scrub-ok: Tailscale's own domain suffix
+    env = str(config.env("HOST_CHECK", "") or "").strip().lower()
+    return {"mode": host_check_mode(), "mode_from_env": env in HOST_CHECK_MODES,
+            "answers_to": answers, "unexpected": unexpected_hosts()}
+
+
+def reset_host_check_state() -> None:
+    """Tests: forget the counters and the cached facts."""
+    with _unexpected_lock:
+        _unexpected.clear()
+    _wait_host_refresh()
+    with _facts_lock:
+        _facts.update(ts=None, names=frozenset(), addrs=frozenset(), gen=_facts["gen"] + 1,
+                      thread=None)
+    _rules_cache.update(key=None, rules=None)
+
+
 def request_is_https(request: Request | None) -> bool:
     """Did this request arrive over TLS, directly or through our proxy?
 
-    ``X-Forwarded-Proto`` is believed only when a forwarding header proves the request
-    came through a proxy; otherwise a client could set it on a plain-http call and pin
-    ``Secure`` on a cookie the browser would then refuse to send back."""
+    ``X-Forwarded-Proto`` is believed only when the socket peer is a trusted proxy
+    (:func:`trusted_proxy_peer`) and a forwarding header proves the request came through
+    it; otherwise a client could set it on a plain-http call and pin ``Secure`` on a
+    cookie the browser would then refuse to send back."""
     if request is None:
         return False
     if request.url.scheme == "https":
         return True
+    client = getattr(request, "client", None)
+    if not trusted_proxy_peer(client.host if client else ""):
+        return False
     proxied = bool(request.headers.get("x-forwarded-for") or request.headers.get("forwarded")
                    or request.headers.get("tailscale-headers-info"))
     if not proxied:

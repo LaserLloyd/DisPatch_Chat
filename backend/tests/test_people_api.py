@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app import accounts, auth, limits, main
+from app import accounts, auth, main
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def test_setup_from_this_machine_creates_the_owner_and_signs_in(world):
     assert r.status_code == 200
     assert r.json()["claimed"] is True
     st = c.get("/api/auth/status").json()
-    assert st["claimed"] and st["authenticated"] and st["role"] == "owner"
+    assert st["claimed"] and st["authenticated"] and st["role"] == "admin"
     assert st["profile"]["name"] == "Olive" and st["needs_password"] is False
     assert st["pin_set"] is True
     owner_row = accounts.get_owner()
@@ -37,17 +37,16 @@ def test_setup_from_this_machine_creates_the_owner_and_signs_in(world):
     # The Owner's PIN is the install PIN: the old unlock flow still works.
     c2 = world.client()
     assert c2.post("/api/auth/unlock", json={"pin": "2468"}).status_code == 200
-    assert c2.get("/api/auth/me").json()["role"] == "owner"
+    assert c2.get("/api/auth/me").json()["role"] == "admin"
 
 
 def test_setup_with_a_password_only_leaves_no_pin(world):
     c = world.client()
     assert c.post("/api/auth/setup", json={"password": "owner-pass1"}).status_code == 200
     assert c.get("/api/auth/status").json()["pin_set"] is False
-    # Claimed all the same: a stranger is Restricted, not owner.
+    # Claimed all the same: a stranger is nobody (4.0: the profile list), not the owner.
     stranger = world.client()
-    assert stranger.get("/api/auth/me").json()["role"] == "restricted"
-    assert stranger.get("/api/bots/all").status_code == 403
+    assert stranger.get("/api/bots/all").status_code == 401
 
 
 def test_setup_refuses_a_weak_credential(world):
@@ -85,21 +84,21 @@ def test_changing_the_owner_pin_does_not_sign_the_children_out(world, owner):
 # --------------------------------------------------------------------------- #
 
 
-def test_an_admin_needs_the_owner_to_have_a_password_first(world):
+def test_credentials_are_optional_for_new_admins_too(world):
     c = world.client()
     assert c.post("/api/auth/setup", json={"new_pin": "2468"}).status_code == 200   # PIN-only owner
-    r = c.post("/api/people", json={"name": "Ada", "role": "admin", "password": "admin-pass1"})
-    assert r.status_code == 409 and r.json()["error"]["code"] == "password_required"
-    # The owner sets a password (confirmed with the install PIN), then it works.
-    r = c.post("/api/auth/password", json={"current_pin": "2468", "new": "owner-pass1"})
-    assert r.status_code == 200, r.text
-    r = c.post("/api/people", json={"name": "Ada", "role": "admin", "password": "admin-pass1"})
-    assert r.status_code == 201
+    # 4.0: PINs and passwords are optional on every profile (People warns, no_credential).
+    r = c.post("/api/people", json={"name": "Ada", "role": "admin"})
+    assert r.status_code == 201 and r.json()["no_credential"] is True
+    r = c.post("/api/people", json={"name": "Bea", "role": "admin", "password": "admin-pass1"})
+    assert r.status_code == 201 and r.json()["no_credential"] is False
+    r = c.post("/api/people", json={"name": "Cy", "role": "user", "password": "user-pass-12"})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "password_role"
 
 
-def test_a_member_needs_a_pin_and_a_restricted_profile_does_not(world, owner):
-    assert owner.post("/api/people", json={"name": "Max", "role": "member"}).status_code == 400
-    assert owner.post("/api/people", json={"name": "Max", "role": "member", "pin": "5555"}).status_code == 201
+def test_no_profile_needs_a_pin(world, owner):
+    assert owner.post("/api/people", json={"name": "Max", "role": "member"}).status_code == 201
+    assert owner.post("/api/people", json={"name": "Moe", "role": "member", "pin": "5555"}).status_code == 201
     assert owner.post("/api/people", json={"name": "Mia", "role": "restricted"}).status_code == 201
     assert owner.post("/api/people", json={"name": "mia", "role": "restricted"}).status_code == 409   # unique, case-folded
 
@@ -135,7 +134,8 @@ def test_the_owner_is_immutable(world, owner):
     assert owner.patch(f"/api/people/{me.id}", json={"role": "member"}).status_code == 409
     assert owner.delete(f"/api/people/{me.id}").status_code == 409
     with pytest.raises(accounts.AccountError):
-        accounts.update_profile(me.id, role="admin")
+        accounts.update_profile(me.id, role="user")
+    assert accounts.update_profile(me.id, role="admin").protected      # 4.0: still the protected Admin
     with pytest.raises(accounts.AccountError):
         accounts.create_profile("Second", "owner")
 
@@ -143,22 +143,19 @@ def test_the_owner_is_immutable(world, owner):
 def test_a_restricted_profile_can_never_be_granted_management(world, owner):
     r = owner.post("/api/people", json={"name": "Mia", "role": "restricted",
                                         "grants": ["manage_settings"]})
-    assert r.status_code == 400
+    assert r.status_code == 422
     ok = owner.post("/api/people", json={"name": "Mia", "role": "restricted", "grants": ["use_images"]})
     assert ok.status_code == 201
     r = owner.patch(f"/api/people/{ok.json()['id']}", json={"grants": ["admin_system"]})
-    assert r.status_code == 400
+    assert r.status_code == 422
 
 
-def test_budgets_are_validated(world, owner):
-    bad = [{"minutes_per_day": 0}, {"quiet_hours": "late"}, {"turns": -1}, {"nonsense": 1}]
-    for b in bad:
-        assert owner.post("/api/people", json={"name": "Mia", "role": "restricted",
-                                               "budgets": b}).status_code == 400, b
-    ok = owner.post("/api/people", json={"name": "Mia", "role": "restricted",
-                                         "budgets": {"minutes_per_day": 30, "quiet_hours": "20:30-07:00",
-                                                     "turns": 40, "threads": 5, "upload_mb": 10}})
-    assert ok.status_code == 201
+def test_budgets_are_gone(world, owner):
+    """4.0 (SPEC section 5): no daily limits or budgets of any kind - the field is refused."""
+    r = owner.post("/api/people", json={"name": "Mia", "role": "basic", "budgets": {"turns": 40}})
+    assert r.status_code == 422
+    mia = world.person(owner, "Mia", "basic")
+    assert owner.patch(f"/api/people/{mia['id']}", json={"budgets": {"turns": 9}}).status_code == 422
 
 
 # --------------------------------------------------------------------------- #
@@ -176,14 +173,14 @@ def test_sign_in_credentials_follow_the_role(world, owner):
     assert world.login(c, profile_id=ada["id"], pin="5555").status_code == 401       # admin: password only
     assert world.login(c, profile_id=ada["id"], password="admin-pass1").status_code == 200
     assert world.login(c, profile_id=max_["id"], pin="0000").status_code == 401
-    assert world.login(c, profile_id=max_["id"], pin="5555").json()["role"] == "member"
-    assert world.login(c, profile_id=mia["id"]).json()["role"] == "restricted"        # no PIN: just pick it
+    assert world.login(c, profile_id=max_["id"], pin="5555").json()["role"] == "user"
+    assert world.login(c, profile_id=mia["id"]).json()["role"] == "basic"        # no PIN: just pick it
     assert world.login(c, profile_id=pin_kid["id"]).status_code == 401               # has a PIN: needs it
     assert world.login(c, profile_id=pin_kid["id"], pin="1212").status_code == 200
     # The Owner: password or the install PIN.
     me = accounts.get_owner()
-    assert world.login(c, profile_id=me.id, password="owner-pass1").json()["role"] == "owner"
-    assert world.login(c, profile_id=me.id, pin="2468").json()["role"] == "owner"
+    assert world.login(c, profile_id=me.id, password="owner-pass1").json()["role"] == "admin"
+    assert world.login(c, profile_id=me.id, pin="2468").json()["role"] == "admin"
     assert world.login(c, profile_id=me.id, pin="9999").status_code == 401
     assert world.login(c, profile_id="nope", pin="1").status_code == 401
 
@@ -196,27 +193,33 @@ def test_stepping_up_to_admin_needs_their_credential(world, owner):
     assert c.get("/api/people").status_code == 403                                    # Restricted
     r = c.post("/api/auth/switch", json={"name": "Ada", "pin": "1234"})
     assert r.status_code == 401
-    assert c.get("/api/auth/me").json()["role"] == "restricted"                      # still Mia
+    assert c.get("/api/auth/me").json()["role"] == "basic"                      # still Mia
     r = c.post("/api/auth/switch", json={"name": "Ada", "password": "admin-pass1"})
     assert r.status_code == 200 and c.get("/api/auth/me").json()["role"] == "admin"
     assert c.get("/api/people").status_code == 200
 
 
-def test_lock_returns_to_restricted(world, owner):
+def test_lock_lands_on_the_lock_target(world, owner):
     assert owner.get("/api/people").status_code == 200
-    owner.post("/api/auth/lock")
-    assert owner.get("/api/people").status_code == 403
-    assert owner.get("/api/auth/me").json()["role"] == "restricted"
+    r = owner.post("/api/auth/lock")
+    assert r.json()["lock_target"] == "profile_list" and r.json()["landed"] is None
+    assert owner.get("/api/people").status_code == 401
+    # With a default profile, the lock lands there.
+    c = world.client()
+    assert world.login(c, profile_id=accounts.get_owner().id, pin="2468").status_code == 200
+    lobby = c.post("/api/people", json={"name": "Lobby", "role": "user"}).json()
+    auth.set_lock_target("default_profile", lobby["id"])
+    r = c.post("/api/auth/lock")
+    assert r.json()["landed"]["id"] == lobby["id"] and r.json()["landed"]["shared"] is True
+    assert c.get("/api/auth/me").json()["profile"]["id"] == lobby["id"]
 
 
-def test_a_role_change_ends_the_old_sessions(world, owner):
+def test_a_role_change_goes_through_the_role_route(world, owner):
     max_ = world.person(owner, "Max", "member", pin="5555")
-    member = world.client()
-    assert world.login(member, profile_id=max_["id"], pin="5555").status_code == 200
-    assert member.get("/api/auth/me").json()["role"] == "member"
-    assert owner.patch(f"/api/people/{max_['id']}", json={"role": "restricted"}).status_code == 200
-    assert member.get("/api/auth/me").json()["role"] == "restricted"       # session died -> anonymous
-    assert member.get("/api/auth/me").json()["profile"] is None
+    # 4.0: User -> Basic deletes content, so PATCH points at POST /api/people/{id}/role.
+    r = owner.patch(f"/api/people/{max_['id']}", json={"role": "restricted"})
+    assert r.status_code == 409 and r.json()["error"]["code"] == "use_role_route"
+    assert owner.patch(f"/api/people/{max_['id']}", json={"role": "user"}).status_code == 200   # same role
 
 
 def test_disabling_and_deleting_a_profile_signs_it_out(world, owner):
@@ -226,8 +229,9 @@ def test_disabling_and_deleting_a_profile_signs_it_out(world, owner):
     assert owner.patch(f"/api/people/{max_['id']}", json={"disabled": True}).status_code == 200
     assert member.get("/api/auth/me").json()["profile"] is None
     assert world.login(world.client(), profile_id=max_["id"], pin="5555").status_code == 401
-    assert owner.delete(f"/api/people/{max_['id']}").status_code == 200
-    assert max_["id"] not in {p["id"] for p in owner.get("/api/people").json()["profiles"]}
+    # 4.0: deleting goes through POST /api/people/{id}/delete (counts confirmed first).
+    r = owner.delete(f"/api/people/{max_['id']}")
+    assert r.status_code == 409 and r.json()["error"]["code"] == "use_delete_route"
 
 
 def test_a_changed_pin_ends_that_profiles_sessions_only(world, owner):
@@ -266,9 +270,8 @@ def test_session_timeouts_follow_the_role_and_the_profile(world, owner):
     assert c.get("/api/auth/status").json()["signed_in"] is True    # (this request slides the window)
     mia_session().last_seen -= 1900
     assert c.get("/api/auth/status").json()["signed_in"] is False
-    # The session is gone, the device is still Mia's (2026-10-19: no way out of her limits).
-    me = c.get("/api/auth/me").json()
-    assert (me["kind"], me["profile"]["id"]) == ("profile", mia["id"]), me
+    # The session is gone and (4.0, no device binding) the device is nobody's.
+    assert c.get("/api/auth/me").json()["kind"] == "none"
     # A per-profile override wins over the role default.
     assert owner.patch(f"/api/people/{mia['id']}", json={"session_timeout": 60}).status_code == 200
     world.login(c, profile_id=mia["id"])
@@ -336,153 +339,58 @@ def test_a_good_login_clears_that_clients_failures(world, owner):
     assert _bad(c, max_["id"], 4) == [401] * 4          # the count started again from zero
 
 
-# --------------------------------------------------------------------------- #
-# Devices bound to a default profile
-# --------------------------------------------------------------------------- #
-
-
-def test_a_bound_device_opens_as_its_profile(world, owner):
-    mia = world.person(owner, "Mia", "restricted")
-    r = owner.put("/api/people/devices/this", json={"profile_id": mia["id"], "label": "Kitchen tablet"})
-    assert r.status_code == 200 and r.json()["default_profile_id"] == mia["id"]
-    tablet = world.client()
-    tablet.cookies.set("lc_device", owner.cookies.get("lc_device"))
-    me = tablet.get("/api/auth/me").json()
-    assert me["role"] == "restricted" and me["profile"]["name"] == "Mia" and me["disclosure"]
-    # An unrelated browser (no device cookie) is plain anonymous Restricted.
-    assert world.client().get("/api/auth/me").json()["profile"] is None
-
-
-def test_admins_and_the_owner_cannot_be_a_device_default(world, owner):
-    ada = world.person(owner, "Ada", "admin", password="admin-pass1")
-    assert owner.put("/api/people/devices/this", json={"profile_id": ada["id"]}).status_code == 409
-    me = accounts.get_owner()
-    assert owner.put("/api/people/devices/this", json={"profile_id": me.id}).status_code == 409
-
-
-def test_unbinding_and_forgetting_a_device(world, owner):
-    mia = world.person(owner, "Mia", "restricted")
-    dev = owner.put("/api/people/devices/this", json={"profile_id": mia["id"]}).json()["id"]
-    tablet = world.client()
-    tablet.cookies.set("lc_device", owner.cookies.get("lc_device"))
-    assert tablet.get("/api/auth/me").json()["profile"]["name"] == "Mia"
-    assert owner.put("/api/people/devices/this", json={"profile_id": None}).status_code == 200
-    assert tablet.get("/api/auth/me").json()["profile"] is None
-    assert owner.delete(f"/api/people/devices/{dev}").status_code == 200
-    assert dev not in {d["id"] for d in owner.get("/api/people/devices").json()["devices"]}
-
-
-def test_a_device_bound_member_is_a_member_not_an_admin(world, owner):
-    max_ = world.person(owner, "Max", "member", pin="5555")
-    owner.put("/api/people/devices/this", json={"profile_id": max_["id"]})
-    tablet = world.client()
-    tablet.cookies.set("lc_device", owner.cookies.get("lc_device"))
-    assert tablet.get("/api/auth/me").json()["role"] == "member"
-    assert tablet.get("/api/people").status_code == 403
-    assert tablet.get("/api/bots").status_code == 200
+def test_device_binding_is_gone(world, owner):
+    # 4.0: the bind route no longer exists; listing and forgetting devices stay.
+    assert owner.put("/api/people/devices/this", json={"profile_id": None}).status_code in (404, 405)
+    assert owner.get("/api/people/devices").status_code == 200
 
 
 # --------------------------------------------------------------------------- #
-# Restricted safeguards: budgets, time limits, the activity summary
+# The activity summary (Basic profiles have no budgets or time limits any more)
 # --------------------------------------------------------------------------- #
 
 
-def _safe_bot(world):
-    from app import config
-    return next(b.id for b in config.load_bots() if b.safe)
+def _household_bot(world):
+    from app import characters, config
+    return next(b.id for b in config.load_bots() if not characters.is_personal(b))
 
 
-def test_daily_budgets_belong_to_the_profile_and_survive_a_restart(world, owner):
-    mia = world.person(owner, "Mia", "restricted", budgets={"threads": 2})
-    kit = world.person(owner, "Kit", "restricted", budgets={"threads": 1})
-    bot = _safe_bot(world)
-    a, b = world.client(("203.0.113.50", 1)), world.client(("203.0.113.50", 2))   # SAME address
-    world.login(a, profile_id=mia["id"])
-    world.login(b, profile_id=kit["id"])
-    codes = [a.post("/api/threads", json={"bot_id": bot}).status_code for _ in range(3)]
-    assert codes == [200, 200, 429]
-    # Kit has her own allowance although she shares Mia's address.
-    assert [b.post("/api/threads", json={"bot_id": bot}).status_code for _ in range(2)] == [200, 429]
-    # Persisted: forget every in-memory cache and the count is still there.
-    accounts.reset_for_tests()
-    assert a.post("/api/threads", json={"bot_id": bot}).status_code == 429
-    assert accounts.usage_today(mia["id"]).get("action:thread") == 2
-
-
-def test_the_budget_resets_with_the_day(world, owner, monkeypatch):
-    mia = world.person(owner, "Mia", "restricted", budgets={"threads": 1})
-    bot = _safe_bot(world)
-    c = world.client()
+def test_a_basic_profile_has_no_daily_limit(world, owner, monkeypatch):
+    bot = _household_bot(world)
+    mia = world.person(owner, "Mia", "basic", household_bots=[bot], grants=["dispatch_agents"])
+    c = world.client(("203.0.113.50", 1))
     world.login(c, profile_id=mia["id"])
-    assert c.post("/api/threads", json={"bot_id": bot}).status_code == 200
-    assert c.post("/api/threads", json={"bot_id": bot}).status_code == 429
+    codes = [c.post("/api/threads", json={"bot_id": bot}).status_code for _ in range(5)]
+    assert codes == [200] * 5
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     monkeypatch.setattr(accounts, "today", lambda: tomorrow)
-    assert c.post("/api/threads", json={"bot_id": bot}).status_code == 200
-
-
-def test_time_limits_and_quiet_hours(world, owner):
-    mia = world.person(owner, "Mia", "restricted", budgets={"minutes_per_day": 10})
-    c = world.client()
-    world.login(c, profile_id=mia["id"])
     assert c.get("/api/bots").status_code == 200
-    accounts.usage_add(mia["id"], "active_seconds", 10 * 60)
-    r = c.get("/api/bots")
-    assert r.status_code == 403 and r.json()["error"]["code"] == "time_limit"
-    # Auth routes still answer, so the child can see why and sign out.
-    assert c.get("/api/auth/me").status_code == 200
-    # Quiet hours: a window that contains "now" blocks; one that does not, does not.
-    now = datetime.now()
-    inside = f"{(now - timedelta(minutes=5)).strftime('%H:%M')}-{(now + timedelta(minutes=5)).strftime('%H:%M')}"
-    outside = f"{(now + timedelta(hours=2)).strftime('%H:%M')}-{(now + timedelta(hours=3)).strftime('%H:%M')}"
-    accounts.update_profile(mia["id"], budgets={"quiet_hours": inside})
-    c2 = world.client()
-    world.login(c2, profile_id=mia["id"])
-    r = c2.get("/api/bots")
-    assert r.status_code == 403 and r.json()["error"]["code"] == "quiet_hours"
-    accounts.update_profile(mia["id"], budgets={"quiet_hours": outside})
-    c3 = world.client()
-    world.login(c3, profile_id=mia["id"])
-    assert c3.get("/api/bots").status_code == 200
 
 
-def _at(hour, minute):
-    return datetime(2026, 1, 1, hour, minute)  # noqa: DTZ001 - local wall-clock time is the point
-
-
-def test_quiet_hours_window_arithmetic():
-    assert limits.in_quiet_hours("20:30-07:00", _at(22, 0))
-    assert limits.in_quiet_hours("20:30-07:00", _at(6, 59))
-    assert not limits.in_quiet_hours("20:30-07:00", _at(7, 0))
-    assert not limits.in_quiet_hours("20:30-07:00", _at(12, 0))
-    assert limits.in_quiet_hours("13:00-14:00", _at(13, 30))
-    assert not limits.in_quiet_hours("garbage", _at(13, 30))
-
-
-def test_the_owner_sees_an_activity_summary_and_the_child_is_told(world, owner):
-    mia = world.person(owner, "Mia", "restricted", budgets={"threads": 5})
+def test_the_owner_sees_an_activity_summary_and_the_profile_is_told(world, owner):
+    mia = world.person(owner, "Mia", "basic")
     c = world.client()
     world.login(c, profile_id=mia["id"])
-    bot = _safe_bot(world)
-    assert c.post("/api/threads", json={"bot_id": bot}).status_code == 200
-    assert c.post("/api/threads", json={"bot_id": bot}).status_code == 200
-    # What the child sees: the disclosure, and its own summary.
+    # What the profile sees: the disclosure, and its own summary.
     me = c.get("/api/auth/me").json()
-    assert "owner can see" in me["disclosure"].lower()
-    mine = c.get("/api/me/activity").json()
-    assert mine["visible_to_owner"] is True and mine["today"]["action:thread"] == 2
+    assert "admin can see" in me["disclosure"].lower()
+    assert me["disclosure_code"] == "activity_summary"     # the UI's locale key, not the English
+    assert c.get("/api/me/activity").status_code == 404      # 4.0: no per-profile activity page
     # What the owner sees: counts, not content.
     act = owner.get("/api/people/activity", params={"profile_id": mia["id"]}).json()
     counts = act["summary"]["days"][0]["counts"]
-    assert counts["login"] == 1 and counts["thread"] == 2
+    assert counts["login"] == 1
     assert all("content" not in e for e in act["recent"])
-    # A restricted child cannot read anyone's summary.
+    # A Basic profile cannot read anyone's summary (view_activity is the Admins').
     assert c.get("/api/people/activity").status_code == 403
+    # An Admin is not told it is being summarised.
+    assert owner.get("/api/auth/me").json()["disclosure"] is None
+    assert owner.get("/api/auth/me").json()["disclosure_code"] is None
 
 
 def test_admin_actions_are_audited(world, owner):
     mia = world.person(owner, "Mia", "restricted")
-    owner.patch(f"/api/people/{mia['id']}", json={"budgets": {"turns": 9}})
+    owner.patch(f"/api/people/{mia['id']}", json={"name": "Mia B"})
     owner.post(f"/api/people/{mia['id']}/pin", json={"pin": "4321"})
     kinds = [e["kind"] for e in owner.get("/api/people/audit").json()["entries"]]
     assert {"profile_created", "profile_updated", "pin_set"} <= set(kinds)
@@ -534,18 +442,13 @@ def test_machine_upload_needs_its_scope_and_the_key(world, owner, monkeypatch):
     r = local.post("/api/upload", headers={"X-API-Key": token}, files=files)
     assert r.status_code == 200, r.text
     assert r.json()["id"] and r.json()["name"] == "report.txt"
-    # A machine's uploads share the sessionless daily byte budget (an agent in a
-    # loop must not fill the disk).
-    monkeypatch.setattr(main, "DECOY_UPLOAD_QUOTA", 64)
+    # A machine's uploads share the 200 MB/day machine guard (an agent in a loop must
+    # not fill the disk).
+    monkeypatch.setattr(main, "MACHINE_UPLOAD_QUOTA", 64)
     big = {"file": ("big.txt", b"y" * 200, "text/plain")}
     assert local.post("/api/upload", headers={"X-API-Key": token}, files=big).status_code == 429
     # Without the key an on-box process is no machine (trust is off): it is a
-    # signed-out device, which this install refuses (anonymous_access: none) ...
-    with auth._lock:
-        cfg = auth.load()
-        cfg.anonymous_access = "none"
-        auth._write(cfg)
-        auth._bust_cache()
+    # signed-out device, which needs a sign-in to upload ...
     r = local.post("/api/upload", files=files)
     assert r.status_code == 401 and r.json()["error"]["code"] == "signin_required", r.text
     # ... and a WRONG key is refused outright, not downgraded.
@@ -572,9 +475,14 @@ def test_a_member_cannot_run_an_agent_until_the_owner_grants_it(world, owner, mo
     monkeypatch.setattr(main, "run_agent_turn", fake_turn)
     max_ = world.person(owner, "Max", "member", pin="5555")
     agent_bot = next(b.id for b in config.load_bots() if b.audience == "members")
-    tid = owner.post("/api/threads", json={"bot_id": agent_bot}).json()["id"]
     member = world.client()
     assert world.login(member, profile_id=max_["id"], pin="5555").status_code == 200
+    # 4.0: an agent character is not usable at all without dispatch_agents (characters.may_use)
+    r = member.post("/api/threads", json={"bot_id": agent_bot})
+    assert r.status_code == 403
+    assert owner.patch(f"/api/people/{max_['id']}", json={"grants": ["dispatch_agents"]}).status_code == 200
+    assert world.login(member, profile_id=max_["id"], pin="5555").status_code == 200   # grant re-signs
+    tid = member.post("/api/threads", json={"bot_id": agent_bot}).json()["id"]
 
     def send(cmid):
         got = []
@@ -588,11 +496,6 @@ def test_a_member_cannot_run_an_agent_until_the_owner_grants_it(world, owner, mo
                     return got
                 got.append(f)
 
-    frames = send("a1")
-    err = next(f for f in frames if f.get("type") == "error")
-    assert err["code"] == "permission_denied" and err["required_permission"] == "dispatch_agents"
-    assert turns == []
-    assert owner.patch(f"/api/people/{max_['id']}", json={"grants": ["dispatch_agents"]}).status_code == 200
     frames = send("a2")
     assert any(f.get("type") == "ack" and f.get("status") == "ok" for f in frames), frames
     import time
@@ -605,33 +508,24 @@ def test_a_member_cannot_run_an_agent_until_the_owner_grants_it(world, owner, mo
 
 
 # --------------------------------------------------------------------------- #
-# anonymous_access: none
+# The lock target (4.0): the profile list or the default profile
 # --------------------------------------------------------------------------- #
 
 
-def test_anonymous_access_none_shows_a_signed_out_device_only_the_signin_page(world, owner):
-    mia = world.person(owner, "Mia", "restricted")
-    cfg = auth.load()
-    cfg.anonymous_access = "none"
-    auth._write(cfg)
-    auth._bust_cache()
+def test_a_signed_out_device_sees_only_the_signin_page_with_the_profile_list(world, owner):
+    mia = world.person(owner, "Mia", "restricted", household_bots=["alpha"])
     stranger = world.client(("203.0.113.9", 1))
     assert stranger.get("/").status_code == 200
     st = stranger.get("/api/auth/status").json()
-    assert st["anonymous_access"] == "none" and any(p["name"] == "Mia" for p in st["profiles"])
+    assert st["lock_target"] == "profile_list" and any(p["name"] == "Mia" for p in st["profiles"])
     r = stranger.get("/api/bots")
     assert r.status_code == 401 and r.json()["error"]["code"] == "signin_required"
     from starlette.websockets import WebSocketDisconnect
     with pytest.raises(WebSocketDisconnect), stranger.websocket_connect("/ws"):
         pass
-    # Signing in as the Restricted profile restores the Restricted view.
+    # Signing in as the Basic profile gives its view.
     assert world.login(stranger, profile_id=mia["id"]).status_code == 200
     assert stranger.get("/api/bots").status_code == 200
-    # A device bound to a profile is not anonymous.
-    owner.put("/api/people/devices/this", json={"profile_id": mia["id"]})
-    tablet = world.client(("203.0.113.10", 1))
-    tablet.cookies.set("lc_device", owner.cookies.get("lc_device"))
-    assert tablet.get("/api/bots").status_code == 200
 
 
 def test_a_profile_override_can_be_cleared_and_the_lock_screen_names_the_credential(world, owner):
@@ -661,37 +555,27 @@ def test_a_members_status_does_not_advertise_host_control_features(world, owner)
     assert set(stranger.get("/api/auth/status").json()["features"]) == {"extensions"}
 
 
-def test_the_restricted_disclosure_matches_who_can_read_a_childs_chats(world, owner):
-    """The banner a Restricted profile reads (people_api.DISCLOSURE, and the UI's
-    restricted.banner) must say what characters.may_use actually allows: a chat
-    belongs to its character, so other profiles that can use that character -- a
-    second Restricted one, a Member -- and, while anonymous_access is "restricted",
-    a device nobody signed in on can all read it. A character limited to one
-    profile keeps its chats from the other profiles."""
+def test_the_disclosure_matches_who_can_read_a_basic_profiles_chats(world, owner):
+    """The line a Basic profile reads (people_api.DISCLOSURE) must say what ownership
+    allows (4.0): a chat is its owner's - no other profile, Admins included, opens it."""
     from app import people_api
-    mia = world.person(owner, "Mia", "restricted")
-    leo = world.person(owner, "Leo", "restricted")
+    mia = world.person(owner, "Mia", "restricted", household_bots=["alpha"], grants=["dispatch_agents"])
+    leo = world.person(owner, "Leo", "restricted", household_bots=["alpha"], grants=["dispatch_agents"])
     world.person(owner, "Max", "member", pin="5555")
-    owner.post("/api/characters", json={"name": "Kids", "audience": "restricted"})
-    owner.post("/api/characters", json={"name": "Mias", "audience": "restricted", "profiles": [mia["id"]]})
     c_mia = world.client(("203.0.113.70", 42000))
     assert world.login(c_mia, profile_id=mia["id"]).status_code == 200
-    shared = c_mia.post("/api/threads", json={"bot_id": "kids"}).json()["id"]
-    own = c_mia.post("/api/threads", json={"bot_id": "mias"}).json()["id"]
+    own = c_mia.post("/api/threads", json={"bot_id": "alpha"}).json()["id"]
+    assert c_mia.get(f"/api/threads/{own}/messages").status_code == 200
     c_leo = world.client(("203.0.113.71", 42001))
     assert world.login(c_leo, profile_id=leo["id"]).status_code == 200
     c_max = world.client(("203.0.113.72", 42002))
     assert world.login(c_max, name="Max", pin="5555").status_code == 200
-    stranger = world.client(("203.0.113.73", 42003))          # nobody signed in on it
-    for who, c in (("another Restricted profile", c_leo), ("a Member", c_max),
-                   ("a device that is not signed in", stranger), ("the Owner", owner)):
-        assert c.get(f"/api/threads/{shared}/messages").status_code == 200, who
-    assert c_leo.get(f"/api/threads/{own}/messages").status_code == 403
-    assert stranger.get(f"/api/threads/{own}/messages").status_code == 403
+    stranger = world.client(("203.0.113.73", 42003))
+    for who, c in (("another Basic profile", c_leo), ("a User", c_max), ("the Owner", owner)):
+        assert c.get(f"/api/threads/{own}/messages").status_code == 404, who
+    assert stranger.get(f"/api/threads/{own}/messages").status_code == 401
     text = people_api.DISCLOSURE.lower()
-    assert "owner can see" in text
-    assert "same character" in text and "other profiles" in text
-    assert "haven't signed in" in text
+    assert "summary" in text and "private" in text
 
 
 # --------------------------------------------------------------------------- #
@@ -726,7 +610,8 @@ def test_own_pin_refuses_a_weak_pin_and_the_owner_and_restricted(world, owner):
     assert r.status_code == 409 and r.json()["error"]["code"] == "owner_immutable"
     kid = world.client()
     assert world.login(kid, name="Mia").status_code == 200
-    assert kid.post("/api/auth/pin", json={"current": "", "new": "1234"}).status_code == 403
+    # 4.0: a Basic profile sets its own PIN too (a first PIN needs no current one)
+    assert kid.post("/api/auth/pin", json={"current": "", "new": "1234"}).status_code == 200
     # A device nobody signed in on has no profile to change.
     assert world.client().post("/api/auth/pin", json={"current": "", "new": "1234"}).status_code in (401, 403)
 
@@ -779,3 +664,24 @@ def test_password_change_keeps_a_remembered_device_remembered(world, owner):
     assert world.login(plain, name="Ada", password="admin-pass2").status_code == 200
     r = plain.post("/api/auth/password", json={"current": "admin-pass2", "new": "admin-pass3"})
     assert r.status_code == 200 and r.json()["remembered"] is False
+
+
+def test_another_admins_first_password_is_confirmed_with_its_own_pin_not_the_install_pin(world, owner):
+    """An Admin without a password sets its first one with the PIN it signs in with. For the
+    main Admin that is the install PIN; for any other Admin it is its own PIN (it may not know
+    the main Admin's), and an Admin with no credential at all needs none."""
+    r = owner.post("/api/people", json={"name": "Ada", "role": "admin", "pin": "5151"})
+    assert r.status_code == 201, r.text          # PINs and passwords are optional for every role
+    c = world.client()
+    assert world.login(c, name="Ada", pin="5151").status_code == 200
+    bad = c.post("/api/auth/password", json={"current_pin": "2468", "new": "ada-pass-123"})
+    assert bad.status_code == 401, bad.text                     # the install PIN is not Ada's
+    ok = c.post("/api/auth/password", json={"current_pin": "5151", "new": "ada-pass-123"})
+    assert ok.status_code == 200, ok.text
+    assert accounts.get_by_name("Ada").has_password
+    # The main Admin still confirms with the install PIN.
+    accounts.update_profile(accounts.get_owner().id, password_hash=None)
+    main = world.client()
+    assert world.login(main, name="Olive", pin="2468").status_code == 200
+    assert main.post("/api/auth/password", json={"current_pin": "5151", "new": "olive-pass-9"}).status_code == 401
+    assert main.post("/api/auth/password", json={"current_pin": "2468", "new": "olive-pass-9"}).status_code == 200

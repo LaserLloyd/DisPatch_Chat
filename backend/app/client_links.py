@@ -19,8 +19,7 @@ an in-process cache, guarded by one lock, atomic ``os.replace`` on write so a
 crash mid-write reads as the previous good file rather than a torn one.
 
 Every route that reaches this module sits behind the SAME gate as the rest
-of the Clients tab (``main._require_practice`` — full session only, never
-Safe Mode); this module holds no gate of its own on purpose, so there is
+of the Clients tab (``main._require_practice`` — Admin only); this module holds no gate of its own on purpose, so there is
 exactly one place that decision is made.
 """
 

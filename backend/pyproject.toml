@@ -1,6 +1,6 @@
 [project]
 name = "dispatch-chat"
-version = "3.1.0"
+version = "4.3.0"
 description = "Self-hosted chat for your household and your AI agents"
 license = "MIT"
 requires-python = ">=3.12"
@@ -82,6 +82,14 @@ testpaths = ["tests", "../apps"]
 asyncio_mode = "auto"
 timeout = 600
 pythonpath = ["."]
+# 4.0 (BUILD-PLAN-v2 §1.13.2): the synthetic-load benchmark under tests/scale/ is opt-in.
+# A plain `pytest` deselects it; `uv run pytest -m scale -q --basetemp ~/.cache/cfp/pytest/scale`
+# runs it (a later -m wins over this one).
+markers = [
+    "scale: synthetic-load benchmark (tests/scale/, 20 profiles x 50k messages); opt in with -m scale",
+    "privacy_matrix: opt-in privacy matrix (DISPATCH_PRIVACY_MATRIX=1)",
+]
+addopts = "-m 'not scale'"
 
 # --------------------------------------------------------------------------- #
 # Ruff

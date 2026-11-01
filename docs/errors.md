@@ -18,30 +18,43 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | Code | HTTP | What it means |
 |---|---|---|
 | [`advisor_request_unknown`](#advisor_request_unknown) | 404 | Unknown request |
-| [`agent_backend_rejected`](#agent_backend_rejected) | 409 | The agent backend refused that request. |
-| [`agent_backend_unavailable`](#agent_backend_unavailable) | 503 | The agent backend is not available. |
+| [`agent_backend_rejected`](#agent_backend_rejected) | 409 | The agent can't do that right now. |
+| [`agent_backend_unavailable`](#agent_backend_unavailable) | 503 | Agents can't run right now. |
+| [`agent_bot_protected`](#agent_bot_protected) | 409 | An agent bot cannot be deleted from Mine. |
 | [`agent_budget_exhausted`](#agent_budget_exhausted) | 429 | This agent's budget for today is used up. |
+| [`agent_create_owner_only`](#agent_create_owner_only) | 403 | Only the Owner can make a bot that runs an agent on the DisPatch computer. |
 | [`agent_credentials_invalid`](#agent_credentials_invalid) | 422 | The credentials were not accepted. |
 | [`agent_disabled`](#agent_disabled) | 409 | That agent is switched off. |
-| [`agent_gateway_down`](#agent_gateway_down) | 503 | The agent gateway is not connected |
+| [`agent_gateway_down`](#agent_gateway_down) | 503 | The agents' server (OpenClaw) isn't running. Try again later. |
 | [`agent_has_active_tasks`](#agent_has_active_tasks) | 409 | That agent has tasks that are still running. |
 | [`agent_invalid`](#agent_invalid) | 422 | The agent definition is not valid. |
 | [`agent_name_taken`](#agent_name_taken) | 409 | An agent with that name already exists. |
-| [`agent_needs_owner`](#agent_needs_owner) | 403 | Only the Owner can give an agent that capability. |
+| [`agent_needs_owner`](#agent_needs_owner) | 403 | Only the Owner can give an agent this power: {} |
 | [`agent_not_found`](#agent_not_found) | 404 | Agent not found |
+| [`agent_owner_only`](#agent_owner_only) | 409 | This bot runs an agent, which only the Owner may use. |
 | [`agents_only`](#agents_only) | 403 | Only agents may fire reactions |
 | [`api_key_required`](#api_key_required) | 401 | API key required |
+| [`approval_expired`](#approval_expired) | 409 | That approval request timed out and was answered No. |
 | [`approval_not_found`](#approval_not_found) | 404 | That approval request is not pending any more. |
 | [`approval_scope_not_allowed`](#approval_scope_not_allowed) | 422 | That approval can only be given for this one call. |
+| [`archive_invalid`](#archive_invalid) | 422 | months must be a whole number from 1 to 120. |
+| [`archived_not_bool`](#archived_not_bool) | 400 | archived must be true or false |
+| [`avatar_crop_invalid`](#avatar_crop_invalid) | 422 | The face square must be given as fractions from 0 to 1. |
+| [`avatar_invalid`](#avatar_invalid) | 422 | That file is not a picture DisPatch can read. |
 | [`avatar_not_capturable`](#avatar_not_capturable) | 409 | The bot has no capturable avatar right now |
 | [`avatar_not_found`](#avatar_not_found) | 404 | Avatar not found |
 | [`avatar_not_raster`](#avatar_not_raster) | 400 | Avatar must be a raster image |
 | [`avatar_pool_missing`](#avatar_pool_missing) | 404 | No avatar pool for that bot |
 | [`avatar_snapshot_failed`](#avatar_snapshot_failed) | 500 | Could not store the avatar snapshot |
 | [`avatar_source_required`](#avatar_source_required) | 400 | Send an image file, or pass source=current |
+| [`avatar_too_large`](#avatar_too_large) | 413 | The picture is too large (25 MB at most). |
+| [`avatar_upload_only`](#avatar_upload_only) | 422 | A picture is set by uploading it, not by naming a path. |
 | [`avatar_write_failed`](#avatar_write_failed) | 500 | Could not write the avatar |
 | [`backend_invalid`](#backend_invalid) | 422 | backend must be 'direct' or 'legacy-api' |
-| [`backend_unavailable`](#backend_unavailable) | 503 | The image backend is unavailable. |
+| [`backend_not_allowed`](#backend_not_allowed) | 403 | Your profile may not choose a bot's backend. |
+| [`backend_unavailable`](#backend_unavailable) | 503 | The image computer isn't ready yet. DisPatch tries again. |
+| [`backends_invalid`](#backends_invalid) | 422 | backends must be an object. |
+| [`backends_unknown_connection`](#backends_unknown_connection) | 422 | Unknown connection. |
 | [`backup_confirm_required`](#backup_confirm_required) | 422 | Restoring replaces your current data |
 | [`backup_corrupt`](#backup_corrupt) | 400 | The backup file is damaged |
 | [`backup_not_found`](#backup_not_found) | 404 | Unknown backup |
@@ -49,6 +62,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`backup_protected`](#backup_protected) | 409 | That backup is protected |
 | [`backup_wrong_key`](#backup_wrong_key) | 400 | The passphrase is wrong, or this is not a DisPatch backup |
 | [`bad_request`](#bad_request) | 400 | Bad request. |
+| [`basic_no_bots`](#basic_no_bots) | 422 | A Basic profile uses the bots an Admin gives it; it has none of its own. |
 | [`before_invalid`](#before_invalid) | 400 | before must be an ISO-8601 timestamp |
 | [`before_required`](#before_required) | 400 | before (ISO timestamp) required |
 | [`body_not_object`](#body_not_object) | 422 | body must be an object |
@@ -58,7 +72,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`bot_id_unknown`](#bot_id_unknown) | 400 | Unknown bot_id |
 | [`bot_not_found`](#bot_not_found) | 404 | Unknown bot |
 | [`bot_owned_by_app`](#bot_owned_by_app) | 409 | This bot belongs to an app; remove or disable the app instead |
-| [`budgets_invalid`](#budgets_invalid) | 400 | A budget value is invalid. |
+| [`budget_reserved`](#budget_reserved) | 429 | Today's spending limit is already reserved by tasks that are running. |
 | [`captioner_unavailable`](#captioner_unavailable) | 503 | The image captioner is unavailable. |
 | [`character_invalid`](#character_invalid) | 422 | That character change is not valid |
 | [`character_last`](#character_last) | 409 | A DisPatch install needs at least one bot |
@@ -66,12 +80,14 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`checked_not_boolean`](#checked_not_boolean) | 400 | checked must be a boolean for a row update |
 | [`checked_not_integers`](#checked_not_integers) | 400 | checked entries must be integers |
 | [`checked_not_list`](#checked_not_list) | 400 | checked must be a list of row indices |
+| [`cli_preset_invalid`](#cli_preset_invalid) | 422 | That command-line preset is not valid. |
 | [`client_id_invalid`](#client_id_invalid) | 400 | invalid client id |
-| [`client_quota`](#client_quota) | 429 | Too many image renders in flight. |
+| [`client_quota`](#client_quota) | 429 | Too many pictures are being made. Wait for some to finish. |
+| [`confirm_required`](#confirm_required) | 409 | Deleting this bot also deletes your chats with it. Confirm to go on. |
 | [`conflict`](#conflict) | 409 | Conflict. |
-| [`connection_blocked_target`](#connection_blocked_target) | 403 | That address is blocked |
+| [`connection_blocked_target`](#connection_blocked_target) | 403 | DisPatch isn't allowed to use that address |
 | [`connection_exists`](#connection_exists) | 409 | A connection with that id already exists |
-| [`connection_in_use`](#connection_in_use) | 409 | That connection is used by a character |
+| [`connection_in_use`](#connection_in_use) | 409 | A bot still uses that connection |
 | [`connection_invalid`](#connection_invalid) | 422 | That connection is not valid |
 | [`connection_invalid_url`](#connection_invalid_url) | 422 | That address is not valid |
 | [`connection_not_found`](#connection_not_found) | 404 | Unknown connection |
@@ -83,18 +99,22 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`content_too_long`](#content_too_long) | 400 | content is too long |
 | [`content_too_long_detail`](#content_too_long_detail) | 422 | content is too long ({} chars; max {}) — split it across messages rather than letting it be cut |
 | [`crop_invalid`](#crop_invalid) | 400 | crop_x/crop_y/crop_size must be fractions in 0..1 |
-| [`csrf_origin`](#csrf_origin) | 403 | Cross-origin request refused |
+| [`csrf_origin`](#csrf_origin) | 403 | Refused: this didn't come from DisPatch's own page. Open DisPatch at its usual address and try again. |
 | [`current_pin_incorrect`](#current_pin_incorrect) | 403 | Current PIN is incorrect |
-| [`daily_limit`](#daily_limit) | 429 | Daily limit reached on this device |
-| [`daily_upload_limit`](#daily_upload_limit) | 429 | Daily upload limit reached — try again tomorrow or unlock |
+| [`cursor_invalid`](#cursor_invalid) | 400 | Invalid cursor |
+| [`daily_upload_limit`](#daily_upload_limit) | 429 | Daily machine upload limit reached — try again tomorrow |
 | [`day_format`](#day_format) | 422 | day must be YYYY-MM-DD |
 | [`days_not_number`](#days_not_number) | 400 | days must be a number |
 | [`days_out_of_range`](#days_out_of_range) | 400 | days must be 0–365 |
 | [`deep_check_running`](#deep_check_running) | 409 | A deep check is already running |
-| [`device_bind_role`](#device_bind_role) | 409 | A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential. |
+| [`default_profile_no_credential`](#default_profile_no_credential) | 409 | The shared default profile cannot have a PIN or password. Pick another default profile in Settings > People first. |
+| [`delete_stale`](#delete_stale) | 409 | What would be deleted has changed. Look at the numbers again before confirming. |
+| [`draft_failed`](#draft_failed) | 502 | The AI did not return a usable bot. Try again, or add more detail. |
+| [`draft_unavailable`](#draft_unavailable) | 503 | No AI connection is available for building a bot. |
 | [`empty_file`](#empty_file) | 400 | Empty file |
 | [`enabled_flag_invalid`](#enabled_flag_invalid) | 422 | body must be {enabled: true\|false} |
 | [`endpoint_required`](#endpoint_required) | 400 | endpoint is required |
+| [`env_key_owner_only`](#env_key_owner_only) | 403 | Only the Owner can use a key stored on the DisPatch computer for a connection. |
 | [`extension_not_found`](#extension_not_found) | 404 | No such extension |
 | [`extensions_yaml_unreadable`](#extensions_yaml_unreadable) | 409 | extensions.yaml cannot be read ({}); fix it by hand first |
 | [`face_crop_not_raster`](#face_crop_not_raster) | 400 | Face crop must be a raster image |
@@ -103,28 +123,39 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`folder_path_invalid`](#folder_path_invalid) | 400 | Each folder must be an absolute path or start with ~/ |
 | [`folder_refused`](#folder_refused) | 400 | Not an existing folder, or a folder that is always refused |
 | [`folder_too_broad`](#folder_too_broad) | 400 | That folder is too broad to share — pick a folder inside it |
-| [`forbidden`](#forbidden) | 403 | Forbidden |
-| [`force_needs_session`](#force_needs_session) | 403 | force needs an unlocked session |
+| [`forbidden`](#forbidden) | 403 | You aren't allowed to do that. |
 | [`frontend_missing`](#frontend_missing) | 404 | no index |
 | [`frontend_missing_2`](#frontend_missing_2) | 404 | frontend not built |
 | [`gateway_abort_failed`](#gateway_abort_failed) | 502 | The gateway would not stop that turn |
 | [`gateway_models_failed`](#gateway_models_failed) | 502 | The gateway could not list models |
-| [`gpu_leased`](#gpu_leased) | 503 | The image server's GPU is leased. |
+| [`give_to_invalid`](#give_to_invalid) | 422 | give_to must be "everyone" or a list of profiles. |
+| [`give_to_required`](#give_to_required) | 409 | A bot can't be taken away here. Use its Who can use it list, which shows what happens to the copy first. |
+| [`give_to_stale`](#give_to_stale) | 409 | Who gets this bot has changed. Look at the numbers again before confirming. |
+| [`gpu_leased`](#gpu_leased) | 503 | The image computer is busy with other work. Try again later. |
 | [`guide_exists`](#guide_exists) | 409 | That guide is already in your chats |
+| [`guide_force_signin`](#guide_force_signin) | 403 | force needs a signed-in session |
 | [`guide_needs_atlas`](#guide_needs_atlas) | 404 | The guide needs the Atlas bot |
 | [`guide_unknown`](#guide_unknown) | 404 | Unknown guide |
 | [`hidden_flag_invalid`](#hidden_flag_invalid) | 400 | hidden must be a boolean |
+| [`host_not_allowed`](#host_not_allowed) | 421 | This DisPatch does not answer to that address. |
+| [`host_owner_only`](#host_owner_only) | 403 | Only the Owner can do this, because it runs programs or reads files on the DisPatch computer. |
+| [`household_bots_invalid`](#household_bots_invalid) | 422 | household_bots must be "all" or a list of character ids. |
+| [`household_invalid`](#household_invalid) | 422 | household_bots must be a list of bot ids. |
 | [`image_dimensions_too_large`](#image_dimensions_too_large) | 400 | Image dimensions too large (max 64 megapixels) |
+| [`image_minor_sexual`](#image_minor_sexual) | 422 | That picture can't be made: images show adults only, and nothing sexual can involve anyone under 18. Rewrite the request with adult characters. |
+| [`image_real_person_sexual`](#image_real_person_sexual) | 422 | That picture can't be made: sexual images of real, identifiable people aren't allowed. Remove the real person's name or likeness, or describe an original character instead. |
 | [`image_request_failed`](#image_request_failed) | 500 | Could not start the image request |
 | [`image_requests_disabled`](#image_requests_disabled) | 403 | Image requests aren't enabled for {} |
-| [`image_unavailable`](#image_unavailable) | 503 | Image generation isn't configured |
+| [`image_unavailable`](#image_unavailable) | 503 | Picture making isn't set up (Settings → AI & Connections → Image generation) |
 | [`image_undecodable`](#image_undecodable) | 400 | Could not decode image |
 | [`imagestudio_a_generation_is_already_running`](#imagestudio_a_generation_is_already_running) | 409 | A generation is already running |
 | [`imagestudio_cannot_delete_pictures`](#imagestudio_cannot_delete_pictures) | 403 | Your profile cannot delete pictures |
+| [`imagestudio_clear_pick_one`](#imagestudio_clear_pick_one) | 422 | Give either a picture id with its order, or a time range |
 | [`imagestudio_generation_running_clear`](#imagestudio_generation_running_clear) | 409 | A generation is running; try again when it is done |
 | [`imagestudio_no_image_provider_has_an_api`](#imagestudio_no_image_provider_has_an_api) | 409 | No image provider has an API key yet (Settings → AI & Connections → Image generation) |
 | [`imagestudio_not_a_picture_id`](#imagestudio_not_a_picture_id) | 422 | That is not a picture id |
 | [`imagestudio_picture_already_gone`](#imagestudio_picture_already_gone) | 404 | That picture is already gone |
+| [`imagestudio_picture_needs_order`](#imagestudio_picture_needs_order) | 422 | A picture id needs the page's order |
 | [`imagestudio_pictures_changed`](#imagestudio_pictures_changed) | 409 | The pictures changed since you confirmed; count again |
 | [`imagestudio_that_chat_image_is_not_in`](#imagestudio_that_chat_image_is_not_in) | 404 | That chat image is not in the media store |
 | [`imagestudio_that_model_name_is_not_valid`](#imagestudio_that_model_name_is_not_valid) | 422 | That model name is not valid |
@@ -155,29 +186,53 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`jobboard_tags_capped_at`](#jobboard_tags_capped_at) | 400 | tags capped at {} |
 | [`jobboard_unknown_board_bot`](#jobboard_unknown_board_bot) | 404 | Unknown board bot |
 | [`json_invalid`](#json_invalid) | 400 | invalid JSON body |
+| [`kit_chat_invalid`](#kit_chat_invalid) | 422 | A chat needs a title and some text. |
+| [`kit_not_found`](#kit_not_found) | 404 | This bot has no copies to manage. |
+| [`kit_shipped`](#kit_shipped) | 409 | This bot's copies are managed by DisPatch itself. |
 | [`list_index_invalid`](#list_index_invalid) | 400 | list must be a small non-negative integer |
+| [`lock_target_admin`](#lock_target_admin) | 422 | This is the default profile everyone lands on without signing in, so it can't be an Admin. |
+| [`lock_target_fence`](#lock_target_fence) | 422 | This is the default profile everyone lands on without signing in, so agent bots and voice cloning stay off for it. |
+| [`lock_target_invalid`](#lock_target_invalid) | 422 | Pick a profile that exists and isn't turned off. |
 | [`machine_scope_denied`](#machine_scope_denied) | 403 | This API key is not allowed to call that endpoint. |
+| [`maintenance_blocked`](#maintenance_blocked) | 409 | The clean-up is paused while a backup or other upkeep runs. |
+| [`maintenance_running`](#maintenance_running) | 409 | A maintenance run is already in progress. |
+| [`maintenance_step_unknown`](#maintenance_step_unknown) | 422 | Unknown maintenance step. |
 | [`max_tokens_invalid`](#max_tokens_invalid) | 422 | max_tokens must be a whole number |
 | [`message_no_mood`](#message_no_mood) | 404 | This message has no mood |
 | [`message_not_found`](#message_not_found) | 404 | Message not found |
 | [`mood_face_missing`](#mood_face_missing) | 404 | No face on file for this mood |
 | [`multi_gpu_required`](#multi_gpu_required) | 503 | The workflow needs more GPUs than the image server has. |
+| [`no_generated_key`](#no_generated_key) | 404 | This backup uses a passphrase you chose, so there is no generated key to show. |
 | [`not_a_checklist`](#not_a_checklist) | 400 | Message is not a checklist |
 | [`not_a_directory`](#not_a_directory) | 400 | Not a directory |
+| [`not_copyable`](#not_copyable) | 422 | This bot runs on an agent and cannot be copied. |
 | [`not_found`](#not_found) | 404 | Not found |
+| [`not_managed`](#not_managed) | 422 | This bot is not kept up to date by your household. |
+| [`not_shareable`](#not_shareable) | 422 | Only a bot of your own that runs on a direct connection can be shared. |
 | [`nothing_to_change`](#nothing_to_change) | 400 | Nothing to change |
+| [`oidc_config_invalid`](#oidc_config_invalid) | 422 | The sign-in provider settings are not valid. |
+| [`oidc_disabled`](#oidc_disabled) | 404 | Sign-in with an outside provider is not turned on. |
+| [`oidc_failed`](#oidc_failed) | 401 | Sign-in with the outside provider did not work. |
+| [`oidc_last_credential`](#oidc_last_credential) | 422 | Keep a PIN or password on the Owner profile while an outside sign-in is linked to it. |
+| [`oidc_link_conflict`](#oidc_link_conflict) | 409 | That outside account is already linked to another profile. |
+| [`oidc_link_forbidden`](#oidc_link_forbidden) | 403 | This profile cannot be linked to an outside sign-in. |
+| [`oidc_not_linked`](#oidc_not_linked) | 401 | That outside account is not linked to a profile here. |
+| [`oidc_provider_unreachable`](#oidc_provider_unreachable) | 502 | Could not read the sign-in provider's settings. |
+| [`oidc_public_url_required`](#oidc_public_url_required) | 422 | Outside sign-in needs an https public address for DisPatch. |
+| [`order_invalid`](#order_invalid) | 422 | The new order lists a bot twice or is not a list of bot ids. |
 | [`owner_exists`](#owner_exists) | 409 | This install already has an owner. |
-| [`owner_immutable`](#owner_immutable) | 409 | The owner's role cannot be changed. |
-| [`owner_required`](#owner_required) | 409 | Create the owner account first. |
+| [`owner_immutable`](#owner_immutable) | 409 | The Owner's profile type can't be changed. |
+| [`owner_required`](#owner_required) | 409 | Create the Owner profile first. |
 | [`panel_disabled`](#panel_disabled) | 404 | Clients panel disabled |
 | [`password_invalid`](#password_invalid) | 400 | Password invalid. |
-| [`password_required`](#password_required) | 409 | Set a password for the owner first. |
-| [`password_role`](#password_role) | 409 | Only the Owner and Admins have a password; Members and Restricted profiles use a PIN. |
+| [`password_required`](#password_required) | 409 | Set a password for the Owner first. |
+| [`password_role`](#password_role) | 409 | Only Admins have a password; User and Basic profiles use a PIN. |
 | [`path_invalid`](#path_invalid) | 400 | invalid path |
 | [`payload_too_large`](#payload_too_large) | 413 | File too large |
 | [`permission_denied`](#permission_denied) | 403 | Your profile does not have permission to do that. |
 | [`permissions_invalid`](#permissions_invalid) | 400 | A permission is invalid. |
-| [`pin_invalid`](#pin_invalid) | 400 | Pin invalid. |
+| [`personal_needs_direct`](#personal_needs_direct) | 409 | This bot has no AI connection, so it can't answer. Pick one in Settings → Characters → Details. |
+| [`pin_invalid`](#pin_invalid) | 400 | That PIN isn't valid. |
 | [`pin_not_set`](#pin_not_set) | 400 | No PIN is set |
 | [`pin_too_short`](#pin_too_short) | 400 | PIN must be at least {} characters |
 | [`plugin_needs_approval`](#plugin_needs_approval) | 409 | This plugin needs approval |
@@ -189,38 +244,47 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`prefs_not_object`](#prefs_not_object) | 400 | prefs must be an object |
 | [`prefs_unknown_key`](#prefs_unknown_key) | 400 | unknown prefs key(s): {} |
 | [`preview_unavailable`](#preview_unavailable) | 403 | Preview not available for this type |
-| [`profile_conflict`](#profile_conflict) | 409 | That profile could not be created (duplicate name or second owner). |
+| [`profile_conflict`](#profile_conflict) | 409 | That profile couldn't be created: another profile already has that name. |
 | [`profile_field_invalid`](#profile_field_invalid) | 400 | A profile field cannot be set. |
 | [`profile_name_invalid`](#profile_name_invalid) | 400 | A profile name needs 1 to 40 characters. |
 | [`profile_name_taken`](#profile_name_taken) | 409 | A profile named {} already exists. |
 | [`profile_not_found`](#profile_not_found) | 404 | No such profile. |
+| [`profile_required`](#profile_required) | 409 | Sign in to a profile first. |
 | [`profile_role_invalid`](#profile_role_invalid) | 400 | Unknown role {}. |
 | [`prompt_bank_malformed`](#prompt_bank_malformed) | 400 | Malformed prompt bank |
 | [`push_subscription_invalid`](#push_subscription_invalid) | 400 | Expected a JSON push subscription |
 | [`quick_action_target_invalid`](#quick_action_target_invalid) | 422 | bad_action: a quick action applies to user messages |
 | [`quick_action_unknown`](#quick_action_unknown) | 422 | bad_action: unknown quick action |
-| [`quiet_hours`](#quiet_hours) | 403 | This profile is not available right now. |
-| [`rate_limited`](#rate_limited) | 429 | Rate limited. |
+| [`rate_limited`](#rate_limited) | 429 | Too many requests. Wait a moment, then try again. |
 | [`reaction_not_found`](#reaction_not_found) | 404 | reaction not found |
 | [`recovery_needs_new_pin`](#recovery_needs_new_pin) | 409 | Choose a new PIN: other people have profiles here, so the lock cannot simply be removed. |
 | [`refresh_running`](#refresh_running) | 409 | A refresh is already running for this tool |
-| [`remember_device_required`](#remember_device_required) | 403 | Notifications need a remembered device: lock, then unlock with "Remember this device" ticked. |
+| [`remember_device_required`](#remember_device_required) | 403 | Notifications need a remembered device: sign out, then sign in again with "Keep this device signed in" ticked. |
 | [`reply_in_progress_delete`](#reply_in_progress_delete) | 409 | Cannot delete messages while a reply is in progress |
 | [`reply_in_progress_edit`](#reply_in_progress_edit) | 409 | Cannot edit messages while a reply is in progress |
+| [`reset_stale`](#reset_stale) | 409 | What would be deleted has changed. Look at the numbers again before confirming. |
+| [`retention_invalid`](#retention_invalid) | 422 | That retention setting is not valid. |
+| [`role_change_stale`](#role_change_stale) | 409 | What would be deleted has changed. Look at the numbers again before confirming. |
 | [`route_undeclared`](#route_undeclared) | 403 | This endpoint has no access policy. |
-| [`safe_mode`](#safe_mode) | 403 | Unlock for full access |
+| [`routes_unavailable`](#routes_unavailable) | 503 | That way of connecting Claude isn't set up on the DisPatch computer. |
+| [`schedule_invalid`](#schedule_invalid) | 422 | That schedule is not valid. |
+| [`schedule_limit`](#schedule_limit) | 409 | A profile can have at most 20 schedules. |
+| [`schedule_not_found`](#schedule_not_found) | 404 | Unknown schedule. |
+| [`schedule_owner_only`](#schedule_owner_only) | 403 | Only the schedule's own profile can change it; an Admin may only switch it off or delete it. |
 | [`session_key_required`](#session_key_required) | 400 | session_key required |
 | [`session_not_found`](#session_not_found) | 404 | no such session |
 | [`settings_invalid`](#settings_invalid) | 400 | Invalid settings |
-| [`setup_forbidden`](#setup_forbidden) | 403 | Setup is only allowed from this computer or with the setup token. |
-| [`setup_required`](#setup_required) | 403 | This DisPatch has no owner yet. Open it on the computer it runs on, or finish setup with the one-time setup token from the server log. |
+| [`setup_forbidden`](#setup_forbidden) | 403 | Set up DisPatch on the computer it runs on, or use the setup code from its log. |
+| [`setup_required`](#setup_required) | 403 | This DisPatch has no Owner yet. Open it on the computer it runs on, or finish setup with the one-time setup code from its log. |
 | [`signin_required`](#signin_required) | 401 | Sign in to continue. |
 | [`stalled`](#stalled) | 502 | The image render stalled. |
 | [`starter_pack_not_found`](#starter_pack_not_found) | 404 | Unknown starter pack |
+| [`stop_sharing_stale`](#stop_sharing_stale) | 409 | Who has a copy of this bot has changed. Look at the numbers again before confirming. |
 | [`storage_limit`](#storage_limit) | 507 | Storage limit reached — free space or delete files |
 | [`task_not_found`](#task_not_found) | 404 | Task not found |
 | [`task_state_conflict`](#task_state_conflict) | 409 | The task cannot do that in its current state. |
-| [`task_thread_not_allowed`](#task_thread_not_allowed) | 409 | Tasks cannot be assigned from a chat that Restricted profiles can read. |
+| [`template_has_no_copy`](#template_has_no_copy) | 409 | That's a household bot and the Owner has no copy of it. |
+| [`template_not_chattable`](#template_not_chattable) | 403 | That's a household bot. Chat with your own copy of it. |
 | [`test_flag_invalid`](#test_flag_invalid) | 422 | test must be true or false |
 | [`thread_id_required`](#thread_id_required) | 400 | thread_id (or all:true) required |
 | [`thread_not_found`](#thread_not_found) | 404 | Thread not found |
@@ -228,10 +292,11 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`thread_or_session_required`](#thread_or_session_required) | 400 | thread_id or session_key required |
 | [`thread_other_bot`](#thread_other_bot) | 403 | That thread belongs to another bot |
 | [`thread_update_failed`](#thread_update_failed) | 500 | Could not update the thread |
-| [`time_limit`](#time_limit) | 403 | Today's time for this profile is used up. |
 | [`title_required`](#title_required) | 400 | title required |
-| [`too_many_attempts`](#too_many_attempts) | 429 | Too many attempts — wait {}s. |
+| [`too_many_attempts`](#too_many_attempts) | 429 | Too many tries. Wait {} seconds, then try again. |
+| [`too_many_bots`](#too_many_bots) | 409 | A profile can have at most {} bots |
 | [`too_many_entries`](#too_many_entries) | 400 | too many entries |
+| [`too_many_sessions`](#too_many_sessions) | 429 | This profile stays signed in on too many devices. Sign out on one of them (or ask an Admin to sign it out everywhere), then try again. |
 | [`tool_not_found`](#tool_not_found) | 404 | No such tool, or it has no refresh |
 | [`tools_direct_only`](#tools_direct_only) | 422 | tools only applies to direct-API bots |
 | [`tools_flag_invalid`](#tools_flag_invalid) | 422 | tools must be true or false |
@@ -239,11 +304,15 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`transcript_missing`](#transcript_missing) | 404 | No transcript for that session |
 | [`unauthorized`](#unauthorized) | 401 | Authentication required. |
 | [`unknown_image_job`](#unknown_image_job) | 404 | Unknown image job |
-| [`unlock_first`](#unlock_first) | 403 | Unlock with your PIN first |
+| [`unlock_first`](#unlock_first) | 403 | Sign in as the Owner first |
 | [`unsupported_media_type`](#unsupported_media_type) | 415 | Reaction images must be PNG, JPEG, GIF, WebP or AVIF |
+| [`use_delete_route`](#use_delete_route) | 409 | Delete a profile with POST /api/people/{id}/delete (preview the counts first). |
+| [`use_household_route`](#use_household_route) | 409 | Set the household bots with PUT /api/people/{id}/household-bots. |
+| [`use_role_route`](#use_role_route) | 409 | Change a profile's type with POST /api/people/{id}/role (preview first). |
 | [`validation_error`](#validation_error) | 422 | Validation error. |
 | [`voice_addon_missing`](#voice_addon_missing) | 422 | {} needs the voice add-on, which is not installed |
-| [`wizard_owner_required`](#wizard_owner_required) | 409 | Create the owner account first |
+| [`voice_not_allowed`](#voice_not_allowed) | 422 | That voice is not available to you. |
+| [`wizard_owner_required`](#wizard_owner_required) | 409 | Create the Owner profile first: DisPatch won't open to your network until it has one. |
 | [`wizard_step_required`](#wizard_step_required) | 409 | That step cannot be skipped |
 | [`wizard_step_unknown`](#wizard_step_unknown) | 404 | Unknown wizard step |
 
@@ -259,7 +328,7 @@ HTTP **404** - Unknown request
 
 <a id="agent_backend_rejected"></a>
 
-HTTP **409** - The agent backend refused that request.
+HTTP **409** - The agent can't do that right now.
 
 **Fix:** The backend cannot do this (for example steer a running OpenClaw turn). Stop the task or wait for it to finish.
 
@@ -267,9 +336,17 @@ HTTP **409** - The agent backend refused that request.
 
 <a id="agent_backend_unavailable"></a>
 
-HTTP **503** - The agent backend is not available.
+HTTP **503** - Agents can't run right now.
 
 **Fix:** Check Settings, Agents, Backends: OpenClaw must run on this machine, and the Claude Agent needs an API key and the optional agents-claude extra.
+
+## agent_bot_protected
+
+<a id="agent_bot_protected"></a>
+
+HTTP **409** - An agent bot cannot be deleted from Mine.
+
+**Fix:** Reset keeps agent and app bots. Only the Owner can delete one, on purpose, with a confirmation.
 
 ## agent_budget_exhausted
 
@@ -278,6 +355,14 @@ HTTP **503** - The agent backend is not available.
 HTTP **429** - This agent's budget for today is used up.
 
 **Fix:** Raise the daily limit in Settings, Agents, or try again tomorrow. Costs are estimates.
+
+## agent_create_owner_only
+
+<a id="agent_create_owner_only"></a>
+
+HTTP **403** - Only the Owner can make a bot that runs an agent on the DisPatch computer.
+
+**Fix:** Ask the Owner to create it, or make a direct character instead.
 
 ## agent_credentials_invalid
 
@@ -299,7 +384,7 @@ HTTP **409** - That agent is switched off.
 
 <a id="agent_gateway_down"></a>
 
-HTTP **503** - The agent gateway is not connected
+HTTP **503** - The agents' server (OpenClaw) isn't running. Try again later.
 
 **Fix:** Start the OpenClaw gateway, or switch the character to a direct provider.
 
@@ -331,9 +416,9 @@ HTTP **409** - An agent with that name already exists.
 
 <a id="agent_needs_owner"></a>
 
-HTTP **403** - Only the Owner can give an agent that capability.
+HTTP **403** - Only the Owner can give an agent this power: {}
 
-**Fix:** Ask the Owner. Running repository hooks, starting local MCP programs and unattended destructive tools are host-level powers.
+**Fix:** Ask the Owner. Shell and file-editing tools, fewer always-ask tools, programs on the DisPatch computer, unattended tools, a stored secret sent to another computer and working in a folder on the DisPatch computer are the Owner's alone.
 
 ## agent_not_found
 
@@ -342,6 +427,14 @@ HTTP **403** - Only the Owner can give an agent that capability.
 HTTP **404** - Agent not found
 
 **Fix:** Pick an agent from the list; it may be switched off, deleted, or not published to your profile.
+
+## agent_owner_only
+
+<a id="agent_owner_only"></a>
+
+HTTP **409** - This bot runs an agent, which only the Owner may use.
+
+**Fix:** Agent and app bots are the Owner's alone; make a bot with its own AI connection for anyone else.
 
 ## agents_only
 
@@ -359,6 +452,14 @@ HTTP **401** - API key required
 
 **Fix:** Send the API key as X-API-Key.
 
+## approval_expired
+
+<a id="approval_expired"></a>
+
+HTTP **409** - That approval request timed out and was answered No.
+
+**Fix:** The task went on without that step. Run it again if it is still needed.
+
 ## approval_not_found
 
 <a id="approval_not_found"></a>
@@ -374,6 +475,38 @@ HTTP **404** - That approval request is not pending any more.
 HTTP **422** - That approval can only be given for this one call.
 
 **Fix:** Destructive tools ask every time. Choose 'once'.
+
+## archive_invalid
+
+<a id="archive_invalid"></a>
+
+HTTP **422** - months must be a whole number from 1 to 120.
+
+**Fix:** Send months as null (off) or a whole number from 1 to 120.
+
+## archived_not_bool
+
+<a id="archived_not_bool"></a>
+
+HTTP **400** - archived must be true or false
+
+**Fix:** Send archived as true (archive the chat) or false (move it back).
+
+## avatar_crop_invalid
+
+<a id="avatar_crop_invalid"></a>
+
+HTTP **422** - The face square must be given as fractions from 0 to 1.
+
+**Fix:** Send crop_x, crop_y and crop_size together, each a fraction of the picture (crop_size above 0), or none of them.
+
+## avatar_invalid
+
+<a id="avatar_invalid"></a>
+
+HTTP **422** - That file is not a picture DisPatch can read.
+
+**Fix:** Send a PNG, JPEG or WebP picture.
 
 ## avatar_not_capturable
 
@@ -423,6 +556,22 @@ HTTP **400** - Send an image file, or pass source=current
 
 **Fix:** Check the request and resend it.
 
+## avatar_too_large
+
+<a id="avatar_too_large"></a>
+
+HTTP **413** - The picture is too large (25 MB at most).
+
+**Fix:** Send a smaller picture.
+
+## avatar_upload_only
+
+<a id="avatar_upload_only"></a>
+
+HTTP **422** - A picture is set by uploading it, not by naming a path.
+
+**Fix:** Upload the picture (Settings, Account) or send an emoji or a few letters.
+
 ## avatar_write_failed
 
 <a id="avatar_write_failed"></a>
@@ -439,13 +588,37 @@ HTTP **422** - backend must be 'direct' or 'legacy-api'
 
 **Fix:** Fix the fields in detail and resend.
 
+## backend_not_allowed
+
+<a id="backend_not_allowed"></a>
+
+HTTP **403** - Your profile may not choose a bot's backend.
+
+**Fix:** Ask an Admin to allow the connection for this profile in People.
+
 ## backend_unavailable
 
 <a id="backend_unavailable"></a>
 
-HTTP **503** - The image backend is unavailable.
+HTTP **503** - The image computer isn't ready yet. DisPatch tries again.
 
 **Fix:** ComfyUI is starting or briefly down. DisPatch retries.
+
+## backends_invalid
+
+<a id="backends_invalid"></a>
+
+HTTP **422** - backends must be an object.
+
+**Fix:** Send {"allowed": [connection ids]} or {} for every connection.
+
+## backends_unknown_connection
+
+<a id="backends_unknown_connection"></a>
+
+HTTP **422** - Unknown connection.
+
+**Fix:** Use a connection id from GET /api/connections.
 
 ## backup_confirm_required
 
@@ -502,6 +675,14 @@ HTTP **400** - The passphrase is wrong, or this is not a DisPatch backup
 HTTP **400** - Bad request.
 
 **Fix:** Check the request body against the API reference.
+
+## basic_no_bots
+
+<a id="basic_no_bots"></a>
+
+HTTP **422** - A Basic profile uses the bots an Admin gives it; it has none of its own.
+
+**Fix:** Ask an Admin to add household bots to this profile, or to make it a User.
 
 ## before_invalid
 
@@ -575,13 +756,13 @@ HTTP **409** - This bot belongs to an app; remove or disable the app instead
 
 **Fix:** The state conflicts with the request; reload and retry.
 
-## budgets_invalid
+## budget_reserved
 
-<a id="budgets_invalid"></a>
+<a id="budget_reserved"></a>
 
-HTTP **400** - A budget value is invalid.
+HTTP **429** - Today's spending limit is already reserved by tasks that are running.
 
-**Fix:** Use whole numbers in range; quiet hours look like 20:30-07:00.
+**Fix:** Wait for a running task to finish, or raise the daily limit in Settings > Agents.
 
 ## captioner_unavailable
 
@@ -639,6 +820,14 @@ HTTP **400** - checked must be a list of row indices
 
 **Fix:** Check the request and resend it.
 
+## cli_preset_invalid
+
+<a id="cli_preset_invalid"></a>
+
+HTTP **422** - That command-line preset is not valid.
+
+**Fix:** Give each preset an id, a kind and the absolute path of an executable on this computer.
+
 ## client_id_invalid
 
 <a id="client_id_invalid"></a>
@@ -651,9 +840,17 @@ HTTP **400** - invalid client id
 
 <a id="client_quota"></a>
 
-HTTP **429** - Too many image renders in flight.
+HTTP **429** - Too many pictures are being made. Wait for some to finish.
 
 **Fix:** Too many renders from this client are already in flight. They drain by themselves.
+
+## confirm_required
+
+<a id="confirm_required"></a>
+
+HTTP **409** - Deleting this bot also deletes your chats with it. Confirm to go on.
+
+**Fix:** Show the chat count (GET /api/me/characters/{id}/delete-preview), then repeat the delete with ?confirm=true.
 
 ## conflict
 
@@ -667,7 +864,7 @@ HTTP **409** - Conflict.
 
 <a id="connection_blocked_target"></a>
 
-HTTP **403** - That address is blocked
+HTTP **403** - DisPatch isn't allowed to use that address
 
 **Fix:** The address is link-local or a cloud metadata address. An admin can allow it with the setting connections.allow_private_targets.
 
@@ -683,7 +880,7 @@ HTTP **409** - A connection with that id already exists
 
 <a id="connection_in_use"></a>
 
-HTTP **409** - That connection is used by a character
+HTTP **409** - A bot still uses that connection
 
 **Fix:** Point those characters at another connection first, then delete this one.
 
@@ -779,7 +976,7 @@ HTTP **400** - crop_x/crop_y/crop_size must be fractions in 0..1
 
 <a id="csrf_origin"></a>
 
-HTTP **403** - Cross-origin request refused
+HTTP **403** - Refused: this didn't come from DisPatch's own page. Open DisPatch at its usual address and try again.
 
 **Fix:** The request came from a page on a different origin. Use DisPatch's own page, or call the API without browser headers.
 
@@ -791,21 +988,21 @@ HTTP **403** - Current PIN is incorrect
 
 **Fix:** Enter your current PIN to change or remove it.
 
-## daily_limit
+## cursor_invalid
 
-<a id="daily_limit"></a>
+<a id="cursor_invalid"></a>
 
-HTTP **429** - Daily limit reached on this device
+HTTP **400** - Invalid cursor
 
-**Fix:** This profile or device reached today's limit. It resets at local midnight; the Owner can raise it.
+**Fix:** Pass back the next_cursor value a previous page returned, unchanged, or leave cursor out for the first page.
 
 ## daily_upload_limit
 
 <a id="daily_upload_limit"></a>
 
-HTTP **429** - Daily upload limit reached — try again tomorrow or unlock
+HTTP **429** - Daily machine upload limit reached — try again tomorrow
 
-**Fix:** Today's upload allowance is used. It resets at local midnight; the Owner can raise it.
+**Fix:** Programs holding the API key may upload 200 MB a day together (the machine guard, people have no limit). It resets at local midnight; an Admin can change it in Settings > People & Access > Machines.
 
 ## day_format
 
@@ -839,13 +1036,37 @@ HTTP **409** - A deep check is already running
 
 **Fix:** The state conflicts with the request; reload and retry.
 
-## device_bind_role
+## default_profile_no_credential
 
-<a id="device_bind_role"></a>
+<a id="default_profile_no_credential"></a>
 
-HTTP **409** - A device can only open as a Member or Restricted profile; Admins and the Owner always sign in with their credential.
+HTTP **409** - The shared default profile cannot have a PIN or password. Pick another default profile in Settings > People first.
 
-**Fix:** Bind a Member or Restricted profile. Admins and the Owner always sign in with their credential.
+**Fix:** Pick another default profile in Settings > People first.
+
+## delete_stale
+
+<a id="delete_stale"></a>
+
+HTTP **409** - What would be deleted has changed. Look at the numbers again before confirming.
+
+**Fix:** Fetch the delete preview again and confirm with its new token.
+
+## draft_failed
+
+<a id="draft_failed"></a>
+
+HTTP **502** - The AI did not return a usable bot. Try again, or add more detail.
+
+**Fix:** Try again, or describe the bot in more detail.
+
+## draft_unavailable
+
+<a id="draft_unavailable"></a>
+
+HTTP **503** - No AI connection is available for building a bot.
+
+**Fix:** Add a connection in Settings → AI & Connections, or ask an Admin to allow one for your profile.
 
 ## empty_file
 
@@ -870,6 +1091,14 @@ HTTP **422** - body must be {enabled: true|false}
 HTTP **400** - endpoint is required
 
 **Fix:** Check the request and resend it.
+
+## env_key_owner_only
+
+<a id="env_key_owner_only"></a>
+
+HTTP **403** - Only the Owner can use a key stored on the DisPatch computer for a connection.
+
+**Fix:** Ask the Owner, or paste the key itself into the connection instead.
 
 ## extension_not_found
 
@@ -939,17 +1168,9 @@ HTTP **400** - That folder is too broad to share — pick a folder inside it
 
 <a id="forbidden"></a>
 
-HTTP **403** - Forbidden
+HTTP **403** - You aren't allowed to do that.
 
 **Fix:** You are not allowed to do this; sign in as a profile with permission.
-
-## force_needs_session
-
-<a id="force_needs_session"></a>
-
-HTTP **403** - force needs an unlocked session
-
-**Fix:** Sign in first; --force is not available to a machine.
 
 ## frontend_missing
 
@@ -983,11 +1204,35 @@ HTTP **502** - The gateway could not list models
 
 **Fix:** An upstream service failed; check that it is running.
 
+## give_to_invalid
+
+<a id="give_to_invalid"></a>
+
+HTTP **422** - give_to must be "everyone" or a list of profiles.
+
+**Fix:** Send give_to as "everyone" or a list of profile ids that exist.
+
+## give_to_required
+
+<a id="give_to_required"></a>
+
+HTTP **409** - A bot can't be taken away here. Use its Who can use it list, which shows what happens to the copy first.
+
+**Fix:** Open the character's "Who can use it" list; it previews the change and asks you to confirm.
+
+## give_to_stale
+
+<a id="give_to_stale"></a>
+
+HTTP **409** - Who gets this bot has changed. Look at the numbers again before confirming.
+
+**Fix:** Fetch the give-to preview again and confirm with its new token.
+
 ## gpu_leased
 
 <a id="gpu_leased"></a>
 
-HTTP **503** - The image server's GPU is leased.
+HTTP **503** - The image computer is busy with other work. Try again later.
 
 **Fix:** The image server's GPU is booked by someone else. DisPatch retries a render or agent lease; a benchmark lease is not waited out. Come back later.
 
@@ -998,6 +1243,14 @@ HTTP **503** - The image server's GPU is leased.
 HTTP **409** - That guide is already in your chats
 
 **Fix:** The state conflicts with the request; reload and retry.
+
+## guide_force_signin
+
+<a id="guide_force_signin"></a>
+
+HTTP **403** - force needs a signed-in session
+
+**Fix:** Re-seeding a guide over an existing chat (force) is for a signed-in Admin; a program with the API key can only add a missing guide.
 
 ## guide_needs_atlas
 
@@ -1023,6 +1276,38 @@ HTTP **400** - hidden must be a boolean
 
 **Fix:** Check the request and resend it.
 
+## host_not_allowed
+
+<a id="host_not_allowed"></a>
+
+HTTP **421** - This DisPatch does not answer to that address.
+
+**Fix:** Open DisPatch by one of its own addresses, or add this name to allowed_hosts in security.yaml (Settings > System > Network), or set host_check: log and restart.
+
+## host_owner_only
+
+<a id="host_owner_only"></a>
+
+HTTP **403** - Only the Owner can do this, because it runs programs or reads files on the DisPatch computer.
+
+**Fix:** Ask the Owner to do it.
+
+## household_bots_invalid
+
+<a id="household_bots_invalid"></a>
+
+HTTP **422** - household_bots must be "all" or a list of character ids.
+
+**Fix:** Send "all" or a list of household character ids (GET /api/bots/all).
+
+## household_invalid
+
+<a id="household_invalid"></a>
+
+HTTP **422** - household_bots must be a list of bot ids.
+
+**Fix:** Send "all" (Users only) or a list of household bot ids; Admins use every household bot.
+
 ## image_dimensions_too_large
 
 <a id="image_dimensions_too_large"></a>
@@ -1030,6 +1315,22 @@ HTTP **400** - hidden must be a boolean
 HTTP **400** - Image dimensions too large (max 64 megapixels)
 
 **Fix:** Check the request and resend it.
+
+## image_minor_sexual
+
+<a id="image_minor_sexual"></a>
+
+HTTP **422** - That picture can't be made: images show adults only, and nothing sexual can involve anyone under 18. Rewrite the request with adult characters.
+
+**Fix:** Describe adult characters only. This rule cannot be switched off.
+
+## image_real_person_sexual
+
+<a id="image_real_person_sexual"></a>
+
+HTTP **422** - That picture can't be made: sexual images of real, identifiable people aren't allowed. Remove the real person's name or likeness, or describe an original character instead.
+
+**Fix:** Remove the real person's name or likeness, or describe an original character. This rule cannot be switched off.
 
 ## image_request_failed
 
@@ -1051,9 +1352,9 @@ HTTP **403** - Image requests aren't enabled for {}
 
 <a id="image_unavailable"></a>
 
-HTTP **503** - Image generation isn't configured
+HTTP **503** - Picture making isn't set up (Settings → AI & Connections → Image generation)
 
-**Fix:** Configure an image provider in Settings > AI & Connections > Image generation.
+**Fix:** Set up picture making in Settings → AI & Connections → Image generation.
 
 ## image_undecodable
 
@@ -1077,7 +1378,15 @@ HTTP **409** - A generation is already running
 
 HTTP **403** - Your profile cannot delete pictures
 
-**Fix:** Ask the Owner or an Admin; deleting needs the manage_history permission.
+**Fix:** Ask an Admin; deleting needs the manage_history permission.
+
+## imagestudio_clear_pick_one
+
+<a id="imagestudio_clear_pick_one"></a>
+
+HTTP **422** - Give either a picture id with its order, or a time range
+
+**Fix:** Send a picture id with its order, or a time range, not both and not neither.
 
 ## imagestudio_generation_running_clear
 
@@ -1110,6 +1419,14 @@ HTTP **422** - That is not a picture id
 HTTP **404** - That picture is already gone
 
 **Fix:** Reload Image Studio; the picture was deleted already.
+
+## imagestudio_picture_needs_order
+
+<a id="imagestudio_picture_needs_order"></a>
+
+HTTP **422** - A picture id needs the page's order
+
+**Fix:** Send the picture's order from the page along with its id.
 
 ## imagestudio_pictures_changed
 
@@ -1351,6 +1668,30 @@ HTTP **400** - invalid JSON body
 
 **Fix:** Check the request and resend it.
 
+## kit_chat_invalid
+
+<a id="kit_chat_invalid"></a>
+
+HTTP **422** - A chat needs a title and some text.
+
+**Fix:** Give every household chat a title and a body.
+
+## kit_not_found
+
+<a id="kit_not_found"></a>
+
+HTTP **404** - This bot has no copies to manage.
+
+**Fix:** Turn on managed copies for the bot first (Settings -> Characters -> Copies & chats).
+
+## kit_shipped
+
+<a id="kit_shipped"></a>
+
+HTTP **409** - This bot's copies are managed by DisPatch itself.
+
+**Fix:** Atlas's copies are always kept up to date; switch "Give every profile a copy" off instead.
+
 ## list_index_invalid
 
 <a id="list_index_invalid"></a>
@@ -1359,6 +1700,30 @@ HTTP **400** - list must be a small non-negative integer
 
 **Fix:** Check the request and resend it.
 
+## lock_target_admin
+
+<a id="lock_target_admin"></a>
+
+HTTP **422** - This is the default profile everyone lands on without signing in, so it can't be an Admin.
+
+**Fix:** Make another profile the default first (Settings → People & Access → Default profile), or give the person a profile of their own.
+
+## lock_target_fence
+
+<a id="lock_target_fence"></a>
+
+HTTP **422** - This is the default profile everyone lands on without signing in, so agent bots and voice cloning stay off for it.
+
+**Fix:** Grant it to a profile of its own, or make another profile the default first.
+
+## lock_target_invalid
+
+<a id="lock_target_invalid"></a>
+
+HTTP **422** - Pick a profile that exists and isn't turned off.
+
+**Fix:** Choose a User or Basic profile with no PIN or password that exists and isn't turned off, or the sign-in screen.
+
 ## machine_scope_denied
 
 <a id="machine_scope_denied"></a>
@@ -1366,6 +1731,30 @@ HTTP **400** - list must be a small non-negative integer
 HTTP **403** - This API key is not allowed to call that endpoint.
 
 **Fix:** Send an API key whose machine scopes include the one shown in required_permission (security.yaml machine_scopes).
+
+## maintenance_blocked
+
+<a id="maintenance_blocked"></a>
+
+HTTP **409** - The clean-up is paused while a backup or other upkeep runs.
+
+**Fix:** Wait for the backup or the box maintenance to finish; the task retries on its own every 30 minutes.
+
+## maintenance_running
+
+<a id="maintenance_running"></a>
+
+HTTP **409** - A maintenance run is already in progress.
+
+**Fix:** Wait for it to finish (GET /api/maintenance/status), then run it again if you still need to.
+
+## maintenance_step_unknown
+
+<a id="maintenance_step_unknown"></a>
+
+HTTP **422** - Unknown maintenance step.
+
+**Fix:** Use the step names a dry run (POST /api/maintenance/run with dry_run: true) lists.
 
 ## max_tokens_invalid
 
@@ -1407,6 +1796,14 @@ HTTP **503** - The workflow needs more GPUs than the image server has.
 
 **Fix:** The workflow needs more GPUs than the image server's ComfyUI was started with. Pick a single-GPU workflow or restart the server with more cards.
 
+## no_generated_key
+
+<a id="no_generated_key"></a>
+
+HTTP **404** - This backup uses a passphrase you chose, so there is no generated key to show.
+
+**Fix:** Use the passphrase you set when you turned on scheduled backups.
+
 ## not_a_checklist
 
 <a id="not_a_checklist"></a>
@@ -1423,6 +1820,14 @@ HTTP **400** - Not a directory
 
 **Fix:** Check the request and resend it.
 
+## not_copyable
+
+<a id="not_copyable"></a>
+
+HTTP **422** - This bot runs on an agent and cannot be copied.
+
+**Fix:** Only direct-API household bots can be copied.
+
 ## not_found
 
 <a id="not_found"></a>
@@ -1431,6 +1836,22 @@ HTTP **404** - Not found
 
 **Fix:** Check the address.
 
+## not_managed
+
+<a id="not_managed"></a>
+
+HTTP **422** - This bot is not kept up to date by your household.
+
+**Fix:** Only a copy of a household-managed bot (Atlas, or a bot an Admin manages) can be reset to its default.
+
+## not_shareable
+
+<a id="not_shareable"></a>
+
+HTTP **422** - Only a bot of your own that runs on a direct connection can be shared.
+
+**Fix:** Share one of your own direct bots; copies, agent bots and other people's bots cannot be shared.
+
 ## nothing_to_change
 
 <a id="nothing_to_change"></a>
@@ -1438,6 +1859,86 @@ HTTP **404** - Not found
 HTTP **400** - Nothing to change
 
 **Fix:** Check the request and resend it.
+
+## oidc_config_invalid
+
+<a id="oidc_config_invalid"></a>
+
+HTTP **422** - The sign-in provider settings are not valid.
+
+**Fix:** Check the issuer address (https://), the client id and the scopes (they must include openid).
+
+## oidc_disabled
+
+<a id="oidc_disabled"></a>
+
+HTTP **404** - Sign-in with an outside provider is not turned on.
+
+**Fix:** Ask the Owner to set it up in Settings, or sign in with your PIN or password.
+
+## oidc_failed
+
+<a id="oidc_failed"></a>
+
+HTTP **401** - Sign-in with the outside provider did not work.
+
+**Fix:** Try again. If it keeps failing, sign in with your PIN or password and ask the Owner to check the provider settings.
+
+## oidc_last_credential
+
+<a id="oidc_last_credential"></a>
+
+HTTP **422** - Keep a PIN or password on the Owner profile while an outside sign-in is linked to it.
+
+**Fix:** Unlink the outside sign-in first, or keep a PIN or password.
+
+## oidc_link_conflict
+
+<a id="oidc_link_conflict"></a>
+
+HTTP **409** - That outside account is already linked to another profile.
+
+**Fix:** Unlink it from the other profile first, or link a different account.
+
+## oidc_link_forbidden
+
+<a id="oidc_link_forbidden"></a>
+
+HTTP **403** - This profile cannot be linked to an outside sign-in.
+
+**Fix:** Only an enabled, personal profile can be linked; the shared profile cannot.
+
+## oidc_not_linked
+
+<a id="oidc_not_linked"></a>
+
+HTTP **401** - That outside account is not linked to a profile here.
+
+**Fix:** Sign in with your PIN or password, then link the account from your profile.
+
+## oidc_provider_unreachable
+
+<a id="oidc_provider_unreachable"></a>
+
+HTTP **502** - Could not read the sign-in provider's settings.
+
+**Fix:** Check the issuer address and that the provider is reachable from this computer, then try again.
+
+## oidc_public_url_required
+
+<a id="oidc_public_url_required"></a>
+
+HTTP **422** - Outside sign-in needs an https public address for DisPatch.
+
+**Fix:** Set the Public address (DISPATCH_PUBLIC_URL) to the https:// address people use, then turn it on.
+
+## order_invalid
+
+<a id="order_invalid"></a>
+
+HTTP **422** - The new order lists a bot twice or is not a list of bot ids.
+
+**Fix:** Reload the list and move the bot again.
 
 ## owner_exists
 
@@ -1451,17 +1952,17 @@ HTTP **409** - This install already has an owner.
 
 <a id="owner_immutable"></a>
 
-HTTP **409** - The owner's role cannot be changed.
+HTTP **409** - The Owner's profile type can't be changed.
 
-**Fix:** The owner's role cannot be changed, disabled or deleted here.
+**Fix:** The Owner's profile type can't be changed, turned off or deleted.
 
 ## owner_required
 
 <a id="owner_required"></a>
 
-HTTP **409** - Create the owner account first.
+HTTP **409** - Create the Owner profile first.
 
-**Fix:** Create the owner account first (Settings > Account).
+**Fix:** Create the Owner profile first (Settings → Account).
 
 ## panel_disabled
 
@@ -1483,7 +1984,7 @@ HTTP **400** - Password invalid.
 
 <a id="password_required"></a>
 
-HTTP **409** - Set a password for the owner first.
+HTTP **409** - Set a password for the Owner first.
 
 **Fix:** Set the owner's password first (Settings > Account).
 
@@ -1491,9 +1992,9 @@ HTTP **409** - Set a password for the owner first.
 
 <a id="password_role"></a>
 
-HTTP **409** - Only the Owner and Admins have a password; Members and Restricted profiles use a PIN.
+HTTP **409** - Only Admins have a password; User and Basic profiles use a PIN.
 
-**Fix:** Only the Owner and Admins have a password; Members and Restricted profiles use a PIN.
+**Fix:** Only Admins have a password; User and Basic profiles use a PIN.
 
 ## path_invalid
 
@@ -1517,7 +2018,7 @@ HTTP **413** - File too large
 
 HTTP **403** - Your profile does not have permission to do that.
 
-**Fix:** Ask an Admin or the Owner to grant your profile the permission shown in required_permission.
+**Fix:** Ask an Admin to grant your profile the permission shown in required_permission.
 
 ## permissions_invalid
 
@@ -1525,13 +2026,21 @@ HTTP **403** - Your profile does not have permission to do that.
 
 HTTP **400** - A permission is invalid.
 
-**Fix:** Use the permission names from docs/contracts/permissions.json; a Restricted profile can never hold a management permission.
+**Fix:** Use the permission names from docs/contracts/permissions.json; a profile can only be granted what its type allows (contracts.permissions ROLE_GRANTABLE).
+
+## personal_needs_direct
+
+<a id="personal_needs_direct"></a>
+
+HTTP **409** - This bot has no AI connection, so it can't answer. Pick one in Settings → Characters → Details.
+
+**Fix:** Give the character a connection in its editor (personal characters run on a direct backend only).
 
 ## pin_invalid
 
 <a id="pin_invalid"></a>
 
-HTTP **400** - Pin invalid.
+HTTP **400** - That PIN isn't valid.
 
 **Fix:** Choose a PIN of at least 4 characters.
 
@@ -1627,9 +2136,9 @@ HTTP **403** - Preview not available for this type
 
 <a id="profile_conflict"></a>
 
-HTTP **409** - That profile could not be created (duplicate name or second owner).
+HTTP **409** - That profile couldn't be created: another profile already has that name.
 
-**Fix:** Choose a different name; there is only ever one owner.
+**Fix:** Choose a different name.
 
 ## profile_field_invalid
 
@@ -1663,13 +2172,21 @@ HTTP **404** - No such profile.
 
 **Fix:** Pick a profile from the list; it may have been deleted.
 
+## profile_required
+
+<a id="profile_required"></a>
+
+HTTP **409** - Sign in to a profile first.
+
+**Fix:** Sign in to a profile; machine callers and open installs have no profile of their own.
+
 ## profile_role_invalid
 
 <a id="profile_role_invalid"></a>
 
 HTTP **400** - Unknown role {}.
 
-**Fix:** Use owner, admin, member or restricted.
+**Fix:** Use admin, user or basic (the 3.x words owner, member and restricted are still accepted as input).
 
 ## prompt_bank_malformed
 
@@ -1703,19 +2220,11 @@ HTTP **422** - bad_action: unknown quick action
 
 **Fix:** Fix the fields in detail and resend.
 
-## quiet_hours
-
-<a id="quiet_hours"></a>
-
-HTTP **403** - This profile is not available right now.
-
-**Fix:** This profile is not available at this time of day. Ask the Owner to change quiet hours.
-
 ## rate_limited
 
 <a id="rate_limited"></a>
 
-HTTP **429** - Rate limited.
+HTTP **429** - Too many requests. Wait a moment, then try again.
 
 **Fix:** Slow down and retry after a moment.
 
@@ -1747,9 +2256,9 @@ HTTP **409** - A refresh is already running for this tool
 
 <a id="remember_device_required"></a>
 
-HTTP **403** - Notifications need a remembered device: lock, then unlock with "Remember this device" ticked.
+HTTP **403** - Notifications need a remembered device: sign out, then sign in again with "Keep this device signed in" ticked.
 
-**Fix:** Sign out and in again with "Remember this device" ticked to get notifications.
+**Fix:** Sign out and in again with "Keep this device signed in" ticked to get notifications.
 
 ## reply_in_progress_delete
 
@@ -1767,6 +2276,30 @@ HTTP **409** - Cannot edit messages while a reply is in progress
 
 **Fix:** The state conflicts with the request; reload and retry.
 
+## reset_stale
+
+<a id="reset_stale"></a>
+
+HTTP **409** - What would be deleted has changed. Look at the numbers again before confirming.
+
+**Fix:** Fetch the reset preview again and confirm with its new token.
+
+## retention_invalid
+
+<a id="retention_invalid"></a>
+
+HTTP **422** - That retention setting is not valid.
+
+**Fix:** Send setting keys from GET /api/maintenance/retention with values in range (months 1 to 120, time HH:MM).
+
+## role_change_stale
+
+<a id="role_change_stale"></a>
+
+HTTP **409** - What would be deleted has changed. Look at the numbers again before confirming.
+
+**Fix:** Fetch the role-change preview again and confirm with its new token.
+
 ## route_undeclared
 
 <a id="route_undeclared"></a>
@@ -1775,13 +2308,45 @@ HTTP **403** - This endpoint has no access policy.
 
 **Fix:** This is a bug: the endpoint has no declared permission. Report it; it is refused until it has one.
 
-## safe_mode
+## routes_unavailable
 
-<a id="safe_mode"></a>
+<a id="routes_unavailable"></a>
 
-HTTP **403** - Unlock for full access
+HTTP **503** - That way of connecting Claude isn't set up on the DisPatch computer.
 
-**Fix:** Sign in as a profile that is allowed to do this (Settings > People & Access), or ask the Owner. Restricted profiles and signed-out devices can only chat with characters made for them.
+**Fix:** Set the environment variables it names on the server, then restart DisPatch.
+
+## schedule_invalid
+
+<a id="schedule_invalid"></a>
+
+HTTP **422** - That schedule is not valid.
+
+**Fix:** Use every_minutes (15 or more), daily_at HH:MM or weekly_day_at {day, at}, and a known time zone.
+
+## schedule_limit
+
+<a id="schedule_limit"></a>
+
+HTTP **409** - A profile can have at most 20 schedules.
+
+**Fix:** Delete a schedule you no longer need, then add the new one.
+
+## schedule_not_found
+
+<a id="schedule_not_found"></a>
+
+HTTP **404** - Unknown schedule.
+
+**Fix:** Reload the list; the schedule may have been deleted.
+
+## schedule_owner_only
+
+<a id="schedule_owner_only"></a>
+
+HTTP **403** - Only the schedule's own profile can change it; an Admin may only switch it off or delete it.
+
+**Fix:** Ask the profile that made the schedule to change it.
 
 ## session_key_required
 
@@ -1811,17 +2376,17 @@ HTTP **400** - Invalid settings
 
 <a id="setup_forbidden"></a>
 
-HTTP **403** - Setup is only allowed from this computer or with the setup token.
+HTTP **403** - Set up DisPatch on the computer it runs on, or use the setup code from its log.
 
-**Fix:** Open DisPatch on the computer it runs on, or send the one-time setup token from the server log.
+**Fix:** Open DisPatch on the computer it runs on, or send the one-time setup code from its log.
 
 ## setup_required
 
 <a id="setup_required"></a>
 
-HTTP **403** - This DisPatch has no owner yet. Open it on the computer it runs on, or finish setup with the one-time setup token from the server log.
+HTTP **403** - This DisPatch has no Owner yet. Open it on the computer it runs on, or finish setup with the one-time setup code from its log.
 
-**Fix:** Open DisPatch on the computer it runs on, or finish setup with the one-time setup token printed in the server log (POST /api/auth/setup).
+**Fix:** Open DisPatch on the computer it runs on, or finish setup with the one-time setup code printed in its log (POST /api/auth/setup).
 
 ## signin_required
 
@@ -1829,7 +2394,7 @@ HTTP **403** - This DisPatch has no owner yet. Open it on the computer it runs o
 
 HTTP **401** - Sign in to continue.
 
-**Fix:** Pick your profile and enter your PIN or password. The owner can allow signed-out use with anonymous_access: restricted in security.yaml.
+**Fix:** Pick your profile on the sign-in screen (with its PIN or password if it has one). Unsigned devices land on the default profile only when an Admin has set one (Settings, People: lock target).
 
 ## stalled
 
@@ -1846,6 +2411,14 @@ HTTP **502** - The image render stalled.
 HTTP **404** - Unknown starter pack
 
 **Fix:** List the packs with GET /api/starter-packs.
+
+## stop_sharing_stale
+
+<a id="stop_sharing_stale"></a>
+
+HTTP **409** - Who has a copy of this bot has changed. Look at the numbers again before confirming.
+
+**Fix:** Fetch the stop-sharing preview again and confirm with its new token.
 
 ## storage_limit
 
@@ -1871,13 +2444,21 @@ HTTP **409** - The task cannot do that in its current state.
 
 **Fix:** Reload the task: it may have just finished, or it is still running.
 
-## task_thread_not_allowed
+## template_has_no_copy
 
-<a id="task_thread_not_allowed"></a>
+<a id="template_has_no_copy"></a>
 
-HTTP **409** - Tasks cannot be assigned from a chat that Restricted profiles can read.
+HTTP **409** - That's a household bot and the Owner has no copy of it.
 
-**Fix:** Assign the task from a chat with a character that only Members and above can see, or from the Tasks page.
+**Fix:** Post to the id of the copy, or give the Owner a copy of the household bot (Settings → Characters → Who can use it).
+
+## template_not_chattable
+
+<a id="template_not_chattable"></a>
+
+HTTP **403** - That's a household bot. Chat with your own copy of it.
+
+**Fix:** Open your own copy of the character (the response names it as copy_id when you have one); templates are shared settings, not chats.
 
 ## test_flag_invalid
 
@@ -1935,14 +2516,6 @@ HTTP **500** - Could not update the thread
 
 **Fix:** This is a server fault; check the logs (Settings > System) and retry.
 
-## time_limit
-
-<a id="time_limit"></a>
-
-HTTP **403** - Today's time for this profile is used up.
-
-**Fix:** This profile has used today's time. Ask the Owner to change the limit, or try tomorrow.
-
 ## title_required
 
 <a id="title_required"></a>
@@ -1955,9 +2528,17 @@ HTTP **400** - title required
 
 <a id="too_many_attempts"></a>
 
-HTTP **429** - Too many attempts — wait {}s.
+HTTP **429** - Too many tries. Wait {} seconds, then try again.
 
 **Fix:** Wait the number of seconds in retry_after, then try again.
+
+## too_many_bots
+
+<a id="too_many_bots"></a>
+
+HTTP **409** - A profile can have at most {} bots
+
+**Fix:** Delete one of your bots first.
 
 ## too_many_entries
 
@@ -1966,6 +2547,14 @@ HTTP **429** - Too many attempts — wait {}s.
 HTTP **400** - too many entries
 
 **Fix:** Check the request and resend it.
+
+## too_many_sessions
+
+<a id="too_many_sessions"></a>
+
+HTTP **429** - This profile stays signed in on too many devices. Sign out on one of them (or ask an Admin to sign it out everywhere), then try again.
+
+**Fix:** Sign out of this profile on a device you no longer use (Settings → People & Access → Sign out everywhere), then try again.
 
 ## tool_not_found
 
@@ -2027,9 +2616,9 @@ HTTP **404** - Unknown image job
 
 <a id="unlock_first"></a>
 
-HTTP **403** - Unlock with your PIN first
+HTTP **403** - Sign in as the Owner first
 
-**Fix:** Sign in as the owner first, then retry.
+**Fix:** Sign in as the Owner first, then try again.
 
 ## unsupported_media_type
 
@@ -2038,6 +2627,30 @@ HTTP **403** - Unlock with your PIN first
 HTTP **415** - Reaction images must be PNG, JPEG, GIF, WebP or AVIF
 
 **Fix:** Send a PNG, JPEG, GIF, WebP or AVIF image.
+
+## use_delete_route
+
+<a id="use_delete_route"></a>
+
+HTTP **409** - Delete a profile with POST /api/people/{id}/delete (preview the counts first).
+
+**Fix:** GET /api/people/{id}/delete/preview, then POST /api/people/{id}/delete with its token.
+
+## use_household_route
+
+<a id="use_household_route"></a>
+
+HTTP **409** - Set the household bots with PUT /api/people/{id}/household-bots.
+
+**Fix:** Send the list to PUT /api/people/{id}/household-bots.
+
+## use_role_route
+
+<a id="use_role_route"></a>
+
+HTTP **409** - Change a profile's type with POST /api/people/{id}/role (preview first).
+
+**Fix:** GET /api/people/{id}/role/preview, then POST /api/people/{id}/role with its token.
 
 ## validation_error
 
@@ -2055,13 +2668,21 @@ HTTP **422** - {} needs the voice add-on, which is not installed
 
 **Fix:** Fix the fields in detail and resend.
 
+## voice_not_allowed
+
+<a id="voice_not_allowed"></a>
+
+HTTP **422** - That voice is not available to you.
+
+**Fix:** Pick a built-in voice or one of your own (or a household) cloned voice.
+
 ## wizard_owner_required
 
 <a id="wizard_owner_required"></a>
 
-HTTP **409** - Create the owner account first
+HTTP **409** - Create the Owner profile first: DisPatch won't open to your network until it has one.
 
-**Fix:** Finish step 1 of the setup wizard (the owner account) before this step.
+**Fix:** Finish step 1 of the setup wizard (the Owner profile) before this step.
 
 ## wizard_step_required
 

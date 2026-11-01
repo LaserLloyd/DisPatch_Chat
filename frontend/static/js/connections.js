@@ -9,9 +9,10 @@
 // The server does the real work (address checks, the SSRF guard, the Test); this file only turns its
 // answers into plain sentences and decides what to offer. Pure helpers are exported for the tests.
 
-import { w5 as realApi, errorText } from './w5-api.js?v=1';
-import { t } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
+import { w5 as realApi, errorText } from './w5-api.js?v=3';
+import { api as coreApi } from './api.js?v=37';
+import { t } from './i18n.js?v=5';
+import { el, spriteIcon } from './util.js?v=23';
 
 // ------------------------------------------------------------------ pure
 
@@ -39,14 +40,20 @@ export function describeTest(r) {
   }
 }
 
-/** The stored last_test of a connection, in the same shape. */
-export const describeStored = (c) => describeTest(c.last_test && Object.keys(c.last_test).length ? c.last_test : null);
+/** The stored last_test of a connection, in the same shape. The stored test keeps no model
+ *  list (the connection carries it), so the connection's own list is used. */
+export const describeStored = (c) => describeTest(c.last_test && Object.keys(c.last_test).length
+  ? { ...c.last_test, models: Array.isArray(c.last_test.models) ? c.last_test.models : (c.models || []) }
+  : null);
 
-/** "Used by" as names, at most `max`, then "+N more". `nameOf(id)` maps a character id. */
-export function usedByText(ids, nameOf = (id) => id, max = 5) {
+/** "Used by" as names, at most `max`, then "+N more". `nameOf(id)` maps a character id
+ *  (household characters); `personal` is how many personal bots of other profiles use it
+ *  (a count: their names are not the Admin's to read). */
+export function usedByText(ids, nameOf = (id) => id, max = 5, personal = 0) {
   const list = (ids || []).map((id) => nameOf(id) || id);
-  if (!list.length) return t('cxn.unused');
-  const shown = list.slice(0, max).join(', ');
+  if (!list.length && !(personal > 0)) return t('cxn.unused');
+  // The personal-bot count is always said, after the names and outside the "+N more" cut.
+  const shown = [...list.slice(0, max), ...(personal > 0 ? [t('cxn.personal_bots', { count: personal })] : [])].join(', ');
   return list.length > max
     ? t('cxn.used_by_more', { names: shown, count: list.length - max })
     : t('cxn.used_by', { names: shown });
@@ -115,12 +122,28 @@ function paintResult(box, r, onPickModel) {
   }
 }
 
+/** Is the person the main Admin (the Owner)? 4.3 #31: naming a server environment variable as a
+ *  connection's key, and moving a keyed connection to another server, are the Owner's alone.
+ *  `deps.isProtected` when the shell knows; else GET /api/auth/me; unreadable = not the Owner
+ *  (fail closed: the server refuses with env_key_owner_only either way). */
+export async function resolveProtected(deps = {}) {
+  if (typeof deps.isProtected === 'boolean') return deps.isProtected;
+  const me = typeof deps.me === 'function' ? deps.me : coreApi.me;
+  try { const r = await me(); return !!(r && r.protected); } catch { return false; }
+}
+
+/** The "Only the Owner can ..." line, with its lock icon and a hover title. */
+function ownerNote(key) {
+  return el('span', { class: 'people-field-hint cxn-owner-only', title: t(key) }, [spriteIcon('lock', 12), ` ${t(key)}`]);
+}
+
 /**
  * Mount into `pane`. deps: { api?, toast, confirm(msg, opts), openTab(tab), onChanged(),
- * botName(id) -> the character's display name for "Used by" }
+ * botName(id) -> the character's display name for "Used by", isProtected? }
  */
 export async function mountConnections(pane, deps = {}) {
   const api = deps.api || realApi;
+  const owner = await resolveProtected(deps);
   const toast = deps.toast || (() => {});
   const ask = deps.confirm || (async () => true);
   pane.textContent = '';
@@ -183,7 +206,7 @@ export async function mountConnections(pane, deps = {}) {
       try { await api.deleteConnection(c.id); toast(t('cxn.deleted')); deps.onChanged && deps.onChanged(); load(); }
       catch (e) { toast(errorText(e), true); }
     });
-    const users = usedByText(c.in_use_by, deps.botName);
+    const users = usedByText(c.in_use_by, deps.botName, 5, Number(c.in_use_personal || 0));
     return el('div', { class: 'dev-row cxn-card', dataset: { connection: c.id } }, [
       el('span', { class: 'dev-row-text' }, [
         el('strong', { text: c.name }), ' ', nameSaysType(c) ? null : el('span', { class: 'ui-badge', text: c.type_label }),
@@ -218,6 +241,14 @@ export async function mountConnections(pane, deps = {}) {
     const keyHint = el('span', { class: 'people-field-hint' });
     keyRow.append(keyHint);
     const envRow = el('details', { class: 'cxn-adv' }, [el('summary', { text: t('cxn.key_env_title') }), field(t('cxn.key_env_label'), env, t('cxn.key_env_hint'))]);
+    if (!owner) {
+      // A second Admin may keep the variable a connection already names, never name a new one.
+      env.disabled = true;
+      env.title = t('cxn.owner_only_env');
+      envRow.append(ownerNote('cxn.owner_only_env'));
+    }
+    const urlNote = ownerNote('cxn.owner_only_move');
+    urlNote.hidden = true;
     const clearRow = el('label', { class: 'bkp-check', for: 'cxn-clear', hidden: '' }, [clear, ' ', t('cxn.clear_key')]);
     const save = el('button', { type: 'button', class: 'btn-primary', text: editing ? t('cxn.save') : t('cxn.add_save') });
     const testBtn = el('button', { type: 'button', class: 'btn-secondary', text: t('cxn.test') });
@@ -239,7 +270,7 @@ export async function mountConnections(pane, deps = {}) {
 
     function applyType(resetFields) {
       const d = formDefaults(typeOf());
-      if (resetFields) { name.value = d.name; url.value = d.base_url; env.value = d.keyEnv; paintCaps(d.capabilities); }
+      if (resetFields) { name.value = d.name; url.value = d.base_url; env.value = owner ? d.keyEnv : ''; paintCaps(d.capabilities); }
       keyRow.hidden = !d.needsKey;
       envRow.hidden = !d.needsKey;
       key.required = d.keyRequired && !editing;
@@ -256,6 +287,9 @@ export async function mountConnections(pane, deps = {}) {
       applyType(false);
       key.placeholder = existing.credential.has_key ? t('cxn.key_saved_placeholder') : '';
       clearRow.hidden = !existing.credential.has_key;
+      // Moving a connection that holds a key (stored or a variable) sends that key to the new
+      // server: the Owner's call, unless a new key is typed or the key removed at the same time.
+      urlNote.hidden = owner || !(existing.credential.has_key || existing.credential.kind === 'env');
       (existing.models || []).forEach((m) => modelList.append(el('option', { value: m })));
     } else {
       typeSel.value = (preset && preset.type) || state.types[0].id;
@@ -300,7 +334,7 @@ export async function mountConnections(pane, deps = {}) {
 
     formHost.append(el('div', { class: 'cxn-form dev-group' }, [
       el('h3', { class: 'dev-group-title', text: editing ? t('cxn.edit_title', { name: existing.name }) : t('cxn.add_title') }),
-      field(t('cxn.type'), typeSel), field(t('cxn.name'), name), field(t('cxn.address'), url, t('cxn.address_hint')),
+      field(t('cxn.type'), typeSel), field(t('cxn.name'), name), field(t('cxn.address'), url, t('cxn.address_hint')), urlNote,
       keyRow, envRow, clearRow,
       field(t('cxn.default_model'), model, t('cxn.default_model_hint')), modelList,
       el('fieldset', { class: 'cxn-capfield' }, [el('legend', { text: t('cxn.capabilities') }), caps]),

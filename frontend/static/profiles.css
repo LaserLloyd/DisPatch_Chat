@@ -1,0 +1,395 @@
+/* 4.0 chat-first profiles: styles for the new profile, bot and storage screens.
+ *
+ * One section per frontend package; a package edits ONLY its own section, so
+ * parallel packages never conflict here. Use the theme tokens (var(--...)) from
+ * ui-theme/ and app.css; no hard-coded colours. Loaded by index.html after
+ * app.css. Foundation created the file with empty sections.
+ */
+
+/* ===== WP-FE-CORE: rail Mine / Household, profile switch, sign-in tiles ===== */
+
+/* The rail's two groups: a small label above each. On the phone bots grid the label spans the row. */
+.bot-group-label {
+  align-self: stretch; text-align: center; margin: 2px 0 -4px;
+  font-size: 9px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
+  color: var(--text-muted, var(--text-secondary));
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bot-group-label:not(:first-child) {
+  border-top: 1px solid var(--border-subtle, var(--border-strong)); padding-top: 8px; margin-top: 4px;
+}
+.bot-make-btn {
+  width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center;
+  background: none; color: var(--text-secondary); cursor: pointer;
+  border: 1px dashed var(--border-strong);
+}
+.bot-make-btn:hover, .bot-make-btn:focus-visible { color: var(--text-primary); border-style: solid; }
+.bot-make-btn svg { width: 22px; height: 22px; }
+@media (max-width: 768px) {
+  .app[data-view="bots"] .bot-group-label, .app[data-view="bots"] .bot-make-btn { grid-column: 1 / -1; justify-self: center; }
+  .app[data-view="bots"] .bot-group-label { text-align: start; justify-self: stretch; }
+}
+
+/* Sign-in tiles: the protected / shared marks under the type. */
+.signin-badge { font-size: 11px; color: var(--text-secondary); }
+
+/* ===== WP-FE-YOU: My bots, bot editor, AI build, Reset to default ===== */
+
+/* Body copy inside the three screens: the settings panes' bare <p> renders large. */
+.yo-editor p, [data-anchor="reset"] > p, [data-anchor="mydata"] > p { font-size: 13px; line-height: 1.5; margin: 0 0 10px; }
+[data-anchor="reset"] .ui-btn, [data-anchor="mydata"] .ui-btn { margin-top: 2px; }
+.yo-editor .yo-title, .ar-title { font-size: 15px; }
+
+.mb-list { list-style: none; margin: 0 0 12px; padding: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: hidden; }
+.mb-list:empty { display: none; }
+.mb-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--border-strong); }
+.mb-row:first-child { border-top: 0; }
+.mb-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mb-actions { display: flex; gap: 8px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+
+/* Bot editor and AI build (js/bot-editor.js) */
+.yo-editor { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
+.yo-title { margin: 0; font-size: 16px; color: var(--text-primary); }
+.yo-notice { margin: 0; }
+.yo-row { display: grid; grid-template-columns: 1fr 120px; gap: 12px; }
+.yo-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.yo-label { font-size: 13px; color: var(--text-secondary); }
+.yo-hint { font-size: 12px; }
+.yo-error { color: var(--error-text); font-size: 13px; }
+.yo-banner { padding: 8px 10px; border: 1px solid var(--error); border-radius: var(--radius-sm); }
+.yo-persona, .yo-desc { width: 100%; min-height: 8em; resize: vertical; font: inherit; box-sizing: border-box; }
+.yo-counter { text-align: right; font-size: 12px; margin-top: 4px; }
+.yo-counter.over { color: var(--error-text); }
+.yo-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.yo-foot { justify-content: flex-end; margin-top: 4px; }
+.yo-preview { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; background: var(--bg-tertiary); display: block; }
+.yo-preview-box { margin-bottom: 4px; }
+.yo-pick-grid { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
+.yo-pick-grid[hidden] { display: none; }
+.yo-pick { padding: 0; border: 2px solid transparent; border-radius: 50%; background: none; cursor: pointer; line-height: 0; }
+.yo-pick:hover, .yo-pick:focus-visible { border-color: var(--accent); }
+.yo-pick img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; }
+
+/* Reset to default and My data (js/account-reset.js) */
+.ar-confirm { margin: 12px 0; padding: 14px; border: 1px solid var(--error); border-radius: var(--radius-md); background: var(--bg-secondary); display: flex; flex-direction: column; gap: 8px; }
+.ar-confirm[hidden] { display: none; }
+.ar-title { margin: 0; font-size: 15px; color: var(--text-primary); }
+.ar-line { margin: 0; font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
+.ar-status { margin-top: 8px; font-size: 13px; color: var(--text-secondary); }
+
+@media (max-width: 560px) {
+  .yo-row { grid-template-columns: 1fr; }
+  .mb-row { flex-wrap: wrap; }
+  .mb-actions { width: 100%; justify-content: flex-start; }
+}
+
+/* ===== WP-FE-PEOPLE: People & Access types, permissions, lock target ===== */
+
+/* The confirmation dialog with counts (downgrade, reset, delete). Sits above Settings. */
+.pe-backdrop { position: fixed; inset: 0; z-index: 400; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(0, 0, 0, .55); }
+.pe-dialog { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg); width: min(440px, 100%); max-height: 90vh; overflow-y: auto; padding: 18px 20px;
+  box-shadow: var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, .6)); display: flex; flex-direction: column; gap: 10px; }
+.pe-dialog-title { margin: 0; font-size: 16px; }
+.pe-dialog-body, .pe-dialog-note { margin: 0; font-size: 13.5px; line-height: 1.45; }
+.pe-dialog-note { color: var(--text-secondary); font-size: 12.5px; }
+.pe-tally { list-style: none; margin: 4px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 8px; }
+.pe-tally li { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 6px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-tertiary);
+  font-size: 12px; color: var(--text-secondary); text-align: center; }
+.pe-tally-n { font-size: 22px; line-height: 1.1; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.pe-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.pe-dialog-actions .btn-primary.danger { background: var(--error); border-color: var(--error); color: var(--on-error-fill); }
+
+/* Permissions, household bots, backends, lock target (inside the People editor). */
+.pe-lower { display: flex; flex-direction: column; gap: 4px; }
+.pe-perms, .pe-household, .pe-backends { margin: 8px 0 0; padding: 0; border: 0; min-inline-size: 0; }
+.pe-perms .dev-group-title, .pe-household .dev-group-title, .pe-backends .dev-group-title { margin: 0 0 4px; padding: 0; float: none; }
+.pe-perm { align-items: flex-start; }
+.pe-perm-locked { opacity: .8; }
+.pe-perm .dev-row-text { display: flex; flex-direction: column; gap: 2px; }
+.pe-tag { align-self: flex-start; margin-block: 2px; }
+.pe-warn { color: var(--warning-text, var(--error-text)); font-weight: 600; }
+.pe-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0 0; }
+.pe-radios { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
+.pe-radio { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.pe-household-list { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; padding: 6px 10px; }
+.pe-fence-note { margin: 0 0 6px; }
+.pe-hb { display: flex; align-items: center; gap: 8px; font-size: 13.5px; padding: 3px 2px; }
+.people-lock .pe-lock-row { gap: 12px; flex-wrap: wrap; justify-content: space-between; }
+.pe-lock-label { display: inline-flex; align-items: center; gap: 8px; color: var(--text-primary); }
+.pe-lock-pick { max-width: 220px; }
+.pe-fence { margin: 6px 18px 0; }
+.people-warn { color: var(--warning-text, var(--error-text)); font-weight: 600; }
+.people-protected, .people-lockscreen { margin-inline-start: 6px; }
+.people-disclosure { margin-top: 0; }
+
+/* Copies & chats (js/bot-kits.js, 4.1 managed bots) */
+.chr-kit { margin-top: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.chr-kit .cxn-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chr-kit .kit-copies { margin: 0; font-size: 13px; }
+.chr-kit .kit-sub { margin: 6px 0 0; font-size: 13px; color: var(--text-primary); }
+.chr-kit .kit-chats { margin: 0; }
+.chr-kit .kit-chats .mb-text span { font-size: 12px; }
+.chr-kit .kit-form { display: flex; flex-direction: column; gap: 10px; padding: 0; }
+.chr-kit .kit-body { width: 100%; min-height: 120px; resize: vertical; box-sizing: border-box; }
+
+/* ===== WP-UIREV: review fixes (wave 3) ===== */
+
+/* Buttons that hold a sprite icon and a label: one line, centred, a steady gap. */
+.btn-primary:has(> svg.rail-icon), .btn-secondary:has(> svg.rail-icon), .ui-btn:has(> svg.rail-icon) {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+}
+.btn-primary > svg.rail-icon, .btn-secondary > svg.rail-icon, .ui-btn > svg.rail-icon { flex: none; }
+
+/* Sprite icons in places the old glyph font-size rules used to size. The width/height
+   attributes are the fallback; these keep one weight and scale per context. */
+.dash-banner-dot .rail-icon, .dash-finding-pill .rail-icon { width: 14px; height: 14px; }
+.health-card-glyph .rail-icon { width: 22px; height: 22px; }
+.needs-glyph .rail-icon, .step-glyph .rail-icon, .waiting-glyph .rail-icon, .chip-glyph .rail-icon { width: 14px; height: 14px; vertical-align: -2px; }
+.theme-check .rail-icon, .qm-check .rail-icon, .wizard-dot .rail-icon, .typing-hint .rail-icon, .hs-step .rail-icon { width: 12px; height: 12px; vertical-align: -1px; }
+.alt-btn .rail-icon, .link-viewer-mark .rail-icon, .site-link-ext .rail-icon, .tools-item-ext .rail-icon { width: 14px; height: 14px; }
+.list-chevron .rail-icon, .tools-menu-chevron .rail-icon { width: 16px; height: 16px; }
+.empty-emoji .rail-icon { width: 48px; height: 48px; opacity: .8; }
+/* Direction-bearing chevrons mirror in right-to-left languages. */
+[dir="rtl"] .list-chevron .rail-icon, [dir="rtl"] .alt-btn .rail-icon, [dir="rtl"] .hs-step .rail-icon,
+[dir="rtl"] .tools-menu-chevron .rail-icon { transform: scaleX(-1); }
+
+/* Sign-in tiles centre when they wrap, so a lone last tile is not stranded at the start. */
+.signin-tiles { display: flex; flex-wrap: wrap; justify-content: center; }
+.signin-tiles > li { flex: 0 0 min(124px, calc(50% - 5px)); min-width: 0; }
+
+/* Arrange the bar: both move buttons the same width so the columns line up. */
+.rail-arrange-row > .rail-arrange-btn:last-child { min-width: 7.5rem; }
+
+/* Menu items without an icon (a bot's "Make my own copy") line up with the ones that have one. */
+.menu > button:not(:has(> .icn, > svg)) { padding-inline-start: 36px; }
+
+/* The count tiles in the confirmation dialogs sit in one row even at phone width. */
+.pe-tally { grid-template-columns: repeat(auto-fit, minmax(62px, 1fr)); }
+
+/* Tools & more: the label column starts at the same place for tools, buttons and Arrange. */
+.tools-arrange { padding-inline-start: 46px; }
+
+/* ===== WP-SCALE-FE: thread pager, Archived view, load earlier, Storage and image cards ===== */
+
+/* The rail's "Show more" row and the Archived view. */
+.thread-more { display: flex; justify-content: center; padding: 10px 6px 14px; }
+.thread-more-btn, .load-earlier-btn { min-height: 36px; }
+.archived-head { display: flex; align-items: center; gap: 10px; padding: 4px 4px 10px; flex-wrap: wrap; }
+.archived-back { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; }
+.archived-back > svg.rail-icon { width: 16px; height: 16px; }
+.archived-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.thread-unarchive {
+  align-self: flex-start; margin-top: 6px; padding: 4px 10px; min-height: 30px; cursor: pointer;
+  font: inherit; font-size: 12px; color: var(--text-secondary);
+  background: none; border: 1px solid var(--border-strong); border-radius: var(--radius-sm, 8px);
+}
+.thread-unarchive:hover, .thread-unarchive:focus-visible { color: var(--text-primary); border-color: var(--accent); }
+#archived-btn.active { color: var(--accent-text, var(--accent)); background: var(--bg-tertiary); }
+
+/* A long thread: the top-of-list "Load earlier" row, and the spacers that stand in for rows that are not painted. */
+.load-earlier { display: flex; justify-content: center; padding: 4px 0 12px; }
+.win-gap { display: block; flex: none; pointer-events: none; }
+/* Rows are laid out for real: with content-visibility:auto an unseen row is an 80px guess until it scrolls
+ * into view, and the list jumps by the difference. The window above keeps the row count near 300, so the
+ * saving it was after is already made. */
+.messages > .msg { content-visibility: visible; }
+
+/* An image the retention setting removed. */
+.media-expired {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  padding: 10px 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius-md);
+  color: var(--text-muted, var(--text-secondary)); font-size: 13px; background: var(--bg-secondary, transparent);
+}
+.media-expired > svg.rail-icon { flex: none; }
+.media-expired-text { overflow-wrap: anywhere; }
+
+/* Settings -> System: Storage and Generated images. */
+.sys-cleanup { display: contents; }
+.storage-card, .retention-card, .archive-after { max-width: 640px; }
+.storage-areas { list-style: none; margin: 8px 0 6px; padding: 0; display: grid; gap: 6px; }
+.storage-area { display: grid; grid-template-columns: minmax(96px, 36%) 1fr 4.5em; gap: 10px; align-items: center; font-size: 13px; }
+.storage-area-name { color: var(--text-primary); overflow-wrap: anywhere; }
+.storage-area-bar { height: 8px; border-radius: 4px; background: var(--bg-tertiary); overflow: hidden; }
+.storage-area-fill { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.storage-area-size { color: var(--text-secondary); font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
+.storage-free { margin: 4px 0 10px; font-size: 13px; color: var(--text-secondary); }
+.storage-run p { margin: 4px 0; font-size: 13px; }
+.storage-lastrun.failed { color: var(--error-text); }
+.storage-steps { list-style: none; margin: 6px 0 8px; padding: 0; display: grid; gap: 2px; font-size: 12px; }
+.storage-step { display: flex; gap: 10px; justify-content: space-between; padding: 3px 0; border-top: 1px solid var(--border-subtle, var(--border-strong)); }
+.storage-step-name { color: var(--text-secondary); text-transform: capitalize; flex: none; }
+.storage-step-note { color: var(--text-muted, var(--text-secondary)); text-align: end; overflow-wrap: anywhere; }
+.storage-step.failed .storage-step-name, .storage-step.failed .storage-step-note { color: var(--error-text); font-weight: 600; }
+.storage-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.storage-stray-h { margin: 14px 0 2px; font-size: 13px; }
+.storage-stray-list { margin: 4px 0 0; padding-inline-start: 18px; font-size: 12px; overflow-wrap: anywhere; }
+.retention-row, .archive-after-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
+.retention-months-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.retention-row .ui-select, .archive-after-row .ui-select { width: auto; min-width: 9em; max-width: 100%; }
+.retention-row .ui-input.retention-months { width: 6em; }
+.retention-months-unit { font-size: 14px; color: var(--text-secondary); }
+.retention-months[aria-invalid="true"] { border-color: var(--error); }
+.retention-result { min-height: 1.4em; margin: 6px 0; font-size: 13px; }
+.retention-result p { margin: 2px 0; }
+.retention-error { color: var(--error-text); }
+.archive-after-label { color: var(--text-primary); font-size: 14px; }
+@media (max-width: 480px) {
+  .storage-area { grid-template-columns: 1fr auto; }
+  .storage-area-bar { grid-column: 1 / -1; grid-row: 2; }
+}
+
+/* ---- 4.2 Settings -> Characters (js/characters-page.js): Mine | Household ----
+   Sized by the page's own container, never the viewport, so it also works in a resizable
+   Settings window. Colours are theme tokens only (dark and light follow the palette). */
+.cp-host { container-type: inline-size; container-name: cp; }
+/* 4.4: the tabs are a full-width bar of two big choices (icon, label, count, a one-line hint),
+   the selected one filled with --selected / --on-selected, the other a visible outlined button. */
+.cp-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; margin: 0 0 14px;
+  padding: 4px; border: 1px solid var(--border-strong, var(--border)); border-radius: var(--radius-md);
+  background: var(--surface-3); overflow: visible; }
+.cp-tabs .ui-tab.cp-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  min-height: 56px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-secondary, var(--surface-2)); color: var(--text-primary); white-space: normal; text-align: center;
+  box-shadow: none; transition: background-color .12s ease, color .12s ease; }
+.cp-tabs .ui-tab.cp-tab:hover { background: var(--surface-2); border-color: var(--border-strong, var(--border)); }
+.cp-tabs .ui-tab.cp-tab[aria-selected="true"] { background: var(--selected); border-color: var(--selected);
+  color: var(--on-selected); font-weight: var(--fw-semibold); box-shadow: 0 1px 3px rgba(0, 0, 0, .25); }
+.cp-tabs .ui-tab.cp-tab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.cp-tab-top { display: inline-flex; align-items: center; gap: 7px; font-size: 15px; font-weight: var(--fw-semibold); }
+.cp-tab-top .rail-icon { flex: none; }
+.cp-tab-hint { font-size: 12px; line-height: 1.3; color: var(--text-secondary); font-weight: normal; }
+.cp-tab[aria-selected="true"] .cp-tab-hint { color: inherit; opacity: .9; }
+.cp-count { margin-inline-start: 2px; padding: 0 7px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--text-secondary); font-size: 12px; line-height: 1.6; font-weight: var(--fw-semibold); }
+.cp-tab[aria-selected="true"] .cp-count { background: var(--on-selected); color: var(--selected); }
+@container cp (max-width: 420px) {
+  .cp-tabs .ui-tab.cp-tab { min-height: 52px; padding: 6px 6px; }
+  .cp-tab-top { font-size: 14px; gap: 5px; }
+  .cp-tab-hint { font-size: 11.5px; }
+}
+@media (forced-colors: active) {
+  .cp-tabs .ui-tab.cp-tab { border: 1px solid ButtonText; }
+  .cp-tabs .ui-tab.cp-tab[aria-selected="true"] { border: 3px solid Highlight; }
+}
+/* 4.4: starter packs on Household - one card per pack, each opens the Add-a-pack dialog. */
+.cp-packs { margin: 0 0 14px; padding: 12px; border: 1px dashed var(--border-strong, var(--border)); border-radius: var(--radius-md); }
+.cp-packs[hidden] { display: none; }
+.cp-packs-title { margin: 0 0 2px; font-size: 14px; }
+.cp-packs-hint { margin: 0 0 10px; font-size: 12.5px; }
+.cp-packs-row { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.cp-pack-card { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px;
+  border: 1px solid var(--border-strong, var(--border)); border-radius: var(--radius-md); background: var(--bg-tertiary, var(--surface-2));
+  color: var(--text-primary); font: inherit; text-align: start; cursor: pointer; }
+.cp-pack-card:hover { border-color: var(--selected); }
+.cp-pack-card:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.cp-pack-faces { font-size: 20px; line-height: 1.2; letter-spacing: 2px; }
+.cp-pack-name { font-weight: var(--fw-semibold); font-size: 14px; }
+.cp-pack-sum { font-size: 12.5px; color: var(--text-secondary); }
+.cp-pack-go { margin-top: 4px; font-size: 13px; color: var(--text-link); font-weight: var(--fw-semibold); }
+/* The Add-a-pack dialog (js/pack-dialog.js): the People dialog, wider, with a scrolling list. */
+.pe-dialog.pk-dialog { width: min(560px, 100%); }
+.pk-all label { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: var(--fw-semibold); cursor: pointer; }
+.pk-list { list-style: none; margin: 0; padding: 0; max-height: min(46vh, 420px); overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.pk-row + .pk-row { border-top: 1px solid var(--border); }
+.pk-label { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; cursor: pointer; }
+.pk-row--added .pk-label { cursor: default; }
+.pk-row--added .pk-text { color: var(--text-secondary); }
+.pk-pic { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; background: var(--surface-3); border: 2px solid var(--pk-color, var(--border)); }
+.pk-emoji { display: inline-flex; align-items: center; justify-content: center; font-size: 24px; }
+.pk-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pk-name { font-size: 14px; }
+.pk-desc { font-size: 12.5px; line-height: 1.35; color: var(--text-secondary); }
+.pk-conn { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.pk-conn .ui-select { width: auto; min-width: 12em; max-width: 100%; }
+.pk-status:empty { display: none; }
+.pk-status { margin: 0; font-size: 13px; color: var(--error-text); }
+@media (max-width: 480px) {
+  .pk-label { grid-template-columns: auto auto minmax(0, 1fr); }
+  .pk-added { grid-column: 3; justify-self: start; }
+  .pk-dialog .pe-dialog-actions > button { flex: 1 1 auto; }
+}
+.cp-lead { margin: 0 0 12px; font-size: 13px; line-height: 1.5; }
+.cp-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.cp-toolbar[hidden], .cp-add-slot:empty { display: none; }
+.cp-add-slot { margin: 0 0 12px; }
+.cp-add-slot .chars-head { margin: 0; }
+.cp-add-slot .chars-toolbar { padding: 0; }
+.cp-add-slot .chars-add-host { margin: 0; }
+.cp-find { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; }
+.cp-filters { flex: none; max-width: 100%; overflow-x: auto; }
+.cp-chip { min-height: 36px; }
+.cp-search { flex: 1 1 160px; min-width: 0; }
+.cp-empty { margin: 8px 0 14px; }
+.cp-list { list-style: none; margin: 0 0 12px; padding: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: hidden; }
+.cp-list:empty { display: none; }
+.cp-row { border-top: 1px solid var(--border-strong); }
+.cp-row:first-child { border-top: 0; }
+.cp-row--hidden .cp-avatar, .cp-row--hidden .cp-name { opacity: .6; }
+.cp-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; }
+.cp-avatar { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex: none; background: var(--bg-tertiary); }
+.cp-avatar-emoji { display: inline-flex; align-items: center; justify-content: center; font-size: 22px; }
+.cp-text { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cp-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.cp-name { color: var(--text-primary); font-size: 15px; overflow-wrap: anywhere; }
+.cp-pill { font-weight: 600; font-size: 12px; padding: 2px 10px 2px 8px; }
+.cp-pill .rail-icon { flex: none; }
+.cp-sub { font-size: 12px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cp-sub:empty { display: none; }
+.cp-icons { display: flex; flex-wrap: wrap; gap: 4px; }
+.cp-icons:empty { display: none; }
+.cp-ico { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2); color: var(--text-secondary); border: 1px solid var(--border-strong); }
+.cp-actions { display: flex; align-items: center; gap: 6px; flex: none; position: relative; margin-inline-start: auto; }
+.cp-quick { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.cp-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; min-width: 36px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-primary); font: inherit; font-size: 13px; cursor: pointer; }
+.cp-btn:hover { background: var(--bg-tertiary); }
+.cp-btn--primary { border-color: var(--accent); }
+.cp-btn--primary .cp-btn-text { font-weight: 600; }
+.cp-btn:focus-visible, .cp-who-chip:focus-visible, .cp-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cp-btn[aria-pressed="false"] { color: var(--text-secondary); }
+.cp-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-subtle); color: var(--text-primary); }
+.cp-row--cta { background: var(--accent-subtle); border: 1px solid var(--accent); border-radius: var(--radius-md); margin-block: 6px; }
+.cp-cta-btn { min-height: 40px; padding-inline: 16px; background: var(--accent); color: var(--on-accent, #fff); }
+.cp-cta-btn:hover { background: var(--accent); filter: brightness(1.08); }
+.cp-menu { position: absolute; inset-inline-end: 0; top: 100%; z-index: 20; min-width: 200px; }
+.cp-details { padding: 4px 12px 14px; border-top: 1px dashed var(--border-strong); background: var(--bg-secondary, transparent); }
+.cp-detail-body { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; }
+.cp-group { margin: 0; padding: 10px 12px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); min-inline-size: 0; display: flex; flex-direction: column; gap: 8px; }
+.cp-legend { padding: 0 6px; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.cp-persona { min-height: 110px; resize: vertical; width: 100%; box-sizing: border-box; }
+.cp-who { display: flex; flex-wrap: wrap; gap: 8px; }
+.cp-who-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 12px 4px 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text-secondary); font: inherit; font-size: 13px; cursor: pointer; }
+.cp-who-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-subtle); color: var(--text-primary); }
+.cp-who-chip[aria-pressed="true"]::after { content: "\2713"; font-weight: 700; color: var(--accent); }
+.cp-face { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex: none; background: var(--bg-tertiary); }
+.cp-face-text { display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.cp-copy-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+/* 4.3: reorder (grip + Move up/down), Tools & more tag, menu icons, the add-on slot. */
+.cp-handle { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; min-height: 44px; margin-inline-start: -6px; color: var(--text-secondary); cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; border-radius: var(--radius-sm); }
+.cp-handle:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+.cp-row--dragging { opacity: .55; }
+.cp-row--dragging .cp-handle { cursor: grabbing; }
+.cp-drop-before { box-shadow: inset 0 3px 0 var(--accent); }
+.cp-drop-after { box-shadow: inset 0 -3px 0 var(--accent); }
+.cp-reorder-hint { margin: 0 0 10px; font-size: 12.5px; }
+.cp-parked-tag { display: inline-flex; align-items: center; gap: 4px; }
+.cp-menu .cp-menu-item { display: flex; align-items: center; gap: 6px; }   /* text lines up with the icon-less items (36px) */
+.cp-menu .cp-menu-item .rail-icon { flex: none; }
+.cp-ext-slot { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+
+/* Narrow container (a phone, or a small Settings window): the actions drop under the text and
+   the quick buttons keep their icons only. */
+@container cp (max-width: 560px) {
+  .cp-head { flex-wrap: wrap; }
+  .cp-actions { flex: 1 0 100%; justify-content: space-between; }
+  .cp-quick { justify-content: flex-start; }
+  .cp-btn-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .cp-btn { min-width: 44px; min-height: 44px; padding: 0 10px; }
+  .cp-details-btn .cp-btn-text, .cp-btn--primary .cp-btn-text { position: static; width: auto; height: auto; clip-path: none; overflow: visible; }
+  .cp-menu { inset-inline-start: auto; }
+}
+@container cp (min-width: 900px) {
+  .cp-detail-body { display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
+  .cp-detail-body > .cp-group[data-group="who"], .cp-detail-body > .cp-copies, .cp-detail-body > .cxn-actions, .cp-detail-body > .lock-error, .cp-detail-body > .chr-kit-host, .cp-detail-body > p { grid-column: 1 / -1; }
+}

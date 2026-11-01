@@ -1,11 +1,11 @@
 // Markdown -> sanitized HTML, plus code highlighting and image handling.
 // Relies on globals provided by vendored scripts: marked and DOMPurify load
 // with the document; hljs is fetched on demand (see ensureHighlighter).
-import { loadScript, loadStyle, escapeHtml } from './util.js?v=20';
+import { loadScript, loadStyle, escapeHtml, spriteIconHtml } from './util.js?v=23';
 // markdown.js builds HTML as STRINGS rather than DOM nodes, so the two
 // user-facing attributes below can't be reached by the data-i18n pass — they are
 // translated inline instead. i18n.js imports nothing, so there is no cycle.
-import { t } from './i18n.js?v=4';
+import { t } from './i18n.js?v=5';
 //
 // The rendering rules here are a port of the OpenClaw Control UI's markdown
 // module (openclaw 2026.7.1, `dist/control-ui/assets/markdown-*.js`) so the same
@@ -392,17 +392,17 @@ const TEX_CHARS = {
   Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Xi: 'Ξ', Pi: 'Π',
   Sigma: 'Σ', Upsilon: 'Υ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
   times: '×', div: '÷', pm: '±', mp: '∓', cdot: '·', ast: '∗', star: '⋆',
-  approx: '≈', sim: '∼', simeq: '≃', cong: '≅', equiv: '≡', propto: '∝',
+  approx: '≈', sim: '∼', simeq: '≃', cong: '≅', equiv: '≡', propto: '∝',  // forgeui: allow-icons
   neq: '≠', ne: '≠', leq: '≤', le: '≤', geq: '≥', ge: '≥', ll: '≪', gg: '≫',
   infty: '∞', partial: '∂', nabla: '∇', sum: '∑', prod: '∏', int: '∫',
   sqrt: '√', angle: '∠', perp: '⊥', parallel: '∥', degree: '°', deg: '°',
-  rightarrow: '→', to: '→', longrightarrow: '⟶', leftarrow: '←', gets: '←',
+  rightarrow: '→', to: '→', longrightarrow: '⟶', leftarrow: '←', gets: '←',  // forgeui: allow-icons
   leftrightarrow: '↔', Rightarrow: '⇒', implies: '⇒', Leftarrow: '⇐',
-  Leftrightarrow: '⇔', iff: '⇔', uparrow: '↑', downarrow: '↓', mapsto: '↦',
+  Leftrightarrow: '⇔', iff: '⇔', uparrow: '↑', downarrow: '↓', mapsto: '↦',  // forgeui: allow-icons
   in: '∈', notin: '∉', ni: '∋', subset: '⊂', subseteq: '⊆', supset: '⊃',
   supseteq: '⊇', cup: '∪', cap: '∩', emptyset: '∅', varnothing: '∅',
   forall: '∀', exists: '∃', nexists: '∄', neg: '¬', land: '∧', lor: '∨',
-  therefore: '∴', because: '∵', ldots: '…', dots: '…', cdots: '⋯',
+  therefore: '∴', because: '∵', ldots: '…', dots: '…', cdots: '⋯',  // forgeui: allow-icons
   quad: ' ', qquad: '  ', ',': ' ', ';': ' ', '%': '%', '&': '&', '_': '_',
   '$': '$', '#': '#', '{': '{', '}': '}',
 };
@@ -579,11 +579,11 @@ function expandDocDirectives(text, parker) {
     const eid = attrEscape(encodeURIComponent(fid));
     const dlUrl = `/api/files/${eid}/download`;
     const rawUrl = `/api/files/${eid}/raw`;
-    return `\n\n${parker.park(`<div class="doc-card"><span class="md-doc-icon" aria-hidden="true"></span><a href="${dlUrl}" download="${attrEscape(fname)}" target="_blank" class="doc-link">${attrEscape(fname)}</a><a href="${rawUrl}" target="_blank" class="doc-preview-link" title="${attrEscape(t('msg.view_raw'))}"><span class="md-doc-icon eye-icon" aria-hidden="true"></span></a></div>`)}\n\n`;
+    return `\n\n${parker.park(`<div class="doc-card"><span class="md-doc-icon" aria-hidden="true"></span><a href="${dlUrl}" download="${attrEscape(fname)}" target="_blank" class="doc-link">${attrEscape(fname)}</a><a href="${rawUrl}" target="_blank" class="doc-preview-link" title="${attrEscape(t('msg.view_raw'))}" aria-label="${attrEscape(t('msg.view_raw'))}"><span class="md-doc-icon eye-icon" aria-hidden="true"></span></a></div>`)}\n\n`;
   }));
 }
 
-// Strip media from the markdown SOURCE — for Safe Mode. Removing media before
+// Strip media from the markdown SOURCE — for No-Image Mode. Removing media before
 // parsing matters: assigning innerHTML containing an <img> starts the network
 // fetch immediately, even on a detached node, so post-render removal would
 // still hit the server / disk cache.
@@ -648,9 +648,9 @@ export function parseFilePath(value) {
 // spellings become a file link: a bare path in prose, `[[view:/p|label]]`, and
 // a markdown link whose href is a local path.
 //
-// UNLOCKED ONLY. `noLocal` (renderMarkdown/enhanceContent option, set from
-// state.decoy) is the client half of the gate; the server 403s every viewer
-// route for a decoy session independently. Neither half is sufficient — and a
+// ADMINS ONLY. `noLocal` (renderMarkdown/enhanceContent option, set for anyone
+// but an Admin) is the client half of the gate; the server 403s every viewer
+// route for a non-Admin independently. Neither half is sufficient — and a
 // local href left in place would navigate the APP's own origin, which is why
 // the suppressed form is plain text/span rather than "a link that 404s".
 const LOCAL_ROOTS = 'var|home|tmp|mnt|opt|srv|media|run\\/media|Users|root';
@@ -970,7 +970,7 @@ function expandViewDirectives(text, parker, noLocal) {
   return subOutsideCode(text, (seg) => seg.replace(/\[\[view:([^\]|]+)(?:\|([^\]]*))?\]\]/g, (_, p, label) => {
     const path = stripFileScheme(p.trim());
     const shown = (label || '').trim() || shortenHome(path);
-    // Safe Mode: the directive degrades to its label as plain text. Leaving
+    // noLocal (a non-Admin): the directive degrades to its label as plain text. Leaving
     // the raw `[[view:…]]` would show the reader syntax instead of words.
     if (noLocal) return shown;
     const card = `<div class="doc-card view-card"><span class="md-doc-icon eye-icon" aria-hidden="true"></span>` +
@@ -1197,7 +1197,8 @@ function renderChecklist(md) {
 const CALLOUT_RE =
   /^\s*<p>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(?:<br\s*\/?>\s*)?/i;
 const CALLOUT_ICONS = {
-  note: 'ℹ️', tip: '💡', important: '❗', warning: '⚠️', caution: '🛑',
+  note: spriteIconHtml('info', 16), tip: spriteIconHtml('info', 16), important: spriteIconHtml('triangle-alert', 16),
+  warning: spriteIconHtml('triangle-alert', 16), caution: spriteIconHtml('circle-x', 16),
 };
 
 // --- marked renderer overrides (Control UI parity) -------------------------
@@ -1247,7 +1248,7 @@ function ensureRenderer() {
       // file grammar declines it — but it is exactly what the viewer opens as a
       // listing, and it is what agents write when they name a folder.
       const f = parseFilePath(decoded) || parseLocalDir(decoded);
-      // Safe Mode produces no local affordance at all: plain quoted code.
+      // noLocal (a non-Admin) produces no local affordance at all: plain quoted code.
       if (!f || _noLocal) return html;
       return fileLinkHtml(f.path, f.line, html);
     },
@@ -1592,6 +1593,7 @@ function enhanceTable(table) {
     const grip = document.createElement('span');
     grip.className = 'md-th-resize';
     grip.setAttribute('aria-hidden', 'true');
+    grip.title = t('md.resize_column');
     grip.addEventListener('pointerdown', (e) => {
       if (e.button !== undefined && e.button !== 0) return;
       e.preventDefault(); e.stopPropagation();
@@ -1635,7 +1637,7 @@ export function enhanceContent(container, { noLocal = false } = {}) {
   // renderer already handles the common case; this is the backstop, and the
   // ONLY place that can catch an href the sanitizer left navigable.
   //
-  // `/var/x` matches ALLOWED_URI_REGEXP, so without this a Safe-Mode session
+  // `/var/x` matches ALLOWED_URI_REGEXP, so without this a non-Admin session
   // would be offered a link that navigates the APP's origin to a path that
   // isn't a route. Under noLocal the anchor is replaced by a plain span: the
   // words survive, the affordance does not.
@@ -1730,10 +1732,11 @@ export function enhanceContent(container, { noLocal = false } = {}) {
     // picture did nothing at all. Chat media is stored once, so the original
     // is the same URL — the affordance is what was missing, not the file.
     //
-    // Nothing to gate on here: when media is not allowed (Safe Mode, NIM) the
+    // Nothing to gate on here: when media is not allowed (No-Image Mode) the
     // sanitizer has already stripped <img> from the allowed tags, so an image
     // that exists at this point is one the viewer is permitted to open.
     if (!img.dataset.full && norm) img.dataset.full = norm;
+    if (img.dataset.full && !img.title) img.title = t('msg.open_picture');
   });
   // Inline videos: normalize src and give them the gif treatment (muted
   // autoplay loop). Sound/controls live in the lightbox (click to open).
@@ -1798,7 +1801,7 @@ export function installMarkdownHandlers(onToast, { onOpenFile } = {}) {
     }
     // Upstream opens a side panel here; DisPatch has the Local Viewer, so a
     // plain click OPENS the path and the modifier/long-press keeps the old
-    // copy. Without an onOpenFile (Safe Mode, or a host that has no viewer)
+    // copy. Without an onOpenFile (a non-Admin, or a host that has no viewer)
     // copying stays the only behaviour.
     const fileLink = e.target.closest?.('a[data-file-path]');
     if (fileLink) {

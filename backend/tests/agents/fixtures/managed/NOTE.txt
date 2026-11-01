@@ -1,0 +1,5 @@
+Synthetic Managed Agents recordings for tests/agents/test_i43_managed_adapter.py.
+
+They follow the event shapes documented for the managed-agents-2026-04-01 beta (SSE, one
+`event:`/`data:` pair per event). They were NOT captured from the live service: the adapter is
+off by default and unverified live until it is run with a real key.

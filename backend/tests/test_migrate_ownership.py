@@ -10,11 +10,13 @@ import asyncio
 import hashlib
 import json
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 import yaml
 
 from app import accounts, auth, characters, config, migrate, policy
+from app.contracts.permissions import Role
 
 PUSH_KEYS = {"remembered": "a" * 64, "legacy": "b" * 64, "dead": "c" * 64, "open": "open:" + "d" * 64}
 
@@ -68,9 +70,22 @@ def v3(tmp_path, monkeypatch):
         await db.add_file("b.txt", "b.txt", 1, "text/plain", source="fileserver", owner_profile_id=None)
         await db.close()
     asyncio.run(build())
-    migrate.run(take_backup=False)                    # 001-009 recorded ...
+    with monkeypatch.context() as m:                  # 001-009 recorded ...
+        # 010_profiles is not part of this 3.x shape: it would fold (and clear) the
+        # character profile lists 009 reads. It is marked as done below, so these tests
+        # see 009 alone; tests/test_migrate_profiles.py covers 010.
+        m.setattr(migrate, "profiles_plan", lambda **_: SimpleNamespace(lines=list))
+        migrate.run(take_backup=False)
     con = sqlite3.connect(d / "chats.db")             # ... then back to the 3.x shape
+    con.execute("INSERT OR IGNORE INTO schema_migrations (id, applied_at, app_version) "
+                "VALUES ('010_profiles', '2026-10-22T00:00:00+00:00', '4.0.0')")
+    con.execute("INSERT OR IGNORE INTO schema_migrations (id, applied_at, app_version) "      # 012 is
+                "VALUES ('012_templates', '2026-10-22T00:00:00+00:00', '4.2.0')")             # not under test
     con.execute("DROP INDEX IF EXISTS idx_threads_owner_bot_updated")
+    for idx in ("idx_threads_owner_list", "idx_threads_owner_bot_list",   # 011_scale's, on the
+                "idx_threads_owner_unread", "idx_files_owner_created"):   # columns dropped below
+        con.execute(f"DROP INDEX IF EXISTS {idx}")
+    con.execute("DROP TRIGGER IF EXISTS threads_owner_au")             # 011_scale's, on that column too
     con.execute("ALTER TABLE threads DROP COLUMN owner_profile_id")
     con.execute("ALTER TABLE files DROP COLUMN owner_profile_id")
     con.execute("ALTER TABLE profiles DROP COLUMN backends")
@@ -119,12 +134,12 @@ def test_the_dry_run_prints_the_table_and_writes_nothing(v3):
     assert "threads.owner_profile_id" in text and "files.owner_profile_id" in text
     assert "profiles.backends" in text
     rows = {line.split("'")[1]: line for line in text.splitlines() if "chat(s) ->" in line}
-    assert "2 chat(s) -> Robin (Restricted)" in rows["cub"]
-    assert "-> Sam (Member)" in rows["solo"] and "only Sam may use it" in rows["solo"]
+    assert "2 chat(s) -> Robin (Basic)" in rows["cub"]
+    assert "-> Sam (User)" in rows["solo"] and "only Sam may use it" in rows["solo"]
     for bot in ("pal", "work", "rx", "pair", "ghost"):
         assert "-> Olive (Owner)" in rows[bot], rows[bot]
     assert "no longer in the roster" in rows["ghost"]
-    assert "-> Robin (Restricted)" in rows["mixed"]        # matched case-insensitively
+    assert "-> Robin (Basic)" in rows["mixed"]        # matched case-insensitively
     assert "files: 2 File Server record(s) -> Olive (Owner)" in text
     assert "push subscriptions: 3 get their device's profile, 1 dropped" in text
     assert "'cub' could become a personal character of Robin" in text
@@ -158,8 +173,23 @@ def test_applying_assigns_by_the_never_widen_rule(v3):
     assert (rep.backup / "apps-data" / "imagestudio" / "images.jsonl").exists()
 
 
+def _could_use_3x(bot, prof) -> bool:
+    """The 3.x rule 009 was written against, restated here independently of migrate.py
+    (4.0's characters.may_use asks other questions: household lists, personal bots).
+    Admins everything; then the character's profile list; Basic (stored restricted) only
+    audience all/restricted."""
+    if prof.role is Role.ADMIN:
+        return True
+    if bot.profiles and prof.id not in bot.profiles:
+        return False
+    if prof.role is Role.BASIC:
+        return bot.audience in ("all", "restricted")
+    return True
+
+
 def test_no_profile_gains_access_to_a_chat_it_could_not_read(v3):
-    """The rule, checked directly: every new owner could already use the character."""
+    """The rule, checked directly: every new owner could already use the character
+    (under the pre-upgrade 3.x rules, which is what 009's never-widen promise is about)."""
     migrate.run()
     accounts.reset_for_tests()
     bots = {b.id.lower(): b for b in config.load_bots()}
@@ -170,8 +200,8 @@ def test_no_profile_gains_access_to_a_chat_it_could_not_read(v3):
         bot_id = con.execute("SELECT bot_id FROM threads WHERE id=?", (tid,)).fetchone()[0]
         con.close()
         bot = bots.get(bot_id.lower())
-        if prof.role != "owner":
-            assert bot is not None and characters.may_use(bot, policy.profile_principal(prof)), (tid, bot_id)
+        if not prof.protected:
+            assert bot is not None and _could_use_3x(bot, prof), (tid, bot_id)
 
 
 def test_two_restricted_profiles_means_no_guess(v3):
@@ -219,7 +249,7 @@ def test_assign_and_all_to_owner_override_the_rule(v3, capsys):
     d = str(v3["dir"])
     assert migrate.main(["--dry-run", "--data-dir", d, "--assign", "work=Sam", "--assign", "cub=Olive"]) == 0
     out = capsys.readouterr().out
-    assert "'work'" in out and "-> Sam (Member)  (--assign)" in out
+    assert "'work'" in out and "-> Sam (User)  (--assign)" in out
     assert migrate.main(["--data-dir", d, "--assign", "work=sam", "--assign", "cub=Olive"]) == 0
     got = _owners(v3["dir"])
     assert got["t3"] == v3["sam"].id and got["t0"] == v3["owner"].id

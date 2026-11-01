@@ -332,7 +332,8 @@ OK_MARKER = re.compile(r"(?:#|//|--)\s*scrub-ok\b"
 #:   * only against the LOCAL private-identifier rules.
 #: Every generic rule — credentials, hosts, IPs, paths, emails — still applies
 #: to that line and to the rest of the file.
-LICENCE_FILENAMES = {"LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE", "COPYING"}
+LICENCE_FILENAMES = {"LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE", "COPYING",
+                    "icons-LICENSE.txt"}  # the vendored ThemeForge icon licence (hash-checked, uneditable)
 COPYRIGHT_NOTICE = re.compile(
     r"^\s*Copyright\s*(?:\(c\)|©)?\s*\d{4}(?:\s*[-–]\s*\d{4})?\s+\S", re.IGNORECASE)
 #: The `why` string load_local_rules attaches to every local rule.

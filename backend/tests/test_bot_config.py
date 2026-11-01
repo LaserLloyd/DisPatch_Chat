@@ -93,6 +93,10 @@ def _non_default(f):
         return "personal"            # the only non-default scope; anything else reads household
     if f.name == "api":
         return {"provider": "openai", "model": "m", "api_key": "k"}
+    if f.name == "kit_baseline":
+        return {"name": "Otter", "picture": "abc123"}
+    if f.name == "give_to":
+        return ["p1", "p2"]          # a template's recipients ("everyone" is the other shape)
     if f.name == "advisor":
         return {"owner": "Sam", "providers": [{"provider": "custom", "model": "m"}],
                 "agents": ["worker"]}
@@ -110,7 +114,11 @@ def test_bot_entry_round_trips_every_persistable_field(cfg_env):
     """
     from dataclasses import fields
 
-    every = {f.name: _non_default(f) for f in fields(config.Bot)}
+    # `template` / `overrides` make a linked COPY, whose inheritable fields come from the template
+    # (a different record shape, round-tripped in tests/test_bot_templates.py); `resolved_view` is
+    # load-time bookkeeping, not data.
+    skip = {"template", "overrides", "resolved_view"}
+    every = {f.name: _non_default(f) for f in fields(config.Bot) if f.name not in skip}
     # One pass with EVERY field non-default (a safe advisor is a legal bot
     # since 2026-10-13), plus the two single-sided shapes that used to be the
     # only legal ones, so a regression in either direction still fails here.

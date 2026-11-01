@@ -24,7 +24,7 @@ const {
   localMidnight, isToday, withinDays,
   bucketThreads, filterSignature,
   shouldShowThreadSections, threadSectionHeadEl,
-} = await import('../static/js/thread-sections.js?v=1');
+} = await import('../static/js/thread-sections.js?v=2');
 
 // 2026-09-15T12:00:00Z — anchor for "today" tests. Pick something safely mid-day
 // in a plausible timezone so midnight-rollover tests don't fight a DST cliff.

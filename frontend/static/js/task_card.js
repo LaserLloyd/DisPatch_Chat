@@ -21,9 +21,9 @@
 // DOM is built incrementally: an event appends or patches one element, so a focused button in
 // an approval card is never torn down by an unrelated delta arriving.
 
-import { el } from './util.js?v=20';
-import { t } from './i18n.js?v=4';
-import { approvalCardEl, approvalView } from './approval_card.js?v=1';
+import { el, spriteIcon } from './util.js?v=23';
+import { t } from './i18n.js?v=5';
+import { approvalCardEl, approvalView } from './approval_card.js?v=4';
 
 export const TERMINAL = new Set(['succeeded', 'failed', 'cancelled']);
 export const ACTIVE = new Set(['running', 'awaiting_approval']);
@@ -149,7 +149,10 @@ export function applyEvent(model, ev) {
     }
     case 'approval_request': {
       const view = approvalView({ ...ev, tool: ev.tool_name, state: 'pending' });
-      model.approvals.set(view.id, view);
+      const had = model.approvals.get(view.id);
+      // ev.ts is unix seconds: when the agent asked (the approval's timeout counts from then).
+      const requestedAt = (had && had.requestedAt) || (Number(ev.ts) > 0 ? Number(ev.ts) * 1000 : null);
+      model.approvals.set(view.id, had ? { ...had, requestedAt } : { ...view, requestedAt });
       const node = newNode('approval', { requestId: view.id });
       list.push(node);
       return { node, created: true, list };
@@ -216,6 +219,24 @@ export function formatUsd(n) {
   return `$${v >= 0.1 || v === 0 ? v.toFixed(2) : v.toFixed(4).replace(/(\.\d\d\d*?)0+$/, '$1')}`;
 }
 
+/** Whole minutes left before an approval asked at `requestedAt` times out (4.3 #11: unanswered
+ *  after `agents.approval_timeout_s` it is denied). Null when either is unknown. */
+export function approvalLeftMinutes(requestedAt, timeoutS, now = Date.now()) {
+  if (!timeoutS || !requestedAt) return null;
+  const at = typeof requestedAt === 'number' ? requestedAt : Date.parse(requestedAt);
+  if (!Number.isFinite(at)) return null;
+  return Math.max(0, Math.ceil((at + timeoutS * 1000 - now) / 60000));
+}
+
+/** The "waiting" pill text: "Waiting for your OK (12 min left)", or without the minutes when the
+ *  timeout is not known to this profile (only Admins read the agent settings). */
+export function waitingLabel(pending, timeoutS, now = Date.now()) {
+  const times = (pending || []).map((a) => (typeof a.requestedAt === 'number' ? a.requestedAt : Date.parse(a.requestedAt)))
+    .filter(Number.isFinite);
+  const left = times.length ? approvalLeftMinutes(Math.min(...times), timeoutS, now) : null;
+  return left == null ? t('tasks.waiting_ok') : t('tasks.waiting_ok_left', { count: left });
+}
+
 export function durationLabel(seconds) {
   if (seconds == null || !Number.isFinite(seconds)) return '';
   const s = Math.round(seconds);
@@ -235,8 +256,9 @@ export function durationLabel(seconds) {
  *   toast             (message, isError) => void
  *   announce          (message) => void   - optional screen-reader live text
  *   compact           in a chat bubble: only the tail of the timeline, expandable
- *   showOwner         show who started it (an Owner / Admin looking at everyone's)
+ *   showOwner         show who started it (an Admin looking at everyone's)
  *   onChange          (task) => void      - the task row changed (state, cost)
+ *   approvalTimeoutS  number | () => number - the approval timeout, when known (4.3 #11)
  * }
  */
 export function createTaskCard(deps) {
@@ -259,6 +281,11 @@ export function createTaskCard(deps) {
   const controls = el('div', { class: 'task-controls' });
   root.append(live, head, promptBox, timeline, resultBox, controls);
 
+  let waitTimer = 0;
+  const timeoutS = () => {
+    const v = typeof deps.approvalTimeoutS === 'function' ? deps.approvalTimeoutS() : deps.approvalTimeoutS;
+    return Number(v) > 0 ? Number(v) : 0;
+  };
   const say = (msg) => {
     live.textContent = msg;
     if (deps.announce) deps.announce(msg);
@@ -294,7 +321,7 @@ export function createTaskCard(deps) {
     if (!rec) return;
     const isSub = node.kind === 'subagent';
     rec.el.className = `task-tool${isSub ? ' task-sub' : ''}${node.done ? (node.ok ? ' task-ok' : ' task-bad') : ' task-wait'}`;
-    rec.mark.textContent = node.done ? (node.ok ? '✓' : '✕') : '…';
+    rec.mark.replaceChildren(...(node.done ? [spriteIcon(node.ok ? 'check' : 'x', 14)] : ['…']));
     if (isSub) {
       rec.label.textContent = t('tasks.subagent', { name: node.agentType || node.name });
       rec.prev.textContent = node.description || '';
@@ -403,7 +430,8 @@ export function createTaskCard(deps) {
     if (!task) return;
     const state = model.state && TERMINAL.has(model.state) ? model.state : task.state;
     const cost = costLabel(task, model);
-    const pending = [...model.approvals.values()].filter((a) => a.state === 'pending').length;
+    const pendingList = [...model.approvals.values()].filter((a) => a.state === 'pending');
+    const pending = pendingList.length;
     root.dataset.state = task.state;
     root.dataset.taskId = task.id;
     root.setAttribute('aria-busy', String(ACTIVE.has(task.state)));
@@ -413,7 +441,16 @@ export function createTaskCard(deps) {
       el('span', { class: `task-pill task-pill-${task.state}`, text: stateLabel(state) }),
     ];
     if (task.hold === 'send') bits.push(el('span', { class: 'task-pill task-pill-hold', text: t('tasks.waiting_for_send') }));
-    if (pending) bits.push(el('span', { class: 'task-pill task-pill-hold', text: t('tasks.approvals_waiting', { count: pending }) }));
+    // 4.3 #11: a task waiting for an OK gives its slot back and is denied when nobody answers in
+    // time - say how long is left. The pill re-paints every half minute while it waits.
+    if (pending) {
+      bits.push(el('span', { class: 'task-pill task-pill-hold task-pill-wait', title: t('tasks.waiting_ok_title') }, [
+        spriteIcon('clock', 12), ` ${waitingLabel(pendingList, timeoutS())}`,
+      ]));
+      bits.push(el('span', { class: 'task-pill task-pill-hold', text: t('tasks.approvals_waiting', { count: pending }) }));
+    }
+    if (pending && timeoutS() && !waitTimer && !disposed) waitTimer = setInterval(paintHead, 30000);
+    if ((!pending || disposed) && waitTimer) { clearInterval(waitTimer); waitTimer = 0; }
     const meta = [];
     if (deps.showOwner && task.owner_name) meta.push(task.owner_name);
     if (cost) meta.push(cost);
@@ -529,7 +566,8 @@ export function createTaskCard(deps) {
     const view = approvalView(a);
     if (!view.id) return;
     const prev = model.approvals.get(view.id) || {};
-    model.approvals.set(view.id, { ...prev, ...view, tool: view.tool || prev.tool, args: view.args || prev.args,
+    const requestedAt = a.requested_at || prev.requestedAt || (view.state === 'pending' ? Date.now() : null);
+    model.approvals.set(view.id, { ...prev, ...view, requestedAt, tool: view.tool || prev.tool, args: view.args || prev.args,
       scopes: a.scopes ? view.scopes : prev.scopes || view.scopes, canTask: a.scopes ? view.canTask : prev.canTask });
     const card = approvalEls.get(view.id);
     if (card) card.update(model.approvals.get(view.id));
@@ -543,14 +581,14 @@ export function createTaskCard(deps) {
     task = row;
     for (const a of approvals || []) {
       const v = approvalView(a);
-      model.approvals.set(v.id, v);
+      model.approvals.set(v.id, { ...v, requestedAt: a.requested_at || null });
     }
     for (const ev of events || []) {
       const info = applyEvent(model, ev);
       // the approval rows carry the decision; the event only the request
       if (info && info.node.kind === 'approval') {
         const have = (approvals || []).find((x) => x.request_id === info.node.requestId);
-        if (have) model.approvals.set(have.request_id, approvalView(have));
+        if (have) model.approvals.set(have.request_id, { ...approvalView(have), requestedAt: have.requested_at || null });
       }
       patch(info);
     }
@@ -623,6 +661,7 @@ export function createTaskCard(deps) {
 
   function dispose() {
     disposed = true;
+    if (waitTimer) { clearInterval(waitTimer); waitTimer = 0; }
     if (raf) {
       if (typeof cancelAnimationFrame === 'function' && raf.frame) cancelAnimationFrame(raf.frame);
       clearTimeout(raf.timer);

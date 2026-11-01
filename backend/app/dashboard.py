@@ -865,12 +865,13 @@ async def _database(db, *, deep: bool) -> dict:
 
 
 async def _connections() -> dict:
-    """Live WebSocket clients, split by access tier — counts ONLY.
+    """Live WebSocket clients, split into signed in and lapsed — counts ONLY.
 
+    "limited" counts the sockets whose session has lapsed (or that predate the PIN):
+    they receive nothing attributable until they reconnect (ws.ConnectionManager._lapsed).
     No addresses, no user agents, no tokens, not even a per-connection id: the
-    operator needs to know "three devices are watching, one of them is limited",
-    and nothing on this page should be able to tell them which family member is
-    in the kitchen. The manager's per-connection map is read read-only; if its
+    operator needs to know "three devices are watching, one of them has lapsed",
+    and nothing on this page should be able to tell them who is where. The manager's per-connection map is read read-only; if its
     internals ever change we still report the total and say the split is
     unavailable, rather than guessing.
     """
@@ -881,11 +882,11 @@ async def _connections() -> dict:
            "tiers_available": False}
     try:
         conns = getattr(manager, "_conns", None)
-        is_safe = getattr(manager, "_is_safe", None)
-        if isinstance(conns, dict) and callable(is_safe):
+        lapsed = getattr(manager, "_lapsed", None)
+        if isinstance(conns, dict) and callable(lapsed):
             limited = 0
             for meta in list(conns.values()):
-                if is_safe(meta):
+                if lapsed(meta):
                     limited += 1
             out["limited"] = limited
             out["full"] = max(0, out["total"] - limited)
@@ -1138,8 +1139,8 @@ def _security_findings(bind: dict | None = None) -> list[dict]:
     if cfg.pin_set:
         out.append(_finding(
             "auth.lock", OK, "Lock configured",
-            "A PIN is set: unlisted bots and media stay behind it, and everything "
-            "else is served the limited Safe-Mode view."))
+            "A PIN is set: a device that is not signed in sees only the default profile "
+            "or the profile list, never another profile's chats, bots or files."))
     elif reachable:
         out.append(_finding(
             "auth.no_pin", FAIL, "No PIN set while reachable on the network",
@@ -1657,6 +1658,14 @@ def _tail_sync(path: Path, lines: int) -> dict:
     }
 
 
+def _redacted(body: dict) -> dict:
+    """Pass every log line through the support bundle's redactor (4.3, #18): the log may
+    carry a token or key a module printed; it never leaves the process unmasked."""
+    from .backups import redact_text
+    body["lines"] = [redact_text(line) for line in body.get("lines") or []]
+    return body
+
+
 async def tail_log(lines: int = LOG_TAIL_DEFAULT) -> dict:
     """Last `lines` lines of the app log. Never raises for the ordinary cases —
     a missing or unreadable file comes back as ``available: false`` with a
@@ -1666,8 +1675,21 @@ async def tail_log(lines: int = LOG_TAIL_DEFAULT) -> dict:
     lines = max(1, min(int(lines), LOG_TAIL_MAX_LINES))
     path = log_path()
     try:
-        return await asyncio.to_thread(_tail_sync, path, lines)
+        return _redacted(await asyncio.to_thread(_tail_sync, path, lines))
     except FileNotFoundError:
+        # 4.3 (#18): no file (the default: logs go to stdout) - read the in-memory ring of
+        # this process's recent lines instead.
+        from . import logbuffer
+        if logbuffer.installed():
+            ring = logbuffer.lines(lines)
+            return _redacted({
+                "path": str(path), "available": True, "source": "memory",
+                "reason": None, "lines": ring, "size_bytes": None, "modified_at": None,
+                "truncated": len(ring) >= lines,
+                "note": "No log file at this path, so these are the most recent lines this "
+                        "process logged (kept in memory, lost on restart). The full log is "
+                        "in `journalctl --user -u local-chat` (systemd) or `docker logs "
+                        "<container>`."})
         return {"path": str(path), "available": False, "lines": [],
                 "reason": "No log file at this path. DisPatch logs to standard "
                           "output by default — use `journalctl --user -u "

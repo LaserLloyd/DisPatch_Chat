@@ -14,7 +14,8 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from app import advisor, auth, config, firstrun, llm_api, main
+from app import accounts, advisor, auth, config, firstrun, llm_api, main, profiles_service
+from app.contracts.permissions import Role
 from app.database import Database
 
 
@@ -66,6 +67,28 @@ def _threads(client: TestClient, bot="atlas"):
     return client.get("/api/threads", params={"bot_id": bot}).json()["threads"]
 
 
+def claim(client: TestClient):
+    """The claim of a fresh install (the first Admin) and what it gets: ``(profile, its Atlas
+    copy)``. Made through the same service call the claim route makes."""
+    accounts.reset_for_tests()
+    owner = accounts.create_profile("Ada", Role.ADMIN, protected=True)
+    profiles_service.on_profile_created(owner, first_admin=True)
+    copy = next(b for b in config.load_bots() if b.owner_profile == owner.id)
+    return owner, copy
+
+
+def _copy_threads(client: TestClient, bot_id: str, *, wait_for: int = 0):
+    """The copy's threads; ``wait_for`` > 0 waits (the claim's sync runs on the app's loop) until
+    that many exist."""
+    import time
+    for _ in range(100):
+        rows = client.portal.call(main.db.list_threads, bot_id)
+        if len(rows) >= wait_for:
+            return rows
+        time.sleep(0.1)
+    return rows
+
+
 # --------------------------------------------------------------------------- #
 # Defaults
 # --------------------------------------------------------------------------- #
@@ -84,12 +107,13 @@ def test_a_fresh_install_materialises_atlas_and_lists_it(env):
     written = yaml.safe_load((env.tmp_path / "config.yaml").read_text())
     assert written["bots"][0]["id"] == "atlas"      # (the Job Board app adds its own)
     assert written["bots"][0]["advisor"] == {"providers": [], "tools": True}
-    # An unlocked session gets the whole roster; the Job Board's bot rides
-    # along as "Hidden" (shown on no device -- the client keeps it off the
-    # rail) so the app can open its threads (2.4.2).
+    # The Admin gets the whole roster; the Job Board's bot rides along `hidden` (the client
+    # keeps it off the rail) so the app can open its threads. 4.0 payloads carry no
+    # legacy safe / hide_unlocked / audience keys.
     rows = c.get("/api/bots").json()["bots"]
-    assert [b["id"] for b in rows if not b["hide_unlocked"]] == ["atlas"]
+    assert [b["id"] for b in rows if not b["hidden"]] == ["atlas"]
     assert all(not b["visible"] for b in rows if b["id"] != "atlas")
+    assert not any(k in b for b in rows for k in ("safe", "hide_unlocked", "audience"))
     row = next(b for b in c.get("/api/bots/all").json()["bots"] if b["id"] == "atlas")
     assert (row["backend"], row["tools"], row["connected"]) == ("direct", True, False)
 
@@ -159,32 +183,43 @@ def test_digest_and_status_survive_an_unconnected_advisor(env):
 # --------------------------------------------------------------------------- #
 
 
-def test_a_fresh_install_seeds_the_guide_threads_once(env):
+def test_a_fresh_install_seeds_nothing_on_the_template(env):
     c = env(real_defaults=True)
-    ts = _threads(c)
-    assert sorted(t["title"] for t in ts) == ["How DisPatch works", "Meet Atlas",
-                                              "Set up add-ons"]
-    assert ts[0]["title"] == "Meet Atlas"            # newest = top of the list
-    for t in ts:
-        msgs = c.get(f"/api/threads/{t['id']}/messages").json()
-        msgs = msgs["messages"] if isinstance(msgs, dict) else msgs
-        assert len(msgs) == 1
-        assert msgs[0]["role"] == "assistant"
-        assert msgs[0]["metadata"]["seeded"] is True
-    assert (env.tmp_path / firstrun.FLAG_NAME).exists()
-    meet = firstrun.GUIDE_DIR.joinpath("meet-atlas.md").read_text().strip()
-    ids = {t["title"]: t["id"] for t in ts}
-    body = c.get(f"/api/threads/{ids['Meet Atlas']}/messages").json()
-    body = body["messages"] if isinstance(body, dict) else body
-    assert body[0]["content"] == meet
+    assert _threads(c) == [], "nobody chats with the Atlas template"
+    assert not (env.tmp_path / firstrun.FLAG_NAME).exists(), "the claim writes the flag"
 
 
 def test_a_second_boot_seeds_nothing(env):
     c = env(real_defaults=True)
-    assert len(_threads(c)) == 3
+    assert _threads(c) == []
     c.__exit__(None, None, None)
     c2 = env(real_defaults=True, fresh_db=False)
-    assert len(_threads(c2)) == 3
+    assert _threads(c2) == []
+
+
+def test_the_claim_posts_the_first_run_chat_once_on_the_admins_copy(env, monkeypatch):
+    monkeypatch.setenv("DISPATCH_ATLAS_GUIDES", "1")      # the suite switches the guides off
+    c = env(real_defaults=True)
+    owner, copy = claim(c)
+    assert copy.template == firstrun.BOT_ID
+    # the claim asked for a sync: the Atlas kit chats and the first-run chat arrive on the copy
+    (t,) = [t for t in _copy_threads(c, copy.id, wait_for=4) if t.title == "Set up add-ons"]
+    assert t.owner_profile_id == owner.id
+    import time
+    for _ in range(100):                                   # the thread exists a moment before its message
+        msgs = c.portal.call(main.db.dump_messages, t.id)
+        if msgs:
+            break
+        time.sleep(0.1)
+    (m,) = msgs
+    assert m.role == "assistant" and m.metadata["seeded"] is True
+    for _ in range(100):                                   # the flag is written just after the post
+        if (env.tmp_path / firstrun.FLAG_NAME).exists():
+            break
+        time.sleep(0.1)
+    assert (env.tmp_path / firstrun.FLAG_NAME).exists()
+    assert c.portal.call(firstrun.post_claim_guides, main.db, main._deliver_assistant_text) == []
+    assert _threads(c) == [], "and nothing on the template"
 
 
 def test_deleting_every_thread_does_not_bring_the_tour_back(env):
@@ -231,16 +266,16 @@ def test_seeded_text_goes_through_the_normal_persist_path(env, monkeypatch):
     guide.mkdir()
     pic = env.tmp_path / "shot.png"
     pic.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
-    (guide / "meet-atlas.md").write_text(
+    (guide / "set-up-add-ons.md").write_text(
         "Hello ![Settings](/static/guide/settings.png)\n\n"
         f"[[media:{pic}|a shot]]\n")
-    (guide / "how-dispatch-works.md").write_text("Tour.")
     monkeypatch.setattr(firstrun, "GUIDE_DIR", guide)
+    monkeypatch.setenv("DISPATCH_ATLAS_GUIDES", "1")
     c = env(real_defaults=True)
-    ids = {t["title"]: t["id"] for t in _threads(c)}
-    body = c.get(f"/api/threads/{ids['Meet Atlas']}/messages").json()
-    body = body["messages"] if isinstance(body, dict) else body
-    content = body[0]["content"]
+    _owner, copy = claim(c)
+    (t,) = [t for t in _copy_threads(c, copy.id, wait_for=4) if t.title == "Set up add-ons"]
+    (m,) = c.portal.call(main.db.dump_messages, t.id)
+    content = m.content
     assert "![Settings](/static/guide/settings.png)" in content
     assert str(pic) not in content and "[[media:/media/" in content
 
@@ -274,10 +309,10 @@ def test_create_an_agent_bot(env):
     c = env(real_defaults=True)
     r = c.post("/api/bots", json={"id": "worker", "name": "Worker",
                                   "backend": "agent", "agent": "oc-worker",
-                                  "model_hint": "agent", "safe": False, "visible": False})
+                                  "model_hint": "agent"})
     assert r.status_code == 201, r.text
     row = r.json()
-    assert (row["backend"], row["agent"], row["visible"]) == ("agent", "oc-worker", False)
+    assert (row["backend"], row["agent"]) == ("agent", "oc-worker")
     assert config.get_bot("worker").advisor is None
 
 
@@ -304,14 +339,13 @@ def test_create_with_a_taken_id_is_409(env):
 def test_patch_changes_only_what_it_names(env):
     c = env(real_defaults=True)
     r = c.patch("/api/bots/atlas", json={"name": "Globe", "emoji": "🧭",
-                                         "model_hint": "mine", "visible": False,
-                                         "safe": False, "reactions": True,
+                                         "model_hint": "mine", "reactions": True,
                                          "avatar_pool": True, "tools": False})
     assert r.status_code == 200, r.text
     row = r.json()
-    assert (row["name"], row["emoji"], row["model_hint"], row["visible"],
-            row["safe"], row["reactions"], row["avatar_pool"], row["tools"]) == (
-        "Globe", "🧭", "mine", False, False, True, True, False)
+    assert (row["name"], row["emoji"], row["model_hint"],
+            row["reactions"], row["avatar_pool"], row["tools"]) == (
+        "Globe", "🧭", "mine", True, True, False)
     b = config.get_bot("atlas")
     assert b.advisor == {"providers": [], "tools": False}
     r = c.patch("/api/bots/atlas", json={"name": "Atlas"})
@@ -455,8 +489,8 @@ def test_a_locked_device_cannot_manage_bots(env, method, path, body):
     c.post("/api/auth/setup", json={"new_pin": "1234"})
     c.cookies.clear()                       # no session -> Safe Mode
     r = c.request(method, path, json=body)
-    assert r.status_code == 403
-    assert "unlock" in r.text.lower()
+    assert r.status_code in (401, 403)
+    assert "unlock" in r.text.lower() or "sign in" in r.text.lower()
     assert config.get_bot("atlas").name == "Atlas"
     assert config.get_bot("x") is None
 
@@ -487,8 +521,13 @@ def test_connect_writes_the_provider_into_atlas(env):
     assert (body["provider"], body["model"], body["backend"]) == ("openai", "gpt-4o", "direct")
     adv = config.get_bot("atlas").advisor
     assert adv["tools"] is True
-    assert adv["providers"] == [{"provider": "openai", "base_url": "https://api.openai.com/v1",
-                                 "model": "gpt-4o", "api_key": "sk-SECRET-2"}]
+    # 4.0: through a household Connection; the key is in the secret store, not config.yaml.
+    (entry,) = adv["providers"]
+    cid = entry.pop("connection")
+    assert entry == {"provider": "openai", "base_url": "https://api.openai.com/v1", "model": "gpt-4o"}
+    from app import connections
+    assert connections.credential(connections.get(cid)) == "sk-SECRET-2"
+    assert "sk-SECRET-2" not in (env.tmp_path / "config.yaml").read_text()
     assert oct((env.tmp_path / "config.yaml").stat().st_mode & 0o777) == "0o600"
 
 
@@ -539,7 +578,10 @@ def test_reconnect_keeps_the_fallback_chain_behind_the_first_provider(env):
     assert r.status_code == 200, r.text
     provs = config.get_bot("atlas").advisor["providers"]
     assert [p["model"] for p in provs] == ["gpt-4o-mini", "local-27b"]
-    assert provs[1]["read_timeout_s"] == 180 and provs[0]["api_key"] == "KEEP"
+    # The 3.x inline key moved into the connection the first entry now names.
+    from app import connections
+    assert provs[1]["read_timeout_s"] == 180 and "api_key" not in provs[0]
+    assert connections.credential(connections.get(provs[0]["connection"])) == "KEEP"
 
 
 def test_reconnect_keeps_the_key_and_every_other_field(env):
@@ -555,7 +597,8 @@ def test_reconnect_keeps_the_key_and_every_other_field(env):
     r = c.post("/api/llm/connect", json={"provider": "openai", "model": "gpt-4o-mini"})
     assert r.status_code == 200, r.text
     b = config.get_bot("atlas")
-    assert b.advisor["providers"][0]["api_key"] == "KEEP"
+    from app import connections
+    assert connections.credential(connections.get(b.advisor["providers"][0]["connection"])) == "KEEP"
     assert b.advisor["providers"][0]["max_tokens"] == 777
     assert b.advisor["providers"][0]["model"] == "gpt-4o-mini"
     assert (b.advisor["owner"], b.advisor["knowledge_dir"], b.advisor["agents"]) == (
@@ -718,7 +761,7 @@ def test_a_deleted_avatar_comes_back_even_after_the_first_run(env, avatar_dir):
     env(real_defaults=True)
     for p in avatar_dir.iterdir():
         p.unlink()
-    assert (env.tmp_path / firstrun.FLAG_NAME).exists()
+    firstrun._write_flag()                      # the first run is over
     assert firstrun.install_default_avatars() == list(firstrun.DEFAULT_AVATARS)
 
 

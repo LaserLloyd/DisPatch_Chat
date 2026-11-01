@@ -17,9 +17,10 @@ import pytest
 from fastapi.routing import APIRoute
 
 from app import config, main, route_policy
-from app.contracts.permissions import ROLE_PERMISSIONS, Role
+from app.contracts.permissions import Role, effective_permissions
 
-RESTRICTED = {p.value for p in ROLE_PERMISSIONS[Role.RESTRICTED]}
+#: What a Restricted (4.0: Basic) session holds.
+RESTRICTED = set(effective_permissions(Role.BASIC))
 LAN = ("203.0.113.50", 40000)
 
 #: Gate-level refusal codes: seeing one of these means the policy engine said no.
@@ -117,10 +118,11 @@ def test_the_denial_names_the_missing_permission(clients):
     r = clients["kid"].put("/api/tools", json={"tools": []})
     assert r.status_code == 403
     body = r.json()
-    assert body["detail"] == "Unlock for full access"          # the 2.x wording, unchanged
-    assert body["decoy"] is True                               # the 2.x marker, unchanged
+    # 4.0: a Basic profile meets the ordinary named refusal (no Safe-Mode decoy body)
+    assert body["detail"] == "Your profile does not have permission to do that."
+    assert "decoy" not in body
     assert body["required_permission"] == "manage_plugins"
-    assert body["error"]["code"] == "safe_mode" and body["error"]["fix"]
+    assert body["error"]["code"] == "permission_denied" and body["error"]["fix"]
 
 
 def test_a_member_is_stopped_where_a_restricted_profile_is_and_a_bit_earlier(world, clients):
@@ -134,7 +136,7 @@ def test_a_member_is_stopped_where_a_restricted_profile_is_and_a_bit_earlier(wor
     assert r.status_code == 403 and r.json()["error"]["code"] == "permission_denied"
     assert r.json()["required_permission"] == "manage_plugins"
     for path in ("/api/bots/all", "/api/llm/providers", "/api/people", "/api/dashboard",
-                 "/api/harness/status", "/api/export", "/api/search?q=x"):
+                 "/api/harness/status"):        # 4.0: export / search are every role's own
         assert member.get(path).status_code == 403, path
     # Dispatching an agent is not a Member permission; the Owner can grant it per profile.
     from app import accounts
@@ -150,52 +152,28 @@ def _roster(client):
     return {b["id"]: b for b in client.get("/api/bots").json()["bots"]}
 
 
-def test_a_restricted_roster_is_the_audience_not_the_whole_roster(clients):
-    everyone = _roster(clients["owner"])
-    seen = _roster(clients["kid"])
-    assert set(seen) and set(seen) < set(everyone)
-    assert all(b["audience"] in ("all", "restricted") for b in seen.values())
-    assert all(b["audience"] == "members" for k, b in everyone.items() if k not in seen)
-    assert _roster(clients["anonymous"]).keys() == seen.keys()
-
-
-def test_a_restricted_caller_cannot_reach_a_members_character_by_id(world, clients):
-    hidden = next(b for b in config.load_bots() if b.audience == "members")
-    shown = next(b for b in config.load_bots() if b.audience == "all")
-    kid = clients["kid"]
-    assert kid.get(f"/api/bots/{hidden.id}/avatar").status_code == 403
-    assert kid.get(f"/api/bots/{hidden.id}/avatar/thumb").status_code == 403
-    assert kid.get(f"/api/bots/{hidden.id}/avatar/history").status_code == 403
-    assert kid.post("/api/threads", json={"bot_id": hidden.id}).status_code == 403
-    assert kid.post("/api/threads", json={"bot_id": shown.id}).status_code == 200
-    owner_thread = clients["owner"].post("/api/threads", json={"bot_id": hidden.id}).json()["id"]
-    assert kid.get(f"/api/threads/{owner_thread}").status_code == 403
-    assert kid.get(f"/api/threads/{owner_thread}/messages").status_code == 403
-    assert kid.get(f"/api/threads?bot_id={hidden.id}").status_code == 403
-    assert owner_thread in {t["id"] for t in clients["owner"].get(
-        f"/api/threads?bot_id={hidden.id}").json()["threads"]}
-
-
-def test_a_restricted_tool_list_is_only_the_safe_tools(world, clients, tmp_path_factory):
+def test_a_basic_profile_gets_no_tool_panel_whatever_its_safe_flag(world, clients, tmp_path_factory):
     from app import tools
     page = tmp_path_factory.mktemp("site")        # outside the data dir, which a tool may not serve
     (page / "index.html").write_text("<p>hi</p>")
     root = page.as_posix()
     manifest = [
         "tools:",
-        f"  - {{id: kids, title: Kids, kind: static, root: '{root}', entry: index.html, safe: true}}",
+        f"  - {{id: flagged, title: Flagged, kind: static, root: '{root}', entry: index.html, safe: true}}",
         f"  - {{id: grown, title: Grownups, kind: static, root: '{root}', entry: index.html, safe: false}}",
     ]
     (config.DATA_DIR / "tools.yaml").write_text("\n".join(manifest) + "\n")
     tools._reset_state()
     ids = {t["id"] for t in clients["kid"].get("/api/tools").json()["tools"]}
-    assert "kids" in ids and "grown" not in ids
-    assert clients["kid"].get("/tools/kids/index.html").status_code == 200
+    # 4.0: tool panels are Admin-only (use_tools never in a User's or Basic column); the 3.x
+    # ``safe`` flag no longer opens one.
+    assert "flagged" not in ids and "grown" not in ids
+    assert clients["kid"].get("/tools/flagged/index.html").status_code == 403
     assert clients["kid"].get("/tools/grown/index.html").status_code == 403
     assert clients["kid"].get("/api/tools/grown/status").status_code == 403
-    # A Member sees both (no host paths); the Owner sees the paths too.
+    # The Owner sees both, with the paths.
     owner_ids = {t["id"]: t for t in clients["owner"].get("/api/tools").json()["tools"]}
-    assert {"kids", "grown"} <= set(owner_ids) and "root" in owner_ids["grown"]
+    assert {"flagged", "grown"} <= set(owner_ids) and "root" in owner_ids["grown"]
 
 
 # --------------------------------------------------------------------------- #
@@ -237,38 +215,6 @@ def test_every_websocket_action_is_gated(clients, monkeypatch):
     assert turns == []
 
 
-def test_a_restricted_turn_reaches_only_restricted_audience_characters(world, clients, monkeypatch):
-    """G5: a Restricted turn never reaches a Members character, and the one it may
-    reach runs LOCKED (no tools, no dispatch)."""
-    turns = []
-
-    async def fake_turn(thread_id, bot_id, text, opts=None):
-        turns.append((thread_id, bot_id, opts))
-
-    monkeypatch.setattr(main, "run_agent_turn", fake_turn)
-    members_bot = next(b.id for b in config.load_bots() if b.audience == "members")
-    kids_bot = next(b.id for b in config.load_bots() if b.audience in ("all", "restricted"))
-    owner = clients["owner"]
-    t_members = owner.post("/api/threads", json={"bot_id": members_bot}).json()["id"]
-    t_kids = owner.post("/api/threads", json={"bot_id": kids_bot}).json()["id"]
-    for who in ("kid", "anonymous"):
-        hello, frames = _ws_exchange(clients[who], [
-            {"type": "send", "thread_id": t_members, "text": "hello", "client_msg_id": "m1"},
-            {"type": "send", "thread_id": t_kids, "text": "hello", "client_msg_id": "m2"},
-        ])
-        assert hello["decoy"] is True and hello["role"] == "restricted"
-        assert {b["id"] for b in hello["bots"]} == set(_roster(clients["kid"]))
-        errors = [f for f in frames if f.get("type") == "error"]
-        assert errors and "Unlock" in errors[0]["message"]
-        acks = [f for f in frames if f.get("type") == "ack"]
-        assert {a.get("client_msg_id"): a.get("status") for a in acks} == {"m1": "rejected", "m2": "ok"}
-    assert {t[0] for t in turns} == {t_kids}
-    assert all(t[2] is not None and t[2].locked is True for t in turns)
-    # Nothing was written into the members thread.
-    msgs = clients["owner"].get(f"/api/threads/{t_members}/messages").json()["messages"]
-    assert msgs == []
-
-
 def test_frames_about_a_members_character_never_reach_a_restricted_socket(world, clients):
     members_bot = next(b.id for b in config.load_bots() if b.audience == "members")
     tid = clients["owner"].post("/api/threads", json={"bot_id": members_bot}).json()["id"]
@@ -296,23 +242,3 @@ from _extfake import KNOBS, ext_env, install, thread_for  # noqa: E402
 from starlette.websockets import WebSocketDisconnect  # noqa: E402
 
 
-def test_a_restricted_voice_socket_reaches_only_restricted_audience_characters(ext_env):
-    c, _ = ext_env
-    install()
-    KNOBS.handler_mode = "hold"
-    # An owner, a Restricted profile, and the profile's own session.
-    assert c.post("/api/auth/setup", json={"name": "Olive", "password": "owner-pass1"}).status_code == 200
-    mia = c.post("/api/people", json={"name": "Mia", "role": "restricted"}).json()
-    members_tid = thread_for(c, next(b.id for b in config.load_bots() if b.audience == "members"))
-    kids_tid = thread_for(c, next(b.id for b in config.load_bots() if b.audience in ("all", "restricted")))
-    c.cookies.clear()
-    assert c.post("/api/auth/login", json={"profile_id": mia["id"]}).status_code == 200
-    origin = {"origin": "http://testserver"}
-    with pytest.raises(WebSocketDisconnect) as e, c.websocket_connect(
-            f"/ws/voice/{members_tid}", headers=origin) as ws:
-        ws.receive_text()
-    assert e.value.code == 1008
-    with c.websocket_connect(f"/ws/voice/{kids_tid}", headers=origin) as ws:
-        ws.receive_text()
-    sock = KNOBS.sockets[-1]
-    assert sock.locked is True, "a Restricted profile's voice turn must run locked"

@@ -312,9 +312,9 @@ def url_for(thread_id: str, sid: str | None) -> str:
 
     Keyed by THREAD, not by hash. The content-addressed id says nothing about
     which bot the picture belongs to, so a hash-keyed URL could not be gated
-    against a Safe-Mode session without reverse-mapping it — and the obvious
-    "is any referencing thread safe?" test leaks a non-safe bot's face as soon
-    as one safe bot shares the same image. Going through the thread means the
+    against the asking profile without reverse-mapping it — and the obvious
+    "is any referencing thread visible?" test leaks one bot's face as soon
+    as another visible bot shares the same image. Going through the thread means the
     route reuses the rule that already governs the thread itself.
 
     The bytes behind it are immutable, so the response caches forever; the URL

@@ -57,7 +57,8 @@ def test_schema_document_is_versioned_and_complete():
     assert doc["schema"] == settings_schema.SCHEMA_VERSION == 1
     keys = {s["key"] for s in doc["settings"]}
     assert {"system.backup_keep", "people.lock_timeout_seconds", "tools.livetools_enabled",
-            "characters.default_audience", "connections.allow_private_targets"} <= keys
+            "connections.allow_private_targets"} <= keys
+    assert "characters.default_audience" not in keys          # 4.0: no audiences
     first = next(s for s in doc["settings"] if s["key"] == "system.backup_keep")
     assert first["env_names"] == ["DISPATCH_BACKUP_KEEP", "LOCAL_CHAT_BACKUP_KEEP"]
     assert first["restart_required"] is True and first["level"] == "basic"
@@ -160,7 +161,7 @@ def test_restart_pending_is_tracked_from_the_value_at_first_look(tmp_path, monke
     settings_store.set_many({"system.backup_keep": 12})                          # back to what is running
     assert settings_store.resolve("system.backup_keep").restart_pending is False
     # a setting that applies at once is never "pending"
-    assert settings_store.set_many({"people.restricted_daily_turns": 5}).restart_required == ["people.restricted_daily_turns"]
+    assert settings_store.set_many({"people.machine_daily_upload_bytes": 5}).restart_required == ["people.machine_daily_upload_bytes"]
     assert settings_store.set_many({"characters.greeting": True}).restart_required == []
 
 
@@ -187,9 +188,9 @@ def test_a_file_bound_setting_writes_through_to_its_file(tmp_path, monkeypatch):
     auth._cache = None
     assert settings_store.resolve("people.lock_timeout_seconds").value == 600
     assert settings_store.set_many({"people.lock_timeout_seconds": 900,
-                                    "people.session_timeout_member": 1200}).ok
+                                    "people.session_timeout_user": 1200}).ok
     raw = yaml.safe_load((tmp_path / "security.yaml").read_text())
-    assert raw["lock_timeout_seconds"] == 900 and raw["session_timeout_member"] == 1200
+    assert raw["lock_timeout_seconds"] == 900 and raw["session_timeout_user"] == 1200
     assert auth.lock_timeout() == 900                       # the code that reads the file sees it
     # a hand edit of the file is what the store reports afterwards (the file is the home)
     raw["lock_timeout_seconds"] = 1500
@@ -303,7 +304,7 @@ def test_get_schema_and_values(world, owner):
     # filters
     only_people = owner.get("/api/settings", params={"group": "people"}).json()["values"]
     assert only_people and all(k.startswith("people.") for k in only_people)
-    found = owner.get("/api/settings", params={"q": "snapshot"}).json()["values"]
+    found = owner.get("/api/settings", params={"q": "automatic copies"}).json()["values"]
     assert "system.backup_interval" in found
     assert owner.get("/api/settings", params={"group": "nope"}).status_code == 422
     adv = owner.get("/api/settings", params={"level": "advanced"}).json()["values"]
@@ -352,9 +353,9 @@ def test_settings_need_manage_settings(world, owner):
     member = world.client(("203.0.113.52", 40002))
     world.login(member, profile_id=max_["id"], pin="5555")
     for c in (kid, stranger, member):
-        assert c.get("/api/settings").status_code == 403
-        assert c.get("/api/settings/schema").status_code == 403
-        assert c.patch("/api/settings", json={"set": {"system.backup_keep": 3}}).status_code == 403
+        assert c.get("/api/settings").status_code in (401, 403)
+        assert c.get("/api/settings/schema").status_code in (401, 403)
+        assert c.patch("/api/settings", json={"set": {"system.backup_keep": 3}}).status_code in (401, 403)
     # the one public route carries no secrets and works for a stranger
     d = stranger.get("/api/settings/defaults")
     assert d.status_code == 200 and set(d.json()) == {"theme", "language", "avatar_style"}
@@ -387,7 +388,7 @@ def test_owner_only_flags_cover_the_host_control_settings():
 def test_set_many_refuses_owner_only_keys_for_a_non_owner(tmp_path, monkeypatch):
     monkeypatch.setenv("DISPATCH_DATA_DIR", str(tmp_path))
     res = settings_store.set_many({"connections.image_cli": "/bin/evil", "characters.greeting": True}, owner=False)
-    assert "connections.image_cli" in res.errors and "Owner" in res.errors["connections.image_cli"]
+    assert "connections.image_cli" in res.errors and "only an Admin" in res.errors["connections.image_cli"]
     assert settings_store.resolve("connections.image_cli").source == "default"
     assert settings_store.resolve("characters.greeting").source == "default"      # all or nothing
     ok = settings_store.set_many({"connections.image_cli": "/bin/ok"})
@@ -400,14 +401,23 @@ def test_a_manage_settings_grant_is_not_host_control(world, owner):
     boss = world.person(owner, "Boss", "admin", password="boss-password-1")  # scrub-ok: throwaway test fixture
     admin = world.client(("203.0.113.60", 40010))
     world.login(admin, profile_id=boss["id"], password="boss-password-1")  # scrub-ok: throwaway test fixture
-    r = admin.patch("/api/settings", json={"set": {"connections.image_cli": "/bin/fine"}})
+    r = admin.patch("/api/settings", json={"set": {"system.backup_keep": 7}})
     assert r.status_code == 200, r.text
-    max_ = world.person(owner, "Max", "member", pin="5555", grants=["manage_settings"])
+    # 4.3 host tier (A14): a setting that names a program the host runs is the Owner's only
+    r = admin.patch("/api/settings", json={"set": {"connections.image_cli": "/bin/fine"}})
+    assert r.status_code == 403 and r.json()["error"]["code"] == "host_owner_only", r.text
+    # 4.0: a Member (User) can no longer be granted manage_settings, and a grant forged into
+    # the database is not effective: the Member reaches no settings at all.
+    from app import accounts
+    r = owner.post("/api/people", json={"name": "Max", "role": "member", "pin": "5555",
+                                        "grants": ["manage_settings"]})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "permissions_invalid", r.text
+    max_ = world.person(owner, "Max", "member", pin="5555")
+    accounts.update_profile(max_["id"], grants=["manage_settings"])      # forged straight into the DB
     member = world.client(("203.0.113.61", 40011))
     world.login(member, profile_id=max_["id"], pin="5555")
-    assert member.get("/api/settings").status_code == 200
-    ok = member.patch("/api/settings", json={"set": {"characters.greeting": True}})
-    assert ok.status_code == 200, ok.text
+    assert member.get("/api/settings").status_code == 403
+    assert member.patch("/api/settings", json={"set": {"characters.greeting": True}}).status_code == 403
     for body in ({"set": {"connections.image_cli": "/bin/evil"}}, {"set": {"tools.openclaw_bin": "/bin/evil"}},
                  {"reset": ["system.backup_keep"]}):
         r = member.patch("/api/settings", json=body)
@@ -434,7 +444,7 @@ def test_ui_sections_follow_the_settings_plan():
     where = {d.key: d.ui_section for d in S.CORE_SETTINGS}
     assert where["people.lock_timeout_seconds"] == "people#signin-rules"
     assert where["people.remember_device_days"] == "people#signin-rules"
-    assert where["people.restricted_daily_turns"] == "people#restricted-limits"
+    assert where["people.machine_daily_upload_bytes"] == "people#machine"
     assert where["people.machine_loopback_trust"] == "people#machine"
     assert where["system.backup_interval"] == "system#backups"
     assert where["system.public_url"] == "system#network"
@@ -459,14 +469,15 @@ def test_duration_and_size_presets_are_valid_values():
         for v in d.presets:
             assert S.coerce(d, v) == v, f"{d.key}: preset {v} is refused"
     # The default sits among the presets, so a fresh install shows a named choice.
-    for key in ("people.lock_timeout_seconds", "people.session_timeout_member", "system.backup_interval",
-                "system.files_total_max", "people.restricted_daily_upload_bytes"):
+    for key in ("people.lock_timeout_seconds", "people.session_timeout_user", "system.backup_interval",
+                "system.files_total_max", "people.machine_daily_upload_bytes"):
         d = S.get_def(key)
         assert d.default in d.presets, key
 
 
 def test_the_default_connection_is_a_choice_of_connections(world):
-    from app import connections, settings_schema as S
+    from app import connections
+    from app import settings_schema as S
     c = connections.create(type="openai_compatible", name="Box", base_url="http://127.0.0.1:9/v1")
     d = S.get_def("connections.default").public()
     assert d["type"] == "choice" and d["choices_from"] == "connections"

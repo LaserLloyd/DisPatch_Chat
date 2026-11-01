@@ -147,8 +147,14 @@ def test_a_missing_key_is_an_auth_error_not_a_silent_login_fallback(ws, agent_da
                                         ("vertex", "CLAUDE_CODE_USE_VERTEX"),
                                         ("anthropic_aws", "CLAUDE_CODE_USE_ANTHROPIC_AWS")])
 def test_provider_routes_set_their_switch_and_need_no_api_key(ws, agent_data, route, flag):
-    p = plan_for(spec(), ws, agent_data, api_key=None, auth_route=route)
-    assert p.options["env"][flag] == "1" and p.secret_env == {}
+    # 4.3 (#9): a cloud route forwards its own allow-listed credentials (fakes here) and
+    # still never needs the Anthropic key. tests/test_i43_routes.py covers the missing case.
+    fake_env = {"bedrock": {"AWS_REGION": "eu-west-1", "AWS_BEARER_TOKEN_BEDROCK": "fake-bearer-123456"},
+                "vertex": {"ANTHROPIC_VERTEX_PROJECT_ID": "p", "GOOGLE_APPLICATION_CREDENTIALS": "/x.json"},
+                "anthropic_aws": {}}[route]
+    p = plan_for(spec(), ws, agent_data, api_key=None, auth_route=route, route_env=fake_env)
+    assert p.options["env"][flag] == "1" and p.secret_env == fake_env
+    assert "ANTHROPIC_API_KEY" not in p.secret_env
 
 
 # ---- permission modes and tools ------------------------------------------------------ #

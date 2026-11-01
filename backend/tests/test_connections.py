@@ -131,7 +131,7 @@ def test_a_connection_in_use_cannot_be_deleted(tmp_path, monkeypatch):
         "providers": [{"provider": "lmstudio", "model": "m", "connection": c.id}]}))
     with pytest.raises(ConnectionError_) as e:
         connections.delete(c.id)
-    assert e.value.code == "connection_in_use" and "scribe" in str(e.value)
+    assert e.value.code == "connection_in_use" and "Scribe" in str(e.value)  # by name
     config.remove_bot("scribe") if len(config.load_bots()) > 1 else None
     config.update_bot("scribe", lambda b: __import__("dataclasses").replace(
         b, advisor={"providers": [{"provider": "lmstudio", "model": "m"}]}))
@@ -360,6 +360,24 @@ def test_adoption_reuses_one_connection_per_server_and_moves_only_the_key(tmp_pa
     assert again.created == [] and again.linked == 0
 
 
+def test_adoption_never_names_a_connection_after_its_address(tmp_path, monkeypatch):
+    """A connection's name reaches non-Admin screens; the address must not be in it."""
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    roster = [
+        {"id": "a", "api": {"provider": "custom", "base_url": "http://192.0.2.7:1234/v1", "model": "m"}},
+        {"id": "b", "api": {"provider": "custom", "base_url": "http://192.0.2.6:4321/v1", "model": "m"}},
+    ]
+    dry = connections.adopt_inline([dict(r, api=dict(r["api"])) for r in roster], dry_run=True)
+    assert not any("192.0.2" in a.split("->")[0] for a in dry.actions), dry.actions
+    plan = connections.adopt_inline(roster)
+    assert len(plan.created) == 2
+    names = [connections.get(cid).name for cid in plan.created]
+    assert all("192.0.2" not in n and "1234" not in n for n in names), names
+    assert len(set(names)) == 2, names                               # still told apart
+    labels = connections.neutral_labels(connections.list_all())
+    assert sorted(labels.values()) == ["OpenAI-compatible server 1", "OpenAI-compatible server 2"]
+
+
 def test_adoption_dry_run_creates_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     roster = _roster()
@@ -440,10 +458,10 @@ def test_only_manage_connections_may_touch_connections(world, owner):
     world.login(member, profile_id=max_["id"], pin="5555")
     stranger = world.client(("203.0.113.51", 40001))
     for c in (member, stranger):
-        assert c.get("/api/connections").status_code == 403
-        assert c.post("/api/connections", json={"type": "lmstudio"}).status_code == 403
-        assert c.post("/api/connections/discover").status_code == 403
-        assert c.post("/api/connections/test", json={"type": "lmstudio"}).status_code == 403
+        assert c.get("/api/connections").status_code in (401, 403)
+        assert c.post("/api/connections", json={"type": "lmstudio"}).status_code in (401, 403)
+        assert c.post("/api/connections/discover").status_code in (401, 403)
+        assert c.post("/api/connections/test", json={"type": "lmstudio"}).status_code in (401, 403)
     # an Admin holds the permission
     world.person(owner, "Ada", "admin", password="admin-pass1")
     admin = world.client()
@@ -487,3 +505,21 @@ def test_advisor_embeddings_use_the_key_of_the_connection_for_the_same_server(tm
     assert advisor._embed_config({"base_url": "http://192.0.2.5:1234/v1", "model": "e",
                                   "api_key": "inline-123456"}).api_key == "inline-123456"
     assert advisor._embed_config({"base_url": "http://192.0.2.7:1234/v1", "model": "e"}).api_key == ""
+
+
+def test_a_connection_id_never_carries_the_admins_name(tmp_path, monkeypatch):
+    """Non-Admins see connection ids (``/api/me/backends``, a personal bot's backend), so an id is
+    built from the type only: an Admin's name may hold an address or an account."""
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    c = connections.create(type="openai_compatible", name="Rig box (203.0.113.7:1234)",
+                           base_url="http://203.0.113.7:1234/v1")
+    assert c.id == "openai_compatible" and c.name == "Rig box (203.0.113.7:1234)"
+    again = connections.create(type="openai_compatible", name="Rig box (203.0.113.7:1234) B",
+                               base_url="http://203.0.113.7:1235/v1")
+    assert again.id == "openai_compatible-2"
+    for cid in (c.id, again.id):
+        assert "10" not in cid and "rig" not in cid
+    # an explicit id is still the Admin's choice
+    mine = connections.create(type="openai_compatible", name="Mine", conn_id="house-box",
+                              base_url="http://127.0.0.1:9/v1")
+    assert mine.id == "house-box"

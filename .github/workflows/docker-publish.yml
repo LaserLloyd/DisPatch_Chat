@@ -217,10 +217,18 @@ jobs:
 
       - name: Create and push the manifest list
         working-directory: ${{ runner.temp }}/digests
+        # Arrays, not unquoted $(...): each tag and each digest reference is one
+        # argument (actionlint/shellcheck SC2046 guard).
         run: |
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+          tag_args=()
+          while IFS= read -r tag; do
+            tag_args+=(-t "$tag")
+          done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          refs=()
+          for digest in *; do
+            refs+=("${REGISTRY}/${IMAGE_NAME}@sha256:${digest}")
+          done
+          docker buildx imagetools create "${tag_args[@]}" "${refs[@]}"
 
       - name: Inspect the result
         id: inspect

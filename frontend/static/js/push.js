@@ -6,7 +6,7 @@
 // notification opens the thread (sw.js `notificationclick`).
 //
 // Rules the row follows:
-//   * Safe Mode: not built at all (the routes 403 anyway).
+//   * Signed out: not built at all (the routes refuse anyway).
 //   * Push needs a secure context. http://<lan-ip>:8765 is not one, so there
 //     the switch is disabled and says to open the https address instead.
 //   * The server binds a subscription to a REMEMBERED device; on an ordinary
@@ -94,9 +94,13 @@ export async function disablePush(win = globalThis) {
   if (sub) { try { await sub.unsubscribe(); } catch { /* already gone */ } }
 }
 
-/** The Settings row, or null in Safe Mode. `t` is i18n's translate. */
-export function pushRow(t, { decoy = false, win = globalThis, onToast } = {}) {
-  if (decoy) return null;
+/** The Settings row. `t` is i18n's translate.
+ *  allowed       false: the profile may not use notifications -> null (the caller hides the card)
+ *  remembered    false: this session is known not to be a remembered one -> the hint, and no
+ *                GET /api/push/vapid (it would answer 403 into the console)
+ *  rememberDays  0: remembering devices is off on this install -> the hint says who turns it on */
+export function pushRow(t, { win = globalThis, onToast, allowed = true, remembered = null, rememberDays = null } = {}) {
+  if (allowed === false) return null;
   const doc = win.document;
   const label = doc.createElement('label');
   label.className = 'bm-avatar-style dev-row';
@@ -123,6 +127,13 @@ export function pushRow(t, { decoy = false, win = globalThis, onToast } = {}) {
     return label;
   }
   say('push.hint');
+  const rememberKey = rememberDays === 0 ? 'push.needs_remember_off' : 'push.needs_remember';
+  if (remembered === false) {
+    box.disabled = true;
+    say(rememberKey);
+    label.dataset.state = 'remember';
+    return label;
+  }
 
   // Current state: the server knows whether THIS device is subscribed; the
   // browser's permission can have been revoked since, which wins.
@@ -142,7 +153,7 @@ export function pushRow(t, { decoy = false, win = globalThis, onToast } = {}) {
     } catch (e) {
       box.checked = false;
       if (e.status === 403 && /remember/i.test(e.message)) {
-        say('push.needs_remember');
+        say(rememberKey);
         label.dataset.state = 'remember';
       } else {
         box.disabled = false;
@@ -166,7 +177,7 @@ export function pushRow(t, { decoy = false, win = globalThis, onToast } = {}) {
       box.checked = !want;
       if (e.code === 'denied') say('push.denied');
       else if (e.status === 403 && /remember/i.test(e.message)) {
-        say('push.needs_remember');
+        say(rememberKey);
         label.dataset.state = 'remember';
       } else if (onToast) onToast(t('push.failed'));
     } finally {

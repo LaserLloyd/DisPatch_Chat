@@ -37,26 +37,31 @@ class Capability:
     cli: str | None = None
     mcp: str | None = None
     machine: tuple[str, ...] = ()        # machine scopes that reach it as well
+    #: 4.3 host tier: only the protected Admin (the Owner) or an open install, never a second
+    #: Admin or a machine (route_policy ``host=True`` on every route of it).
+    host: bool = False
 
     def as_dict(self) -> dict:
         return {
             "id": self.id, "title": self.title, "permission": self.permission,
             "http": [f"{m} {p}" for m, p in self.http], "ws": list(self.ws),
             "ui": self.ui, "cli": self.cli, "mcp": self.mcp, "machine": list(self.machine),
+            "host": self.host,
         }
 
 
-def _c(id: str, title: str, permission: str | None, *, http=(), ws=(), ui=None, machine=()) -> Capability:
+def _c(id: str, title: str, permission: str | None, *, http=(), ws=(), ui=None, machine=(),
+       host: bool = False) -> Capability:
     return Capability(id=id, title=title, permission=permission,
                       http=tuple(tuple(h.split(" ", 1)) for h in http),   # type: ignore[arg-type]
-                      ws=tuple(ws), ui=ui, machine=tuple(machine))
+                      ws=tuple(ws), ui=ui, machine=tuple(machine), host=host)
 
 
 CAPABILITIES: tuple[Capability, ...] = (
     # ---- sign-in and accounts ----------------------------------------------
     _c("auth.status", "Read the sign-in state", None, http=["GET /api/auth/status"], ui="api.authStatus"),
     _c("auth.me", "Who am I, and what may I do", None, http=["GET /api/auth/me"], ui="api.me"),
-    _c("auth.unlock", "Sign the Owner in with the install PIN", None, http=["POST /api/auth/unlock"], ui="api.unlock"),
+    _c("auth.unlock", "Sign the main Admin in with the install PIN", None, http=["POST /api/auth/unlock"], ui="api.unlock"),
     _c("auth.login", "Sign in as a profile (PIN or password)", None, http=["POST /api/auth/login"], ui="api.login"),
     _c("auth.switch", "Quick-switch profile", None, http=["POST /api/auth/switch"], ui="api.switchProfile"),
     _c("auth.lock", "Sign out", None, http=["POST /api/auth/lock"], ui="api.lock"),
@@ -65,8 +70,12 @@ CAPABILITIES: tuple[Capability, ...] = (
     _c("auth.password", "Change my password", "manage_settings", http=["POST /api/auth/password"], ui="api.changePassword"),
     _c("auth.remember", "Configure remembered devices", "manage_settings",
        http=["POST /api/auth/remember-config", "POST /api/auth/forget-devices"], ui="api.rememberConfig"),
-    _c("auth.api_token", "Manage the machine API key", "manage_settings",
-       http=["GET /api/auth/api-token", "POST /api/auth/api-token"], ui="api.apiTokenInfo"),
+    _c("auth.api_token", "Read the machine access key settings", "manage_settings",
+       http=["GET /api/auth/api-token"], ui="api.apiTokenInfo"),
+    # 4.3 Fable: replacing the key changes who reaches DisPatch without a credential and breaks the
+    # Owner's own programs: host tier (route_policy host=True), the Owner only.
+    _c("auth.api_token_rotate", "Replace the machine access key", "manage_settings",
+       http=["POST /api/auth/api-token"], ui="api.rotateApiToken", host=True),
     _c("people.list", "List profiles", "manage_users", http=["GET /api/people"], ui="api.people"),
     _c("people.create", "Create a profile", "manage_users", http=["POST /api/people"], ui="api.createPerson"),
     _c("people.update", "Change a profile (role, limits, name)", "manage_users",
@@ -78,13 +87,11 @@ CAPABILITIES: tuple[Capability, ...] = (
        http=["POST /api/people/{profile_id}/password"], ui="api.setPersonPassword"),
     _c("people.sign_out", "Sign a profile out everywhere", "manage_users",
        http=["POST /api/people/{profile_id}/sign-out"], ui="api.signOutPerson"),
-    _c("people.devices", "List devices; bind this device to a profile; forget one", "manage_users",
-       http=["GET /api/people/devices", "PUT /api/people/devices/this", "DELETE /api/people/devices/{device_id}"],
+    _c("people.devices", "List devices; forget one", "manage_users",
+       http=["GET /api/people/devices", "DELETE /api/people/devices/{device_id}"],
        ui="api.devices"),
     _c("people.activity", "Activity summary and admin audit log", "view_activity",
        http=["GET /api/people/activity", "GET /api/people/audit"], ui="api.peopleActivity"),
-    _c("me.activity", "My own activity summary (the Restricted disclosure)", "use_chat",
-       http=["GET /api/me/activity"], ui="api.myActivity"),
     # ---- chat ----------------------------------------------------------------
     _c("threads.list", "List threads", "use_chat", http=["GET /api/threads"], ws=["get_threads"],
        ui="api.threads", machine=["machine:threads"]),
@@ -113,19 +120,17 @@ CAPABILITIES: tuple[Capability, ...] = (
        ui="api.editMessage"),
     _c("messages.feedback", "Rate a reply", "use_chat", http=["POST /api/messages/{message_id}/feedback"],
        ui="api.messageFeedback"),
-    _c("uploads.attach", "Attach a picture or file to a chat", "use_chat",
+    _c("uploads.attach", "Attach a picture or file to a chat", "attach_files",
        http=["POST /api/upload"], ui="api.upload", machine=["machine:upload"]),
-    _c("uploads.drop", "Drop a file one-way into a chat (the locked side's upload)", "use_chat",
-       http=["POST /api/drop"], ui="api.drop"),
-    _c("search", "Search every conversation", "view_activity", http=["GET /api/search"], ui="api.search"),
-    _c("export", "Export all history", "admin_system", http=["GET /api/export"], ui="api.exportUrl"),
+    _c("search", "Search your own conversations", "use_chat", http=["GET /api/search"], ui="api.search"),
+    _c("export", "Export your own history", "manage_history", http=["GET /api/export"], ui="api.exportUrl"),
     # ---- characters -----------------------------------------------------------
     _c("characters.list", "List the characters I may talk to", "use_chat", http=["GET /api/bots"], ui="api.bots",
        machine=["machine:bots_read"]),
     _c("characters.manage_list", "List every character with its settings", "manage_characters",
        http=["GET /api/bots/all"], ui="api.allBots"),
     _c("characters.create", "Add a character", "manage_characters", http=["POST /api/bots"], ui="api.addBot"),
-    _c("characters.update", "Change a character (including its audience)", "manage_characters",
+    _c("characters.update", "Change a character (including whether it is hidden)", "manage_characters",
        http=["PATCH /api/bots/{bot_id}"], ui="api.patchBot"),
     _c("characters.delete", "Remove a character", "manage_characters", http=["DELETE /api/bots/{bot_id}"],
        ui="api.deleteBot"),
@@ -154,12 +159,26 @@ CAPABILITIES: tuple[Capability, ...] = (
     _c("characters.api", "Add and change characters (3.0 name for bots)", "manage_characters",
        http=["GET /api/characters/all", "GET /api/characters/personas", "PUT /api/characters/order",
              "POST /api/characters", "GET /api/characters/{character_id}",
-             "PATCH /api/characters/{character_id}", "DELETE /api/characters/{character_id}"],
+             "DELETE /api/characters/{character_id}"],
        ui="settings.characters"),
+    _c("characters.manage", "The Characters page: Mine and Household rows", "use_chat",
+       http=["GET /api/characters/manage"], ui="settings.characters"),
+    _c("characters.reorder", "Reorder my own characters (the rail and Mine)", "use_chat",
+       http=["PUT /api/me/characters/order"], ui="settings.characters"),
+    _c("characters.edit", "Edit a character: a template, a copy, an own bot or the Owner's agent bot",
+       "create_characters", http=["PATCH /api/characters/{character_id}"], ui="settings.characters"),
+    _c("characters.sharing", "Who can use a character: give to, stop sharing, share my bot",
+       "manage_characters",
+       http=["GET /api/characters/{character_id}/give-to/preview",
+             "PUT /api/characters/{character_id}/give-to",
+             "POST /api/characters/{character_id}/stop-sharing/preview",
+             "POST /api/characters/{character_id}/stop-sharing",
+             "POST /api/me/characters/{bot_id}/share"], ui="settings.characters"),
     _c("characters.visible", "List the characters I may talk to", "use_chat", http=["GET /api/characters"],
        ui="settings.characters", machine=["machine:bots_read"]),
     _c("characters.packs", "List and install starter packs", "manage_characters",
-       http=["GET /api/starter-packs", "POST /api/starter-packs/{pack_id}/install"], ui="settings.characters"),
+       http=["GET /api/starter-packs", "POST /api/starter-packs/{pack_id}/install",
+             "GET /api/starter-packs/{pack_id}/pictures/{character_id}"], ui="settings.characters"),
     _c("settings.schema", "Read the settings schema and every value", "manage_settings",
        http=["GET /api/settings/schema", "GET /api/settings"], ui="settings.system"),
     _c("settings.change", "Change or reset settings", "manage_settings", http=["PATCH /api/settings"],
@@ -192,16 +211,16 @@ CAPABILITIES: tuple[Capability, ...] = (
     _c("agents.handoff", "Approve or dismiss an agent hand-off", "approve_agent_actions",
        http=["POST /api/advisor/requests/{rid}/send", "POST /api/advisor/requests/{rid}/dismiss"],
        ui="api.advisorSend"),
-    _c("agents.openclaw", "Browse and import OpenClaw sessions", "manage_agents",
+    # 4.3 Fable: host tier (they read OpenClaw session stores outside the data folder).
+    _c("agents.openclaw", "Browse and import OpenClaw sessions", "admin_system",
        http=["GET /api/openclaw/sessions", "GET /api/openclaw/transcript", "POST /api/openclaw/import"],
-       ui="api.ocSessions"),
+       ui="api.ocSessions", host=True),
     _c("agents.available", "List the agents published to me", "dispatch_agents",
        http=["GET /api/agents/available"], ui="api.agentsAvailable"),
     _c("agents.manage", "Create, edit, publish, budget and delete agents", "manage_agents",
        http=["GET /api/agents", "POST /api/agents", "PATCH /api/agents/{agent_id}",
              "DELETE /api/agents/{agent_id}", "GET /api/agents/backends", "GET /api/agents/settings",
-             "PUT /api/agents/settings", "GET /api/agents/profile-budgets",
-             "PUT /api/agents/profile-budgets/{profile_id}", "GET /api/agents/usage",
+             "PUT /api/agents/settings", "GET /api/agents/usage",
              "POST /api/agents/retention/purge"], ui="api.agents"),
     _c("agents.credentials", "Store the Claude API key and MCP secrets (write-only)", "manage_agents",
        http=["GET /api/agents/credentials/claude", "PUT /api/agents/credentials/claude",
@@ -220,11 +239,13 @@ CAPABILITIES: tuple[Capability, ...] = (
     _c("images.jobs", "Create and read an image job", "use_images",
        http=["POST /api/image-jobs", "GET /api/image-jobs/{job_id}"], machine=["machine:image_jobs"]),
     # ---- files, tools, plugins ---------------------------------------------------
-    _c("files.list", "List the file server", "use_tools", http=["GET /api/files"], ui="api.files",
+    _c("files.list", "List your own File Server files", "files_read", http=["GET /api/files"], ui="api.files",
        machine=["machine:files_list"]),
-    _c("files.upload", "Upload to the file server", "use_tools", http=["POST /api/files"], ui="api.uploadFile"),
-    _c("files.delete", "Delete a file", "use_tools", http=["DELETE /api/files/{file_id}"], ui="api.deleteFile"),
-    _c("files.wipe", "Wipe the file server", "admin_system", http=["POST /api/files/wipe"], ui="api.wipeFiles"),
+    _c("files.upload", "Upload to your File Server", "files_upload", http=["POST /api/files"], ui="api.uploadFile"),
+    _c("files.delete", "Delete one of your own files (File Server: files_read; a chat attachment: manage_history)",
+       "use_chat", http=["DELETE /api/files/{file_id}"], ui="api.deleteFile"),
+    _c("files.wipe", "Delete your own File Server files up to a date", "files_read",
+       http=["POST /api/files/wipe"], ui="api.wipeFiles"),
     _c("tools.list", "List tools I may open", "use_tools", http=["GET /api/tools"], ui="api.tools"),
     _c("tools.configure", "Edit the tool list; refresh a tool", "manage_plugins",
        http=["PUT /api/tools", "POST /api/tools/{tool_id}/refresh"], ui="api.toolsSave"),
@@ -236,14 +257,16 @@ CAPABILITIES: tuple[Capability, ...] = (
     # ---- host ------------------------------------------------------------------------
     _c("system.health", "Health and diagnostics", None, http=["GET /api/health"], ui="api.health",
        machine=["machine:health_detail"]),
+    _c("system.invariants", "Check the data invariants (ownership model)", "admin_system",
+       http=["GET /api/health/invariants"], machine=["machine:health"]),
     _c("system.dashboard", "Host dashboard", "admin_system",
        http=["GET /api/dashboard", "GET /api/dashboard/deep", "GET /api/dashboard/logs"], ui="settings.health"),
     _c("system.harness", "DeepSeek harness (code execution)", "admin_system",
        http=["GET /api/harness/status", "POST /api/harness/jobs", "POST /api/harness/sessions"],
-       ui="api.harnessStatus"),
+       ui="api.harnessStatus", host=True),
     _c("system.local_viewer", "Local viewer", "admin_system",
        http=["GET /api/local/roots", "GET /api/local/stat", "GET /api/local/ls", "PUT /api/local/config"],
-       ui="api.localRoots"),
+       ui="api.localRoots", host=True),
     _c("system.openapi", "Read the OpenAPI document", "manage_settings", http=["GET /api/openapi.json"],
        machine=["machine:openapi"]),
 )

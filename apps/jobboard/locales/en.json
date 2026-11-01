@@ -44,7 +44,7 @@
   "detail.first_seen": "First seen",
   "detail.source": "Source",
   "detail.offline": "Could not reach DisPatch — check your connection.",
-  "detail.locked": "Unlock to see this job.",
+  "detail.locked": "Sign in to a profile that may see this job.",
   "vote.yes": "👍 Yes",
   "vote.no": "👎 No",
   "vote.maybe": "🤔 Maybe",
@@ -110,5 +110,5 @@
   "tags.remove": "Remove tag {tag}",
   "archive.button": "Archive",
   "archive.done": "Archived",
-  "locked": "Unlock DisPatch to see the Job Board."
+  "locked": "This profile cannot open the Job Board. Ask an Admin."
 }

@@ -22,11 +22,11 @@
 //   * a failed load says WHY (offline / locked / gone), never just "not found";
 //   * a slow reload that lost a race never paints.
 
-import { el, iconLabel, railIcon, RAIL_ICONS } from '/static/js/app-sdk.js?v=3';
+import { el, iconLabel, railIcon, RAIL_ICONS } from '/static/js/app-sdk.js?v=7';
 
 export const API_BASE = '/api/apps/jobboard';
 // Bump with board.css: the panel links the board's stylesheet into the shell.
-const CSS_HREF = '/apps/jobboard/board.css?v=2';
+const CSS_HREF = '/apps/jobboard/board.css?v=3';
 
 const REASONS = [
   'wrong_location', 'too_senior', 'too_junior', 'compensation',
@@ -55,10 +55,6 @@ const EVENT_KEY = {
   duplicate_detected: 'activity.type.duplicate_detected', expired: 'activity.type.expired',
   feedback: 'activity.type.feedback', applied: 'activity.type.applied',
 };
-export const USED_KEYS = [
-  ...Object.values(REASON_KEY), ...Object.values(STATE_KEY), ...Object.values(REMOTE_KEY),
-  ...Object.values(SENIORITY_KEY), ...Object.values(EVENT_KEY),
-];
 
 // `job.last_vote` is either the flat signal or the live backend's object
 // ({signal: 'vote_yes'|…|'applied', …}); both normalise to a bare signal.
@@ -137,7 +133,6 @@ export async function mount(ctx) {
 
   const failureText = (err) => {
     const s = err && err.status;
-    if (err && err.decoy) return t('detail.locked');
     if (s == null) return t('detail.offline');
     if (s === 404) return t('detail.not_found');
     if (s === 401 || s === 403) return t('detail.locked');

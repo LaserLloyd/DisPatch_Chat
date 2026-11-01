@@ -10,16 +10,16 @@
 // This module owns only the WAITING and FAILED states. A finished job is a
 // perfectly ordinary message whose body is a `[[media:…]]` directive, and it
 // is deliberately left to the normal render path: that is what gives it the
-// lightbox, the origin ledger, Safe Mode's media strip and No-Image Mode's
+// lightbox, the origin ledger and No-Image Mode's
 // media-only row drop, all of it for free and all of it already tested. A card
-// of our own here would be a second implementation of those four rules, which
+// of our own here would be a second implementation of those rules, which
 // is exactly how they drift.
 //
 // Nothing in a pending or failed card is an image, so there is nothing for
-// Safe Mode or NIM to hide — both see the same spinner or the same warning,
-// and neither issues a network request for it.
+// No-Image Mode to hide — it sees the same spinner or the same warning,
+// and issues no a network request for it.
 
-import { el } from './util.js?v=20';
+import { el, spriteIcon } from './util.js?v=23';
 
 // The metadata contract, in one place. `kind` is what marks the row; `status`
 // is the only field that changes over the job's life.
@@ -88,10 +88,9 @@ export function imageJobMessageEl(msg) {
     // who cannot see the animation loses nothing.
     card.append(el('span', { class: 'image-job-spinner', 'aria-hidden': 'true' }));
   }
-  card.append(el('span', {
-    class: 'image-job-text',
-    text: msg.content || (job.pending ? '🖼️ Generating an image…' : '⚠️ image failed'),
-  }));
+  card.append(el('span', { class: 'image-job-text' }, msg.content
+    ? [msg.content]
+    : [spriteIcon(job.pending ? 'image' : 'triangle-alert', 14), job.pending ? ' Generating an image…' : ' image failed']));
   if (job.pending && job.percent !== null) {
     // Text, not a bar: the number can go backwards when a second stage
     // starts, and a bar that resets reads as a bug rather than as progress.

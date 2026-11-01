@@ -40,7 +40,7 @@ file, bump its `?v=` everywhere it is referenced *and* bump `CACHE` in
 against an old module, which usually shows up as a blank screen.
 
 **The themes are a vendored bundle, not code.** `frontend/static/ui-theme/` is
-the ForgeUI 1.2 bundle (the `ThemeForge` repository), copied in whole and
+the ThemeForge 2.0 bundle (the `ThemeForge` repository), copied in whole and
 verified by `files.json`: `ui-theme.js` (the theme runtime, the first and only
 blocking script in `<head>`), `ui-theme.css` (the tokens for every theme),
 `ui-components.css` / `ui-components.js` (the component layer and its
@@ -109,13 +109,40 @@ cd backend && uv run pytest -q
 ```
 
 The full backend suite runs on Linux (on Windows, in WSL; see [Windows](#windows) below). Native Windows runs a subset.
-About 3,500 tests; the backend suite takes 25–30 minutes on Linux (it is wall-clock bound).
+About 5,100 tests; the backend suite takes 25–30 minutes on Linux in one process (it is wall-clock bound).
 Three timing/mtime tests are known to flake on a fast box
 (`test_mirror.py::test_state_roundtrip`, `test_reactions.py::test_safe_ids_does_not_rewalk_unchanged_pools`, and one of the
 dashboard/advisor timing tests). The suite is strictly hermetic: every test
 gets a throwaway database and monkeypatched data directories, and nothing
 touches a real install or the network. `backend/tests/test_auth_gate.py` is the
 best model to copy — access control is the part most worth testing.
+
+`scripts/ci-local.sh` runs the CI jobs on your machine (`--list`, `--only`, `--skip`;
+scratch files go under `~/.cache/dispatch-ci-local`, never `/tmp`). It never pushes or
+builds images.
+
+**Browser tests (4.3).** `tests/e2e/roles_axe.py` signs in as every profile type (the
+Owner, a second Admin, a User, a Basic profile, the default profile) on a desktop and a
+phone viewport and in Arabic, opens a chat, walks every Settings section the role may
+see, and fails on any serious or critical axe-core finding that is not in
+`tests/e2e/axe-allowlist.json` (every row carries a reason; the list is for third-party
+noise and expected refusals, not for our own defects). It also writes an inventory of
+every visible control.
+
+```bash
+cd frontend && npm ci           # axe-core, a test-only devDependency
+cd ../backend && uv run --with playwright python ../tests/e2e/roles_axe.py --fresh --shots <dir> --inventory <file>
+```
+
+It needs a Playwright chromium-headless-shell; `DISPATCH_E2E_CHROME` names another browser
+binary, `DISPATCH_E2E_AXE` another `axe.min.js`, `DISPATCH_E2E_DATA` the scratch root
+(default `~/.cache/dispatch-e2e`). `--sw-upgrade` checks that one reload after an upgrade
+loads only the new files. `python tests/e2e/_scratch.py up --fresh` starts a seeded scratch
+instance by hand (five profiles, a fake model; it prints the PINs and the address).
+`tests/perf/bench.py` measures p50/p95 for sign-in, the hello frame, thread pages, the
+roster and a 20-socket broadcast (thresholds only warn). `tests/smoke/openclaw_smoke.py`
+drives the OpenClaw transport against a fake gateway. CI runs the browser suite in
+`.github/workflows/e2e.yml`.
 
 ## Before you commit
 
@@ -229,5 +256,5 @@ LF endings so a Windows checkout does not break the source-scan tests.
 to `backend/app/route_policy.py` — `tests/test_route_table.py` fails the build otherwise —
 and any new `HTTPException` message to `backend/app/contracts/error_catalog.json`
 (`tests/test_error_catalog.py`). `tests/test_g5_access.py` calls every protected route with no
-session and with a Restricted session and expects a refusal. Use the `world` fixture
-(`tests/conftest.py`) for tests that need an owner, profiles and clients with chosen peers.
+session and with a Basic session and expects a refusal. Use the `world` fixture
+(`tests/conftest.py`) for tests that need a first Admin, profiles and clients with chosen peers.

@@ -25,7 +25,6 @@ import logging
 import os
 import re
 import threading
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -70,10 +69,6 @@ class SecretRedactor:
         if value and len(value) >= _MIN_SECRET_LEN:
             with self._lock:
                 self._values.add(value)
-
-    def register_all(self, values: Iterable[str | None]) -> None:
-        for v in values:
-            self.register(v)
 
     def redact(self, text: str) -> str:
         if not text:
@@ -176,8 +171,8 @@ class FileSecretProvider:
     """A JSON file created with mode 0600, atomically replaced on write.
 
     On POSIX the mode keeps other users out. On Windows ``chmod`` only toggles
-    the read-only bit; the file is protected by the ACL it inherits from the
-    per-user data dir. docs/agents/security.md lists that as a known limit.
+    the read-only bit, so every write is followed by ``fsperm.ensure_private``
+    (an owner-only ACL) since 4.3.
     """
 
     name = "file"
@@ -206,6 +201,12 @@ class FileSecretProvider:
         with contextlib.suppress(OSError):
             os.chmod(tmp, 0o600)
         os.replace(tmp, self.path)
+        # 4.3 (N-17): private on every platform. On POSIX this repeats the 0600 (and narrows a
+        # file widened by hand); on Windows, where chmod only toggles the read-only bit, it
+        # gives the file an owner-only ACL. A failure is logged by fsperm, never raised.
+        from .. import fsperm
+        with contextlib.suppress(Exception):
+            fsperm.ensure_private(self.path)
 
     def get(self, key: str) -> str | None:
         return self._load().get(key) or None

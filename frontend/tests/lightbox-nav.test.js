@@ -1,5 +1,5 @@
 // The lightbox's navigation + auto-hiding chrome (js/lightbox-nav.js): the
-// order the arrows step in, where they stop, the lower-zone rule, the touch
+// order the arrows step in, where they stop, the over-the-picture rule, the touch
 // toggle and the swipe verdict. The DOM half (openLightbox in main.js) is
 // pinned by source below and driven in a real browser by the release check.
 
@@ -9,8 +9,8 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  clampIndex, createGallery, keyDirection, inBottomZone, swipeDirection,
-  createChrome, safeGalleryUrl, normalizeGalleryRequest,
+  clampIndex, createGallery, keyDirection, overMedia, swipeDirection,
+  createChrome, safeGalleryUrl, normalizeGalleryRequest, generatedInfo,
 } from '../static/js/lightbox-nav.js';
 
 const STATIC = join(dirname(fileURLToPath(import.meta.url)), '..', 'static');
@@ -60,17 +60,16 @@ test('swiping left reveals the newer picture, right the older; zoomed or vertica
   assert.equal(swipeDirection(-300, 0, { zoomed: true }), 0, 'a zoomed picture pans instead');
 });
 
-// ---- the bottom zone ------------------------------------------------------
+// ---- over the picture ----------------------------------------------------
 
-test('the zone is the lower quarter of the picture (at least 120 px) down to the screen edge', () => {
-  const tall = { top: 100, bottom: 900, height: 800 };      // quarter = 200
-  assert.equal(inBottomZone(650, tall, 1000), false);
-  assert.equal(inBottomZone(701, tall, 1000), true);
-  assert.equal(inBottomZone(960, tall, 1000), true, 'below the picture, where the controls sit');
-  const small = { top: 100, bottom: 300, height: 200 };     // quarter = 50 -> 120 floor
-  assert.equal(inBottomZone(170, small, 1000), false);
-  assert.equal(inBottomZone(181, small, 1000), true);
-  assert.equal(inBottomZone(50, null), false);
+test('the controls show only while the pointer is over the picture', () => {
+  const r = { left: 100, right: 900, top: 100, bottom: 700, width: 800, height: 600 };
+  assert.equal(overMedia(500, 400, r), true);
+  assert.equal(overMedia(100, 100, r), true, 'the edge counts');
+  assert.equal(overMedia(50, 400, r), false, 'beside the picture');
+  assert.equal(overMedia(500, 760, r), false, 'below the picture');
+  assert.equal(overMedia(500, 400, null), false);
+  assert.equal(overMedia(500, 400, { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 }), false);
 });
 
 // ---- the chrome state machine --------------------------------------------
@@ -94,7 +93,7 @@ function chromeHarness() {
   return { c, tm, log };
 }
 
-test('the chrome shows near the bottom or on a control, and fades 1.5 s after the pointer leaves', () => {
+test('the chrome shows over the picture or on a control, and fades 1.5 s (default) after the pointer leaves', () => {
   const { c, tm, log } = chromeHarness();
   assert.equal(c.visible, false);
   c.pointer(false, false);                 // away from the zone while hidden: nothing happens
@@ -222,4 +221,105 @@ test('the CSS hides the chrome unless .chrome-on or focused, never fades under r
   assert.match(CSS, /@media \(prefers-reduced-motion: reduce\) \{\s*\n\s*\.lightbox \.lightbox-chrome \{ transition: none; \}/);
   assert.match(CSS, /\.lightbox \{ touch-action: none; \}/);
   assert.match(readFileSync(join(STATIC, 'sw.js'), 'utf8'), /'\/static\/js\/lightbox-nav\.js'/);
+});
+
+// ---- zoom and details (4.0) ------------------------------------------------
+
+import {
+  clampZoom, zoomAt, clampPan, zoomLabel, formatBytes, fileNameFromUrl, typeLabel,
+  detailRows, itemPrompt, cleanInfo, normalizeGalleryRequest as normGallery, ZOOM_MAX,
+} from '../static/js/lightbox-nav.js';
+
+test('zooming about a point keeps that point still', () => {
+  const rect = { left: 100, top: 100, width: 400, height: 300 };
+  const v = zoomAt({ s: 1, tx: 0, ty: 0 }, 2, 200, 150, rect);
+  // The point (200,150) is 100 px left / 100 px up of the centre (300,250): at 2x it must
+  // still be under the cursor, so the picture moves by the same offset.
+  assert.deepEqual(v, { s: 2, tx: 100, ty: 100 });
+  const zoomed = { left: 100 + 100 - 200, top: 100 + 100 - 150, width: 800, height: 600 };
+  const back = zoomAt(v, 1, 200, 150, zoomed);
+  assert.deepEqual(back, { s: 1, tx: 0, ty: 0 }, 'back to fit is centred');
+  assert.equal(clampZoom(99), ZOOM_MAX);
+  assert.equal(clampZoom(0.2), 1);
+  assert.equal(zoomLabel(2.5), '250%');
+});
+
+test('a zoomed picture can only be panned as far as it sticks out', () => {
+  const base = { w: 400, h: 300 }, vp = { w: 1000, h: 800 };
+  assert.deepEqual(clampPan({ s: 2, tx: 500, ty: -500 }, base, vp), { s: 2, tx: 0, ty: 0 }, 'still fits: centred');
+  assert.deepEqual(clampPan({ s: 4, tx: 9999, ty: -9999 }, base, vp), { s: 4, tx: 300, ty: -200 });
+});
+
+test('the details rows say what is known, in order, and drop the rest', () => {
+  const item = { src: '/media/ab%20c.png?x=1', info: { prompt: 'a red fox', model: 'img-1', seed: '42', source: 'Chat' } };
+  const rows = detailRows(item, { width: 1024, height: 768, bytes: 2048, mime: 'image/png' });
+  assert.deepEqual(rows.map((r) => r.key), ['lightbox.d_file', 'lightbox.d_size', 'lightbox.d_source', 'lightbox.d_model', 'lightbox.d_seed']);
+  assert.equal(rows[0].value, 'ab c.png');
+  assert.equal(rows[1].value, '1024 × 768 · 2.0 KB · PNG');
+  assert.equal(itemPrompt(item), 'a red fox');
+  assert.equal(itemPrompt({ caption: ' just a caption ' }), 'just a caption');
+  assert.equal(formatBytes(-1), null);
+  assert.equal(formatBytes(5 * 1024 * 1024), '5.0 MB');
+  assert.equal(typeLabel('image/jpeg'), 'JPEG');
+  assert.equal(fileNameFromUrl(42), '');
+});
+
+test('an app page can send details, strings only and capped', () => {
+  const g = normGallery({ items: [{ src: '/media/a.png', info: { prompt: 'x'.repeat(5000), seed: 7, evil: { a: 1 }, bot: ['no'] } }] });
+  assert.equal(g.items[0].info.prompt.length, 4000);
+  assert.equal(g.items[0].info.seed, '7');
+  assert.ok(!('evil' in g.items[0].info) && !('bot' in g.items[0].info));
+  assert.deepEqual(cleanInfo(null), {});
+});
+
+// ---- review #2 (LB-1..LB-6) -------------------------------------------------
+
+test('a mouse press never focuses a viewer control (a later key would pin the faded chrome)', () => {
+  assert.match(MAIN, /addEventListener\('mousedown', \(e\) => \{ if \(e\.target\.closest\('button, a'\)\) e\.preventDefault\(\); \}\)/);
+});
+
+test('copy confirmations show above the viewer', () => {
+  const z = (sel) => Number(new RegExp(`\\n${sel.replace('.', '\\.')} \\{[^}]*z-index: (\\d+)`).exec(CSS)[1]);
+  assert.ok(z('.toast') > z('.lightbox'), 'toast z-index must beat .lightbox');
+});
+
+test('RTL: the counter takes the page direction (no dir=ltr on the box) and the left arrow clears the panel', () => {
+  assert.doesNotMatch(MAIN, /lightbox-counter \$\{chromeCls\}`, 'aria-live': 'polite', dir: 'ltr'/);
+  assert.match(MAIN, /el\('bdi', \{ dir: 'ltr', text: nav\.label\(\) \}\)/);
+  assert.match(CSS, /:root\[dir="rtl"\] \.lightbox\.details-open \.lightbox-prev \{ left: 354px; \}/);
+});
+
+test('opening the viewer closes the thread menu; Esc leaves Details alone while a dialog is open', () => {
+  const fn = MAIN.slice(MAIN.indexOf('function openLightbox('));
+  assert.match(fn.slice(0, 400), /toggleThreadMenu\(false\)/);
+  assert.match(fn, /if \(e\.key !== 'Escape' \|\| !detailsOpen\) return;[\s\S]{0,140}dialog\[open\]/);
+});
+
+test('the Details toggle has a name when its text is hidden on a phone', () => {
+  assert.match(MAIN, /lb-details-toggle', type: 'button', 'aria-expanded': 'false',\s*'aria-label': t\('lightbox\.details'\)/);
+});
+
+test('a viewer button tapped right after a pan answers its own tap (Chrome sends no click then)', () => {
+  assert.match(MAIN, /lb\.addEventListener\('touchend', \(e\) => \{[\s\S]{0,500}e\.preventDefault\(\);\s*s\.ctl\.click\(\);/);
+});
+
+// ---- a generated picture's details in a chat -------------------------------
+
+test('Details for a picture sent from Image Studio carry its prompt, model and seed', () => {
+  const meta = { source: 'image-studio', image_id: 'x', prompt: 'a red fox', model: 'minimax · image-01', seed: 7 };
+  assert.deepEqual(generatedInfo(meta), { prompt: 'a red fox', model: 'minimax · image-01', seed: '7' });
+});
+
+test('Details for a chat [[pic:]] job carry prompt, workflow and seed; other messages carry none', () => {
+  assert.deepEqual(generatedInfo({ kind: 'image_job', prompt: 'p', workflow: 'w', seed: 0 }), { prompt: 'p', workflow: 'w', seed: '0' });
+  assert.deepEqual(generatedInfo({ kind: 'notice' }), null);
+  assert.deepEqual(generatedInfo({ source: 'image-studio', prompt: 'p', optimizer: true }), { prompt: 'p', optimizer: true }, 'the optimizer flag travels');
+  assert.equal(generatedInfo({ source: 'image-studio', prompt: 'p', optimizer: 'yes' }).optimizer, undefined);
+  assert.equal(generatedInfo({ kind: 'image_job', prompt: 'p', optimizer: true }).optimizer, undefined);
+  assert.deepEqual(generatedInfo(null), null);
+  assert.equal(generatedInfo({ source: 'image-studio', prompt: 'x'.repeat(5000) }).prompt.length, 4000);
+});
+
+test('the chat details read the one helper, so studio and [[pic:]] pictures cannot drift', () => {
+  assert.match(MAIN, /generatedInfo\(meta\)/);
 });

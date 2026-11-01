@@ -177,15 +177,9 @@ def test_machine_gets_the_true_roster_but_a_locked_tab_does_not(env):
     assert machine.status_code == 200, machine.text
     machine_ids = {b["id"] for b in machine.json()["bots"]}
 
-    browser = client.get("/api/bots", headers=BROWSER_HDRS)
-    assert browser.status_code == 200, browser.text
-    browser_ids = {b["id"] for b in browser.json()["bots"]}
-
-    # Safe Mode is a strict subset, and the machine sees at least one bot the
-    # locked tab does not — otherwise this test proves nothing about either.
-    assert browser_ids <= machine_ids
-    assert machine_ids - browser_ids, (machine_ids, browser_ids)
-    assert all(b["safe"] for b in browser.json()["bots"])
+    # 4.0: a signed-out tab is nobody - no roster at all.
+    assert client.get("/api/bots", headers=BROWSER_HDRS).status_code == 401
+    assert machine_ids
 
 
 def test_bots_roster_is_not_a_remote_freebie(env):
@@ -193,11 +187,9 @@ def test_bots_roster_is_not_a_remote_freebie(env):
     auth.set_pin("1234")
     remote = env(("192.0.2.99", 50000))
 
-    # Keyless remote GET degrades to the decoy view — same carve-out the other
-    # dual-use GETs take — never to the full roster.
+    # Keyless remote GET degrades to an unsigned device - nobody (401) - never the roster.
     r = remote.get("/api/bots")
-    assert r.status_code == 200
-    assert all(b["safe"] for b in r.json()["bots"])
+    assert r.status_code == 401
 
     cfg = auth.load()
     cfg.api_token = "sekrit-token"

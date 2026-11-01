@@ -9,7 +9,7 @@
 // main.js) can change without breaking an app:
 //
 //   api(path, {method, body, query, signal})   same-origin JSON fetch
-//   DecoyError                                  thrown on the Safe-Mode 403
+//   DecoyError                                  deprecated, never thrown
 //   t(key, vars) / ready() / has(key)           the app's own locale files
 //   theme()                                     the shell's palette + light/dark
 //   openThread(id, hint?) / close() / toast(text, isError?) / setTitle(text)
@@ -29,7 +29,7 @@
 // Nothing runs at import time except reading location.pathname: no fetch, no
 // listener, no DOM write (it is in the sw.js SHELL and imported by main.js).
 
-import { el, railIcon, iconLabel, RAIL_ICONS } from './util.js?v=20';
+import { el, railIcon, iconLabel, RAIL_ICONS } from './util.js?v=23';
 
 export { el, railIcon, iconLabel, RAIL_ICONS };
 
@@ -53,7 +53,7 @@ const RTL = new Set(['ar', 'he', 'fa', 'ur', 'yi', 'dv', 'ckb']);
  *  (tokens + the DisPatch adapter). app.css is deliberately NOT here: it is
  *  the shell's own layout, not a theme. */
 const THEME_CSS = [
-  '/static/theme.css?v=7',
+  '/static/theme.css?v=8',
   '/static/ui-theme/ui-theme.css',
   '/static/ui-theme/adapters/dispatch-extra.css',
 ];
@@ -76,8 +76,10 @@ export const APP_ID = HERE ? appIdFromPath(HERE.pathname) : null;
 // api()
 // ---------------------------------------------------------------------------
 
-/** The uniform Safe-Mode answer: the page should say "Unlock for full access",
- *  never pretend the data is empty. */
+/** DEPRECATED (3.x): the old Safe-Mode 403. 4.0 has no Restricted tier, so api() never
+ *  throws it any more; the class stays exported (here and by ext-sdk.js) because it is
+ *  public add-on API, and `err instanceof DecoyError` in an older add-on simply never
+ *  matches. A refused call is a plain Error with `status` 403. */
 export class DecoyError extends Error {
   constructor(message = 'Unlock for full access') {
     super(message);
@@ -99,7 +101,7 @@ function detailText(body, status) {
 }
 
 /** Same-origin JSON request. Resolves to the parsed body (null for 204);
- *  throws DecoyError on a Safe-Mode 403, else an Error carrying `status`,
+ *  throws an Error carrying `status`,
  *  `body` and the server's `detail` as its message. A network failure throws
  *  the platform's TypeError with `status` undefined. */
 export async function api(path, { method = 'GET', body, query, signal, headers } = {}) {
@@ -127,7 +129,6 @@ export async function api(path, { method = 'GET', body, query, signal, headers }
     try { data = await res.json(); } catch { data = null; }
   }
   if (res.ok) return data;
-  if (res.status === 403 && data && data.decoy === true) throw new DecoyError();
   const err = new Error(detailText(data, res.status));
   err.status = res.status;
   err.body = data;
@@ -361,13 +362,23 @@ export function openThread(threadId, hint) {
   return post('open-thread', msg);
 }
 /** Ask the shell to open its own lightbox (zoom, pan, swipe and arrow keys,
- *  download, Esc, No-Image Mode) on a picture set, oldest -> newest. Each item
- *  is {src, name?, caption?, downloadUrl?} with a same-origin path. */
+ *  download, details, Esc, No-Image Mode) on a picture set, oldest -> newest. Each item
+ *  is {src, name?, caption?, downloadUrl?, info?} with a same-origin path; `info` feeds the
+ *  details panel: {prompt, model, workflow, seed, created, source, bot}, strings. */
 export function lightbox(items, index = 0) {
-  const list = (Array.isArray(items) ? items : []).map((it) => ({
-    src: String(it && it.src || ''), name: String(it && it.name || ''),
-    caption: String(it && it.caption || ''), downloadUrl: String(it && it.downloadUrl || ''),
-  }));
+  const list = (Array.isArray(items) ? items : []).map((it) => {
+    const row = {
+      src: String(it && it.src || ''), name: String(it && it.name || ''),
+      caption: String(it && it.caption || ''), downloadUrl: String(it && it.downloadUrl || ''),
+    };
+    if (it && it.info && typeof it.info === 'object') {
+      row.info = {};
+      for (const [k, v] of Object.entries(it.info)) {
+        if (typeof v === 'string' || typeof v === 'number') row.info[k] = String(v);
+      }
+    }
+    return row;
+  });
   return list.length ? post('lightbox', { items: list, index: Number(index) || 0 }) : false;
 }
 /** Ask the shell to close this app's pane. */

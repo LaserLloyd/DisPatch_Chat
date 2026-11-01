@@ -68,9 +68,11 @@ def test_the_stream_reader_is_tolerant():
         assert parse_stream_json_line(noise) is None
 
 
-async def test_start_task_is_the_m3_stub(tmp_path):
-    be = GenericCliBackend()
-    with pytest.raises(NotImplementedError, match="M3"):
+async def test_start_task_refuses_without_a_saved_preset(tmp_path):
+    # M3 (4.3) built the supervisor; with no saved preset nothing may run.
+    from app.agents.interface import AgentBackendError
+    be = GenericCliBackend(presets=list)
+    with pytest.raises(AgentBackendError):
         await be.start_task(AgentSpec(backend="cli"), "x", TaskContext(data_dir=tmp_path))
     caps = be.capabilities()
     assert caps.same_host_required and "bypassPermissions" not in caps.permission_modes

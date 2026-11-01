@@ -4,7 +4,7 @@ Contract: docs/design/2026-09-25-apps.md. An app is REPO code (or a data-dir
 package the operator explicitly trusted in tools.yaml) imported into the
 server process, so the interesting cases are the boundaries around it: a
 manifest that says more than the schema allows, a package that fails to
-import, a Safe-Mode caller, a disabled app, a static path that tries to leave
+import, a caller without the permission, a disabled app, a static path that tries to leave
 the package, a roster the operator already owns.
 
 Same hermetic style as the rest of tests/: throwaway data dir, nothing touches
@@ -320,38 +320,20 @@ def test_app_id_may_equal_its_own_bot_id(env):
 
 
 # --------------------------------------------------------------------------- #
-# Gating: decoy matrix, disabled, safe apps, machine callers
+# Gating: signed-out callers, disabled apps, machine callers
 # --------------------------------------------------------------------------- #
 
-def test_decoy_blocked_rules():
+def test_signed_out_blocked_rules():
     for method, path in (("GET", "/api/apps"), ("GET", "/api/apps/x"),
                          ("GET", "/api/apps/x/y"), ("POST", "/api/apps/x/y"),
                          ("GET", "/apps/x/"), ("GET", "/apps/x/app.js"),
                          ("HEAD", "/apps/x/"), ("GET", "/apps"),
                          ("GET", "/api/jobs"), ("POST", "/api/jobs/find"),
                          ("GET", "/api/apps/jobboard/months")):
-        assert main._decoy_blocked(method, path) is True, (method, path)
+        assert main._signed_out_blocked(method, path) is True, (method, path)
     # Not app paths at all — untouched by the app rule.
-    assert main._decoy_blocked("GET", "/api/appsettings") is False
-    assert main._decoy_blocked("GET", "/applesauce") is False
-
-
-def test_safe_mode_browser_gets_decoy_403_everywhere(env):
-    repo, load, make_client = env
-    _write_app(repo, "priv-test", {"api": {"legacy_prefix": "/api/privtest"}})
-    load()
-    c = make_client(LOOPBACK)
-    auth.set_pin("1234")
-    for method, path in (("GET", "/api/apps/priv-test/ping"),
-                         ("POST", "/api/apps/priv-test/echo"),
-                         ("GET", "/api/privtest/ping"),
-                         ("GET", "/apps/priv-test/"),
-                         ("GET", "/apps/priv-test/app.js"),
-                         ("GET", "/apps/nosuch/"),
-                         ("GET", "/api/apps/nosuch/x")):
-        r = c.request(method, path, headers=BROWSER)
-        assert r.status_code == 403, (method, path, r.status_code)
-        assert r.json().get("decoy") is True, (method, path, r.text)
+    assert main._signed_out_blocked("GET", "/api/appsettings") is False
+    assert main._signed_out_blocked("GET", "/applesauce") is False
 
 
 def test_remote_machine_without_token_is_refused(env):
@@ -361,7 +343,7 @@ def test_remote_machine_without_token_is_refused(env):
     c = make_client(REMOTE)
     auth.set_pin("1234")
     assert c.get("/api/apps/rem-test/ping").status_code == 401
-    assert c.get("/apps/rem-test/").status_code == 403           # static: not a machine surface
+    assert c.get("/apps/rem-test/").status_code in (401, 403)           # static: not a machine surface
 
 
 def test_loopback_machine_gets_require_access_but_not_require_operator(env):
@@ -374,7 +356,7 @@ def test_loopback_machine_gets_require_access_but_not_require_operator(env):
     assert c.post("/api/apps/mach-test/echo", json={"a": 1}).json() == {"echo": {"a": 1}}
     assert c.post("/api/machtest/echo", json={"a": 2}).status_code == 200
     r = c.post("/api/apps/mach-test/admin")
-    assert r.status_code == 403 and r.json().get("decoy") is True
+    assert r.status_code == 403 and r.json()["error"]["code"] == "permission_denied"
 
 
 def test_operator_session_reaches_everything(env):
@@ -386,7 +368,7 @@ def test_operator_session_reaches_everything(env):
     assert c.get("/apps/op-test/").status_code == 200
 
 
-def test_disabled_app_is_404_for_the_operator_and_403_for_safe_mode(env):
+def test_disabled_app_is_404_for_the_operator_and_refused_signed_out(env):
     repo, load, make_client = env
     _write_app(repo, "off-test", {"api": {"legacy_prefix": "/api/offtest"}})
     load()
@@ -395,26 +377,11 @@ def test_disabled_app_is_404_for_the_operator_and_403_for_safe_mode(env):
     for path in ("/api/apps/off-test/ping", "/api/offtest/ping", "/apps/off-test/"):
         assert c.get(path).status_code == 404, path          # no PIN → operator
     auth.set_pin("1234")
-    assert c.get("/api/apps/off-test/ping", headers=BROWSER).status_code == 403
+    assert c.get("/api/apps/off-test/ping", headers=BROWSER).status_code in (401, 403)
     # A machine caller is refused too: the switch turns the FEATURE off.
     assert c.get("/api/apps/off-test/ping").status_code == 404
     _manifest_rows("tools:\n  - {id: off-test, kind: app, enabled: true}\n")
     assert c.get("/api/apps/off-test/ping").status_code == 200
-
-
-def test_safe_app_get_is_allowed_in_safe_mode_but_mutations_are_not(env):
-    repo, load, make_client = env
-    _write_app(repo, "pub-test", {"safe": True})
-    load()
-    assert main._decoy_blocked("GET", "/api/apps/pub-test/ping") is False
-    assert main._decoy_blocked("GET", "/apps/pub-test/") is False
-    assert main._decoy_blocked("POST", "/api/apps/pub-test/echo") is True
-    c = make_client(LOOPBACK)
-    auth.set_pin("1234")
-    assert c.get("/api/apps/pub-test/ping", headers=BROWSER).status_code == 200
-    assert c.get("/apps/pub-test/", headers=BROWSER).status_code == 200
-    r = c.post("/api/apps/pub-test/echo", json={}, headers=BROWSER)
-    assert r.status_code == 403 and r.json()["decoy"] is True
 
 
 # --------------------------------------------------------------------------- #
@@ -565,7 +532,7 @@ def test_app_context_data_dir_env_and_db(env, monkeypatch):
     assert ctx.log.name.endswith("ctx-test")
 
 
-def test_broadcast_requires_the_app_prefix_and_safe_mode_drops_it(env, monkeypatch):
+def test_broadcast_requires_the_app_prefix_and_the_scoper_needs_its_permission(env, monkeypatch):
     repo, load, _ = env
     _write_app(repo, "bc-test")
     (la,) = load()
@@ -579,8 +546,12 @@ def test_broadcast_requires_the_app_prefix_and_safe_mode_drops_it(env, monkeypat
     for bad in ({"type": "message"}, {"type": "app:other:x"}, {"x": 1}):
         with pytest.raises(ValueError):
             asyncio.run(la.ctx.broadcast(bad))
-    assert main.redact_for_decoy({"type": "app:bc-test:changed", "x": 1}) is None
-    assert main.redact_for_decoy({"type": "app:jobboard:job_updated", "job": {}}) is None
+    from app import policy
+    basic = policy.Principal(kind="profile", role="basic", profile_id="b", name="B",
+                             permissions=frozenset({"use_chat"}))
+    assert main.scope_frame_for_principal({"type": "app:bc-test:changed", "x": 1}, basic) is None
+    assert main.scope_frame_for_principal({"type": "app:jobboard:job_updated", "job": {}}, basic) is None
+    assert main.scope_frame_for_principal({"type": "app:bc-test:changed", "x": 1}, None) is None
 
 
 # --------------------------------------------------------------------------- #
@@ -605,6 +576,10 @@ def test_bot_provisioning_appends_once_and_never_edits(env, caplog):
     p = bots["provbot"]
     assert (p.name, p.emoji, p.avatar, p.agent, p.visible) == (
         "Prov", "🎯", "prov-face.png", "scout", False)
+    # 4.0: `hidden` alone keeps a bot off the rail; the app bot is written with it, and the
+    # legacy hide_unlocked flag is not used for it.
+    assert p.hidden is True and p.hide_unlocked is False
+    assert p.to_dict()["hidden"] is True and p.to_dict()["visible"] is False
     k = bots["keptbot"]
     assert (k.name, k.emoji, k.visible) == ("Operator's", "🦊", True)
     assert apps_loader.provision_bots() == []
@@ -618,6 +593,20 @@ def test_startup_provisions_the_jobboard_bot(env):
     make_client()                                   # lifespan runs provisioning
     jb = config.get_bot("jobboard")
     assert jb is not None and jb.agent == "scout" and jb.visible is False
+
+
+def test_an_app_bot_is_off_the_rail(env):
+    """The Job Board's bot (manifest `visible: false`) is hidden from the rail: the roster
+    row the rail draws from says `hidden`, which is the one flag the rail filters on."""
+    from app import characters
+    _, _, make_client = env
+    make_client()
+    jb = config.get_bot("jobboard")
+    assert characters.is_hidden(jb)
+    import yaml
+    doc = yaml.safe_load(config.CONFIG_PATH.read_text(encoding="utf-8"))
+    (row,) = [e for e in doc["bots"] if e.get("id") == "jobboard"]
+    assert row.get("hidden") is True and not row.get("hide_unlocked")
 
 
 # --------------------------------------------------------------------------- #
@@ -643,10 +632,11 @@ def test_api_tools_lists_app_rows_in_order(env, tmp_path):
     app_ids = [r["id"] for r in rows if r["kind"] == "app"]
     assert app_ids.index("early-test") < app_ids.index("jobboard") < app_ids.index("late-test")
     early = next(r for r in rows if r["id"] == "early-test")
-    assert {k: early[k] for k in ("id", "title", "icon", "kind", "enabled", "safe", "order",
+    assert "safe" not in early                      # legacy 3.x key: accepted in app.yaml, never sent
+    assert {k: early[k] for k in ("id", "title", "icon", "kind", "enabled", "order",
                                   "has_refresh", "bot_id", "thread_hook", "entry")} == {
         "id": "early-test", "title": "Early", "icon": "chart", "kind": "app", "enabled": True,
-        "safe": False, "order": 1, "has_refresh": False, "bot_id": "earlybot",
+        "order": 1, "has_refresh": False, "bot_id": "earlybot",
         "thread_hook": "/apps/early-test/thread.js", "entry": "/apps/early-test/"}
     late = next(r for r in rows if r["id"] == "late-test")
     assert late["thread_hook"] is None and "bot_id" not in late
@@ -663,18 +653,7 @@ def test_api_tools_status_for_an_app(env):
     _manifest_rows("tools:\n  - {id: stat-test, kind: app, enabled: false}\n")
     assert c.get("/api/tools/stat-test/status").json()["enabled"] is False
     auth.set_pin("1234")
-    assert c.get("/api/tools/stat-test/status", headers=BROWSER).status_code == 403
-
-
-def test_safe_mode_lists_only_safe_apps(env):
-    repo, load, make_client = env
-    _write_app(repo, "open-test", {"safe": True})
-    _write_app(repo, "closed-test")
-    load()
-    c = make_client(LOOPBACK)
-    auth.set_pin("1234")
-    ids = [t["id"] for t in c.get("/api/tools", headers=BROWSER).json()["tools"]]
-    assert "open-test" in ids and "closed-test" not in ids and "jobboard" not in ids
+    assert c.get("/api/tools/stat-test/status", headers=BROWSER).status_code in (401, 403)
 
 
 def test_put_round_trips_app_rows_and_refuses_extra_fields(env):

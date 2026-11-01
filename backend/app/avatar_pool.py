@@ -26,7 +26,7 @@ one-shot lock (pool_common.retire), and the winner takes the full with it.
 
 Pool images are never web-served from here. A drawn pair enters the snapshot
 store (avatar_snapshots.snapshot_pair) and serves through the existing
-thread-keyed, Safe-Mode-gated route — no new static surface.
+thread-keyed, owner-checked route — no new static surface.
 
 Generation is two host calls per pair, both through the image CLI (fixed
 argv, never shell): a plain generate for the full portrait, then

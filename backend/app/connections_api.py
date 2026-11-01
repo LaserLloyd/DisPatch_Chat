@@ -12,7 +12,10 @@
 * ``POST   /api/connections/adopt``        give every character's inline provider a connection now
                                            (the same step the 3.0 migration runs at start-up)
 
-All of them are ``manage_connections``. A key is accepted on create/update and never returned;
+All of them are ``manage_connections``. Host-level parts are the protected Admin's (the Owner,
+4.3 #31): naming a server environment variable as the key (``env_key_owner_only``; keeping the
+one a connection already names stays every Admin's), moving a connection that holds a key to
+another server, and changing ``required_permission``. A key is accepted on create/update and never returned;
 ``credential.has_key`` says whether one is stored. The "Connect an AI" routes (``/api/llm/*``)
 are unchanged and keep writing inline provider settings; the next start (or ``/adopt``) turns those
 into connections.
@@ -83,7 +86,8 @@ def _err(e: connections.ConnectionError_):
 
 
 def _public(c: connections.Connection) -> dict:
-    return c.public(connections.used_by(c.id))
+    household, personal = connections.usage(c.id)
+    return c.public(household, personal)
 
 
 @router.get("/api/connections", dependencies=[_MANAGE])
@@ -104,14 +108,19 @@ async def connection_types():
 @router.post("/api/connections/test", dependencies=[_MANAGE])
 async def test_unsaved(payload: ConnectionTestIn):
     key = payload.api_key
+    base_url = payload.base_url
     if not key and payload.use_connection:
         # Re-testing a form for a saved connection: the stored key is borrowed for the SAME type
-        # and address only, so a Test can never carry one server's key to another.
-        c = connections.get(payload.use_connection)
+        # and address only, so a Test can never carry one server's key to another - for nobody,
+        # the protected Admin included (a moved address is tested after the PATCH, which is the
+        # Owner's alone, #31). A form without an address tests the connection's OWN address,
+        # never the type's default (4.3: that sent a proxy connection's key to the vendor).
+        c = await asyncio.to_thread(connections.get, payload.use_connection)
         if c is not None and c.type == payload.type and (
-                not payload.base_url or payload.base_url.rstrip("/") == c.base_url.rstrip("/")):
-            key = connections.credential(c)
-    return await connections.run_test(type=payload.type, base_url=payload.base_url, api_key=key,
+                not base_url or base_url.rstrip("/") == c.base_url.rstrip("/")):
+            key = await asyncio.to_thread(connections.credential, c)
+            base_url = c.base_url
+    return await connections.run_test(type=payload.type, base_url=base_url, api_key=key,
                                       model=payload.model)
 
 
@@ -153,6 +162,8 @@ async def get_connection(connection_id: str):
 @router.post("/api/connections", status_code=201, dependencies=[_MANAGE])
 async def create_connection(request: Request, payload: ConnectionCreateIn):
     try:
+        # A server environment variable as the key is the protected Admin's (#31).
+        connections.require_env_binding(policy.of(request).principal, "", payload.api_key_env)
         c = await asyncio.to_thread(
             connections.create, type=payload.type, name=payload.name, base_url=payload.base_url,
             api_key=payload.api_key, api_key_env=payload.api_key_env,
@@ -172,22 +183,29 @@ async def patch_connection(request: Request, connection_id: str, payload: Connec
         raise fail(422, "connection_invalid", "Nothing to change")
     existing = await asyncio.to_thread(connections.get, connection_id)
     if existing is not None:
-        # A connection may raise the permission needed to manage it, but only the Owner or an
-        # Admin (host control) lowers it.
+        pol = policy.of(request)
+        # 4.3 (#31): every Admin holds admin_system since 3.0, so the "host control" checks
+        # below ask for THE protected Admin (the Owner) instead.
+        # A connection's required permission is changed by the protected Admin only.
         perm = changes.get("required_permission")
         if perm and perm != existing.required_permission:
-            policy.of(request).require(Permission.ADMIN_SYSTEM)
+            pol.require_protected()
         need = existing.required_permission
         if need != "manage_connections":
-            policy.of(request).require(need)
-        if _moves_key_to_another_host(existing, changes) and not policy.of(request).can(Permission.ADMIN_SYSTEM):
-            # The key is write-only for an Admin; repointing the address while keeping it would
-            # hand it to a server of their choosing on the next Test or chat turn (the same rule
-            # the agent editor applies to MCP header secrets, and POST /api/connections/test to a
-            # borrowed key).
-            raise fail(403, "permission_denied",
-                       "Changing this connection's server keeps its saved key, so only the Owner or an Admin can do it. "
-                       "Paste the key again (or clear it) to change the address.")
+            pol.require(need)
+        # Naming another server variable as the key (keeping the one it has is fine).
+        if "api_key_env" in changes:
+            try:
+                connections.require_env_binding(pol.principal, connections.env_of(existing),
+                                                changes.get("api_key_env"))
+            except connections.ConnectionError_ as e:
+                raise _err(e) from e
+        if connections.moves_key(existing, changes) and not pol.principal.is_protected:
+            # The key is write-only; repointing the address (another host, port or scheme)
+            # while keeping it would hand it to a server of the caller's choosing on the next
+            # Test or chat turn (the same rule the agent editor applies to MCP header secrets,
+            # and POST /api/connections/test to a borrowed key).
+            raise fail(403, "permission_denied", connections.KEY_MOVE_OWNER_ONLY)
     try:
         c = await asyncio.to_thread(connections.update, connection_id, changes)
     except connections.ConnectionError_ as e:
@@ -196,24 +214,6 @@ async def patch_connection(request: Request, connection_id: str, payload: Connec
         await asyncio.to_thread(characters.refresh_inline_mirrors, c)
     audit(request, "connection.update", c.id, ",".join(sorted(k for k in changes if "key" not in k)))
     return await asyncio.to_thread(_public, c)
-
-
-def _host_of(url: str) -> str:
-    from urllib.parse import urlparse
-    try:
-        return (urlparse(url or "").hostname or "").lower().rstrip(".")
-    except ValueError:
-        return ""
-
-
-def _moves_key_to_another_host(existing: connections.Connection, changes: dict[str, Any]) -> bool:
-    """Would this PATCH send the connection's EXISTING credential to a different host?"""
-    if "base_url" not in changes or not existing.credential_ref:
-        return False
-    if str(changes.get("api_key") or "").strip() or changes.get("clear_key"):
-        return False                     # a new key, or no key: nothing is carried over
-    new = str(changes.get("base_url") or existing.ctype.base_url)
-    return _host_of(new) != _host_of(existing.base_url)
 
 
 @router.delete("/api/connections/{connection_id}", dependencies=[_MANAGE])

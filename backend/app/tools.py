@@ -11,8 +11,7 @@ Contract: ``docs/design/2026-09-25-tools-plugins.md`` (apps:
     rows an EXTENSION registers (``register_builtins``, app/extensions.py —
     the voice add-on's Voice cloning, Built-in voices and Voice lab), which
     are usually OPT-IN: off until a row says ``enabled: true`` (``OPT_IN``;
-    no entry = off). Both are unlocked-tier only and never listed for Safe
-    Mode. A builtin row whose id nobody provides — the add-on was uninstalled
+    no entry = off). Both are listed to operators only. A builtin row whose id nobody provides — the add-on was uninstalled
     — is a DORMANT row: kept verbatim through load and save, never listed,
     logged once. (Until 2.2.0 it invalidated the whole manifest.)
   * **static** — a directory served read-only at ``/tools/<id>/``. This is a
@@ -53,7 +52,7 @@ it.
 Frame tickets. A static page is framed under ``sandbox`` WITHOUT
 ``allow-same-origin``, so it runs as an opaque origin and its own
 stylesheets/scripts/fetches carry no cookie. With a PIN set those subresource
-requests would land in Safe Mode and the page would render bare — the exact
+requests would arrive signed out and the page would render bare — the exact
 failure localview solved with tickets. Same cure here: when an operator
 session asks for an HTML page, it is redirected to
 ``/tools/_t/<ticket>/<path>``, a random client-bound, expiring capability
@@ -87,6 +86,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from . import auth, config, localview, policy
+from .contracts import errors
 from .contracts.permissions import Permission
 
 log = logging.getLogger("local-chat.tools")
@@ -105,7 +105,9 @@ MAX_FILE_BYTES = 64 * 1024 * 1024
 TAIL_BYTES = 2048
 
 NOT_FOUND = {"detail": "Not found"}
-DECOY_BODY = {"detail": "Unlock for full access", "decoy": True}
+FORBIDDEN_BODY = {"detail": "Your profile does not have permission to do that.",
+                  "error": {"code": "permission_denied",
+                            "message": "Your profile does not have permission to do that."}}
 
 #: builtin id → (feature key main uses, default rail title, default icon).
 #: The panes that ship with DisPatch. (The Job Board was a builtin here for
@@ -153,7 +155,7 @@ _ALLOWED_KEYS = {
 #: Settings tab sends rows back as it got them; these are dropped from a PUT
 #: when they still say what the package says, and refused when they do not —
 #: a title is changed in app.yaml, not through this API.
-_APP_MIRROR_KEYS = ("title", "icon", "safe", "order", "has_refresh", "bot_id",
+_APP_MIRROR_KEYS = ("title", "icon", "order", "has_refresh", "bot_id",
                     "thread_hook", "entry", "hook_version", "mounted")
 _REFRESH_KEYS = {"argv", "cwd", "timeout_s"}
 #: Keys GET /api/tools adds that are not part of the manifest. PUT drops them so
@@ -228,7 +230,8 @@ class Tool:
             if self.remote_url:
                 d["remote_url"] = self.remote_url
         d["enabled"] = self.enabled
-        d["safe"] = self.safe
+        if self.safe:                            # legacy 3.x flag: inert, kept only as data
+            d["safe"] = True
         if self.open != self.default_open():     # a default is never written
             d["open"] = self.open
         if self.refresh is not None:
@@ -288,7 +291,7 @@ def _in_deny_roots(p: Path) -> bool:
 def _in_data_dir(p: Path) -> bool:
     """Is ``p`` the app's data directory or anything under it? The deny roots
     only name the data dir's SECRET files; a root AT the data dir would still
-    serve ``files/``, ``media/`` and ``tools.yaml`` — to Safe Mode if ``safe``."""
+    serve ``files/``, ``media/`` and ``tools.yaml`` to anyone the tool is listed to."""
     data = config.DATA_DIR
     candidates = {data}
     with contextlib.suppress(OSError, RuntimeError, ValueError):
@@ -924,14 +927,14 @@ def _session(request: Request):
 
 
 def _is_operator(request: Request) -> bool:
-    """May this caller CONFIGURE tools and plugins (``manage_plugins``)? Owner and
-    Admin sessions, or an open install. A machine is never the operator: tools are
+    """May this caller CONFIGURE tools and plugins (``manage_plugins``)? Admin
+    sessions, or an open install. A machine is never the operator: tools are
     a browser feature. The decision is ``policy``'s - this is only its old name."""
     return policy.of(request).can(Permission.MANAGE_PLUGINS)
 
 
 def _is_member(request: Request) -> bool:
-    """Signed in with the blanket ``use_tools`` (a Member) but not an operator."""
+    """Signed in with the blanket ``use_tools`` (a User granted it) but not an operator."""
     pol = policy.of(request)
     return (not pol.can(Permission.MANAGE_PLUGINS)) and pol.can(Permission.USE_TOOLS)
 
@@ -940,12 +943,8 @@ def _require_operator(request: Request) -> None:
     policy.of(request).require(Permission.MANAGE_PLUGINS)
 
 
-def _limited_visible(t: Tool) -> bool:
-    return t.kind in ("static", "url") and t.safe and t.enabled
-
-
 def _member_visible(t: Tool) -> bool:
-    """What a Member may open: any enabled static page or URL tool the owner added."""
+    """What a non-operator holding ``use_tools`` may open: any enabled static page or URL tool an Admin added."""
     return t.kind in ("static", "url") and t.enabled
 
 
@@ -955,7 +954,7 @@ def _member_visible(t: Tool) -> bool:
 
 def _out_operator(t: Tool) -> dict:
     d = {"id": t.id, "title": t.title, "icon": t.icon, "kind": t.kind,
-         "enabled": t.enabled, "safe": t.safe, "has_refresh": t.refresh is not None,
+         "enabled": t.enabled, "has_refresh": t.refresh is not None,
          "open": t.open}
     if t.kind == "static":
         d["root"] = t.root
@@ -970,7 +969,7 @@ def _out_operator(t: Tool) -> dict:
 
 def _out_limited(t: Tool) -> dict:
     d = {"id": t.id, "title": t.title, "icon": t.icon, "kind": t.kind,
-         "enabled": t.enabled, "safe": t.safe, "has_refresh": False, "open": t.open}
+         "enabled": t.enabled, "has_refresh": False, "open": t.open}
     if t.kind == "static":
         d["entry"] = t.entry
     else:
@@ -985,12 +984,12 @@ def _builtin_row(tid: str) -> dict:
             # `enabled` is the manifest SWITCH (what a Settings save round-trips),
             # never the resolved value — otherwise saving while a feature is
             # merely unavailable would persist `enabled: false` into tools.yaml.
-            "enabled": builtin_switch(tid), "safe": False,
+            "enabled": builtin_switch(tid),
             "has_refresh": False, "builtin_feature": feat,
             "available": _builtin_available(tid),
             "open": builtin_open(tid)}
     if tid in BUILTIN_WINDOWABLE:
-        # Operator listing only (builtins never list for Safe Mode), and the
+        # Operator listing only (builtins are never listed to anyone else), and the
         # same values the feature's own full-session status route returns.
         d["open_url"], d["open_remote_url"] = builtin_addresses(tid)
     return d
@@ -1000,7 +999,7 @@ def _app_row(la) -> dict:
     m = la.manifest
     d = {"id": m.id, "title": m.title, "icon": m.icon, "kind": "app",
          # The manifest SWITCH, like a builtin row (never a resolved value).
-         "enabled": _app_enabled(m.id), "safe": m.safe, "order": m.order,
+         "enabled": _app_enabled(m.id), "order": m.order,
          "has_refresh": False}
     if m.bot is not None:
         d["bot_id"] = m.bot.id
@@ -1028,18 +1027,19 @@ def list_out(operator: bool, member: bool = False, can_app=None) -> list[dict]:
     """Builtins first, then apps by `order` (then id), then static/url tools.
 
     Three audiences: the operator (everything, with paths and refresh commands), a
-    Member (every enabled page or URL tool, no host paths; the apps whose manifest
-    permission they hold) and Restricted (only what is flagged ``safe``)."""
+    holder of the blanket ``use_tools`` (every enabled page or URL tool, no host paths; the
+    apps whose manifest permission they hold) and everyone else (only the apps whose
+    manifest permission they hold - Image Studio for ``use_images``; no tools: a tool panel
+    is never in a User's or Basic profile's column). A tool's ``safe`` flag is legacy 3.x
+    data: kept in tools.yaml, never read."""
     manifest = load_tools()
     apps = _mounted_apps()
-    if member and not operator:
-        rows = [_app_row(la) for la in apps
-                if _app_enabled(la.manifest.id) and (can_app is None or can_app(la.manifest))]
-        return rows + [_out_limited(t) for t in manifest if _member_visible(t)]
     if not operator:
         rows = [_app_row(la) for la in apps
-                if la.manifest.safe and _app_enabled(la.manifest.id)]
-        return rows + [_out_limited(t) for t in manifest if _limited_visible(t)]
+                if _app_enabled(la.manifest.id) and (can_app is None or can_app(la.manifest))]
+        if not member:
+            return rows
+        return rows + [_out_limited(t) for t in manifest if _member_visible(t)]
     rows = [_builtin_row(tid) for tid in BUILTINS]
     rows += [_app_row(la) for la in apps]
     rows += [_out_operator(t) for t in manifest if t.kind not in ("builtin", "app")]
@@ -1253,6 +1253,10 @@ def api_tools_put(request: Request, payload: dict = Body(...)):
             continue
         tid = row.get("id")
         stored = current.get(tid) if isinstance(tid, str) else None
+        # `safe` is a legacy 3.x key (no Restricted tier in 4.0): GET no longer lists it, so a
+        # row sent back without it keeps what the file holds (inert data, round-tripped).
+        if "safe" not in row and stored is not None and stored.safe:
+            row["safe"] = True
         # The UI can never introduce or change a refresh argv: sent = must equal
         # what the file already holds; omitted/null = keep what the file holds.
         if row.get("refresh") is not None:
@@ -1280,6 +1284,13 @@ def api_tools_put(request: Request, payload: dict = Body(...)):
     # rows while the add-on is uninstalled.
     cleaned += [t.to_manifest() for t in current.values()
                 if is_dormant(t) and t.id not in sent_ids]
+    # 4.3 host tier: a static panel serves files off the host (like the local viewer), so
+    # introducing one or moving its root is the protected Admin's.
+    if (any(isinstance(cleaned[i], dict) and cleaned[i].get("kind") == "static" for i in fs_rows)
+            and not policy.of(request).principal.is_host):
+        return JSONResponse({"detail": policy.HOST_DETAIL,
+                             "error": errors.envelope("host_owner_only", message=policy.HOST_DETAIL)},
+                            status_code=403)
     try:
         validated = validate_tools(cleaned, check_fs=fs_rows, dormant_ok=True)
     except ToolValidationError as e:
@@ -1303,6 +1314,7 @@ def _clean_app_row(i: int, row: dict, stored: Tool | None) -> dict:
     la = apps_loader.get(tid) if isinstance(tid, str) else None
     if la is None and (stored is None or stored.kind != "app"):
         raise ToolValidationError(i, "id", "no such app (an app is a package on disk)")
+    row = {k: v for k, v in row.items() if k != "safe"}     # legacy 3.x key, inert
     if la is not None:
         mirror = _app_row(la)
         for k in _APP_MIRROR_KEYS:
@@ -1340,23 +1352,23 @@ async def api_tool_status(request: Request, tool_id: str):
     from . import apps_loader
     la = apps_loader.get(tool_id)
     if la is not None:
-        visible = la.mounted and _app_enabled(tool_id) and (
-            la.manifest.safe or (member and policy.of(request).can(la.manifest.permission)))
+        visible = la.mounted and _app_enabled(tool_id) and \
+            policy.of(request).can(la.manifest.permission)
         if not operator and not visible:
-            return JSONResponse(DECOY_BODY, status_code=403)
+            return JSONResponse(FORBIDDEN_BODY, status_code=403)
         return {"id": tool_id, "kind": "app", "enabled": _app_enabled(tool_id),
                 "mounted": la.mounted}
     t = get_tool(tool_id)
     if t is not None and t.kind == "app":
         # A tools.yaml app row whose package did not load (missing / untrusted).
         if not operator:
-            return JSONResponse(DECOY_BODY, status_code=403)
+            return JSONResponse(FORBIDDEN_BODY, status_code=403)
         return {"id": tool_id, "kind": "app", "enabled": t.enabled, "mounted": False}
     if t is None and tool_id in BUILTINS:
         t = Tool(id=tool_id, kind="builtin")
     if not operator:
-        if t is None or not (_member_visible(t) if member else _limited_visible(t)):
-            return JSONResponse(DECOY_BODY, status_code=403)
+        if t is None or not member or not _member_visible(t):
+            return JSONResponse(FORBIDDEN_BODY, status_code=403)
     elif t is None:
         return JSONResponse(NOT_FOUND, status_code=404)
     if t.kind == "builtin":
@@ -1427,11 +1439,10 @@ def tool_file(request: Request, tool_id: str, rel: str):
     member = _is_member(request)
     t = get_tool(tool_id)
     if not operator:
-        # Restricted: only safe, enabled static tools; a Member: any enabled static
-        # tool. Everything else answers the same decoy 403 whether or not it exists.
-        if t is None or t.kind != "static" or not (
-                _member_visible(t) if member else _limited_visible(t)):
-            return JSONResponse(DECOY_BODY, status_code=403)
+        # A holder of use_tools: any enabled static tool. Everything else answers the
+        # same 403 whether or not it exists.
+        if t is None or t.kind != "static" or not member or not _member_visible(t):
+            return JSONResponse(FORBIDDEN_BODY, status_code=403)
     elif t is None or t.kind != "static" or not t.enabled:
         return JSONResponse(NOT_FOUND, status_code=404)
     try:

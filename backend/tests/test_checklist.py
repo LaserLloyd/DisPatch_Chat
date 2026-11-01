@@ -59,7 +59,6 @@ def checklist_env(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "db", temp_db)
     main._delivered.clear()
     main._thread_bot.clear()
-    main._decoy_upload_used.clear()
 
     with TestClient(main.app, client=("testclient", 50000)) as client:
         auth.set_pin("1234")
@@ -89,20 +88,23 @@ def _checklist_message(client, content=CHECKLIST, metadata=None):
 # Access control
 # --------------------------------------------------------------------------- #
 
-def test_redactor_scopes_checklist_update_to_safe_bots(checklist_env):
-    """Safe Mode must not learn a non-safe bot's checklist changed."""
-    base = {"type": "checklist_update", "thread_id": "t", "message_id": "m",
-            "checklist": {"checked": [0]}}
-    assert main.redact_for_decoy({**base, "bot_id": "alpha"}) is not None  # safe
-    assert main.redact_for_decoy({**base, "bot_id": "main"}) is None       # unsafe
+def test_a_checklist_update_follows_its_thread_owner(checklist_env):
+    """A checklist change is a thread frame: no principal (or an unattributable thread)
+    gets nothing."""
+    base = {"type": "checklist_update", "thread_id": "t-unknown", "message_id": "m",
+            "checklist": {"checked": [0]}, "bot_id": "alpha"}
+    from app import ownership, policy
+    assert main.scope_frame_for_principal(base, policy.open_principal()) is None   # unattributable
+    ownership.remember("t-unknown", None)
+    assert main.scope_frame_for_principal(base, None) is None
+    assert main.scope_frame_for_principal(base, policy.open_principal()) is not None
 
 
 def test_checklist_patch_requires_a_full_session(checklist_env):
     tid, mid = _checklist_message(checklist_env)
     checklist_env.post("/api/auth/lock")
     r = checklist_env.patch(f"/api/messages/{mid}/checklist", json={"checked": [0]})
-    assert r.status_code == 403, r.text
-    assert r.json()["detail"] == "Unlock for full access"
+    assert r.status_code in (401, 403), r.text
 
 
 def test_missing_message_is_404(checklist_env):
@@ -289,5 +291,4 @@ def test_row_op_requires_a_full_session(checklist_env):
     checklist_env.post("/api/auth/lock")
     r = checklist_env.patch(f"/api/messages/{mid}/checklist",
                             json={"index": 0, "checked": True})
-    assert r.status_code == 403, r.text
-    assert r.json()["detail"] == "Unlock for full access"
+    assert r.status_code in (401, 403), r.text

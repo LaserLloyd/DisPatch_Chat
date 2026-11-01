@@ -1,32 +1,38 @@
-// Sign-in, first-run setup and the Restricted experience (DOM half; the
-// decisions live in profiles.js).
+// Sign-in and first-run setup (DOM half; the decisions live in profiles.js).
 //
 //   renderSignIn   profile TILES and the credential prompt a tile asks for
 //                  (password, PIN, both, or nothing), with the 429 countdown.
-//   renderSetup    the form that creates the Owner: full page when the install
+//   renderSetup    the form that creates the first Admin: full page when the install
 //                  is reached from the network (needs the setup token printed in
-//                  the server log), inline in Settings -> Security on the box.
-//   restrictedBanner / openRestrictedPanel
-//                  the slim, non-dismissible "the owner can see a summary"
-//                  strip and the panel behind its link (GET /api/me/activity).
-//   accessNotice   "today's time is used up" / "not available right now".
-//   profileMenu    the rail chip's Switch profile / Lock menu.
+//                  the server log), inline in Settings -> Account on the box.
+//   attachChipMenu the rail chip and its Switch profile / Lock menu.
 //
-// Nothing here talks to the network on its own except the Restricted panel's
-// read of the profile's own activity: every credential goes out through the
-// callback main.js passes in, which owns the session state.
+// Nothing here talks to the network: every credential goes out through the
+// callback main.js passes in, which owns the session state. (4.3: the optional
+// "Sign in with <provider>" button is a page navigation to /api/oidc/start, not a
+// fetch: the provider's sign-in page takes over the tab and comes back to the app.)
 
-import { t } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
+import { t } from './i18n.js?v=5';
+import { el } from './util.js?v=23';
+import { nimEnabled } from './nim.js?v=8';
 import {
-  ACTIVITY_COLUMNS, activityRows, avatarSpec, blockNoticeKey, createCountdown, credentialModes,
-  credentialOptions, formatCountdown, sortTiles, usageLines,
-} from './profiles.js?v=2';
+  avatarSpec, createCountdown, credentialModes, credentialOptions, formatCountdown, markNode, sortTiles,
+} from './profiles.js?v=6';
 
 const roleLabel = (role) => t(`role.${role}`);
+/** A tile's second line: the shared default profile says what it is ("Shared · no PIN"), not its type. */
+const tileRole = (p) => (p.shared ? t('signin.role_shared') : roleLabel(p.role));
+
+/** A 429 on a tile with nothing to type is the quick-switch cap (20 picks in 10 minutes from one
+ *  address), not a wrong PIN: say so instead of "Too many attempts". */
+export function waitText(e, secs, { picking = false } = {}) {
+  const time = formatCountdown(secs);
+  return (e && e.code === 'too_many_switches') || picking ? t('signin.pick_wait', { time }) : t('signin.wait', { time });
+}
 
 function avatar(profile, cls) {
-  const spec = avatarSpec(profile);
+  const spec = avatarSpec(profile, { noImages: nimEnabled() });
+  if (spec.kind === 'mark') return markNode(cls);
   if (spec.kind === 'img') {
     return el('img', { class: cls, src: spec.src, alt: '', width: '48', height: '48', draggable: 'false' });
   }
@@ -49,19 +55,43 @@ function errMessage(e, fallbackKey) {
  *   currentId  the profile already signed in here (switching), or null
  *   onSubmit   async (profile, {pin?, password?, remember?}) -> resolves on
  *              success, rejects with the api Error otherwise
- *   remember   () -> bool, whether the "keep this device unlocked" box is on
- *   preselect  profile id to open straight to (e.g. a bound device's profile)
+ *   remember   () -> bool, whether the "keep this device signed in" box is on
+ *   oidc       optional {enabled, label} from status.oidc (4.3): adds "Sign in with
+ *              <label>" under the tiles
+ *   navigate   (url) -> void, how the OIDC button leaves the page (tests stub it)
  * Returns { reset(), pick(id), destroy() }.
  */
-export function renderSignIn(host, { profiles, currentId = null, onSubmit, remember = () => false, preselect = null }) {
+export function oidcStartUrl({ remember = false, link = null } = {}) {
+  const q = new URLSearchParams();
+  if (link) q.set('link', String(link));
+  if (remember) q.set('remember', '1');
+  const qs = q.toString();
+  return `/api/oidc/start${qs ? `?${qs}` : ''}`;
+}
+
+/** The "Sign in with <provider>" button, or null when outside sign-in is off. */
+export function oidcButton(oidc, { remember = () => false, navigate } = {}) {
+  if (!oidc || !oidc.enabled) return null;
+  const go = navigate || ((url) => window.location.assign(url));
+  const b = el('button', {
+    type: 'button', class: 'btn-secondary signin-oidc',
+    text: t('signin.oidc_button', { provider: oidc.label || t('signin.oidc_provider') }),
+  });
+  b.addEventListener('click', () => { b.disabled = true; go(oidcStartUrl({ remember: !!remember() })); });
+  return b;
+}
+
+export function renderSignIn(host, { profiles, currentId = null, onSubmit, remember = () => false, oidc = null, navigate = null }) {
   let countdown = null;
   let busy = false;
+  let picked = null;              // the tile whose credential form is up (null on the tile list)
   const tiles = sortTiles(profiles);
 
   const stopCountdown = () => { if (countdown) { countdown.stop(); countdown = null; } };
 
   function showTiles() {
     stopCountdown();
+    picked = null;
     const list = el('ul', { class: 'signin-tiles', role: 'list' }, tiles.map((p) => {
       const b = el('button', {
         type: 'button', class: 'signin-tile', 'data-profile': p.id,
@@ -69,17 +99,20 @@ export function renderSignIn(host, { profiles, currentId = null, onSubmit, remem
       }, [
         avatar(p, 'signin-avatar'),
         el('span', { class: 'signin-name', text: p.name }),
-        el('span', { class: 'signin-role', text: roleLabel(p.role) }),
+        el('span', { class: 'signin-role', text: tileRole(p) }),
+        p.protected ? el('span', { class: 'signin-badge', text: t('people.protected') }) : null,
       ]);
       b.addEventListener('click', () => pick(p));
       return el('li', {}, [b]);
     }));
     const err = el('div', { class: 'lock-error signin-error', id: 'signin-tiles-error', role: 'alert', 'aria-live': 'assertive', hidden: '' });
-    host.replaceChildren(
+    const outside = oidcButton(oidc, { remember, navigate });
+    host.replaceChildren(...[
       el('p', { class: 'signin-prompt', text: t('signin.who') }),
       list,
+      outside ? el('div', { class: 'signin-oidc-row' }, [outside]) : null,
       err,
-    );
+    ].filter(Boolean));
     host._err = err;
     const first = list.querySelector('button');
     if (first) { try { first.focus(); } catch { /* not attached yet */ } }
@@ -90,11 +123,11 @@ export function renderSignIn(host, { profiles, currentId = null, onSubmit, remem
     busy = true;
     ui.setBusy(true);
     try {
-      await onSubmit(profile, { ...opts, remember: !!remember() && profile.role !== 'restricted' });
+      await onSubmit(profile, { ...opts, remember: !!remember() });
     } catch (e) {
       ui.clearSecret();
       if (e && e.status === 429 && e.retryAfter) {
-        ui.wait(e.retryAfter);
+        ui.wait(e.retryAfter, e);
       } else {
         ui.error(errMessage(e));
       }
@@ -108,12 +141,14 @@ export function renderSignIn(host, { profiles, currentId = null, onSubmit, remem
     const profile = typeof profileOrId === 'string' ? tiles.find((p) => p.id === profileOrId) : profileOrId;
     if (!profile) return;
     const modes = credentialModes(profile.credential);
+    picked = modes.length ? profile : null;
     if (!modes.length) {
       // Nothing to type: picking the tile IS the sign-in.
       const ui = {
         setBusy: (b) => host.querySelectorAll('.signin-tile').forEach((x) => { x.disabled = b; }),
         clearSecret: () => {},
-        wait: (s) => { const d = host._err; if (d) { d.textContent = t('signin.wait', { time: formatCountdown(s) }); d.hidden = false; } },
+        // Shown once, inline (no toast): the quick-switch cap names itself.
+        wait: (s, e) => { const d = host._err; if (d) { d.textContent = waitText(e, s, { picking: true }); d.hidden = false; } },
         error: (m) => { const d = host._err; if (d) { d.textContent = m; d.hidden = false; } },
       };
       submit(profile, {}, ui);
@@ -131,6 +166,8 @@ export function renderSignIn(host, { profiles, currentId = null, onSubmit, remem
     const label = el('label', { for: 'signin-secret' });
     const err = el('div', { class: 'lock-error signin-error', id: 'signin-cred-error', role: 'alert', 'aria-live': 'assertive', hidden: '' });
     const wait = el('div', { class: 'signin-wait', role: 'status', 'aria-live': 'off', hidden: '' });
+    // The countdown is the one visible line; this sentence is for screen readers only.
+    const announce = el('div', { class: 'sr-only signin-wait-announce', role: 'alert', 'aria-live': 'assertive' });
     const go = el('button', { type: 'submit', class: 'btn-primary signin-go', text: t('signin.go') });
     const back = el('button', { type: 'button', class: 'btn-secondary signin-back', text: t('signin.back') });
     const toggle = modes.length > 1 ? el('button', { type: 'button', class: 'lock-forgot signin-toggle' }) : null;
@@ -153,19 +190,21 @@ export function renderSignIn(host, { profiles, currentId = null, onSubmit, remem
     const ui = {
       setBusy: (b) => { go.disabled = b || !!countdown; input.disabled = b; back.disabled = b; },
       clearSecret: () => { input.value = ''; },
-      error: (m) => { wait.hidden = true; err.textContent = m; err.hidden = !m; input.focus(); },
-      wait: (secs) => {
+      error: (m) => { wait.hidden = true; announce.textContent = ''; err.textContent = m; err.hidden = !m; input.focus(); },
+      wait: (secs, e) => {
         stopCountdown();
-        err.textContent = t('signin.wait_announce', { seconds: secs });
-        err.hidden = false;
+        err.textContent = '';
+        err.hidden = true;
+        announce.textContent = t('signin.wait_announce', { seconds: secs });
         wait.hidden = false;
         go.disabled = true;
         countdown = createCountdown({
           seconds: secs,
-          onTick: (left) => { wait.textContent = t('signin.wait', { time: formatCountdown(left) }); },
+          onTick: (left) => { wait.textContent = waitText(e, left); },
           onDone: () => {
             countdown = null;
             wait.hidden = true;
+            announce.textContent = '';
             err.hidden = true;
             go.disabled = false;
             try { input.focus(); } catch { /* ignore */ }
@@ -180,6 +219,7 @@ export function renderSignIn(host, { profiles, currentId = null, onSubmit, remem
       toggle,
       err,
       wait,
+      announce,
       go,
       back,
     ]);
@@ -195,19 +235,32 @@ export function renderSignIn(host, { profiles, currentId = null, onSubmit, remem
   }
 
   showTiles();
-  if (preselect) pick(preselect);
 
   return {
     reset: showTiles,
     pick,
+    /** The profile whose PIN/password form is showing, or null. */
+    picked: () => picked,
+    /** A one-line note under the tiles (gone once a tile is picked). */
+    notice: (m) => { const d = host._err; if (d) { d.textContent = m || ''; d.hidden = !m; } },
     destroy: () => { stopCountdown(); host.replaceChildren(); },
   };
+}
+
+/** What "Forgot PIN?" does (4.3 Fable). On the tile screen with no tile picked: ask for the
+ *  profile first (it used to open the Owner's recovery-code form). A picked profile that is not
+ *  the Owner: "ask an Admin". Otherwise (the Owner's tile, or the keypad, which is the Owner's
+ *  PIN): the Owner's recovery-code form. */
+export function recoverPlan({ tiles = false, picked = null } = {}) {
+  if (tiles && !picked) return 'pick_first';
+  if (picked && !picked.protected) return 'ask_admin';
+  return 'owner';
 }
 
 // ---- First-run setup -----------------------------------------------------------
 
 /**
- * The "create the Owner" form.
+ * The "create the first Admin" form.
  *   setupRequired  show the Setup token field (network install)
  *   onSubmit       async ({name, password, newPin, setupToken})
  *   onCancel       optional; adds a Cancel/Not now button
@@ -293,7 +346,7 @@ export function setupPage(host, { setupRequired, onSubmit }) {
 
 // ---- Rail chip + menu ----------------------------------------------------------------
 
-/** The label for the chip button, e.g. "Sam, Member". */
+/** The label for the chip button, e.g. "Sam, User". */
 export function chipLabel(profile, role) {
   const name = (profile && profile.name) || t(`role.${role}`);
   return t('chip.label', { name, role: roleLabel(role) });
@@ -301,111 +354,14 @@ export function chipLabel(profile, role) {
 
 export function paintChip(btn, profile, role) {
   if (!btn) return;
-  const spec = avatarSpec(profile || { name: roleLabel(role) });
-  btn.replaceChildren(spec.kind === 'img'
+  const spec = avatarSpec(profile || { name: roleLabel(role) }, { noImages: nimEnabled() });
+  btn.replaceChildren(spec.kind === 'mark' ? markNode('profile-chip-img') : spec.kind === 'img'
     ? el('img', { class: 'profile-chip-img', src: spec.src, alt: '', draggable: 'false' })
     : el('span', { class: 'profile-chip-text', 'aria-hidden': 'true', text: spec.text }));
   const label = chipLabel(profile, role);
   btn.setAttribute('aria-label', label);
   btn.title = label;
   btn.dataset.label = (profile && profile.name) || roleLabel(role);
-}
-
-// ---- Restricted banner + panel ---------------------------------------------------------
-
-/** The slim strip. Non-dismissible by design: a Restricted profile is told, in
- *  plain words, what the owner can see. `disclosure` is the server's string
- *  when it sent one; the localized text is the default. */
-export function paintRestrictedBanner(host, { show, onMore }) {
-  host.hidden = !show;
-  if (!show) { host.replaceChildren(); return; }
-  const more = el('button', { type: 'button', class: 'restricted-more', text: t('restricted.more') });
-  more.addEventListener('click', onMore);
-  host.replaceChildren(el('span', { class: 'restricted-text', text: t('restricted.banner') }), ' ', more);
-}
-
-/** Today's usage against the limits + the 7-day counts, from /api/me/activity. */
-export async function openRestrictedPanel({ fetchActivity }) {
-  const dlg = el('dialog', { class: 'ui-dialog restricted-panel', 'aria-labelledby': 'restricted-title' });
-  const body = el('div', { class: 'ui-dialog-body' });
-  const close = el('button', { type: 'button', class: 'ui-dialog-btn primary', text: t('common.close') });
-  body.append(
-    el('h3', { class: 'ui-dialog-title', id: 'restricted-title', text: t('restricted.panel_title') }),
-    el('p', { class: 'ui-dialog-msg', text: t('restricted.banner') }),
-    // The banner's link promises "who can see what": the activity summary is only
-    // part of it, so say plainly that the Owner and Admins can open the chats too.
-    el('p', { class: 'ui-dialog-msg', text: t('restricted.panel_chats') }),
-    el('h4', { class: 'people-subtitle', text: t('restricted.summary_title') }),
-  );
-  const holder = el('div', { class: 'restricted-holder', 'aria-live': 'polite' }, [
-    el('p', { class: 'muted', text: t('common.loading') })]);
-  body.append(holder, el('div', { class: 'ui-dialog-foot' }, [close]));
-  dlg.append(body);
-  document.body.append(dlg);
-  const done = () => { try { dlg.close(); } catch { /* ignore */ } dlg.remove(); };
-  close.addEventListener('click', done);
-  dlg.addEventListener('cancel', (e) => { e.preventDefault(); done(); });
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) done(); });
-  dlg.showModal();
-  close.focus();
-  try {
-    const r = await fetchActivity();
-    const lines = usageLines(r.today, r.limits);
-    const usage = el('ul', { class: 'restricted-usage' }, lines
-      .filter((l) => l.limit != null || l.used > 0)
-      .map((l) => el('li', { class: l.over ? 'restricted-over' : '' }, [
-        t(`restricted.use_${l.key}`),
-        ': ',
-        el('strong', { text: l.limit != null ? t('restricted.of', { used: l.used, limit: l.limit }) : String(l.used) }),
-      ])));
-    const rows = activityRows(r.summary, 7);
-    const table = rows.length
-      ? el('div', { class: 'people-table-wrap', tabindex: '0', role: 'region', 'aria-label': t('restricted.week') }, [
-        el('table', { class: 'people-table' }, [
-          el('caption', { class: 'people-caption', text: t('restricted.week') }),
-          el('thead', {}, [el('tr', {}, [
-            el('th', { scope: 'col', text: t('people.col_day') }),
-            ...ACTIVITY_COLUMNS.map((c) => el('th', { scope: 'col', class: 'people-num', text: t(`people.col_${c}`) })),
-          ])]),
-          el('tbody', {}, rows.map((row) => el('tr', {}, [
-            el('th', { scope: 'row', text: row.day }),
-            ...ACTIVITY_COLUMNS.map((c) => el('td', { class: 'people-num', text: String(row.counts[c]) })),
-          ]))),
-        ]),
-      ])
-      : el('p', { class: 'muted', text: t('restricted.week_empty') });
-    holder.replaceChildren(
-      el('h4', { class: 'people-subtitle', text: t('restricted.today') }),
-      usage.childNodes.length ? usage : el('p', { class: 'muted', text: t('restricted.today_empty') }),
-      table,
-    );
-  } catch (e) {
-    holder.replaceChildren(el('p', { class: 'muted', text: t('restricted.load_failed') }));
-  }
-  return dlg;
-}
-
-// ---- "Not available right now" notice -------------------------------------------------
-
-/** Fills the full-screen notice for a time_limit / quiet_hours refusal. */
-export function paintAccessNotice(host, code, { onRetry, onSwitch }) {
-  const stem = blockNoticeKey(code) || 'notice.time_limit';
-  const retry = el('button', { type: 'button', class: 'btn-secondary', text: t('notice.check_again') });
-  retry.addEventListener('click', onRetry);
-  const buttons = [retry];
-  if (onSwitch) {
-    const sw = el('button', { type: 'button', class: 'btn-primary', text: t('notice.switch') });
-    sw.addEventListener('click', onSwitch);
-    buttons.unshift(sw);
-  }
-  host.replaceChildren(
-    el('div', { class: 'lock-card access-card' }, [
-      el('div', { class: 'lock-emoji', 'aria-hidden': 'true', text: '🌙' }),
-      el('h2', { id: 'access-title', text: t(`${stem}_title`) }),
-      el('p', { class: 'lock-sub', id: 'access-sub', text: t(`${stem}_body`) }),
-      el('div', { class: 'bm-actions access-actions' }, buttons),
-    ]),
-  );
 }
 
 // ---- Rail chip menu --------------------------------------------------------------------------
@@ -451,11 +407,11 @@ export function attachChipMenu(btn, menu, { header, items }) {
   return { open, close, isOpen: () => !menu.hidden };
 }
 
-// ---- Password (Owner / Admin) ------------------------------------------------------------
+// ---- Password (Admins) ------------------------------------------------------------------
 
 /**
  * Set or change YOUR password.
- *   mode        'first' (a PIN-only Owner setting the first one: confirmed with
+ *   mode        'first' (a PIN-only Admin setting the first one: confirmed with
  *               the install PIN, when there is one) | 'change'
  *   needsPin    first mode only: ask for the current PIN
  *   onSubmit    async ({current?, currentPin?, newPassword})

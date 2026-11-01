@@ -61,7 +61,7 @@ async function boot() {
     HTMLInputElement: win.HTMLInputElement,
   })) put(k, v);
   installFetch(win);
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   return win;
 }
@@ -75,7 +75,6 @@ test('w5 calls post the contract bodies', { skip: dom.skip }, async () => {
     'POST /api/starter-packs/animal_friends/install': () => [200, { installed: [] }],
     'POST /api/wizard/step/voice': () => [200, {}],
     'POST /api/backups/archive%3Aa.dpbk/restore': () => [200, { staged: true }],
-    'PUT /api/plugins/extensions/voice': () => [200, {}],
   };
   const { w5 } = await fresh('w5-api.js');
   await w5.patchSettings({ 'system.backup_keep': 5 }, ['system.port']);
@@ -84,7 +83,6 @@ test('w5 calls post the contract bodies', { skip: dom.skip }, async () => {
   await w5.installPack('animal_friends', { connection: 'c1' });
   await w5.wizardStep('voice', 'skipped');
   await w5.restoreBackup('archive:a.dpbk', 'pw');
-  await w5.setExtensionEnabled('voice', true, ['http_routes']);
   const by = Object.fromEntries(calls.map((c) => [c.key, c.body]));
   assert.deepEqual(by['PATCH /api/settings'], { set: { 'system.backup_keep': 5 }, reset: ['system.port'] });
   assert.deepEqual(by['POST /api/connections'], { type: 'ollama' });
@@ -92,7 +90,6 @@ test('w5 calls post the contract bodies', { skip: dom.skip }, async () => {
   assert.deepEqual(by['POST /api/starter-packs/animal_friends/install'], { connection: 'c1' });
   assert.deepEqual(by['POST /api/wizard/step/voice'], { status: 'skipped' });
   assert.deepEqual(by['POST /api/backups/archive%3Aa.dpbk/restore'], { confirm: true, passphrase: 'pw' });
-  assert.deepEqual(by['PUT /api/plugins/extensions/voice'], { enabled: true, approve: ['http_routes'] });
   void win;
 });
 
@@ -101,16 +98,16 @@ test('a failed call carries the envelope, the per-key errors and the permission 
   routes = {
     'PATCH /api/settings': () => [422, { detail: 'Some settings were not accepted; nothing was changed',
       error: { code: 'settings_invalid', message: 'x', fix: 'Fix them', docs: 'settings_invalid' },
-      errors: { 'system.backup_keep': 'Snapshots to keep: must be at least 1' } }],
-    'PUT /api/plugins/extensions/voice': () => [409, { detail: 'needs approval', error: { code: 'plugin_needs_approval', message: 'm' },
+      errors: { 'system.backup_keep': 'Automatic copies to keep: must be at least 1' } }],
+    'POST /api/connections': () => [409, { detail: 'needs approval', error: { code: 'plugin_needs_approval', message: 'm' },
       requested: ['http_routes'], permissions: [{ id: 'http_routes', label: 'Add its own web API' }] }],
   };
   const { w5, errorText } = await fresh('w5-api.js');
   const e1 = await w5.patchSettings({ 'system.backup_keep': 0 }).then(() => null, (e) => e);
   assert.equal(e1.status, 422); assert.equal(e1.code, 'settings_invalid');
-  assert.deepEqual(e1.errors, { 'system.backup_keep': 'Snapshots to keep: must be at least 1' });
-  assert.match(errorText(e1), /Snapshots to keep: must be at least 1/);
-  const e2 = await w5.setExtensionEnabled('voice', true).then(() => null, (e) => e);
+  assert.deepEqual(e1.errors, { 'system.backup_keep': 'Automatic copies to keep: must be at least 1' });
+  assert.match(errorText(e1), /Automatic copies to keep: must be at least 1/);
+  const e2 = await w5.createConnection({ type: 'ollama' }).then(() => null, (e) => e);
   assert.equal(e2.code, 'plugin_needs_approval'); assert.deepEqual(e2.requested, ['http_routes']);
   assert.equal(e2.permissions[0].label, 'Add its own web API');
 });
@@ -132,7 +129,7 @@ const SCHEMA = {
   schema: 1,
   groups: [{ id: 'system', label: 'System', description: 's' }, { id: 'people', label: 'People & Profiles', description: 'p' }],
   settings: [
-    { key: 'system.backup_keep', type: 'integer', default: 12, label: 'Snapshots to keep', description: 'How many snapshots.', group: 'system', section: 'Backups', level: 'basic', restart_required: true, min: 1, ui_section: 'system#backups' },
+    { key: 'system.backup_keep', type: 'integer', default: 12, label: 'Automatic copies to keep', description: 'How many snapshots.', group: 'system', section: 'Backups', level: 'basic', restart_required: true, min: 1, ui_section: 'system#backups' },
     { key: 'system.host', type: 'string', default: '127.0.0.1', label: 'Listen address', description: 'Informational.', group: 'system', section: 'Network', level: 'advanced' },
     { key: 'people.lock_timeout_seconds', type: 'integer', default: 600, label: 'Auto-lock', description: 'Idle seconds.', group: 'people', section: 'Sessions', level: 'basic',
       unit: 'seconds', min: 30, presets: [300, 600, 900, 3600], ui_section: 'people#signin-rules' },
@@ -228,6 +225,16 @@ test('connections list: reachable with no models is a warning, Used by shows nam
   assert.equal(C.usedByText(['a', 'b'], (id) => names[id]), 'Used by Ann, Bob');
   assert.equal(C.usedByText(['a', 'b', 'c', 'd', 'e', 'f', 'g'], (id) => names[id], 5), 'Used by Ann, Bob, c, d, e and 2 more');
   assert.equal(C.usedByText([], (id) => id), EN.cxn.unused);
+  // A stored test keeps no model list: the connection's own list counts (not a false "0 models").
+  const stored = C.describeStored({ models: ['m1'], last_test: { ok: true, latency_ms: 4 } });
+  assert.equal(stored[0], 'ok');
+  assert.equal(C.describeStored({ models: [], last_test: { ok: true } })[0], 'warn');
+  // Other profiles' personal bots are a count, never names or ids.
+  assert.equal(C.usedByText(['a'], (id) => names[id], 5, 3), 'Used by Ann, personal bots: 3');
+  assert.equal(C.usedByText([], (id) => id, 5, 2), 'Used by personal bots: 2');
+  // The count survives the "+N more" cut.
+  assert.equal(C.usedByText(['a', 'b', 'c', 'd', 'e', 'f'], (id) => names[id] || id, 5, 3),
+    'Used by Ann, Bob, c, d, e, personal bots: 3 and 1 more');
   assert.equal(C.nameSaysType({ name: 'OpenAI-compatible server (api.example/v1)', type_label: 'OpenAI-compatible server' }), true);
   assert.equal(C.nameSaysType({ name: 'Rig', type_label: 'StudioForge' }), false);
 });
@@ -245,18 +252,8 @@ test('connection form payload: a blank key keeps the stored one; clear and env a
   assert.deepEqual(C.formDefaults({ id: 'ollama', label: 'Ollama', base_url: 'http://127.0.0.1:11434/v1', key: 'none', capabilities: ['chat'] }).needsKey, false);
 });
 
-test('character diff: only what changed; connection and model travel together', async () => {
-  const K = await fresh('characters.js').catch(() => null);
-  if (!K) return;
-  const orig = { audience: 'members', description: '', profiles: ['a'], backend: { connection: 'c1', model: 'm1' }, personality: { preset: 'default' }, backend_kind: 'direct' };
-  assert.deepEqual(K.diffCharacter(orig, { audience: 'members', description: '', profiles: ['a'], connection: 'c1', model: 'm1', personality: 'default' }), {});
-  assert.deepEqual(K.diffCharacter(orig, { audience: 'restricted', description: 'Hi', profiles: [], connection: 'c2', model: 'x', personality: 'tutor' }),
-    { description: 'Hi', audience: 'restricted', profiles: [], connection: 'c2', model: 'x', personality: 'tutor' });
-  assert.deepEqual(K.diffCharacter(orig, { connection: '', model: '' }), { connection: null });
-  assert.deepEqual(K.diffCharacter(orig, { connection: 'c1', model: 'm2' }), { model: 'm2' });
-  assert.deepEqual(K.diffCharacter(orig, { personality: 'custom' }), {});
-  assert.equal(K.takesConnection({ backend_kind: 'agent' }), false);
-  assert.equal(K.takesConnection(orig), true);
+test('voiceHash: the Voice section link for a character (bot-ids.js)', async () => {
+  const K = await fresh('bot-ids.js');
   assert.equal(K.voiceHash('otto'), '#voice/voices/otto');
 });
 
@@ -277,11 +274,10 @@ test('wizard: where it starts, the next step, and the bodies it sends', async ()
   assert.equal(W.ownerError({ password: 'long-enough', pin: '', confirm: 'other' }), 'wiz.owner_pw_mismatch');
   assert.equal(W.ownerError({ password: '', pin: '12', confirm: '' }), 'wiz.owner_pin_short');
   assert.equal(W.ownerError({ password: 'long-enough', pin: '1234', confirm: 'long-enough' }), '');
+  // A PIN is optional on both types; blank rows are skipped.
   assert.deepEqual(W.familyPayload([
-    { role: 'member', name: ' Max ', pin: '5555' }, { role: 'restricted', name: 'Mia', pin: '9999' }, { role: 'member', name: '', pin: '' }],
-  { animals: true, assistants: false }), {
-    people: [{ name: 'Max', role: 'member', pin: '5555' }, { name: 'Mia', role: 'restricted' }],
-    install_animal_friends: true, install_assistants: false });
+    { role: 'user', name: ' Max ', pin: '5555' }, { role: 'basic', name: 'Mia', pin: '' }, { role: 'user', name: '', pin: '' }]), {
+    people: [{ name: 'Max', role: 'user', pin: '5555' }, { name: 'Mia', role: 'basic' }] });
 });
 
 test('backup: what each row offers, and the schedule sentence', async () => {
@@ -343,7 +339,7 @@ test('schema rows: a change applies at once (one PATCH for that key), says a res
   input.dispatchEvent(new win.Event('change', { bubbles: true }));
   await tick(); await tick(); await tick();
   assert.deepEqual(patched, [{ set: { 'system.backup_keep': 30 }, reset: [] }]);
-  assert.match(toasts.at(-1)[0], /Snapshots to keep saved\. It applies after DisPatch restarts\./);
+  assert.match(toasts.at(-1)[0], /Automatic copies to keep saved\. It applies after DisPatch restarts\./);
   assert.equal(typeof toasts.at(-1)[2], 'function', 'the toast offers Undo');
   await toasts.at(-1)[2]();
   await tick(); await tick();
@@ -355,7 +351,7 @@ test('schema rows: a refused value is shown on its row', { skip: dom.skip }, asy
   const S = await fresh('settings_schema.js');
   const api = {
     settingsSchema: async () => SCHEMA, settings: async () => VALUES,
-    patchSettings: async () => { const e = new Error('422: x'); e.errors = { 'system.backup_keep': 'Snapshots to keep: must be at least 1' }; throw e; },
+    patchSettings: async () => { const e = new Error('422: x'); e.errors = { 'system.backup_keep': 'Automatic copies to keep: must be at least 1' }; throw e; },
   };
   const host = slotHost(win);
   await S.mountSchemaRows(host, { api, section: 'system', anchor: 'backups', claimed: new Set(['backups']), role: 'owner' });
@@ -434,6 +430,11 @@ test('which rows go where: a row whose anchor has no slot falls back to the sect
   assert.deepEqual(S.rowsForSlot(defs, 'system', '', claimed).map((d) => d.key), ['a.y', 'a.z']);
   assert.deepEqual(S.rowsForSlot(defs, 'people', '', new Set()).map((d) => d.key), [], 'drawn by the section itself');
   assert.deepEqual(S.uiTarget({ group: 'tools' }), ['plugins', '']);
+  // 4.0: the lock-target pair is drawn by People's "When locked, show" picker only, never as rows.
+  const lock = [{ key: 'people.lock_target', ui_section: 'people#lock-target' },
+    { key: 'people.default_profile', ui_section: 'people#lock-target' }, { key: 'people.other', ui_section: 'people' }];
+  assert.deepEqual(S.rowsForSlot(lock, 'people', '', new Set()).map((d) => d.key), ['people.other']);
+  assert.deepEqual(S.rowsForSlot(lock, 'people', 'lock-target', new Set(['lock-target'])).map((d) => d.key), []);
 });
 
 const CONN_TYPES = [
@@ -464,7 +465,7 @@ test('Connections: cards, Test result, add form with a Test before Save', { skip
   assert.match(card.textContent, /Default/);
   [...card.querySelectorAll('button')].find((b) => b.textContent === 'Test').click();
   await tick(); await tick();
-  assert.match(card.querySelector('.cxn-result').textContent, /1 models available|12 ms/);
+  assert.match(card.querySelector('.cxn-result').textContent, /Models available: 1|12 ms/);
   // add form
   [...pane.querySelectorAll('.cxn-bar button')].find((b) => b.textContent === EN.cxn.add).click();
   const form = pane.querySelector('.cxn-form');
@@ -478,7 +479,7 @@ test('Connections: cards, Test result, add form with a Test before Save', { skip
   key.value = 'sk-test';
   [...form.querySelectorAll('button')].find((b) => b.textContent === 'Test').click();
   await tick(); await tick();
-  assert.match(form.querySelector('.cxn-result').textContent, /models available/);
+  assert.match(form.querySelector('.cxn-result').textContent, /Models available/);
   [...form.querySelectorAll('button')].find((b) => b.textContent === EN.cxn.add_save).click();
   await tick(); await tick();
   assert.equal(created.length, 1);
@@ -488,32 +489,6 @@ test('Connections: cards, Test result, add form with a Test before Save', { skip
   [...pane.querySelectorAll('.cxn-bar button')].find((b) => b.textContent === EN.cxn.find).click();
   await tick(); await tick();
   assert.match(pane.querySelector('.cxn-found').textContent, /Ollama/);
-});
-
-test('Characters: the Details panel loads, shows only what applies, and saves a diff', { skip: dom.skip }, async () => {
-  const win = await boot();
-  const K = await fresh('characters.js');
-  const patched = [];
-  const api = {
-    allCharacters: async () => ({ characters: [{ id: 'nova', name: 'Nova', audience: 'members', description: '', profiles: [],
-      backend: { kind: 'direct', connection: 'c1', model: 'm1' }, backend_kind: 'direct', personality: { preset: 'default' } }] }),
-    connections: async () => ({ connections: [{ id: 'c1', name: 'LM Studio', type_label: 'LM Studio', models: ['m1', 'm2'], default_model: 'm1' }] }),
-    personalities: async () => ({ presets: [{ id: 'default', title: 'Default', description: '' }, { id: 'tutor', title: 'Tutor', description: '' }] }),
-    people: async () => ({ profiles: [{ id: 'p1', name: 'Mia', role: 'restricted' }, { id: 'p2', name: 'Boss', role: 'owner' }] }),
-    patchCharacter: async (id, body) => { patched.push([id, body]); return {}; },
-  };
-  const panel = await K.characterPanel({ id: 'nova', name: 'Nova' }, { api, toast() {}, openTab() {}, reload: async () => {} });
-  win.document.body.append(panel);
-  const labels = [...panel.querySelectorAll('label')].map((l) => l.textContent);
-  assert.ok(labels.includes(EN.chars.connection) && labels.includes(EN.chars.model) && labels.includes(EN.chars.personality));
-  assert.match(panel.textContent, /Mia/, 'Restricted profile listed for visibility');
-  assert.doesNotMatch(panel.textContent, /Boss/, 'the owner always sees everything: not offered');
-  const sel = [...panel.querySelectorAll('select')];
-  sel.find((s) => [...s.options].some((o) => o.value === 'restricted')).value = 'restricted';
-  panel.querySelector('input[type=checkbox][value="p1"]').checked = true;
-  [...panel.querySelectorAll('button')].find((b) => b.textContent === EN.chars.save).click();
-  await tick(); await tick();
-  assert.deepEqual(patched, [['nova', { audience: 'restricted', profiles: ['p1'] }]]);
 });
 
 test('Wizard: owner step validates before it calls the server', { skip: dom.skip }, async () => {
@@ -529,7 +504,7 @@ test('Wizard: owner step validates before it calls the server', { skip: dom.skip
   assert.ok(ctl, 'a fresh install gets the wizard');
   const dlg = win.document.querySelector('.wizard');
   assert.equal(dlg.getAttribute('aria-modal'), 'true');
-  assert.match(dlg.querySelector('.wizard-steps').textContent, /Your account/);
+  assert.match(dlg.querySelector('.wizard-steps').textContent, /Your profile/);
   [...dlg.querySelectorAll('button')].find((b) => b.textContent === EN.wiz.owner_create).click();
   await tick();
   assert.match(dlg.querySelector('.lock-error').textContent, /password or a PIN/);
@@ -539,7 +514,7 @@ test('Wizard: owner step validates before it calls the server', { skip: dom.skip
   [...dlg.querySelectorAll('button')].find((b) => b.textContent === EN.wiz.owner_create).click();
   await tick(); await tick();
   assert.equal(seen.length, 1);
-  assert.deepEqual(seen[0], { name: 'Owner', password: 'long-enough-pw' });  // scrub-ok: test fixture, not a real credential
+  assert.deepEqual(seen[0], { name: 'Admin', password: 'long-enough-pw' });  // scrub-ok: test fixture, not a real credential
   // "Set up later" dismisses for the session and the wizard is not offered again
   [...dlg.querySelectorAll('button')].find((b) => b.textContent === EN.wiz.later).click();
   assert.equal(win.document.querySelector('.wizard'), null);
@@ -570,7 +545,7 @@ test('Backups: a recovery key is shown once; restore asks first and stages', { s
   };
   const host = win.document.createElement('div');
   win.document.body.append(host);
-  mountBackups(host, { api, toast() {}, confirm: async (m, o) => { asked.push([m, o]); return true; }, role: 'owner' });
+  mountBackups(host, { api, toast() {}, confirm: async (m, o) => { asked.push([m, o]); return true; }, role: 'admin' });
   await tick(); await tick();
   assert.match(host.textContent, /every 24 hours/);
   const rows = [...host.querySelectorAll('.bkp-row')];
@@ -592,15 +567,15 @@ test('Backups: a recovery key is shown once; restore asks first and stages', { s
   assert.deepEqual(staged, [['archive:b.dpbk', 'my-passphrase']]);
 });
 
-test('Backups: the Owner and Admins are offered them, a Member is not', { skip: dom.skip }, async () => {
+test('Backups: Admins are offered them, a User is not', { skip: dom.skip }, async () => {
   const win = await boot();
   const { mountBackups } = await fresh('backup.js');
   const host = win.document.createElement('div');
   mountBackups(host, { api: {}, role: 'member' });
-  assert.match(host.textContent, /managed by the Owner and Admins/);
+  assert.match(host.textContent, /Only Admins can manage backups/);
   const admin = win.document.createElement('div');
   mountBackups(admin, { api: { backups: async () => ({ backups: [], schedule: { enabled: false } }), pendingRestore: async () => ({ pending: false }), people: async () => ({ profiles: [] }) }, role: 'admin' });
-  assert.doesNotMatch(admin.textContent, /managed by the Owner and Admins/);
+  assert.doesNotMatch(admin.textContent, /Only Admins can manage backups/);
 });
 
 // ------------------------------------------------------------------ 4. wiring
@@ -617,14 +592,13 @@ test('index.html: AI & Connections is a household section; All settings is gone 
 });
 
 test('main.js: hooks the new modules, registers the locked handler and starts the wizard after boot', () => {
-  for (const m of ['w5-api', 'connections', 'settings_schema', 'characters', 'wizard']) {
+  for (const m of ['w5-api', 'connections', 'settings_schema', 'wizard']) {
     assert.match(MAIN, new RegExp(`from './${m}\\.js\\?v=\\d+'`), m);
     assert.ok(SW.includes(`'/static/js/${m}.js'`), `${m} precached`);
   }
   assert.ok(SW.includes("'/static/w5.css'"));
   assert.match(MAIN, /w5SetOnLocked\(\(\) => handleLocked\(\)\);/);
   assert.match(MAIN, /await refreshAuthAndBoot\(\);\s+[\s\S]{0,400}applyDeviceDefaults\(\);\s+(?:const wizard = await )?maybeStartWizard\(/);
-  assert.match(MAIN, /characterPanel\(bot, \{ \.\.\.characterCtx\(\), skip: \['audience', 'personality'\]/);
   assert.match(MAIN, /case 'connections':\s+await mountConnectionsSection\(pane\)/);
   assert.match(MAIN, /const ctl = await mountConnections\(host, \{/);
   assert.match(MAIN, /function mountSchemaHosts\(pane/);
@@ -655,9 +629,49 @@ test('schema rows: a host-control row is read-only to a Member granted manage_se
   const rowA = await draw('admin');
   assert.equal(rowA.querySelector('input').disabled, false, 'an Admin edits host-control rows');
   assert.equal(rowA.querySelector('.schema-owner-only'), null);
-  const row2 = await draw('owner');
-  assert.equal(row2.querySelector('input').disabled, false);
-  assert.equal(row2.querySelector('.schema-owner-only'), null);
+});
+
+test('schema rows: a host-tier key (4.3 HOST_KEYS) is locked with "Owner only" for a second Admin, open to the protected one', { skip: dom.skip }, async () => {
+  const win = await boot();
+  const S = await fresh('settings_schema.js');
+  const KEY = 'system.log_file';
+  const schema = { ...SCHEMA, settings: SCHEMA.settings.map((d) => (d.key === 'system.backup_keep'
+    ? { ...d, key: KEY, type: 'string', default: '', owner_only: true, restart_required: false } : d)) };
+  const values = { ...VALUES, values: { ...VALUES.values, [KEY]: { value: '/x.log', source: 'store', default: '', is_default: false } } };
+  const patches = [];
+  const api = { settingsSchema: async () => schema, settings: async () => values,
+    patchSettings: async (set, reset) => { patches.push([set, reset]); return { ok: true, changed: [] }; } };
+  const draw = async (opts) => {
+    const h = slotHost(win);
+    await S.mountSchemaRows(h, { api, section: 'system', anchor: 'backups', claimed: new Set(['backups']), role: 'admin', force: true, ...opts });
+    return h.querySelector(`[data-key="${KEY}"]`);
+  };
+  const second = await draw({ protected: false });
+  assert.equal(second.querySelector('input').disabled, true, 'a second Admin cannot change it');
+  assert.equal(second.querySelector('.schema-owner-only').textContent, EN.settings.owner_only_badge);
+  assert.equal(EN.settings.owner_only_badge, 'Owner only');
+  assert.ok(second.querySelector('.ui-setting__reset').hidden, 'and gets no Reset');
+  const unsaid = await draw({});
+  assert.equal(unsaid.querySelector('input').disabled, true, 'a caller that does not say protected is not offered it');
+  const owner = await draw({ protected: true });
+  assert.equal(owner.querySelector('input').disabled, false);
+  assert.equal(owner.querySelector('.schema-owner-only'), null);
+  // An Admin-tier (owner_only) row that is not a host key stays a second Admin's.
+  const plain = await (async () => {
+    const h = slotHost(win);
+    await S.mountSchemaRows(h, { api: { ...api, settingsSchema: async () => ({ ...SCHEMA, settings: SCHEMA.settings.map((d) => (d.key === 'system.backup_keep' ? { ...d, owner_only: true } : d)) }), settings: async () => VALUES },
+      section: 'system', anchor: 'backups', claimed: new Set(['backups']), role: 'admin', protected: false, force: true });
+    return h.querySelector('[data-key="system.backup_keep"]');
+  })();
+  assert.equal(plain.querySelector('input').disabled, false);
+  // the frontend list mirrors backend settings_api.HOST_SETTING_KEYS exactly (4.3 review: the
+  // practice/mail addresses the secrets go to were missing on both sides)
+  const PY = readFileSync(join(HERE, '..', '..', 'backend', 'app', 'settings_api.py'), 'utf8');
+  const block = PY.slice(PY.indexOf('HOST_SETTING_KEYS'), PY.indexOf('})', PY.indexOf('HOST_SETTING_KEYS')));
+  const backend = [...block.matchAll(/"([a-z_]+\.[a-z_.]+)"/g)].map((m) => m[1]).sort();
+  assert.deepEqual([...S.HOST_KEYS].sort(), backend);
+  assert.ok(S.HOST_KEYS.has('tools.practice_url') && S.HOST_KEYS.has('tools.mail_remote_url'));
+  void patches;
 });
 
 test('schema rows: a default connection whose connection was deleted shows as missing, not as None', { skip: dom.skip }, async () => {

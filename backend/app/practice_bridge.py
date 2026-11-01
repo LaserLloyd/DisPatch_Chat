@@ -17,7 +17,7 @@ The PIN itself is read fresh off disk on each login attempt and never sent
 to, or logged for, the DisPatch caller.
 
 Every route is full-session only (see ``_require_practice`` in main.py) and
-belongs in ``_decoy_blocked``.
+belongs in ``_signed_out_blocked``.
 """
 
 from __future__ import annotations

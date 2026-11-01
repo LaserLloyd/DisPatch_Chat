@@ -1,0 +1,15 @@
+{
+  "_doc": "Known serious/critical axe findings and console lines that tests/e2e/roles_axe.py does not fail on. Every row needs a reason. axe rows: {rule, target (a regex on the CSS target axe reports), reason}. console rows: {pattern (a regex on a recorded console line), reason}. http rows: {pattern (a regex on 'http <code>: <METHOD> <path>'), reason}: an expected 4xx (5xx always fails). Keep this short: a row here is a known defect or third-party noise, never a way to make the gate green.",
+  "axe": [],
+  "console": [],
+  "http": [
+    {
+      "pattern": "^http 403: GET /api/push/vapid",
+      "reason": "Expected refusal: Web Push needs a remembered device (remember_device_required); the e2e signs in without 'Keep this device signed in', and Settings -> Account asks anyway to show the right switch state."
+    },
+    {
+      "pattern": "^http 404: GET /ext/voice/locales/ar\\.json",
+      "reason": "Test fixture gap, not an app defect: the fake voice add-on that tests/e2e/_scratch.py installs ships only an English locale, so the ar pass's add-on locale fetch 404s (the shell then keeps English, as designed). The real DisPatch_Voice add-on ships all eight locales including ar.json. Drop this row once _scratch.py's fake add-on carries locales/ar.json."
+    }
+  ]
+}

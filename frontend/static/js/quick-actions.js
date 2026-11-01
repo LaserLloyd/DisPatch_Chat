@@ -12,18 +12,17 @@
 //     x, and by Backspace in an empty box;
 //   * a sent message shows a small tag with the action's label over its bubble;
 //   * "Upload a file" heads the menu and "Upload to chat" leads the chips: the
-//     composer's attach flow (main.js hands it over with setUpload). While the
-//     bolt button is shown it IS the attach button -- the standalone paperclip
-//     folds away (class qa-folded) -- and where the bolt is hidden (a bot with
-//     `quick_actions: false`) the paperclip stays.
+//     composer's attach flow (main.js hands it over with setUpload). The
+//     paperclip beside the bolt stays visible either way (4.3: people look for
+//     a paperclip); the menu entry is a second way to the same picker.
 //
 // This module owns the action list and the pill; main.js owns the sending (it
 // asks `currentAction()` and calls `clearComposerAction()` once the frame is
 // out). Every string goes through t(); every node is built with el() and
 // textContent, never innerHTML, because the labels come from an operator file.
 
-import { el, railIcon, RAIL_ICONS } from './util.js?v=20';
-import { t } from './i18n.js?v=4';
+import { el, railIcon, RAIL_ICONS } from './util.js?v=23';
+import { t } from './i18n.js?v=5';
 
 const ICON_BOLT = RAIL_ICONS.bolt;
 const ICON_CLOSE = ['M6 6l12 12', 'M18 6 6 18'];
@@ -68,15 +67,12 @@ export function setAllowed(on) {
   syncButtons();
 }
 
-/** Show the bolt when it has something to offer, and fold the paperclip into it
- *  while it is shown (upload is its first item). Where the bolt is hidden the
- *  paperclip stays, so attaching is always one button away. */
+/** Show the bolt when it has something to offer. The paperclip beside it is never hidden
+ *  here: attaching is always one visible button away. */
 function syncButtons() {
   const btn = $('quick-btn');
   const off = !allowed || (!actions.length && !uploadFn);
   if (btn) btn.hidden = off;
-  const attach = $('attach-btn');
-  if (attach) attach.classList.toggle('qa-folded', !off && !!uploadFn);
 }
 
 /** main.js: the attach flow (`fn()` opens the same picker as the paperclip), or
@@ -224,7 +220,7 @@ function buildMenu() {
       class: `qm-item${isCurrent ? ' is-current' : ''}`, type: 'button', role: 'menuitem', tabindex: '-1',
       title: a.hint || a.label, dataset: { action: a.id },
     }, [
-      el('span', { class: 'qm-check', 'aria-hidden': 'true', text: isCurrent ? '✓' : '' }),
+      el('span', { class: 'qm-check', 'aria-hidden': 'true' }, isCurrent ? [railIcon(RAIL_ICONS.tick)] : []),
       el('span', { class: 'qm-label', text: a.label }),
       a.tools ? el('span', { class: 'qm-tag', text: t('quick.web') }) : null,
     ]);
@@ -312,9 +308,4 @@ export function wireQuickActions({ announce } = {}) {
 export function repaintQuickActions() {
   if (current) setComposerAction(current, { focus: false });
   if (quickMenuOpen()) buildMenu();
-}
-
-/** Test hook: forget module state. */
-export function _reset() {
-  actions = []; current = null; wired = false; allowed = true; announceFn = () => {}; uploadFn = null;
 }

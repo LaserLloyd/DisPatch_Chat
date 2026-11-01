@@ -1,0 +1,30 @@
+{
+ "delivered": {
+  "pe2aa88a6cb9e": {
+   "meet-atlas": {
+    "rev": 1,
+    "source": "kit:pe2aa88a6cb9e:meet-atlas:1"
+   },
+   "using-dispatch": {
+    "rev": 2,
+    "source": "kit:pe2aa88a6cb9e:using-dispatch:2"
+   }
+  },
+  "pe63d316c0739": {
+   "meet-atlas": {
+    "rev": 1,
+    "source": "guide:pe63d316c0739:meet-your-atlas.md"
+   },
+   "using-dispatch": {
+    "rev": 2,
+    "source": "kit:pe63d316c0739:using-dispatch:2"
+   }
+  }
+ },
+ "migrated": true,
+ "removed": {
+  "c30db2d188b5c09aa9a6768ca6ab6cd6": [
+   "atlas"
+  ]
+ }
+}

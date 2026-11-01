@@ -7,7 +7,7 @@ who install DisPatch do not have one; they have an API key. This module is the
 second backend for the same worker: it answers the five calls the worker makes
 on the MCP client (``readiness``, ``enqueue``, ``poll``, ``fetch``, ``cancel``,
 plus ``status`` for /api/health), so the placeholder → picture rewrite, the
-deadline, coalescing, rate limits and Safe-Mode redaction all apply unchanged.
+deadline, coalescing, rate limits and the image hard-line guard all apply unchanged.
 See docs/design/integrations-2-3.md.
 
 An API generation is ONE synchronous HTTP request that takes 5-60 s. ``enqueue``
@@ -124,7 +124,9 @@ PRESETS: tuple[ImagePreset, ...] = (
     ImagePreset(
         id="custom", label="Custom (OpenAI-compatible)", shape="openai-images",
         editable_base_url=True, key_required=False, size_mode="openai",
-        price_note="Depends on the host."),
+        # No price note: a custom host is often a free local server, and Image
+        # Studio reads any note as "this provider is metered".
+        price_note=""),
 )
 PRESET_BY_ID = {p.id: p for p in PRESETS}
 
@@ -323,6 +325,30 @@ def merge_submission(payload: dict, stored: dict | None = None) -> dict:
     return cfg
 
 
+def require_key_rules(principal, payload: dict, cfg: dict, stored: dict) -> None:
+    """The 4.3 #31 rules for the image provider form (``PUT /api/llm/image`` and its Test):
+    (1) naming a server environment variable that the stored config does not already name for
+    the same provider and server needs the protected Admin (``env_key_owner_only``); (2) a form
+    that sends no key of its own but points at ANOTHER server would carry the stored key (or the
+    variable's value) there, so it needs the protected Admin too (``permission_denied``). A key
+    typed into the form may go wherever the form says. Raises ``connections.ConnectionError_``
+    (403). Every Admin keeps re-saving the same form (a model change, the same address)."""
+    from . import connections
+    preset = PRESET_BY_ID.get(cfg.get("provider") or "")
+    if preset is None or connections._protected(principal):
+        return
+    old_preset = PRESET_BY_ID.get(provider_id(stored))
+    old_base = (str(stored.get("base_url") or "") or old_preset.base_url) if old_preset else ""
+    new_base = cfg.get("base_url") or preset.base_url
+    here = old_preset is preset and connections.same_server(old_base, new_base)
+    connections.require_env_binding(principal, str(stored.get("api_key_env") or "") if here else "",
+                                    cfg.get("api_key_env") or "")
+    typed = bool(str(payload.get("api_key") or "").strip())
+    carried = bool(cfg.get("api_key") or cfg.get("api_key_env"))
+    if carried and not typed and not here:
+        raise connections.ConnectionError_("permission_denied", connections.KEY_MOVE_OWNER_ONLY, 403)
+
+
 def env_name_ok(name: str) -> bool:
     """A credential-shaped variable name, never one of DisPatch's own.
 
@@ -398,8 +424,13 @@ def _error_from_status(r: httpx.Response, label: str) -> image_jobs.ImageJobErro
         return image_jobs.ImageJobError(
             f"{label} is rate-limiting or out of quota (HTTP 429)"
             + (f": {msg}" if msg else ""))
-    return image_jobs.ImageJobError(
-        f"{label} returned HTTP {r.status_code}" + (f": {msg}" if msg else ""))
+    # Plain words for people: no "HTTP 404". A custom host is just "the picture server".
+    who = "The picture server" if label.startswith("Custom") else label
+    if not msg:
+        msg = ("not found" if r.status_code == 404
+               else "it had a problem on its side" if r.status_code >= 500
+               else f"error {r.status_code}")
+    return image_jobs.ImageJobError(f"{who} answered: {msg}")
 
 
 async def _download(client: httpx.AsyncClient, url: str) -> bytes:
@@ -532,10 +563,6 @@ def _openai_items(payload: Any, label: str) -> list[bytes | str]:
     return out
 
 
-def _openai_bytes(payload: Any, label: str) -> bytes | str:
-    return _openai_items(payload, label)[0]
-
-
 _MINIMAX_CODES = {
     1002: "MiniMax is rate-limiting this key",
     1004: "MiniMax rejected the API key",
@@ -572,10 +599,6 @@ def _minimax_items(payload: Any, label: str) -> list[bytes | str]:
         raise image_jobs.ImageJobError(f"{label} returned no picture (it may have "
                                        "blocked the prompt)")
     return out
-
-
-def _minimax_bytes(payload: Any, label: str) -> bytes | str:
-    return _minimax_items(payload, label)[0]
 
 
 # --------------------------------------------------------------------------- #

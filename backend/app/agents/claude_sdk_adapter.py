@@ -43,16 +43,18 @@ import contextlib
 import dataclasses
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
 import uuid
 from collections import deque
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from . import tool_policy
 from .branding import tool_matches
 from .budget import BudgetVerdict, sdk_run_cap
 from .events import (
@@ -114,6 +116,120 @@ AUTH_ROUTE_ENV = {
     "anthropic_aws": {"CLAUDE_CODE_USE_ANTHROPIC_AWS": "1"},
 }
 
+# Per-route credential env (4.3, issue #9). The worker runs with a minimal environment (an
+# allowlist, see worker_env) and a PRIVATE HOME, so a cloud route only authenticates with what
+# is forwarded here: these names, copied from the server's environment, nothing else. Names are
+# cited from the provider pages of the CLI docs on code.claude.com (fetched 2026-10-31):
+#   bedrock  https://code.claude.com/docs/en/amazon-bedrock.md
+#   vertex   https://code.claude.com/docs/en/google-vertex-ai.md
+#   foundry  https://code.claude.com/docs/en/microsoft-foundry.md
+#   gateway/skip-auth and model pins: https://code.claude.com/docs/en/env-vars.md
+# UNVERIFIED LIVE: no cloud credentials exist on the build box; the tests use fakes.
+_MODEL_PINS = ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+               "ANTHROPIC_DEFAULT_HAIKU_MODEL")
+
+
+@dataclass(frozen=True)
+class RouteEnvSpec:
+    """``requires``: each entry is one requirement met by ANY of its alternatives; an alternative
+    is a tuple of names that must ALL be set (non-empty)."""
+
+    forward: tuple[str, ...]
+    requires: tuple[tuple[tuple[str, ...], ...], ...] = ()
+    forward_prefixes: tuple[str, ...] = ()
+
+
+ROUTE_ENV: dict[str, RouteEnvSpec] = {
+    "api_key": RouteEnvSpec(forward=()),
+    "bedrock": RouteEnvSpec(
+        forward=("AWS_REGION", "AWS_DEFAULT_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+                 "AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE",
+                 "AWS_BEARER_TOKEN_BEDROCK", "ANTHROPIC_BEDROCK_BASE_URL", "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
+                 "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION", "ANTHROPIC_BEDROCK_REGION_PREFIX",
+                 "CLAUDE_CODE_SKIP_AWS_CRED_CACHE", *_MODEL_PINS),
+        requires=(
+            # The docs fall back to the profile's region, then us-east-1. The worker's HOME is
+            # private (no ~/.aws), so the region is required explicitly: no silent default.
+            (("AWS_REGION",), ("AWS_DEFAULT_REGION",)),
+            (("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"), ("AWS_BEARER_TOKEN_BEDROCK",),
+             ("AWS_PROFILE", "AWS_CONFIG_FILE"), ("AWS_PROFILE", "AWS_SHARED_CREDENTIALS_FILE"),
+             ("CLAUDE_CODE_SKIP_BEDROCK_AUTH",)),
+        )),
+    "vertex": RouteEnvSpec(
+        forward=("ANTHROPIC_VERTEX_PROJECT_ID", "CLOUD_ML_REGION", "GOOGLE_APPLICATION_CREDENTIALS",
+                 "ANTHROPIC_VERTEX_BASE_URL", "CLAUDE_CODE_SKIP_VERTEX_AUTH", *_MODEL_PINS),
+        forward_prefixes=("VERTEX_REGION_CLAUDE_",),
+        requires=(
+            (("ANTHROPIC_VERTEX_PROJECT_ID",),),
+            # Application Default Credentials live under ~/.config/gcloud, which the private HOME
+            # hides: a key/WIF file (or a gateway that skips auth) must be named.
+            (("GOOGLE_APPLICATION_CREDENTIALS",), ("CLAUDE_CODE_SKIP_VERTEX_AUTH",)),
+        )),
+    "foundry": RouteEnvSpec(
+        forward=("ANTHROPIC_FOUNDRY_RESOURCE", "ANTHROPIC_FOUNDRY_BASE_URL", "ANTHROPIC_FOUNDRY_API_KEY",
+                 "ANTHROPIC_FOUNDRY_AUTH_TOKEN", "CLAUDE_CODE_SKIP_FOUNDRY_AUTH", *_MODEL_PINS),
+        requires=(
+            (("ANTHROPIC_FOUNDRY_RESOURCE",), ("ANTHROPIC_FOUNDRY_BASE_URL",)),
+            # The Azure CLI chain (az login) lives in the hidden HOME: a key or token is required.
+            (("ANTHROPIC_FOUNDRY_API_KEY",), ("ANTHROPIC_FOUNDRY_AUTH_TOKEN",),
+             ("CLAUDE_CODE_SKIP_FOUNDRY_AUTH",)),
+        )),
+    "anthropic_aws": RouteEnvSpec(forward=()),        # not offered by the service; switch only
+}
+#: Names no route may ever forward (asserted below and in tests/agents/test_i43_routes.py).
+NEVER_FORWARD_PREFIXES = ("DISPATCH_",)
+NEVER_FORWARD = frozenset({"ANTHROPIC_API_KEY", "HOME", "USERPROFILE", "CLAUDE_CONFIG_DIR", "PATH",
+                           "PYTHONPATH", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN",
+                           "CLAUDE_CODE_OAUTH_REFRESH_TOKEN"})
+for _spec in ROUTE_ENV.values():
+    assert not (set(_spec.forward) & NEVER_FORWARD), _spec
+    assert not any(n.startswith(NEVER_FORWARD_PREFIXES) for n in _spec.forward), _spec
+_SECRETISH = re.compile(r"(KEY|SECRET|TOKEN|PASSWORD)", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class RouteCheck:
+    route: str
+    forward: dict[str, str]
+    missing: list[str]                    # one entry per unmet requirement: "A", "A + B", "A or B"
+
+    @property
+    def available(self) -> bool:
+        return not self.missing
+
+
+def _describe_alternatives(alts: tuple[tuple[str, ...], ...]) -> str:
+    each = [" + ".join(a) for a in alts]
+    if len(each) <= 2:
+        return " or ".join(each)
+    return "one of: " + ", ".join(each)
+
+
+def check_route_env(route: str, environ: Mapping[str, str]) -> RouteCheck:
+    """Which provider env a route forwards from ``environ``, and what it still lacks. Pure."""
+    spec = ROUTE_ENV.get(route)
+    if spec is None:
+        raise ValueError(f"unknown auth route {route!r}")
+    present = {k: v for k, v in environ.items() if isinstance(v, str) and v != ""}
+    fwd = {k: present[k] for k in spec.forward if k in present}
+    for k, v in present.items():
+        if any(k.startswith(p) for p in spec.forward_prefixes) and re.fullmatch(r"[A-Z0-9_]+", k):
+            fwd[k] = v
+    for k in list(fwd):
+        if k in NEVER_FORWARD or k.startswith(NEVER_FORWARD_PREFIXES):
+            fwd.pop(k)
+    missing = [_describe_alternatives(alts) for alts in spec.requires
+               if not any(all(n in fwd for n in alt) for alt in alts)]
+    return RouteCheck(route, fwd, missing)
+
+
+def route_missing_message(check: RouteCheck) -> str:
+    label = {"bedrock": "Amazon Bedrock", "vertex": "Google Vertex AI", "foundry": "Microsoft Foundry"}.get(
+        check.route, check.route)
+    return (f"The Claude Agent's {label} route is missing: {'; '.join(check.missing)}. "
+            "Set them in the DisPatch service environment and restart it.")
+
+
 # ResultMessage.subtype values (docs: cost-tracking / headless), tolerant reader.
 _SUB_MAX_BUDGET = "error_max_budget_usd"
 _SUB_MAX_TURNS = "error_max_turns"
@@ -150,10 +266,13 @@ class ClaudeLaunchPlan:
     secret_env: dict[str, str] = field(default_factory=dict)          # -> options.env in the worker
     secret_mcp_headers: dict[str, dict[str, str]] = field(default_factory=dict)
     worker: dict[str, Any] = field(default_factory=dict)              # callables the worker builds
+    # 4.3 (#8): what the worker's always-on PreToolUse policy hook enforces (tool_policy.decide).
+    policy: dict[str, Any] = field(default_factory=dict)
 
     def to_wire(self) -> dict[str, Any]:
         return {"op": "start", "options": self.options, "secret_env": self.secret_env,
-                "secret_mcp_headers": self.secret_mcp_headers, "worker": self.worker}
+                "secret_mcp_headers": self.secret_mcp_headers, "worker": self.worker,
+                "policy": self.policy}
 
     def describe(self) -> dict[str, Any]:
         """A loggable view: env VALUES and secret names only (support bundles)."""
@@ -163,7 +282,7 @@ class ClaudeLaunchPlan:
             opts["system_prompt"] = f"<omitted: {len(str(opts['system_prompt']))} chars>"
         return {"options": opts, "secret_env": sorted(self.secret_env),
                 "secret_mcp_headers": {k: sorted(v) for k, v in self.secret_mcp_headers.items()},
-                "worker": self.worker}
+                "worker": self.worker, "policy": self.policy}
 
 
 def _mcp_options(spec: AgentSpec) -> dict[str, dict[str, Any]]:
@@ -190,8 +309,14 @@ def expand_allowlist(allowlist: list[str]) -> list[str]:
 def build_launch_plan(spec: AgentSpec, ctx: TaskContext, ws: Workspace, *, api_key: str | None,
                       auth_route: str = "api_key", resume_session_id: str | None = None,
                       spent_task_usd: float = 0.0, spent_today_usd: float = 0.0,
-                      header_secrets: dict[str, dict[str, str]] | None = None) -> ClaudeLaunchPlan:
-    """Turn an AgentSpec into the SDK options the worker will use."""
+                      header_secrets: dict[str, dict[str, str]] | None = None,
+                      route_env: Mapping[str, str] | None = None) -> ClaudeLaunchPlan:
+    """Turn an AgentSpec into the SDK options the worker will use.
+
+    ``route_env`` is the environment a cloud route's credentials are read from (default: this
+    process's). Only the route's allow-listed names are forwarded, over the stdin pipe
+    (``secret_env``); a route that lacks a required name fails here, before any start.
+    """
     pol = spec.approval_policy
     mode = PERMISSION_MODE_FOR[pol.mode]
     assert mode not in FORBIDDEN_PERMISSION_MODES
@@ -200,6 +325,9 @@ def build_launch_plan(spec: AgentSpec, ctx: TaskContext, ws: Workspace, *, api_k
     if pol.mode == "interactive":
         # Approval-needing tools are NOT pre-allowed: they must reach can_use_tool.
         allowed = [t for t in allow if classify_tool(pol, t) == "auto"]
+        # 4.3 (#8): a command tool always reaches can_use_tool, where the Bash allow-list is
+        # decided per command (the PreToolUse hook also forces "ask" for a non-matching one).
+        allowed = [t for t in allowed if t not in tool_policy.COMMAND_TOOLS]
     elif pol.mode == "unattended":
         allowed = list(allow)             # AgentSpec validation guarantees nothing here needs a human
     else:  # plan: read-only only; the callback denies the rest
@@ -252,6 +380,14 @@ def build_launch_plan(spec: AgentSpec, ctx: TaskContext, ws: Workspace, *, api_k
         options["resume"] = resume_session_id
 
     secret_env: dict[str, str] = {}
+    if auth_route != "api_key":
+        check = check_route_env(auth_route, os.environ if route_env is None else route_env)
+        if check.missing:
+            raise AgentBackendError(ErrorCode.auth_failed, route_missing_message(check))
+        for k in check.forward:
+            if k in env:                      # never shadow an isolation value (none overlap today)
+                raise AgentBackendError(ErrorCode.policy_violation, f"{k} cannot be forwarded")
+        secret_env.update(check.forward)
     if auth_route == "api_key":
         if not api_key:
             raise AgentBackendError(
@@ -261,7 +397,8 @@ def build_launch_plan(spec: AgentSpec, ctx: TaskContext, ws: Workspace, *, api_k
         secret_env[SECRET_ANTHROPIC_API_KEY] = api_key
     use_callback = pol.mode in ("interactive", "plan")
     worker = {"can_use_tool": use_callback, "keepalive_pretooluse_hook": use_callback}
-    return ClaudeLaunchPlan(options, secret_env, dict(header_secrets or {}), worker)
+    policy = {"ws_root": str(ws.root), "bash_allow": list(pol.bash_allow), "mode": pol.mode}
+    return ClaudeLaunchPlan(options, secret_env, dict(header_secrets or {}), worker, policy)
 
 
 def make_sdk_options(options: dict[str, Any], sdk: Any, *, can_use_tool: Any = None,
@@ -319,9 +456,20 @@ def worker_env(ws: Workspace, parent_env: dict[str, str] | None = None) -> dict[
 # --------------------------------------------------------------------------- #
 
 
-def decide_permission(spec: AgentSpec, tool_name: str) -> tuple[Literal["allow", "deny", "ask"], str]:
-    """What to do when the SDK asks about ``tool_name`` (the can_use_tool path)."""
+def decide_permission(spec: AgentSpec, tool_name: str, input: dict[str, Any] | None = None,
+                      ws_root: str | os.PathLike[str] | None = None,
+                      ) -> tuple[Literal["allow", "deny", "ask"], str]:
+    """What to do when the SDK asks about ``tool_name`` (the can_use_tool path).
+
+    With ``input`` and ``ws_root`` (the live path always passes both) the shared
+    :func:`tool_policy.decide` runs first: the same function the worker's PreToolUse hook runs.
+    """
     pol = spec.approval_policy
+    pd: tool_policy.Decision | None = None
+    if input is not None and ws_root is not None:
+        pd = tool_policy.decide(tool_name, input, ws_root, pol.bash_allow)
+        if pd.verdict == "deny":
+            return "deny", pd.reason
     if pol.mode == "plan":
         if tool_name == "ExitPlanMode":
             return "allow", "proposing the plan"
@@ -333,6 +481,12 @@ def decide_permission(spec: AgentSpec, tool_name: str) -> tuple[Literal["allow",
     allow_names = expand_allowlist(spec.tool_allowlist)
     if not tool_matches(tool_name, allow_names):
         return "deny", f"{tool_name} is not in this agent's tool allowlist"
+    if pd is not None and tool_name in tool_policy.COMMAND_TOOLS:
+        # #8: the allow-list decides a command tool; a match runs unasked, the rest ask.
+        if pd.verdict == "allow":
+            return "allow", pd.reason
+        d = tool_policy.for_mode(pd, pol.mode)
+        return d.verdict, d.reason
     if pol.mode == "unattended":
         if classify_tool(pol, tool_name) == "auto" or tool_matches(tool_name, pol.unattended_allow):
             return "allow", "unattended allow"
@@ -553,7 +707,8 @@ class ClaudeAgentBackend(BaseBackend):
     ABORT_GRACE_S = 15.0
 
     def __init__(self, *, transport_factory: TransportFactory | None = None,
-                 auth_route: str = "api_key", api_key: str | None = None, **kw: Any) -> None:
+                 auth_route: str = "api_key", api_key: str | None = None,
+                 route_env: Mapping[str, str] | None = None, **kw: Any) -> None:
         super().__init__(**kw)
         if auth_route not in AUTH_ROUTE_ENV:
             raise ValueError(f"auth_route must be one of {sorted(AUTH_ROUTE_ENV)}")
@@ -561,6 +716,7 @@ class ClaudeAgentBackend(BaseBackend):
             lambda rt, ws: SubprocessTransport(ws))
         self._auth_route = auth_route
         self._api_key = api_key
+        self._route_env = route_env          # None: read os.environ at each start (tests pass fakes)
 
     def capabilities(self) -> Capabilities:
         return Capabilities(
@@ -629,7 +785,11 @@ class ClaudeAgentBackend(BaseBackend):
             plan = build_launch_plan(
                 rt.spec, rt.ctx, ws, api_key=key, auth_route=self._auth_route,
                 resume_session_id=rt.session_id, spent_task_usd=rt.tracker.usd,
-                spent_today_usd=rt.tracker.spent_today_usd, header_secrets=header_secrets)
+                spent_today_usd=rt.tracker.spent_today_usd, header_secrets=header_secrets,
+                route_env=self._route_env)
+            for k, v in plan.secret_env.items():     # forwarded cloud credentials never reach a log
+                if k == SECRET_ANTHROPIC_API_KEY or _SECRETISH.search(k):
+                    self.redactor.register(v)
             transport = self._factory(rt, ws)
             await transport.start(plan)
             rt.extras.update(transport=transport, plan=plan, iter=transport.messages().__aiter__())
@@ -682,6 +842,11 @@ class ClaudeAgentBackend(BaseBackend):
             self._on_result(rt, m)
         elif kind == "worker_error":
             raise _worker_error(m)
+        elif kind == "policy_denied":
+            # The worker's PreToolUse hook refused a call; the model got the reason. Logged by
+            # tool name and reason only (a path the agent named may be sensitive: clipped).
+            log.info("task %s: policy refused %s: %s", rt.task_id, str(m.get("tool_name"))[:60],
+                     clip(str(m.get("reason") or ""), 200))
         # unknown kinds are ignored on purpose (tolerant reader, RESEARCH.md item 14)
 
     def _on_system(self, rt: TaskRuntime, m: dict[str, Any]) -> None:
@@ -773,7 +938,8 @@ class ClaudeAgentBackend(BaseBackend):
     async def _on_permission_request(self, rt: TaskRuntime, m: dict[str, Any]) -> None:
         tool, rid = str(m.get("tool_name")), str(m.get("request_id"))
         inp = m.get("input") if isinstance(m.get("input"), dict) else {}
-        verdict, why = decide_permission(rt.spec, tool)
+        ws: Workspace | None = rt.extras.get("workspace")
+        verdict, why = decide_permission(rt.spec, tool, inp, ws.root if ws is not None else None)
         decision = verdict
         if verdict == "ask":
             decision = await self._request_approval(
@@ -997,6 +1163,14 @@ async def run_worker(inbox: asyncio.Queue, send: Callable[[dict[str, Any]], None
             srv["headers"] = {**(srv.get("headers") or {}), **headers}
 
     can_use_tool = hooks = keepalive = None
+    # 4.3 (#8): the always-on policy hook. A start without a policy block (older parent) still
+    # gets one: the workspace is the cwd, the Bash allow-list is empty, the mode follows the
+    # permission mode - the strictest reading, never "no policy".
+    pol = start.get("policy") if isinstance(start.get("policy"), dict) else {}
+    pol_root = str(pol.get("ws_root") or opts.get("cwd") or "")
+    pol_bash = [p for p in (pol.get("bash_allow") or []) if isinstance(p, str)]
+    pol_mode = str(pol.get("mode") or {v: k for k, v in PERMISSION_MODE_FOR.items()}.get(
+        opts.get("permission_mode"), "unattended"))
     if wp.get("can_use_tool"):
         async def can_use_tool(tool_name, input_data, context):
             rid = uuid.uuid4().hex
@@ -1008,12 +1182,29 @@ async def run_worker(inbox: asyncio.Queue, send: Callable[[dict[str, Any]], None
             if answer.get("allow"):
                 return sdk.PermissionResultAllow()
             return sdk.PermissionResultDeny(message=answer.get("message") or "Denied")
-    if wp.get("keepalive_pretooluse_hook"):
-        # The documented workaround that keeps the stream open so can_use_tool can
-        # fire (RESEARCH.md R-CUT).
-        async def _keepalive(input_data, tool_use_id, context):
-            return {"continue_": True}
-        keepalive = _keepalive
+
+    async def _policy_hook(input_data, tool_use_id, context):
+        # Registered in every mode. It returns the keep-alive when the policy has no objection
+        # (the documented workaround that keeps the stream open so can_use_tool can fire,
+        # RESEARCH.md R-CUT), else an explicit deny/ask. Any error denies (fail closed).
+        try:
+            data = input_data if isinstance(input_data, dict) else {}
+            tool = str(data.get("tool_name") or "")
+            tin = data.get("tool_input") if isinstance(data.get("tool_input"), dict) else {}
+            if not pol_root:
+                d = tool_policy.Decision("deny", "no workspace is known for this task")
+            else:
+                d = tool_policy.decide(tool, tin, pol_root, pol_bash)
+            out = tool_policy.hook_output(d, pol_mode)
+        except Exception as e:                            # pragma: no cover - defensive
+            tool, out = "?", tool_policy.hook_output(
+                tool_policy.Decision("deny", f"the tool policy failed: {type(e).__name__}"), "unattended")
+        spec_out = out.get("hookSpecificOutput") or {}
+        if spec_out.get("permissionDecision") == "deny":
+            send({"kind": "policy_denied", "tool_name": tool, "tool_use_id": tool_use_id,
+                  "reason": spec_out.get("permissionDecisionReason")})
+        return out
+    keepalive = _policy_hook
 
     try:
         if keepalive is not None:

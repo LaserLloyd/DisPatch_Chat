@@ -119,10 +119,56 @@
 .agents-budget { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
 .agents-publish { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 8px 12px; }
 .agents-publish-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
-.agents-profile-budget { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 8px 12px; margin-block: 8px; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
-.agents-profile-budget legend { padding-inline: 6px; }
 .agents-spend { margin: 6px 0; padding-inline-start: 1.2em; }
 .agents-secret .agents-actions input { min-width: 12em; }
+
+/* ---- 4.3: waiting pill, owner-only marks, limits, routes, CLI presets, schedules ---------- */
+.task-pill-wait { display: inline-flex; align-items: center; gap: 4px; }
+.agents-owner-badge, .agents-owner-note, .cxn-owner-only {
+  display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); font-size: .88em;
+}
+.agents-owner-note { margin: 4px 0; }
+.agents-bash-field textarea:disabled, .cxn-adv input:disabled { opacity: .7; cursor: not-allowed; }
+.agents-limits-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 8px; }
+.agents-limit input[type="number"] { width: 8em; max-width: 100%; }
+.agents-unit { margin-inline-start: 6px; color: var(--text-secondary); white-space: nowrap; }
+.agents-route-needs { margin: 4px 0 8px; padding-inline-start: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: .9em; color: var(--text-secondary); }
+.agents-route-needs li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; overflow-wrap: anywhere; }
+.agents-cli-rows { display: flex; flex-direction: column; gap: 10px; }
+.agents-cli-row { border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.agents-cli-row input, .agents-cli-row textarea, .agents-cli-row select { width: 100%; font: inherit; box-sizing: border-box; }
+.agents-actions button, .sched-actions button { display: inline-flex; align-items: center; gap: 4px; }
+
+.sched-modal { width: min(760px, 96vw); max-height: min(88vh, 900px); display: flex; flex-direction: column; overflow-y: auto; }
+.sched-modal > .modal-hint, .sched-modal > .sched-limits, .sched-modal > .sched-everyone { margin: 8px 18px 0; }
+.sched-everyone { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.sched-editor-host, .sched-list { padding: 8px 18px; }
+.sched-list { display: flex; flex-direction: column; gap: 8px; padding-bottom: 18px; }
+.sched-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-secondary); padding: 10px 12px; }
+.sched-off { opacity: .8; }
+.sched-row-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 260px; }
+.sched-rule { color: var(--text-primary); }
+.sched-owner, .sched-prompt { color: var(--text-secondary); font-size: .9em; overflow-wrap: anywhere; }
+.sched-prompt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sched-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
+.sched-form { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
+.sched-form h3 { margin: 0; font-size: 1.05em; }
+.sched-field { display: flex; flex-direction: column; gap: 4px; }
+.sched-field textarea, .sched-field select, .sched-field input { font: inherit; max-width: 100%; box-sizing: border-box; }
+.sched-field textarea { width: 100%; }
+.sched-help { margin: 0; font-size: .9em; }
+#sched-thread { width: 100%; text-overflow: ellipsis; }
+.sched-when { display: flex; flex-wrap: wrap; gap: 10px; }
+.sched-when > .sched-field { flex: 1 1 140px; }
+.sched-inline { display: flex; align-items: center; }
+.sched-inline input { width: 7em; }
+.sched-preview { margin: 0; color: var(--text-secondary); font-size: .92em; }
+
+@media (max-width: 640px) {
+  .sched-modal { width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; }
+  .sched-actions button, .agents-actions button, .sched-field select, .sched-field input { min-height: 44px; }
+  .tasks-header-actions { flex-wrap: wrap; justify-content: flex-end; }
+}
 
 @media (max-width: 640px) {
   .tasks-modal { width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; }

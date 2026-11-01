@@ -1,0 +1,15 @@
+event: session.status_running
+data: {"type": "session.status_running", "id": "sevt_31", "processed_at": "2026-10-31T00:00:01Z"}
+
+event: agent.message
+data: {"type": "agent.message", "id": "sevt_32", "processed_at": "2026-10-31T00:00:02Z", "content": [{"type": "text", "text": "Working..."}]}
+
+event: session.thread_status_idle
+data: {"type": "session.thread_status_idle", "id": "sevt_33", "processed_at": "2026-10-31T00:00:03Z", "stop_reason": {"type": "budget_reached"}}
+
+event: session.usage
+data: {"type": "session.usage", "id": "sevt_34", "processed_at": "2026-10-31T00:00:03Z", "list_cost": {"amount": "50", "currency": "USD"}}
+
+event: session.status_idle
+data: {"type": "session.status_idle", "id": "sevt_35", "processed_at": "2026-10-31T00:00:03Z", "stop_reason": {"type": "budget_reached"}}
+

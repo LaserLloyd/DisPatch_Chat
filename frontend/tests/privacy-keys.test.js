@@ -40,14 +40,11 @@ const EXEMPT = new Map([
   // The privacy flag itself. Wiping it would turn privacy mode off on the way
   // out and the device would silently start caching again on the next load.
   ['dispatch-privacy', 'privacy.js FLAG_KEY — the setting that drives the wipe'],
-  // No-Image Mode is a RATCHET: once on, it takes the PIN to turn off. Wiping
+  // No-Image Mode is a RATCHET: once on, a signed-out device cannot turn it off. Wiping
   // it would make "clear this device" a one-click way around that gate on a
   // handed-over tablet, which is the exact scenario NIM exists for. See the
   // matching note in privacy.js — do not "fix" this by wiping it.
   ['dispatch-nim', 'nim.js FLAG_KEY — a PIN-gated ratchet, deliberately kept'],
-  // "This device dismissed the one-time stored-on-the-host card." Not personal
-  // data; wiping it would re-show the card on every visit of a privacy-mode device.
-  ['dispatch-privacy-ack', 'host-notice.js PRIVACY_ACK_KEY — a seen-the-notice flag, deliberately kept'],
 ]);
 
 const sources = () => {
@@ -159,11 +156,11 @@ test('APP_KEYS names no key that nothing writes', () => {
     + 'a maintained one:\n' + phantom.join('\n'));
 });
 
-test('the two documented exemptions are still the only ones', () => {
+test('the documented exemptions are still the only ones', () => {
   // A cheap tripwire on the exemption list itself: growing it is exactly how a
   // wipe promise gets hollowed out one "just this key" at a time, so adding an
   // entry should require deliberately editing this expectation too.
-  assert.deepEqual([...EXEMPT.keys()].sort(), ['dispatch-nim', 'dispatch-privacy', 'dispatch-privacy-ack']);
+  assert.deepEqual([...EXEMPT.keys()].sort(), ['dispatch-nim', 'dispatch-privacy']);
 });
 
 // ===========================================================================

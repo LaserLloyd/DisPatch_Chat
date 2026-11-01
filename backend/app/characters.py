@@ -1,16 +1,14 @@
 """Characters: the 3.0 name for what 2.x called a bot, and the operations on them.
 
 A character is a persona: who it is (name, emoji, avatar, personality), what answers for it (a
-Connection and model, or an agent), who may see it (``audience`` plus an optional list of
-profiles) and how it sounds (a voice reference the voice add-on validates).
+Connection and model, or an agent) and how it sounds (a voice reference the voice add-on
+validates). Who may use it is :func:`may_use` (4.0: scope, the profile's ``household_bots``).
 
 Storage did not move. ``config.yaml`` stays the roster and ``config.Bot`` the record, so every
 existing bot, preset, avatar and pool is a character with no data migration to get wrong; what
 changed is the vocabulary and the API (``/api/characters``; ``/api/bots*`` keep working as thin
 aliases for one release). What the split adds to a record:
 
-``profiles``    profile ids allowed to see it in addition to ``audience`` (empty = everyone the
-                audience allows). Owner and Admin always see everything.
 ``pack``        the starter pack it came from
 ``description`` a line for the picker
 ``connection`` / ``model``  are NOT stored on the bot: they are the first entry of its provider
@@ -23,17 +21,40 @@ call the functions here.
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
+import secrets
+import tempfile
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
-from . import accounts, apps_loader, config, connections, extensions, personas
+import yaml
+
+from . import (
+    accounts,
+    apps_loader,
+    backends_policy,
+    config,
+    connections,
+    ext_profile_hooks,
+    extensions,
+    ownership,
+    personas,
+)
 from .config import Bot
 
 log = logging.getLogger("local-chat.characters")
 
 
 _UNSET: Any = object()
+
+
+def _hidden_field() -> str:
+    """The Bot field the Admin's "Hide" switch writes: ``hidden`` once the roster model has it,
+    ``hide_unlocked`` (its 3.x spelling, which migration 010 renames) until then."""
+    return "hidden" if "hidden" in Bot.__dataclass_fields__ else "hide_unlocked"
 
 
 class CharacterError(Exception):
@@ -104,10 +125,36 @@ def bot_row(b: Bot) -> dict:
         row["provider"] = str((first or {}).get("provider") or "")
         row["model"] = str((first or {}).get("model") or "")
     row["connection"] = connection_of(b)
-    row["profiles"] = list(b.profiles)
     row["description"] = b.description
     row["pack"] = b.pack
     return row
+
+
+#: override key -> the PATCH field name the client knows
+_ADVISOR_OVERRIDE_NAMES = {"persona": "persona", "tools": "tools", "tools_picked": "tools",
+                           "provider0": "connection"}
+
+
+def overridden_fields(b: Bot) -> list[str]:
+    """The fields a copy's owner changed (its stored overrides, in the API's field names). The
+    one computation behind the manage row and ``/api/me/characters/{id}``."""
+    if not b.template:
+        return []
+    out: set[str] = set()
+    for k, v in (b.overrides or {}).items():
+        if k == "advisor" and isinstance(v, dict):
+            for ak in v:
+                if ak in _ADVISOR_OVERRIDE_NAMES:
+                    out.add(_ADVISOR_OVERRIDE_NAMES[ak])
+                if ak == "provider0":
+                    out.add("model")
+        elif k == "picture":
+            out.add("picture")
+        elif k in ("provider0_picked", "voice_cleared"):
+            continue
+        else:
+            out.add(k)
+    return sorted(out)
 
 
 def character_out(b: Bot) -> dict:
@@ -122,35 +169,250 @@ def character_out(b: Bot) -> dict:
     row["backend_kind"] = kind
     row["personality"] = personality_of(b)
     row["voice_link"] = {"section": "voice", "anchor": "voices", "character": b.id}
+    row["overridden"] = overridden_fields(b)
     row["flags"] = {"reactions": b.reactions, "reaction_autopilot": b.reaction_autopilot,
                     "avatar_pool": b.avatar_pool, "image_jobs": b.image_jobs,
-                    "quick_actions": b.quick_actions, "hide_unlocked": b.hide_unlocked}
+                    "quick_actions": b.quick_actions, "hidden": is_hidden(b)}
+    # 4.1 managed bots: a household bot with a kit, or a personal copy kept up to date by one.
+    from . import kits
+    try:
+        row["managed"] = kits.managed(b)
+    except Exception:
+        row["managed"] = False
     return row
 
 
-def may_use(b: Bot, principal) -> bool:
-    """May ``principal`` see ``b`` and talk to it? Audience first, then the profile list. Owner,
-    Admin, an open install and machines see everything."""
-    if principal is None or principal.kind in ("open", "machine") or principal.is_operator:
-        return True
-    if principal.kind == "anonymous":
-        return not b.profiles and b.audience in ("all", "restricted")
-    if b.profiles and principal.profile_id not in b.profiles:
+# --------------------------------------------------------------------------- #
+# Who may use a character (4.0, BUILD-PLAN-v2 §1.2; WP-CORE owns this region)
+# --------------------------------------------------------------------------- #
+
+
+def is_personal(b: Bot) -> bool:
+    """A personal character belongs to exactly one profile (``scope: personal``)."""
+    return getattr(b, "scope", "household") == "personal"
+
+
+def is_hidden(b: Bot) -> bool:
+    """The Admin's "keep it off the rail" flag (``hidden``). Display only: a hidden character
+    still opens by link. Migration 010 wrote ``hidden`` for every 3.x ``hide_unlocked`` bot;
+    the legacy ``hide_unlocked`` / ``safe`` / ``audience`` keys are inert data since then and
+    are never read here (an ``audience: restricted`` left in config.yaml hides nothing)."""
+    return bool(getattr(b, "hidden", False))
+
+
+def is_agent_backed(b: Bot) -> bool:
+    """Its turns run an agent (or an app's agent) on the host."""
+    return backend_kind(b) in ("agent", "app")
+
+
+def is_protected_personal(b: Bot) -> bool:
+    """A personal bot that a wipe (Reset profile) never removes: an agent or app bot (4.2), and
+    the Owner's hand-built own bots named in ``migrate.OWNER_OWN_BOTS`` (Sage). It keeps its
+    config entry, pictures, pools and voice-acks; only its chats can go. Protection from a wipe
+    is not a ban on a deliberate delete: the Owner may delete one with an explicit confirmation
+    (:func:`profiles_service.delete_personal` with ``deliberate=True``)."""
+    if b.scope != "personal":
         return False
-    if principal.is_restricted:
-        return b.audience in ("all", "restricted")
+    if is_agent_backed(b):
+        return True
+    from . import migrate, ownership
+    return b.id in migrate.OWNER_OWN_BOTS and bool(b.owner_profile) \
+        and b.owner_profile == ownership.protected_admin_id()
+
+
+def _household_list(principal) -> str | list[str]:
+    prof = getattr(principal, "profile", None)
+    if prof is None and getattr(principal, "profile_id", None):
+        prof = accounts.get_profile(principal.profile_id)
+    hb = getattr(prof, "household_bots", "all") if prof is not None else "all"
+    return hb if hb == "all" else list(hb or [])
+
+
+def _me(principal) -> str | None:
+    """The profile id a profile principal acts as (the protected Admin of a pre-accounts
+    session has no id until resolved)."""
+    me = getattr(principal, "profile_id", None)
+    if not me and getattr(principal, "protected", False):
+        from . import ownership
+        me = ownership.protected_admin_id()
+    return me or None
+
+
+def may_chat(b: Bot | None, principal) -> bool:
+    """May ``principal`` see ``b`` and talk to it? One function, in this order:
+
+    1. an open install (nobody owns it yet): yes;
+    2. a **template** (4.2, ``give_to``): no - nobody chats with a template, Admins and
+       machines included; they chat with their own linked copy;
+    3. an agent- or app-backed **personal** character (R1): only when its owner is the
+       protected Admin, whoever asks (a hand-edited roster cannot hand Bits to anyone else);
+    4. a machine (the API key): household characters and the protected Admin's personal ones;
+    5. a personal character: only its owner (``owner_profile``) - never an Admin;
+    6. a household character (pre-4.2 data): an Admin yes; a User when its ``household_bots``
+       is ``"all"`` or names the id; a Basic profile only when its list names the id;
+    7. an agent-backed household character also needs ``dispatch_agents`` for every
+       non-Admin (an app-backed one - the Job Board - is Admin-only).
+
+    No principal, no character: False."""
+    if b is None or principal is None:
+        return False
+    kind = getattr(principal, "kind", "")
+    if kind == "open":
+        return True
+    if kind not in ("machine", "profile"):
+        return False
+    if b.is_template:
+        return False
+    personal = is_personal(b)
+    if personal and is_agent_backed(b):
+        from . import ownership
+        own = ownership.protected_admin_id()
+        if not own or b.owner_profile != own:
+            return False
+    if kind == "machine":
+        if personal:
+            from . import ownership
+            own = ownership.protected_admin_id()
+            return bool(own) and b.owner_profile == own
+        return True
+    me = _me(principal)
+    if personal:
+        return bool(me) and bool(b.owner_profile) and b.owner_profile == me
+    if getattr(principal, "is_admin", False):
+        return True
+    role = getattr(principal, "role", None)
+    hb = _household_list(principal)
+    if role == "basic":
+        listed = hb != "all" and b.id in hb
+    else:
+        listed = hb == "all" or b.id in hb
+    if not listed:
+        return False
+    if is_agent_backed(b):
+        if backend_kind(b) == "app":
+            return False
+        return bool(principal.can("dispatch_agents"))
     return True
 
 
-def visible_to(principal, bots: list[Bot] | None = None) -> list[Bot]:
+#: 3.x/4.0 name of :func:`may_chat`; every existing caller asks "may it talk to / see it".
+may_use = may_chat
+
+
+def entitled(profile, template: Bot | None) -> bool:
+    """Does ``profile`` (an ``accounts.Profile``) get a copy of ``template``? ``give_to`` is
+    ``"everyone"`` or a list of profile ids; any role qualifies (Basic included), a disabled
+    profile does not. Says nothing about whether the copy exists yet."""
+    if profile is None or template is None or not template.is_template:
+        return False
+    if getattr(profile, "disabled", False):
+        return False
+    gt = template.give_to
+    return gt == "everyone" or (isinstance(gt, (list, tuple)) and profile.id in gt)
+
+
+def may_manage(b: Bot | None, principal) -> bool:
+    """May ``principal`` edit ``b``? A template: ``manage_characters`` (any Admin). A personal
+    character: its owner (no one else, Admins included). A household non-template (pre-4.2):
+    ``manage_characters``. Whether a Basic owner may edit a managed copy is the route's call
+    (``create_characters``); this answers ownership only."""
+    if b is None or principal is None:
+        return False
+    kind = getattr(principal, "kind", "")
+    if kind == "open":
+        return True
+    if kind != "profile":
+        return False
+    if is_personal(b):
+        me = _me(principal)
+        return bool(me) and b.owner_profile == me
+    return bool(principal.can("manage_characters"))
+
+
+def copy_of(template_id: str, profile_id: str | None, bots: list[Bot] | None = None) -> Bot | None:
+    """``profile_id``'s linked copy of ``template_id`` (R4: at most one), or None."""
+    if not profile_id:
+        return None
+    for b in (bots if bots is not None else config.load_bots()):
+        if b.template == template_id and b.is_linked_copy and b.owner_profile == profile_id:
+            return b
+    return None
+
+
+def resolve_for_machine(bot: Bot | None) -> Bot | None:
+    """A machine caller addressing a bot by id: a template id resolves to the protected
+    Admin's linked copy of it (None when there is none); anything else is itself."""
+    if bot is None or not bot.is_template:
+        return bot
+    from . import ownership
+    return copy_of(bot.id, ownership.protected_admin_id())
+
+
+def _visible(b: Bot, principal) -> bool:
+    if not may_use(b, principal):
+        return False
+    if not is_hidden(b):
+        return True
+    # A hidden household character is still listed for a profile whose explicit list names it.
+    hb = _household_list(principal) if getattr(principal, "kind", "") == "profile" else "all"
+    return hb != "all" and b.id in hb
+
+
+def visible_to(bot: Bot, principal) -> bool:
+    """May ``principal`` use ``bot`` AND is it listed - not hidden, or the profile's explicit
+    household list names it (rails, ``bots`` / ``hello`` frames, ``/api/bots``,
+    ``ctx.bots_visible``). Lists: :func:`visible_bots` (rails) and :func:`usable_bots`
+    (every bot the principal may use, hidden ones included: the Characters manager)."""
+    return _visible(bot, principal)
+
+
+def visible_bots(principal, bots: list[Bot] | None = None) -> list[Bot]:
+    return [b for b in (bots if bots is not None else config.load_bots()) if _visible(b, principal)]
+
+
+def usable_bots(principal, bots: list[Bot] | None = None) -> list[Bot]:
+    """Every character ``principal`` may use (hidden ones included)."""
     return [b for b in (bots if bots is not None else config.load_bots()) if may_use(b, principal)]
 
 
-def may_use_id(bot_id: str | None, principal) -> bool:
-    if not bot_id:
+def template_bots(principal, bots: list[Bot] | None = None) -> list[Bot]:
+    """The templates an Admin manages (``manage_characters``): the household view. Never a chat
+    list - nobody chats with a template. Anyone else: nothing."""
+    if principal is None or not (getattr(principal, "kind", "") == "open"
+                                 or principal.can("manage_characters")):
+        return []
+    return [b for b in (bots if bots is not None else config.load_bots()) if b.is_template]
+
+
+def may_view_item(b: Bot | None, principal) -> bool:
+    """May ``principal`` fetch ``b``'s picture and other read-only item data? Whoever may chat
+    with it, plus (4.2) an Admin holding ``manage_characters`` for a template - templates are
+    shown in the Household tab but never chatted with."""
+    if may_chat(b, principal):
         return True
-    b = config.resolve_bot(bot_id)
-    return True if b is None else may_use(b, principal)
+    if b is None or not b.is_template or principal is None \
+            or getattr(principal, "kind", "") != "profile":
+        return False
+    if principal.can("manage_characters"):
+        return True
+    # A template given to the caller: its picture shows on the "Get my copy" row.
+    prof = accounts.get_profile(_me(principal) or "")
+    return bool(prof is not None and entitled(prof, b))
+
+
+def may_list_manage(b: Bot, principal) -> bool:
+    """Is ``b`` a row of the Bot Manager listing (``/api/bots/all``) for ``principal``? A
+    template: only with ``manage_characters``; another profile's personal character: never."""
+    if b.is_template:
+        return may_manage(b, principal)
+    return not is_personal(b) or may_chat(b, principal)
+
+
+def may_use_id(bot_id: str | None, principal) -> bool:
+    """:func:`may_use` by id. An unknown id (or none) is False: fail closed."""
+    if not bot_id:
+        return False
+    return may_use(config.resolve_bot(bot_id), principal)
 
 
 # --------------------------------------------------------------------------- #
@@ -199,7 +461,13 @@ def with_connection(b: Bot, connection_id: str, model: str | None = None) -> Bot
             "This character is answered by an agent runtime, so it has no connection. "
             "Create a direct character to use a connection.", 422)
     old = first_entry(b) or {}
-    mdl = (model if model is not None else "") or str(old.get("model") or "") or c.default_model
+    # The old model name only carries over onto the SAME connection (or onto the first one an
+    # inline entry is attached to): another connection's server does not serve it, so a move
+    # to a different connection without a model takes that connection's default.
+    old_conn = str(old.get("connection") or "")
+    keep_old = not old_conn or old_conn == c.id
+    mdl = ((model if model is not None else "") or (str(old.get("model") or "") if keep_old else "")
+           or c.default_model)
     if not mdl:
         raise CharacterError("character_invalid",
                              "Pick a model (run Test on the connection to list what it offers).", 422)
@@ -267,25 +535,15 @@ def refresh_inline_mirrors(conn: connections.Connection) -> int:
 # --------------------------------------------------------------------------- #
 
 
-def _clean_profiles(ids: Any) -> list[str]:
-    if ids is None:
-        return []
-    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
-        raise CharacterError("character_invalid", "profiles must be a list of profile ids", 422)
-    known = {p.id for p in accounts.list_profiles()}
-    bad = [i for i in ids if i not in known]
-    if bad:
-        raise CharacterError("character_invalid", f"Unknown profile {bad[0]!r}", 422)
-    return list(dict.fromkeys(ids))
-
-
 def create(*, name: str, backend: str = "direct", id: str | None = None, emoji: str = "",
-           agent: str | None = None, model_hint: str = "", safe: bool = False, hide_unlocked: bool = False,
-           audience: str | None = None, quick_actions: bool = True, visible: bool = True,
+           agent: str | None = None, model_hint: str = "", quick_actions: bool = True,
            tools: bool | None = None, connection: str | None = None, model: str | None = None,
-           description: str = "", profiles: list[str] | None = None, pack: str = "",
+           description: str = "", pack: str = "",
            persona: str | None = None, color: str = "", voice: str = "", voice_rp: str = "",
-           ) -> Bot:
+           hidden: bool = False, give_to: str | list | None = None) -> Bot:
+    """Create a household character. A direct one is a template when ``give_to`` is given (4.2:
+    nobody chats with a household bot, every profile chats with its own copy of it); an agent /
+    app bot is never a template."""
     bots = config.load_bots()
     taken = {b.id for b in bots}
     if id is not None:
@@ -297,19 +555,19 @@ def create(*, name: str, backend: str = "direct", id: str | None = None, emoji: 
     kw: dict[str, Any] = {}
     if backend == "direct":
         kw["advisor"] = {"providers": [], "tools": True if tools is None else tools}
+        if give_to is not None:
+            kw["give_to"] = give_to
     else:
         kw["agent"] = (agent or "").strip()
-    if audience is None:
-        from . import settings_store
-        default_aud = settings_store.get("characters.default_audience", "members")
-        if not safe and not hide_unlocked and visible and default_aud != "members":
-            audience = default_aud
+        # R1 (4.2): an agent runs on this computer, so it is personal to the protected Admin;
+        # on an install nobody has claimed yet it stays household until the claim adopts it.
+        owner = ownership.protected_admin_id()
+        if owner:
+            kw["scope"], kw["owner_profile"] = "personal", owner
     bot = Bot(
         id=bot_id, name=name, emoji=emoji or ("🌍" if backend == "direct" else "🤖"),
         model_hint=model_hint or ("Direct API" if backend == "direct" else ""),
-        quick_actions=quick_actions, color=color, description=description[:400], pack=pack,
-        profiles=_clean_profiles(profiles),
-        **config.audience_flags(audience, config.fold_visible(visible, safe, hide_unlocked)), **kw)
+        quick_actions=quick_actions, color=color, description=description[:400], pack=pack, **kw)
     if persona is not None and persona.strip():
         try:
             bot = personas.apply(bot, persona)
@@ -320,21 +578,37 @@ def create(*, name: str, backend: str = "direct", id: str | None = None, emoji: 
             check_extension_field(fld, bot_id, val.strip())
     if voice or voice_rp:
         bot = replace(bot, voice=voice.strip()[:80], voice_rp=voice_rp.strip()[:32])
+    if hidden:
+        bot = replace(bot, **{_hidden_field(): True})
     if connection:
         bot = with_connection(bot, connection, model)
     return config.upsert_bot(bot)
 
 
-def patch(bot_id: str, changes: dict[str, Any]) -> Bot:
-    """Apply a PATCH body (already validated for shape) under the roster lock."""
+def patch(bot_id: str, changes: dict[str, Any], *, allow_personal: bool = False) -> Bot:
+    """Apply a PATCH body (already validated for shape) under the roster lock.
+
+    HOUSEHOLD characters only (an Admin's surface): a personal one answers 404, exactly as if
+    it did not exist - an Admin cannot see or edit another profile's bot. The owner's route is
+    :func:`patch_personal`. ``allow_personal`` is for the unified PATCH
+    (``characters_manage.patch``), which has already checked that the caller owns the bot: it
+    edits the protected Admin's personal agent bots with the household field set (SF-1)."""
     from fastapi import HTTPException  # the old handler raised these inside the lock
 
+    existing = config.get_bot(bot_id)
+    if existing is not None and existing.scope == "personal" and not allow_personal:
+        raise CharacterError("bot_not_found", "Unknown bot", 404)
     changes = dict(changes)
+    if "hidden" in changes:                                  # the Admin's "Hide"
+        want = bool(changes.pop("hidden"))
+        changes[_hidden_field()] = want
+        if not want:
+            # 010 keeps the 3.x hide_unlocked beside hidden as inert data; showing a bot
+            # again clears it too, so the file never says two things.
+            changes["hide_unlocked"] = False
     for fld in extensions.BOT_FIELDS:
         if changes.get(fld) is not None:
             check_extension_field(fld, bot_id, str(changes[fld]).strip())
-    if "profiles" in changes:
-        changes["profiles"] = _clean_profiles(changes["profiles"])
     if "description" in changes:
         changes["description"] = str(changes["description"] or "")[:400]
     connection = changes.pop("connection", _UNSET)         # None / "" detaches; absent leaves it alone
@@ -349,13 +623,6 @@ def patch(bot_id: str, changes: dict[str, Any]) -> Bot:
                 raise HTTPException(422, "tools only applies to direct-API bots")
             ch["advisor"] = config.set_direct_tools(bot.advisor, bool(tools))
         persona = ch.pop("persona", None)
-        if "visible" in ch:
-            ch.update(config.fold_visible(ch.pop("visible"), ch.get("safe", bot.safe),
-                                          ch.get("hide_unlocked", bot.hide_unlocked)))
-        if "audience" in ch:
-            ch.update(config.audience_flags(ch.pop("audience"), {
-                "safe": ch.get("safe", bot.safe),
-                "hide_unlocked": ch.get("hide_unlocked", bot.hide_unlocked)}))
         for fld in ("voice", "voice_rp"):
             if fld in ch:
                 ch[fld] = str(ch[fld]).strip()[:80 if fld == "voice" else 32]
@@ -399,13 +666,330 @@ def _detach(b: Bot) -> Bot:
     return b
 
 
+def detach_copy(bot_id: str) -> Bot | None:
+    """A linked copy becomes a plain own bot holding its effective values (:func:`config.detach`)
+    and no longer claims to be a copy (``cloned_from``, ``pack``), so no kit pushes to it. THE
+    detach path: untick-with-chats, Stop sharing, template delete (:func:`remove`)."""
+    return config.update_bot(bot_id, lambda b: replace(
+        b, template="", overrides=None, resolved_view=None, cloned_from="", pack="",
+        detached_from=b.template or b.detached_from))
+
+
 def remove(bot_id: str) -> None:
-    if config.get_bot(bot_id) is None:
+    """Remove a HOUSEHOLD character (a personal one is 404 here; its owner uses
+    :func:`remove_personal`)."""
+    existing = config.get_bot(bot_id)
+    if existing is None or existing.scope == "personal":
         raise CharacterError("bot_not_found", "Unknown bot", 404)
     if apps_loader.owns_bot(bot_id):
         raise CharacterError("bot_owned_by_app",
                              "This bot belongs to an app; remove or disable the app instead", 409)
+    # A template's copies keep what they show and become plain own bots (4.2): they never go
+    # with it. (Detach first: a copy written without its template would still carry the link.)
+    for copy in [b for b in config.load_bots() if b.template == bot_id]:
+        detach_copy(copy.id)
     try:
         config.remove_bot(bot_id)
     except ValueError as e:
         raise CharacterError("character_last", str(e), 409) from e
+    # its kit goes with it: a household bot later made with the same id must not inherit it
+    from . import kits
+    try:
+        kits.delete_household(bot_id)
+    except OSError:
+        log.warning("could not remove the kit of %s", bot_id, exc_info=True)
+
+
+# --------------------------------------------------------------------------- #
+# Personal characters (4.0): a profile's own bots
+# --------------------------------------------------------------------------- #
+#
+# A personal character is a config.yaml entry with ``scope: personal`` and
+# ``owner_profile: <profile id>``. Its id is opaque (``p`` + 12 hex digits) because ids reach logs
+# and add-ons and must say nothing about the bot or its owner. Direct backend only: a personal
+# bot never reaches an agent runtime, runs no image jobs, keeps no reaction pool and reads no
+# knowledge folder. Who may SEE one is decided by ``may_use`` (WP-CORE); everything here is
+# the owner's own surface and answers 404 for anybody else's bot, Admins included.
+
+#: The editor's "own text" limit (the global ceiling, personas.MAX_CHARS, is larger).
+MAX_PERSONAL_PERSONA = 4000
+#: A cap per profile, so a runaway client cannot grow config.yaml without bound.
+MAX_PERSONAL_BOTS = 50
+#: What the owner's PATCH may carry. Everything else (flags, agent, pools) is household.
+#: ``voice_rp`` (4.3): the voice add-on's per-bot role-play style, checked by the add-on's
+#: validator; on a copy it is an override like ``voice``.
+PERSONAL_PATCH_FIELDS = frozenset({
+    "name", "emoji", "description", "color", "quick_actions", "tools", "persona", "personality",
+    "voice", "voice_rp", "connection", "model", "hidden", "image_jobs"})
+AVATAR_ROLES = ("face", "full", "thumb")
+AVATAR_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def new_personal_id(taken: set[str] | None = None) -> str:
+    """A fresh opaque personal-bot id, never one already on the roster."""
+    used = {t.lower() for t in (taken if taken is not None else {b.id for b in config.load_bots()})}
+    while True:
+        bid = "p" + secrets.token_hex(6)
+        if bid not in used:
+            return bid
+
+
+def personal_bots(profile_id: str) -> list[Bot]:
+    """Every personal character ``profile_id`` owns (config order)."""
+    return [b for b in config.load_bots()
+            if b.scope == "personal" and b.owner_profile == profile_id]
+
+
+def get_personal(bot_id: str, profile_id: str) -> Bot:
+    """``bot_id`` if ``profile_id`` owns it, else the same 404 an unknown bot gets."""
+    b = config.get_bot(bot_id)
+    if b is None or b.scope != "personal" or not profile_id or b.owner_profile != profile_id:
+        raise CharacterError("bot_not_found", "Unknown bot", 404)
+    return b
+
+
+def _personal_text(persona: str | None, personality: str | None) -> str | None:
+    """The personality text the editor asked for (None = leave it alone, "" = the default)."""
+    if personality:
+        if personality == personas.DEFAULT_ID:
+            return ""
+        preset = next((p for p in personas.presets() if p.id == personality), None)
+        if preset is None:
+            raise CharacterError("character_invalid", f"Unknown personality {personality!r}", 422)
+        return preset.text
+    if persona is None:
+        return None
+    text = str(persona)
+    if len(text.strip()) > MAX_PERSONAL_PERSONA:
+        raise CharacterError("character_invalid",
+                             f"A personality is at most {MAX_PERSONAL_PERSONA} characters", 422)
+    return text
+
+
+def _check_personal_voice(voice: str, bot_id: str, owner: str) -> str:
+    """The voice to store: it must pass the add-on's validator AND be one this owner may use
+    (a household voice or one of the owner's own clones; BUILD-PLAN-v2 §1.12)."""
+    v = str(voice or "").strip()[:80]
+    if not v:
+        return ""
+    check_extension_field("voice", bot_id, v)
+    if not ext_profile_hooks.voice_allowed(v, owner):
+        raise CharacterError("voice_not_allowed", "That voice is not available to you.", 422)
+    return v
+
+
+def _connect_personal(bot: Bot, profile, connection: str | None, model: str | None, *,
+                      may_choose: bool, fallback_ok: bool = False, soft: bool = False) -> Bot:
+    """Point a personal bot at a connection ``profile`` may use (see backends_policy).
+
+    ``soft`` (the automatic Atlas and copies): a connection with no model to offer leaves the
+    bot unconnected instead of failing - it answers with the "not connected" notice."""
+    wanted = (connection or "").strip() or None
+    if wanted and not may_choose:
+        # Without the permission the pick is not honoured: the bot gets the household default.
+        if not fallback_ok:
+            raise CharacterError("backend_not_allowed",
+                                 "Your profile may not choose a bot's backend.", 403)
+        wanted = None
+    try:
+        cid = backends_policy.resolve_connection(profile, wanted, fallback_ok=fallback_ok)
+    except backends_policy.BackendsError as e:
+        raise CharacterError(e.code, str(e), 404 if e.code == "connection_not_found" else 422) from e
+    if not cid:
+        return bot
+    # A copy that fell back to another connection cannot carry the source's model name over.
+    use_model = model if (not wanted or cid == wanted) else None
+    try:
+        return with_connection(bot, cid, use_model)
+    except CharacterError:
+        if soft:
+            return bot
+        raise
+
+
+def create_personal(profile, *, name: str, emoji: str = "", description: str = "",
+                    persona: str | None = None, personality: str | None = None,
+                    voice: str = "", connection: str | None = None, model: str | None = None,
+                    tools: bool = True, color: str = "", quick_actions: bool = True,
+                    avatar: str = "", may_choose_backend: bool = True, fallback_ok: bool = False,
+                    soft_connection: bool = False) -> Bot:
+    """Make a personal character for ``profile`` (an ``accounts.Profile``) and save it.
+
+    Direct backend only. The backend is checked against ``profile.backends.allowed`` and the
+    voice against ``ext_profile_hooks.voice_allowed``; both refuse with a 422
+    :class:`CharacterError`. Returns the saved :class:`Bot`."""
+    name = str(name or "").strip()[:40]
+    if not name:
+        raise CharacterError("character_invalid", "A bot needs a name", 422)
+    if len(personal_bots(profile.id)) >= MAX_PERSONAL_BOTS:
+        raise CharacterError("too_many_bots",
+                             f"A profile can have at most {MAX_PERSONAL_BOTS} bots", 409)
+    bot_id = new_personal_id()
+    bot = Bot(
+        id=bot_id, name=name, emoji=(emoji or "🌍").strip()[:8], model_hint="Direct API",
+        quick_actions=bool(quick_actions), color=str(color or "").strip()[:32],
+        description=str(description or "")[:400], avatar=avatar,
+        scope="personal", owner_profile=profile.id,
+        advisor={"providers": [], "tools": bool(tools)})
+    text = _personal_text(persona, personality)
+    if text:
+        try:
+            bot = personas.apply(bot, text)
+        except ValueError as e:
+            raise CharacterError("character_invalid", str(e), 422) from e
+    voice = _check_personal_voice(voice, bot_id, profile.id)
+    if voice:
+        bot = replace(bot, voice=voice)
+    bot = _connect_personal(bot, profile, connection, model, may_choose=may_choose_backend,
+                           fallback_ok=fallback_ok, soft=soft_connection)
+    return config.upsert_bot(bot)
+
+
+def patch_personal(bot_id: str, profile, changes: dict[str, Any], *,
+                   may_choose_backend: bool = True) -> Bot:
+    """Change one of ``profile``'s own characters. Only :data:`PERSONAL_PATCH_FIELDS` are
+    accepted; anything else is a 422. An unknown bot or somebody else's is a 404."""
+    get_personal(bot_id, profile.id)
+    changes = dict(changes)
+    bad = sorted(set(changes) - PERSONAL_PATCH_FIELDS)
+    if bad:
+        raise CharacterError("character_invalid", f"Cannot change {bad[0]!r} on your own bot", 422)
+    connection = changes.pop("connection", _UNSET)
+    model = changes.pop("model", None)
+    persona = changes.pop("persona", None)
+    personality = changes.pop("personality", None)
+    if persona is not None and personality:
+        raise CharacterError("character_invalid", "Send a personality preset or your own text, not both", 422)
+    text = _personal_text(persona, personality)
+    if "name" in changes:
+        changes["name"] = str(changes["name"] or "").strip()[:40]
+        if not changes["name"]:
+            raise CharacterError("character_invalid", "A bot needs a name", 422)
+    if "emoji" in changes:
+        changes["emoji"] = str(changes["emoji"] or "").strip()[:8]
+    if "description" in changes:
+        changes["description"] = str(changes["description"] or "")[:400]
+    if "color" in changes:
+        changes["color"] = str(changes["color"] or "").strip()[:32]
+    if "voice" in changes:
+        changes["voice"] = _check_personal_voice(changes["voice"], bot_id, profile.id)
+    if "voice_rp" in changes:
+        changes["voice_rp"] = str(changes["voice_rp"] or "").strip()[:32]
+        check_extension_field("voice_rp", bot_id, changes["voice_rp"])
+    tools = changes.pop("tools", None)
+
+    def _apply(bot: Bot) -> Bot:
+        updated = replace(bot, **changes)
+        if "voice" in changes and "voice_cleared" in (updated.overrides or {}):
+            updated = replace(updated, overrides={k: v for k, v in updated.overrides.items()
+                                                  if k != "voice_cleared"})
+        if tools is not None:
+            updated = replace(updated, advisor=config.set_direct_tools(updated.advisor, bool(tools)))
+        if text is not None:
+            try:
+                updated = personas.apply(updated, text)
+            except ValueError as e:
+                raise CharacterError("character_invalid", str(e), 422) from e
+        if connection is not _UNSET or model is not None:
+            if connection is not _UNSET and not connection:
+                # "(none)": a linked copy goes back to its template's connection (the policy
+                # decides what its owner may use); an own bot drops the connection reference.
+                updated = _unpick_connection(updated, profile)
+            elif connection is _UNSET:
+                if model is not None:
+                    updated = with_model(updated, model)
+            else:
+                updated = _connect_personal(updated, profile, connection, model,
+                                            may_choose=may_choose_backend)
+        return updated
+
+    saved = config.update_bot(bot_id, _apply)
+    if saved is None:
+        raise CharacterError("bot_not_found", "Unknown bot", 404)
+    return saved
+
+
+def _unpick_connection(bot: Bot, profile) -> Bot:
+    """``connection: null`` from the owner: forget their own pick. A linked copy follows its
+    template's connection again (:func:`profiles_service._policy_view`: the template's when its
+    owner may use it, else the owner's default) and loses its connection override; any other
+    bot just drops the ``connection`` reference (inline settings stay)."""
+    tpl = config.get_bot(bot.template) if bot.template else None
+    if tpl is None or tpl.template:
+        return _detach(bot)
+    from . import profiles_service
+    ov = {k: v for k, v in (bot.overrides or {}).items() if k != "provider0_picked"}
+    return profiles_service._policy_view(profile, tpl)(replace(bot, overrides=ov))
+
+
+def _unlink_quiet(path: Path) -> None:
+    with contextlib.suppress(OSError):
+        path.unlink()
+
+
+def drop_bot_assets(bots: list[Bot]) -> None:
+    """Delete what a removed personal bot leaves on disk: its avatar triplet and its entry in
+    ``voice-acks.yaml``. (Chats are the caller's: ``profiles_service`` deletes them first.)"""
+    ids = [b.id for b in bots if b.scope == "personal"]
+    if not ids:
+        return
+    avatar_dir = Path(config.AVATAR_DIR)
+    for bid in ids:
+        for role in AVATAR_ROLES:
+            for ext in AVATAR_EXTS:
+                _unlink_quiet(avatar_dir / f"{bid}-{role}{ext}")
+        with contextlib.suppress(OSError):
+            for stray in avatar_dir.glob(f".{bid}-*.partial"):
+                _unlink_quiet(stray)
+    _drop_voice_ack_entries(ids, [b.name for b in bots if b.scope == "personal"])
+
+
+def _drop_voice_ack_entries(bot_ids: list[str], names: list[str]) -> None:
+    """Remove ``bots.<id>`` entries from the voice add-on's ``voice-acks.yaml`` (its style
+    keys are a bot's id or display name; a name is only dropped when no surviving bot has it).
+    Rewritten only when something was removed, atomically and 0600."""
+    path = Path(config.DATA_DIR) / "voice-acks.yaml"
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return
+    bots = doc.get("bots") if isinstance(doc, dict) else None
+    if not isinstance(bots, dict):
+        return
+    surviving = {b.name.lower() for b in config.load_bots() if b.id not in set(bot_ids)}
+    drop = {k for k in bots if str(k) in set(bot_ids)}
+    drop |= {k for k in bots if str(k).lower() in {n.lower() for n in names}
+             and str(k).lower() not in surviving}
+    if not drop:
+        return
+    for k in drop:
+        bots.pop(k, None)
+    if not bots:
+        doc.pop("bots", None)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".voice-acks.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+        with contextlib.suppress(OSError):
+            os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        _unlink_quiet(Path(tmp))
+        raise
+
+
+def remove_personal(bot_id: str, profile_id: str, *, deliberate: bool = False) -> Bot:
+    """Remove one of ``profile_id``'s own characters (config entry, avatars, voice-acks entry).
+    Its chats are NOT touched here - ``profiles_service.delete_personal`` deletes them first so
+    nothing is left pointing at a bot that is gone. A protected bot (agent / app / Sage) goes
+    only with ``deliberate=True``. Returns the removed bot."""
+    bot = get_personal(bot_id, profile_id)
+    if is_protected_personal(bot) and not deliberate:
+        raise CharacterError("agent_bot_protected",
+                             "An agent bot cannot be deleted from Mine; it stays with the Owner.", 409)
+    try:
+        config.remove_bot(bot_id)
+    except ValueError as e:
+        raise CharacterError("character_last", str(e), 409) from e
+    drop_bot_assets([bot])
+    return bot

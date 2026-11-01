@@ -5,17 +5,17 @@
 // own api.js client, i18n and CSS tokens (app.css `.clients-*` rules).
 //
 // Full-session only: main.js only ever calls openClientsView() when
-// state.auth.features.practice is true, which the server only sets for an
-// unlocked session — see _require_practice in backend/app/main.py.
+// state.auth.features.practice is true, which the server only sets for a
+// signed-in session — see _require_practice in backend/app/main.py.
 //
 // Hash routing lives INSIDE this panel's own state (clientsRoute), not the
 // document hash, so it doesn't collide with DisPatch's own #chat/#threads
 // routing; back/forward inside the panel is handled by the tab buttons +
 // an internal history-less stack (Back always returns to the list).
 
-import { api } from './api.js?v=35';
-import { t } from './i18n.js?v=4';
-import { acquireInert, releaseInert } from './util.js?v=20';
+import { api } from './api.js?v=37';
+import { t } from './i18n.js?v=5';
+import { acquireInert, releaseInert, spriteIconHtml } from './util.js?v=23';
 
 const JOB_POLL_MS = 1500;
 const JOB_TIMEOUT_MS = 30 * 60 * 1000;
@@ -50,9 +50,9 @@ function el(html) {
 
 function healthGlyph(health) {
   const h = String(health || '').toLowerCase();
-  if (h.includes('hold')) return '■';
-  if (h.includes('stall')) return '▲';
-  if (h.includes('wait')) return '▶';
+  if (h.includes('hold')) return spriteIconHtml('square', 14);
+  if (h.includes('stall')) return spriteIconHtml('triangle-alert', 14);
+  if (h.includes('wait')) return spriteIconHtml('play', 14);
   return '●';
 }
 
@@ -61,11 +61,11 @@ function healthGlyph(health) {
 // --------------------------------------------------------------------------
 
 /** Stop the job poll. Called when the Clients pane closes, including on a
- *  drop to Safe Mode.
+ *  sign-out.
  *
  *  pollJob() reschedules ITSELF, and closing the pane only hid the view — so
  *  the timer kept firing GET /api/practice/jobs/<id> for the rest of the
- *  session. On a locked device those requests 403, which is the gate doing its
+ *  session. On a signed-out device those requests are refused, which is the gate doing its
  *  job, but a background loop talking to the practice box from a device
  *  somebody has just locked is not something to leave running. The pane is
  *  also the only thing that would ever show the answer.
@@ -151,7 +151,7 @@ async function renderOverview(root) {
   const healthCls = norm === 'ok' ? 'status-healthy' : (norm === 'warn' ? 'status-warn' : 'status-needs_human');
   view.appendChild(el(`
     <section class="ov-card health-card ${healthCls}">
-      <div class="health-card-glyph">${norm === 'ok' ? '●' : (norm === 'warn' ? '▲' : '■')}</div>
+      <div class="health-card-glyph">${norm === 'ok' ? '●' : spriteIconHtml(norm === 'warn' ? 'triangle-alert' : 'square', 22)}</div>
       <div>
         <h3>${escapeHtml((doctor.status || 'UNKNOWN').toString().toUpperCase())}</h3>
         <p class="empty-note">${doctor.rows_bad ? `${doctor.rows_bad} check(s) need attention. ` : 'All checks clean. '}${escapeHtml(t('clients.last_checked') || 'Last checked')} ${escapeHtml(doctor.ts || '—')}.</p>
@@ -222,7 +222,7 @@ function renderOverviewList(title, items, emptyText, kind) {
           <span class="waiting-name">${escapeHtml(c.name)}</span>
           <span class="waiting-detail">${label}</span>
         </span>
-        <button type="button" class="secondary jump-btn">${escapeHtml(t('clients.jump') || 'Jump ›')}</button>
+        <button type="button" class="secondary jump-btn">${escapeHtml(t('clients.jump') || 'Jump')} ${spriteIconHtml('chevron-right', 14)}</button>
       </li>
     `);
     row.querySelector('.jump-btn').addEventListener('click', () => openClientDetail(c.id));
@@ -289,7 +289,7 @@ function paintClientList(holder, items, bucket, query) {
             <span class="chip-name">${escapeHtml(c.name)}</span>
             <span class="chip-state">${escapeHtml(c.branch || '')} · ${escapeHtml(c.state)}</span>
           </span>
-          <span class="list-chevron" aria-hidden="true">›</span>
+          <span class="list-chevron" aria-hidden="true">${spriteIconHtml('chevron-right', 16)}</span>
         </button>
       </li>
     `);
@@ -312,7 +312,7 @@ async function renderClientDetail(root, clientId) {
     client = await api.practiceGet(`clients/${encodeURIComponent(clientId)}`);
   } catch (e) {
     if (e && e.status === 401) return;
-    view.innerHTML = `<button type="button" class="secondary clients-inline-back" id="cd-back">‹ ${escapeHtml(t('common.back') || 'Back')}</button><p class="empty-note">${escapeHtml(t('clients.load_error') || 'Could not load this client.')}</p>`;
+    view.innerHTML = `<button type="button" class="secondary clients-inline-back" id="cd-back">${spriteIconHtml('arrow-left', 14)} ${escapeHtml(t('common.back') || 'Back')}</button><p class="empty-note">${escapeHtml(t('clients.load_error') || 'Could not load this client.')}</p>`;
     view.querySelector('#cd-back').addEventListener('click', () => goBackToClients());
     return;
   }
@@ -320,7 +320,7 @@ async function renderClientDetail(root, clientId) {
 
   const backBar = el(`
     <div class="clients-detail-header">
-      <button type="button" class="secondary clients-inline-back" id="cd-back">‹ ${escapeHtml(t('common.back') || 'Back')}</button>
+      <button type="button" class="secondary clients-inline-back" id="cd-back">${spriteIconHtml('arrow-left', 14)} ${escapeHtml(t('common.back') || 'Back')}</button>
       <h3 class="clients-detail-title">${escapeHtml(client.client.name)} <span class="clients-detail-sub">${escapeHtml(client.client.branch || '')} · ${escapeHtml(client.state)}</span></h3>
       <button type="button" class="secondary" id="cd-open-thread" hidden>${escapeHtml(t('clients.open_thread') || 'Open thread')}</button>
     </div>
@@ -391,7 +391,7 @@ function isHttpUrl(v) {
 function openLinkAnchor(url, label, extraClass) {
   const a = el(`<a class="site-link-btn${extraClass ? ` ${extraClass}` : ''}" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer"></a>`);
   a.appendChild(document.createTextNode(label));
-  a.appendChild(el(`<span class="site-link-ext" aria-hidden="true"> ↗</span>`));
+  a.appendChild(el(`<span class="site-link-ext" aria-hidden="true"> ${spriteIconHtml('external-link', 13)}</span>`));
   a.setAttribute('aria-label', `${label} (${t('clients.opens_new_tab') || 'opens in a new tab'})`);
   return a;
 }
@@ -535,7 +535,7 @@ function renderHoldBanner(slot, client) {
   const hold = client.hold;
   const banner = el(`
     <div class="hold-banner" role="alert">
-      <h3>■ ${escapeHtml(t('clients.security_hold') || 'Security hold')}</h3>
+      <h3>${spriteIconHtml('shield-alert', 16)} ${escapeHtml(t('clients.security_hold') || 'Security hold')}</h3>
       <p>${escapeHtml(hold.reason || t('clients.hold_generic') || 'This client is on hold.')}</p>
       <form id="hold-clear-form">
         <input type="text" id="hold-clear-note" placeholder="${escapeHtml(t('clients.hold_note_placeholder') || 'What did you check, and why is it safe to continue?')}" required>
@@ -557,7 +557,7 @@ function renderHoldBanner(slot, client) {
   slot.appendChild(banner);
 }
 
-const STATUS_GLYPH = { done: '✓', current: '▶', upcoming: '○' };
+const STATUS_GLYPH = { done: spriteIconHtml('check', 14), current: spriteIconHtml('play', 14), upcoming: '○' };
 
 function renderSteps(container, client) {
   container.innerHTML = '';
@@ -635,7 +635,7 @@ function renderNeedItem(client, step, need) {
   const present = !!need.present;
   const wrap = el(`
     <div class="needs-item ${present ? 'present' : 'missing'}">
-      <span class="needs-glyph">${present ? '✓' : '✗'}</span>
+      <span class="needs-glyph">${spriteIconHtml(present ? 'check' : 'x', 14)}</span>
       <span class="needs-body">
         <span class="needs-name">${escapeHtml(need.name)}</span>
         ${need.hint ? `<span class="needs-hint">${escapeHtml(need.hint)}</span>` : ''}
@@ -763,10 +763,6 @@ function mountModal(innerHtml) {
   return backdrop.querySelector('.modal-card');
 }
 function modalEscHandler(e) { if (e.key === 'Escape') closeModal(); }
-
-/** Close the confirm dialog. Exported so the pane's own teardown can reach it:
- *  hiding the Clients view left this backdrop parented to <body>. */
-export function closeClientsModal() { closeModal(); }
 
 function closeModal() {
   if (state.modal) {

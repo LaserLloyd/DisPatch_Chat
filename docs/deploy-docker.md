@@ -50,10 +50,10 @@ docker compose ps               # STATUS should reach "healthy" within ~90s
                                 # (the first boot seeds assets; start_period is 90s)
 ```
 
-**Finish the setup wizard.** A fresh container is closed to the network until an owner
+**Finish the setup wizard.** A fresh container is closed to the network until an Admin
 account exists: the sign-in page is all anyone sees. The wizard asks for the one-time
 setup token the server printed (`docker compose logs app`, the `SETUP TOKEN: ...` line),
-creates the owner, and shows the recovery code once; write it down. (3.0; a 2.x
+creates the first Admin, and shows the recovery code once; write it down. (3.0; a 2.x
 container was open until a PIN was set.)
 
 ---
@@ -260,9 +260,9 @@ WARNING local-chat: openclaw CLI not found at 'openclaw' — agent replies will 
 ```
 
 **This is a supported configuration.** Chat between people, the File Server, media,
-threads, search, Safe Mode and remembered devices all work normally. Only bot replies
+threads, search, profiles and remembered devices all work normally. Only bot replies
 are unavailable, and they fail with a clean error rather than a hang. If you want a
-self-hosted family chat and no bots, you are already done.
+self-hosted chat and no bots, you are already done.
 
 ### Option 1 — bake the agent into a derived image (recommended if you want agents)
 
@@ -307,7 +307,8 @@ services:
       - /home/you/.local/bin/openclaw:/usr/local/bin/openclaw:ro
       - /home/you/.nodejs:/opt/nodejs:ro
       # Session transcripts, for streaming and the mirror. Read-only is enough.
-      - /home/you/.openclaw:/home/app/.openclaw:ro
+      # HOME in the container is /data/home (on the data volume) since 4.3.
+      - /home/you/.openclaw:/data/home/.openclaw:ro
       # A SHARED temp dir, so --message-file paths resolve on both sides.
       - /tmp/dispatch-shared:/tmp/dispatch-shared
     environment:
@@ -322,7 +323,10 @@ Sharp edges, all of them real:
   interpreter and libraries present too. A dynamically linked binary needs matching
   glibc. Statically linked single-file binaries are the only ones that mount cleanly.
 - **`~/.openclaw` must be at the same path inside.** The app builds transcript paths
-  from `Path.home()`, and home is `/home/app` in the container. Mount it there.
+  from `Path.home()`, and home is `/data/home` in the container (since 4.3; it was
+  `/home/app` before). Mount it there. An older compose file that still mounts
+  `/home/app/.openclaw` keeps working: the image no longer has `/home/app`, so the
+  entrypoint links whatever is mounted there into `/data/home` at start.
 - **UIDs must line up.** Container UID 1000 must be able to read the host files.
 - **This is not really isolation any more.** You have given the container your agent
   runtime and its session history. Decide that on purpose.
@@ -387,6 +391,32 @@ still sending `Origin: https://chat.example.com`. Result:
 - the page loads
 - every REST call works
 - **the chat never updates again**, with no error shown
+
+### Tell the app which proxy to believe: `DISPATCH_TRUSTED_PROXIES`
+
+The app believes `X-Forwarded-For` (the client's address, used for per-client sign-in
+throttles) and `X-Forwarded-Proto` (whether to mark cookies `Secure`) only from a peer
+it trusts: the container's own loopback, or an address listed in
+`DISPATCH_TRUSTED_PROXIES` (comma-separated CIDRs; `trusted_proxies` in
+`security.yaml` does the same). From anyone else the headers are ignored, so a client
+cannot forge its address or claim HTTPS.
+
+**The shipped Caddy profile is already set up.** `docker-compose.yml` declares the
+project network's subnet (`172.29.87.0/24`), gives the `caddy` service the fixed <!-- scrub-ok: the compose project's own private subnet, not a real LAN -->
+address `172.29.87.10`, and sets `DISPATCH_TRUSTED_PROXIES=172.29.87.10/32` on the app. <!-- scrub-ok: the compose project's own private subnet, not a real LAN -->
+Automatic addresses come from the upper half of the subnet, so no other container can
+be handed `.10`. It is deliberately one address, not the whole subnet: the bridge
+gateway (`.1`) is in the subnet, and connections to a published port can arrive from
+the gateway (rootless Podman's port forwarder, Docker's userland proxy), so trusting
+the subnet would let any LAN client forge its address. If the subnet collides with one
+you already have ("Pool overlaps"), set `DISPATCH_NET_PREFIX` in `.env` (three octets,
+for example `172.30.42`); the subnet, Caddy's address and the trusted entry follow it.
+
+Without the proxy profile nothing holds that address, so nothing is trusted.
+`deploy/compose/stack.yml` has no proxy and sets nothing. For your own proxy, give it a
+fixed address and list exactly that address.
+
+### nginx
 
 If you use nginx, `proxy_set_header Host $host;` is mandatory:
 
@@ -505,9 +535,9 @@ The command line works against the data volume from inside the container (servic
 ```bash
 docker compose exec app python -m app users list
 docker compose exec app python -m app users passwd Olive                 # prompts on your terminal
-printf '%s\n' "$NEWPW" | docker compose exec -T app python -m app users add Noor --profile member --password-stdin
+printf '%s\n' "$NEWPW" | docker compose exec -T app python -m app users add Noor --profile user --password-stdin
 docker compose exec app python -m app users delete Noor --yes
-docker compose exec app python -m app owner reset --yes                  # lost both the password and the PIN
+docker compose exec app python -m app admin reset --yes                  # lost both the password and the PIN
 docker compose exec app python -m app token rotate                       # the machine API key
 ```
 
@@ -520,7 +550,7 @@ With no shell at all, only the volume: put a `RESET_LOGIN` file in the data dire
 and deleted first.
 
 ```bash
-docker compose exec app sh -c ': > /data/RESET_LOGIN'                     # empty: owner sign-in cleared, setup opens
+docker compose exec app sh -c ': > /data/RESET_LOGIN'                     # empty: first Admin's sign-in cleared, setup opens
 printf 'Olive:%s\n' "$NEWPW" | docker compose exec -T app sh -c 'cat > /data/RESET_LOGIN'   # or: set Olive's password
 docker compose restart app
 docker compose logs app | grep -E "login recovery|SETUP TOKEN"
@@ -529,7 +559,7 @@ docker compose logs app | grep -E "login recovery|SETUP TOKEN"
 or `DISPATCH_RESET_OWNER=1` in `.env`, then `docker compose up -d` (one-shot per value, remove it afterwards). Through
 a published port a browser is not "this computer", so after an empty-file or variable reset the wizard asks for the
 `SETUP TOKEN` in the log (also `docker compose exec app cat /data/SETUP-TOKEN.txt`). Data survives all of this: only the
-owner's sign-in changes. Full reference: [accounts.md](accounts.md).
+first Admin's sign-in changes. Full reference: [accounts.md](accounts.md).
 
 ## Upgrading
 
@@ -601,6 +631,25 @@ Notes on the Dockerfile, since a few things in it look changeable but are not:
   `/app/.venv/bin`. uv 0.12 forwards SIGTERM correctly, so this is about image size
   and about the container exiting `0` instead of `143` on a normal stop.
 - **`CMD` is exec form, and that is load-bearing.** See the next section.
+- **`HOME` is `/data/home`, on the data volume.** The image has no `/home/app` any
+  more. The entrypoint creates `/data/home` (mode 0700) when it is missing and never
+  touches an existing one; started as root (`RUN_AS=0:0`) it chowns that one directory,
+  not the volume. Everything that writes to `~` (the voice add-on's rig token, the
+  Claude Agent SDK's `~/.claude`, Python's user caches) lands on the volume.
+- **Read-only root.** `docker-compose.yml` runs the app with `read_only: true` and a
+  64 MB `/tmp` tmpfs. Every write goes to `/data`: the databases, media, `backups/`,
+  the upload spool (`TMPDIR=/data/tmp`) and `HOME`. The small `/tmp` is only for
+  libraries that hard-code it; uploads never go there.
+
+- **`AGENTS_CLAUDE=1` adds the Claude Agent backend.** `--build-arg AGENTS_CLAUDE=1`
+  (or `AGENTS_CLAUDE=1` in `.env` before `docker compose build`) installs the
+  `agents-claude` extra, `claude-agent-sdk` pinned in `backend/pyproject.toml`. Its
+  wheel bundles the native `claude` CLI, so there is no Node.js and nothing else to
+  install, but the image grows by about 300 MB. It is needed only for agents of type
+  "Claude Agent"; the API key is set in the app. At run time the SDK keeps its state in
+  `~/.claude` (`/data/home/.claude`) and its scratch in `TMPDIR`, both on the volume.
+  Without the extra, such an agent reports that the image must be rebuilt with
+  `--build-arg AGENTS_CLAUDE=1`.
 
 - **`VOICE=1` adds the voice add-on, `ffmpeg` and `libopus0`.** The add-on comes from
   `--build-arg VOICE_REF=` (default: `refs/heads/main` of the add-on, the 1.6.0 line; use
@@ -608,6 +657,10 @@ Notes on the Dockerfile, since a few things in it look changeable but are not:
   `--build-context voice-src=<dir>`, from a local directory. The speech models are
   downloaded into `/data/models` from Settings → Voice, never baked in; the rig
   token and the add-on's settings are under `/data` too, so a read-only root works.
+  With Podman on an SELinux host (Fedora, RHEL), a `--build-context` directory needs a
+  container label first, or the build stops with "VOICE_SRC=local needs
+  --build-context" (the directory is there but unreadable):
+  `chcon -R -t container_file_t <dir>`.
   Details and the step count: [voice.md](voice.md).
 
 No compiler is needed for either architecture: every wheel this app uses (pillow,
@@ -717,10 +770,11 @@ image upload rather than on chat traffic.
 
 ### Uploads of large files fail or the container gets OOM-killed mid-upload
 
-Do not mount `/tmp` as tmpfs. Multipart uploads spool through `TMPDIR` before reaching
+Keep `TMPDIR` on real disk. Multipart uploads spool through `TMPDIR` before reaching
 the blob store, and the per-file ceiling is 4 GiB — on tmpfs that is a 4 GiB RAM
-allocation. The image points `TMPDIR` at `/data/tmp` for exactly this reason; if you
-override it, keep it on real disk.
+allocation. The image points `TMPDIR` at `/data/tmp` for exactly this reason. The
+compose file's `/tmp` tmpfs is capped at 64 MB and uploads never touch it; do not point
+`TMPDIR` at it, and do not make it big.
 
 ### Avatars I uploaded disappeared after an upgrade
 

@@ -1,9 +1,9 @@
 // First-run wizard: six short steps that take a fresh install to a first working chat.
 //
-//   1 Owner account      (POST /api/auth/setup: from this computer, or with the setup token in the log)
+//   1 Your account       (POST /api/auth/setup: from this computer, or with the setup token in the log)
 //   2 First connection   (look for StudioForge / LM Studio / Ollama, Test, save, point a character at it)
 //   3 Voice              (optional; just a link to Settings -> Voice and what is installed)
-//   4 Family             (optional; profiles, and the Animal Friends pack for the Restricted ones)
+//   4 People             (optional; User and Basic profiles; the shared DisPatch profile is made for you)
 //   5 Network            (this computer only - the default - or the home network, with the HTTPS note)
 //   6 Done               (a checklist of what is left)
 //
@@ -13,10 +13,10 @@
 //
 // Pure helpers are exported for the tests; nothing runs at import time.
 
-import { w5 as realApi, errorText } from './w5-api.js?v=1';
-import { t } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
-import { describeTest } from './connections.js?v=2';
+import { w5 as realApi, errorText } from './w5-api.js?v=3';
+import { t } from './i18n.js?v=5';
+import { el, spriteIcon } from './util.js?v=23';
+import { describeTest } from './connections.js?v=5';
 
 export const STEPS = ['owner', 'connection', 'voice', 'family', 'network', 'done'];
 export const OPTIONAL = new Set(['voice', 'family']);
@@ -70,12 +70,12 @@ export function ownerError({ password, pin, confirm }) {
   return '';
 }
 
-/** The family body: skip blank rows, children get no PIN. */
-export function familyPayload(rows, { animals, assistants }) {
+/** The people body: skip blank rows. A PIN is optional on both types. */
+export function familyPayload(rows) {
   const people = rows.filter((r) => r.name && r.name.trim()).map((r) => ({
-    name: r.name.trim(), role: r.role, ...(r.role === 'member' && r.pin ? { pin: r.pin } : {}),
+    name: r.name.trim(), role: r.role, ...(r.pin ? { pin: r.pin } : {}),
   }));
-  return { people, install_animal_friends: !!animals, install_assistants: !!assistants };
+  return { people };
 }
 
 export const dismissedForNow = (storage = typeof sessionStorage === 'undefined' ? null : sessionStorage) => {
@@ -100,7 +100,9 @@ export async function maybeStartWizard(ctx = {}) {
   if (!ctx.force && dismissedForNow()) return null;
   let state;
   try { state = await api.wizard(); } catch { return null; }
-  if (!ctx.force && !state.needed) return null;
+  // The server sends the steps only to a caller who can manage settings: anyone else (the shared
+  // default profile on a new device, a User) is never shown a wizard they cannot finish (4.3 review).
+  if (!ctx.force && (!state.needed || !Array.isArray(state.steps))) return null;
   return openWizard(state, ctx);
 }
 
@@ -149,7 +151,7 @@ export function openWizard(initial, ctx = {}) {
       else if (done) cls.push('done');
       if (OPTIONAL.has(s)) cls.push('optional');
       progress.append(el('li', { class: cls.join(' '), 'aria-current': s === step ? 'step' : null }, [
-        el('span', { class: 'wizard-dot', 'aria-hidden': 'true', text: done && s !== step ? '✓' : String(i + 1) }),
+        el('span', { class: 'wizard-dot', 'aria-hidden': 'true' }, [done && s !== step ? spriteIcon('check', 12) : String(i + 1)]),
         el('span', { class: 'wizard-step-label', text: stepLabel(s) }),
         OPTIONAL.has(s) ? el('span', { class: 'sr-only', text: ` (${t('wiz.optional')})` }) : null,
       ]));
@@ -164,7 +166,7 @@ export function openWizard(initial, ctx = {}) {
       content.append(el('p', { text: t('wiz.owner_done') }), actions(btn(t('wiz.next'), 'btn-primary', () => next())));
       return;
     }
-    const name = el('input', { type: 'text', class: 'ui-input', autocomplete: 'username', value: 'Owner', maxlength: '40' });
+    const name = el('input', { type: 'text', class: 'ui-input', autocomplete: 'username', value: t('setup.default_name'), maxlength: '40' });
     const pw = el('input', { type: 'password', class: 'ui-input', autocomplete: 'new-password' });
     const pw2 = el('input', { type: 'password', class: 'ui-input', autocomplete: 'new-password' });
     const pin = el('input', { type: 'password', class: 'ui-input', inputmode: 'numeric', autocomplete: 'off' });
@@ -175,6 +177,8 @@ export function openWizard(initial, ctx = {}) {
       go1.disabled = true;
       try {
         await api.setup(ownerPayload({ name: name.value, password: pw.value, pin: pin.value, token: token.value }));
+        // The page is signed in as the new Admin now: let the app learn who it is before the next step.
+        if (typeof ctx.onAccountCreated === 'function') await ctx.onAccountCreated();
         await refresh();
         toast(t('wiz.owner_created'));
         await next();
@@ -200,7 +204,7 @@ export function openWizard(initial, ctx = {}) {
         const [kind, head, detail] = describeTest(r.test);
         result.className = `cxn-result cxn-${kind}`; result.textContent = detail ? `${head} · ${detail}` : head;
         if (r.test.ok) {
-          if (r.assigned) result.append(' ', t('wiz.conn_assigned', { name: r.assigned.character }));
+          if (r.assigned) result.append(' ', t('wiz.conn_assigned', { name: r.assigned.name || r.assigned.character }));
           list.textContent = '';
           content.append(actions(btn(t('wiz.next'), 'btn-primary', () => next())));
         }
@@ -240,30 +244,24 @@ export function openWizard(initial, ctx = {}) {
     const host = el('div', { class: 'wizard-people dev-group-body' });
     const addRow = (role) => {
       const name = el('input', { type: 'text', class: 'ui-input', maxlength: '40', 'aria-label': t('wiz.family_name') });
-      const pin = el('input', { type: 'password', class: 'ui-input', inputmode: 'numeric', 'aria-label': t('wiz.family_pin'), hidden: role === 'restricted' ? '' : null });
+      const pin = el('input', { type: 'password', class: 'ui-input', inputmode: 'numeric', 'aria-label': t('wiz.family_pin') });
       const r = { role, name, pin };
       rows.push(r);
       host.append(el('div', { class: 'dev-row' }, [el('span', { class: 'ui-badge', text: t(`role.${role}`) }), name, pin]));
     };
-    addRow('member'); addRow('restricted');
-    const animals = el('input', { type: 'checkbox', id: 'wz-animals', class: 'ui-checkbox' });
-    animals.checked = true;
-    const assist = el('input', { type: 'checkbox', id: 'wz-assist', class: 'ui-checkbox' });
+    addRow('user');
     const go4 = btn(t('wiz.family_create'), 'btn-primary', async () => {
       go4.disabled = true;
       try {
-        const body = familyPayload(rows.map((r) => ({ role: r.role, name: r.name.value, pin: r.pin.value })),
-          { animals: animals.checked, assistants: assist.checked });
-        await api.wizardFamily(body);
-        toast(t('wiz.family_done'));
+        const r = await api.wizardFamily(familyPayload(rows.map((x) => ({ role: x.role, name: x.name.value, pin: x.pin.value }))));
+        if (r && Array.isArray(r.created) && r.created.length) toast(t('wiz.family_done'));
         await next();
       } catch (e) { showError(e); } finally { go4.disabled = false; }
     });
     content.append(el('p', { text: t('wiz.family_intro') }), host,
-      btn(t('wiz.family_add_member'), 'btn-secondary', () => addRow('member')),
-      btn(t('wiz.family_add_child'), 'btn-secondary', () => addRow('restricted')),
-      el('label', { class: 'bkp-check', for: 'wz-animals' }, [animals, ' ', t('wiz.family_animals')]),
-      el('label', { class: 'bkp-check', for: 'wz-assist' }, [assist, ' ', t('wiz.family_assistants')]),
+      el('p', { class: 'muted', text: `${t('role.user')}: ${t('people.type_user_hint')} ${t('role.basic')}: ${t('people.type_basic_hint')}` }),
+      btn(t('wiz.family_add_user'), 'btn-secondary', () => addRow('user')),
+      btn(t('wiz.family_add_basic'), 'btn-secondary', () => addRow('basic')),
       actions(go4, btn(t('wiz.skip'), 'btn-secondary', async () => { await api.wizardStep('family', 'skipped'); await next(); })));
   }
 
@@ -296,7 +294,7 @@ export function openWizard(initial, ctx = {}) {
     const list = el('ul', { class: 'wizard-checklist' });
     for (const s of state.steps || []) {
       list.append(el('li', { class: s.done ? 'done' : '' }, [
-        el('span', { 'aria-hidden': 'true', text: s.done ? '✓ ' : (s.skipped ? '– ' : '○ ') }),
+        el('span', { 'aria-hidden': 'true' }, [s.done ? spriteIcon('check', 14) : (s.skipped ? '–' : '○'), ' ']),
         el('strong', { text: s.title }), s.hint && !s.done ? el('span', { class: 'muted', text: ` ${s.hint}` }) : null]));
     }
     content.append(el('p', { text: t('wiz.done_intro') }), list, actions(btn(t('wiz.finish'), 'btn-primary', async () => {

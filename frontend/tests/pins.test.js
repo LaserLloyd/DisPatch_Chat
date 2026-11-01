@@ -60,25 +60,17 @@ test('corrupt storage reads as nothing pinned rather than throwing', () => {
   assert.deepEqual(pinnedIds(), []);
 });
 
-// --- the gate ------------------------------------------------------------
+// --- what is drawn ---------------------------------------------------------
 
-test('Safe Mode sees only pins marked safe', () => {
+test('every pinned entry is drawn, except the theme button', () => {
   reset();
   for (const entry of PINNABLE) setPinned(entry.id, true);
-  const locked = visiblePins(true).map((e) => e.id);
-  const unlocked = visiblePins(false).map((e) => e.id);
-  // Every entry the locked tier is shown must have declared itself safe.
-  for (const id of locked) assert.equal(pinnableById(id).safe, true);
-  // An unsafe entry is OMITTED from Safe Mode, not merely disabled: a greyed
-  // button still advertises a surface a locked device may never reach.
-  for (const entry of PINNABLE) {
-    if (!entry.safe) assert.equal(locked.includes(entry.id), false);
-  }
-  // Unlocked sees everything that is pinned AND drawn here. `kind: 'rail'`
+  const drawn = visiblePins().map((e) => e.id);
+  // Everything pinned AND drawn here. `kind: 'rail'`
   // entries (🎨) own a button in the markup, so the renderer must skip them.
-  assert.equal(unlocked.length, PINNABLE.filter((e) => e.kind !== 'rail').length);
+  assert.equal(drawn.length, PINNABLE.filter((e) => e.kind !== 'rail').length);
   for (const entry of PINNABLE) {
-    if (entry.kind === 'rail') assert.equal(unlocked.includes(entry.id), false);
+    if (entry.kind === 'rail') assert.equal(drawn.includes(entry.id), false);
   }
 });
 
@@ -113,7 +105,7 @@ test('unpinning a default is remembered, and re-pinning clears it', () => {
 test('an unpinned default does not leak into the drawn pin list', () => {
   reset();
   setPinned('theme', false);
-  assert.equal(visiblePins(false).some((e) => e.id === 'theme'), false);
+  assert.equal(visiblePins().some((e) => e.id === 'theme'), false);
 });
 
 test('corrupt opt-out storage falls back to the default rather than throwing', () => {
@@ -134,7 +126,6 @@ test('every registry entry declares the fields the rail relies on', () => {
     }
     assert.equal(typeof entry.enabled, 'function');
     assert.equal(typeof entry.toggle, 'function');
-    assert.equal(typeof entry.safe, 'boolean');
     // titleEn is the fallback when no translator is passed; without it a
     // pinned button would render an empty aria-label.
     assert.ok(entry.titleEn && entry.titleKey);

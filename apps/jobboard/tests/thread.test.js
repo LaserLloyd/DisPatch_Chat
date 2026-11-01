@@ -48,7 +48,7 @@ async function mountHook({ job = baseJob(), hint = { job_id: job.job_id }, route
     [`POST ${BASE}/${job.job_id}/archive`]: () => [200, { ok: true }],
     ...extra,
   });
-  const sdk = await import('/static/js/app-sdk.js?v=3');
+  const sdk = await import('/static/js/app-sdk.js?v=7');
   sdk._resetForTest();
   const app = sdk.forApp('jobboard');
   env.routes['GET /apps/jobboard/locales/en.json'] = () => [200, EN];
@@ -72,7 +72,7 @@ const card = (host) => host.querySelector('.job-card');
 
 test('the hook imports nothing from the shell but app-sdk.js', () => {
   const imports = [...SRC.matchAll(/^import .* from '([^']+)';$/gm)].map((m) => m[1]);
-  assert.deepEqual(imports, ['/static/js/app-sdk.js?v=3']);
+  assert.deepEqual(imports, ['/static/js/app-sdk.js?v=7']);
   assert.doesNotMatch(SRC, /window\.(?:__|toast)/, 'no window globals from the old job-thread.js');
 });
 
@@ -86,7 +86,7 @@ test('mount(): the hinted job’s detail, in the host it was given, with its thr
   assert.deepEqual([...pick.options].map((o) => o.value), ['', 'j-1', 'j-2']);
   assert.equal(pick.value, 'j-1');
   assert.equal(host.querySelector('.jb-thread__label').textContent, '2 jobs in this thread');
-  assert.ok(win.document.head.querySelector('link[data-app-css="jobboard"][href="/apps/jobboard/board.css?v=2"]'), 'its stylesheet is linked once');
+  assert.ok(win.document.head.querySelector('link[data-app-css="jobboard"][href="/apps/jobboard/board.css?v=3"]'), 'its stylesheet is linked once');
   assert.ok(calls.some((c) => c.url === `${BASE}?thread_id=t-1&limit=500`));
   // The meta line uses translated labels, and the brief keeps its newlines.
   assert.match(card(host).querySelector('.job-card__meta').textContent, /Hybrid · Senior · 150,000–190,000 USD/);
@@ -210,7 +210,7 @@ test('Feedback: an empty note is refused inline; a 404 is "not available", never
 test('a job that cannot be loaded says why (gone / locked / offline)', { skip: dom.skip }, async () => {
   let { host } = await mountHook({ routes: { [`GET ${BASE}/j-1`]: () => [404, { detail: 'Job not found' }] } });
   assert.equal(host.querySelector('.jb-thread__status').textContent, EN['detail.not_found']);
-  ({ host } = await mountHook({ routes: { [`GET ${BASE}/j-1`]: () => [403, { detail: 'Unlock', decoy: true }] } }));
+  ({ host } = await mountHook({ routes: { [`GET ${BASE}/j-1`]: () => [403, { detail: 'Permission denied' }] } }));
   assert.equal(host.querySelector('.jb-thread__status').textContent, EN['detail.locked']);
   ({ host } = await mountHook({ routes: { [`GET ${BASE}/j-1`]: () => { throw new TypeError('Failed to fetch'); } } }));
   assert.equal(host.querySelector('.jb-thread__status').textContent, EN['detail.offline']);

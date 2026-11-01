@@ -7,15 +7,17 @@ before a handler runs (the ``Depends`` below say the same sentence again at the 
                             them to profiles, store the Claude API key and MCP secrets, set
                             budgets and retention
 ``dispatch_agents``         use the agents published to you: ``/api/agents/available``,
-                            ``/api/tasks`` and everything under it. A Restricted profile can
-                            never hold this permission (``RESTRICTED_NEVER``), so every route
-                            below answers 403 to it - listing included
+                            ``/api/tasks`` and everything under it. A User or Basic profile
+                            holds it only when an Admin switches it on (4.0 ``ROLE_GRANTABLE``;
+                            never on the lock-target profile), so every route below answers
+                            403 to anyone else - listing included
 ``approve_agent_actions``   answer an approval card (``/api/approvals/{id}``) and press the Send
                             on a held handoff (``/api/tasks/{id}/release``)
 
-Who sees which task is one rule (``agents_ws.may_see_task``): an Owner or Admin sees all, a
-profile sees its own. A task you may not see answers 404, exactly like one that does not
-exist. An agent you may not use answers 404 too.
+Who sees which task is one rule (``agents_ws.may_see_task``): a profile sees its OWN tasks -
+Admins included since 4.0 (they keep the aggregate spend, ``/api/agents/usage``).
+A task you may not see answers 404, exactly like one that does not exist. An agent you may not
+use answers 404 too.
 
 Secrets: the Claude API key and MCP header secrets are WRITE-ONLY. No route returns one, no
 event, log line or error carries one (``tests/agents/test_ag_no_secret_leaks.py``,
@@ -36,8 +38,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from . import accounts, agents_service, characters, config, policy
 from . import agents_store as store
+from .agents.branding import tool_matches
 from .agents.events import ErrorCode
-from .agents.interface import AgentBackendError, AgentSpec
+from .agents.interface import DEFAULT_ALWAYS_ASK, AgentBackendError, AgentSpec
 from .agents_service import BudgetExhausted, TaskError, public_agent, public_approval, public_task
 from .agents_ws import may_see_task
 from .contracts import errors
@@ -75,7 +78,7 @@ def _mgr() -> agents_service.TaskManager:
     try:
         return agents_service.get_manager()
     except RuntimeError:
-        raise HTTPException(503, "The agent backend is not available.") from None
+        raise HTTPException(503, "Agents can't run right now.") from None
 
 
 def _task_error(e: TaskError) -> JSONResponse:
@@ -108,7 +111,7 @@ def _usable_agent(principal: policy.Principal, agent_id: str) -> dict[str, Any]:
     a = store.get_agent(agent_id)
     if a is None:
         raise _not_found_agent()
-    if not principal.is_operator and (a["disabled"] or not _published(a, principal)):
+    if not principal.is_admin and (a["disabled"] or not _published(a, principal)):
         raise _not_found_agent()
     need = (a["spec"] or {}).get("required_permission") or Permission.DISPATCH_AGENTS.value
     if not principal.can(need):
@@ -125,7 +128,7 @@ def _not_found_agent() -> HTTPException:
 def _still_usable(principal: policy.Principal, row: dict[str, Any]) -> None:
     """Following up on or resuming a task is dispatching again: the agent must still be one this
     person may use (not unpublished, switched off, deleted or given a stricter permission since)."""
-    if principal.is_operator:
+    if principal.is_admin:
         return
     a = store.get_agent(row["agent_id"])
     if a is None:
@@ -168,20 +171,37 @@ class AgentPatch(BaseModel):
 
 
 def _is_local_url(url: str | None) -> bool:
+    """A server on THIS machine: the literals ``localhost``, ``127.0.0.1`` and ``::1`` only (4.3 #37).
+
+    ``foo.localhost`` is a name some resolver decides; an IPv4-mapped ``::ffff:127.0.0.1``,
+    ``0.0.0.0``, short forms like ``127.1`` and the rest of 127/8 are refused too - remote, so
+    the protected Admin's grant. (127/8 beyond .1 was remote before 4.3; it stays so, because a
+    security change may only tighten.)"""
+    import ipaddress
     from urllib.parse import urlparse
     try:
         host = (urlparse(url or "").hostname or "").lower()
     except ValueError:
         return False
-    return host in ("localhost", "127.0.0.1", "::1") or host.endswith(".localhost")
+    if host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip in (ipaddress.IPv4Address("127.0.0.1"), ipaddress.IPv6Address("::1"))
+
+
+# Tools that run code on the host or change its files: granting one is a host-level power (4.3 #30).
+SHELL_TOOLS: tuple[str, ...] = ("Bash", "PowerShell", "BashOutput", "KillShell", "Edit", "MultiEdit", "Write", "NotebookEdit")
 
 
 def owner_only_features(spec: AgentSpec) -> set[str]:
-    """Powers that are host-level in effect: only the Owner (``admin_system``) may grant them.
+    """Powers that are host-level in effect: only the protected Admin (``is_protected``) may grant them.
 
     Each entry names the power AND what it is granted over (the stdio command line, the remote
     address a secret goes to, the tool run unattended), so that an edit is compared grant by
-    grant. Comparing bare names let an Admin keep an Owner-approved ``stdio_mcp`` entry and
+    grant. Comparing bare names let an Admin keep an approved ``stdio_mcp`` entry and
     rewrite its command - arbitrary code on the host - or move an approved remote server, with
     its stored secrets, to an address of their choosing."""
     import json as _json
@@ -199,11 +219,64 @@ def owner_only_features(spec: AgentSpec) -> set[str]:
             out.add("privileged_mcp:" + _fp(name, srv.transport, srv.url, srv.command, list(srv.args)))
         if srv.header_secrets and not _is_local_url(srv.url):
             # A stored secret is sent to this address: only to a server on this machine unless the
-            # Owner says otherwise, or an Admin could point a stored key at a host of their choosing.
+            # protected Admin says otherwise, or an Admin could point a stored key at a host of their choosing.
             out.add("secret_to_remote_server:" + _fp(name, srv.url, dict(srv.header_secrets)))
     for tool in spec.approval_policy.unattended_allow:
         out.add("unattended_allow:" + tool)
+    # 4.3 (#8, INT-1): a Bash command matching a bash_allow pattern skips always_ask and runs
+    # unattended, so each pattern is a host-level grant of its own (compared pattern by pattern).
+    for pattern in spec.approval_policy.bash_allow:
+        out.add("bash_allow:" + pattern)
+    # 4.3 #30: a shell/file tool the allowlist admits (fnmatch, so "*" or "Bash*" count too).
+    for tool in SHELL_TOOLS:
+        if tool_matches(tool, spec.tool_allowlist):
+            out.add("shell_tool:" + tool)
+    if spec.approval_policy.mode == "interactive" and not spec.approval_policy.always_ask:
+        out.add("interactive_empty_always_ask")
+    # 4.3 review: a CLI agent runs one of the Owner's saved command lines (cli-presets), and a
+    # generic preset ignores tool_allowlist, always_ask and bash_allow - host code. Binding an
+    # agent to a preset (or moving it to another) is a host-level grant of its own.
+    if spec.backend == "cli":
+        out.add("cli_preset:" + str((spec.backend_options or {}).get("preset") or ""))
     return out
+
+
+def _always_ask_removed(spec: AgentSpec, old: AgentSpec | None) -> set[str]:
+    """4.3 #30: every entry of the stored ``always_ask`` (a new agent: the shipped default set)
+    that the new list no longer covers. Removing one lets a destructive tool run unasked."""
+    before = old.approval_policy.always_ask if old is not None else list(DEFAULT_ALWAYS_ASK)
+    after = spec.approval_policy.always_ask
+    return {"always_ask_removed:" + t for t in before if not tool_matches(t, after)}
+
+
+def _describe_grant(feature: str) -> str:
+    """Words for one owner-only feature (never a secret value: header_secrets hold secret NAMES)."""
+    import json as _json
+    kind, _, rest = feature.partition(":")
+    name = ""
+    if rest.startswith("["):
+        try:
+            name = str(_json.loads(rest)[0])
+        except (ValueError, IndexError):
+            name = ""
+    words = {
+        "trust_repo_settings": "trusting a repository's own settings",
+        "stdio_mcp": f"starting a program on the DisPatch computer ({name})",
+        "privileged_mcp": f"a tool server that can change things ({name})",
+        "secret_to_remote_server": f"sending a stored secret to another computer ({name})",
+        "unattended_allow": f"running {rest} unattended",
+        "bash_allow": f"running shell commands that start with {rest!r} without asking",
+        "shell_tool": f"the {rest} tool",
+        "always_ask_removed": f"no longer asking before {rest}",
+        "interactive_empty_always_ask": "an empty always-ask list",
+        "cli_preset": f"running the program {rest!r} on the DisPatch computer",
+    }
+    return words.get(kind, kind)
+
+
+def _needs_owner_text(features: set[str]) -> str:
+    return ("Only the Owner can give an agent this power: "
+            + "; ".join(sorted(_describe_grant(f) for f in features)) + ".")
 
 
 def _build_spec(raw: dict[str, Any], name: str) -> AgentSpec:
@@ -236,20 +309,26 @@ def _check_spec(spec: AgentSpec, principal: policy.Principal, old: AgentSpec | N
         if srv.url and not re.match(r"https?://", srv.url, re.I):
             raise TaskError("agent_invalid", f"mcp_servers.{name}.url: must be http or https", 422)
     if spec.backend == "openclaw":
-        seat = str(spec.backend_options.get("agent_id") or spec.name)
-        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", seat):
+        # An explicit seat must be a valid OpenClaw id. Without one the adapter derives the seat
+        # from the display name (openclaw.normalize_agent_id: "My Agent" -> "my-agent"), so a
+        # name with spaces saves (4.3 review; a pre-4.3 bug). A name with no usable letter at all
+        # would normalise to the "main" fallback - the lead seat - so it needs an explicit seat.
+        from . import openclaw as _oc
+        seat = str(spec.backend_options.get("agent_id") or "")
+        if seat and not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", seat):
             raise TaskError("agent_invalid", "backend_options.agent_id: letters, digits, '.', '_' and '-' only", 422)
-        try:
-            from . import advisor
-            if seat.strip().lower() in advisor.safe_agent_ids():
-                raise TaskError("agent_invalid", f"backend_options.agent_id: {seat} is a character that "
-                                "Restricted profiles can chat with; a task is never handed to one", 422)
-        except ImportError:                                   # pragma: no cover
-            pass
+        if not seat:
+            derived = _oc._AGENT_ID_INVALID_RE.sub("-", (spec.name or "").strip().lower()).strip("-")
+            if not derived or len(derived) > 64:
+                raise TaskError("agent_invalid", "backend_options.agent_id: this name cannot be used as an "
+                                "OpenClaw seat; fill in the Seat field (letters, digits, '.', '_' and '-')", 422)
+        # 3.x refused the seats Restricted characters answered through (advisor.safe_agent_ids);
+        # 4.0 has no restricted tier and that helper is gone, so any valid seat id is accepted.
     new_owner_only = owner_only_features(spec) - (owner_only_features(old) if old else set())
-    if new_owner_only and not principal.can(Permission.ADMIN_SYSTEM):
-        raise TaskError("agent_needs_owner",
-                        "Only the Owner or an Admin can give an agent that capability.", 403)
+    new_owner_only |= _always_ask_removed(spec, old)
+    # 4.3 #30: since 3.0 every Admin holds admin_system, so the grant needs THE protected Admin.
+    if new_owner_only and not principal.is_protected:
+        raise TaskError("agent_needs_owner", _needs_owner_text(new_owner_only), 403)
 
 
 def _clean_published(ids: list[str]) -> list[str]:
@@ -348,12 +427,11 @@ async def delete_agent(agent_id: str, request: Request, _=_MANAGE):
 async def available_agents(request: Request, _=_DISPATCH):
     pr = _principal(request)
     mgr = _mgr()
-    owner = agents_service.principal_key(pr)
     leaves = {b["name"]: bool((b["capabilities"] or {}).get("data_leaves_host", True))
               for b in mgr.backend_info()}
     out = []
     for a in store.list_agents():
-        if not pr.is_operator and (a["disabled"] or not _published(a, pr)):
+        if not pr.is_admin and (a["disabled"] or not _published(a, pr)):
             continue
         need = (a["spec"] or {}).get("required_permission") or Permission.DISPATCH_AGENTS.value
         if not pr.can(need):
@@ -366,11 +444,7 @@ async def available_agents(request: Request, _=_DISPATCH):
         entry["available"] = problem is None and not a["disabled"]
         entry["problem"] = None if problem is None else {"code": problem[0].value, "message": problem[1]}
         out.append(entry)
-    pb = store.profile_budget(owner) if owner else {}
-    return {"agents": out,
-            "budget": {"usd_per_day": pb.get("usd_per_day"),
-                       "spent_today_usd": round(store.spent_today("profile", owner), 4) if owner else 0.0,
-                       "estimate": True}}
+    return {"agents": out}
 
 
 @router.get("/api/agents/backends")
@@ -493,14 +567,26 @@ class AgentSettingsIn(BaseModel):
     unified_dispatch: bool | None = None
     retention_days: int | None = Field(default=None, ge=0, le=3650)
     max_concurrent: int | None = Field(default=None, ge=1, le=16)
+    # 4.3 (#10, #11): the default limits for agent TASKS (chat turns and handoffs are exempt;
+    # the money ones apply only to backends that report money) and the approval timeout.
+    default_max_usd: float | None = Field(default=None, ge=0.01, le=1000)
+    default_max_turns: int | None = Field(default=None, ge=1, le=1000)
+    default_max_usd_per_day: float | None = Field(default=None, ge=0.01, le=1000)
+    approval_timeout_s: int | None = Field(default=None, ge=60, le=86400)
 
 
 def _settings_view() -> dict[str, Any]:
     s = store.all_settings()
+    d = store.SETTING_DEFAULTS
     return {"unified_dispatch": agents_service.unified_dispatch_enabled(),
             "unified_dispatch_from_env": bool((config.env("AGENTS_UNIFIED_DISPATCH", "") or "").strip()),
             "retention_days": int(s.get("agents.retention_days") or 0),
-            "max_concurrent": int(s.get("agents.max_concurrent") or 4)}
+            "max_concurrent": int(s.get("agents.max_concurrent") or 4),
+            "default_max_usd": float(s.get("agents.default_max_usd") or d["agents.default_max_usd"]),
+            "default_max_turns": int(s.get("agents.default_max_turns") or d["agents.default_max_turns"]),
+            "default_max_usd_per_day": float(s.get("agents.default_max_usd_per_day")
+                                             or d["agents.default_max_usd_per_day"]),
+            "approval_timeout_s": int(s.get("agents.approval_timeout_s") or d["agents.approval_timeout_s"])}
 
 
 @router.get("/api/agents/settings")
@@ -517,33 +603,14 @@ async def put_settings(body: AgentSettingsIn, request: Request, _=_MANAGE):
         store.set_setting("agents.retention_days", body.retention_days)
     if body.max_concurrent is not None:
         store.set_setting("agents.max_concurrent", body.max_concurrent)
+    for field in ("default_max_usd", "default_max_turns", "default_max_usd_per_day", "approval_timeout_s"):
+        v = getattr(body, field)
+        if v is not None:
+            store.set_setting(f"agents.{field}", v)
     accounts.log_activity("agent_settings", profile_id=pr.profile_id, subject="agents",
                           detail=",".join(sorted(k for k, v in body.model_dump().items() if v is not None)),
                           category="audit")
     return _settings_view()
-
-
-class AgentProfileBudgetIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    usd_per_day: float | None = Field(default=None, gt=0, le=100_000)
-    max_turns: int | None = Field(default=None, gt=0, le=100_000)
-    max_wall_clock_s: float | None = Field(default=None, gt=0, le=7 * 86400)
-    max_tokens: int | None = Field(default=None, gt=0, le=1_000_000_000)
-
-
-@router.get("/api/agents/profile-budgets")
-async def get_profile_budgets(request: Request, _=_MANAGE):
-    return {"budgets": store.all_profile_budgets()}
-
-
-@router.put("/api/agents/profile-budgets/{profile_id}")
-async def put_profile_budget(profile_id: str, body: AgentProfileBudgetIn, request: Request, _=_MANAGE):
-    if accounts.get_profile(profile_id) is None:
-        return _problem(404, "agent_invalid", "profile-budgets: that is not a profile")
-    budget = {k: v for k, v in body.model_dump().items() if v is not None}
-    store.set_profile_budget(profile_id, budget or None)
-    return {"profile_id": profile_id, "budget": budget}
 
 
 @router.get("/api/agents/usage")
@@ -600,25 +667,28 @@ async def create_task(body: AgentTaskIn, request: Request, _=_DISPATCH):
         return _problem(409, "agent_disabled", "That agent is switched off.")
     repo = None
     if body.repo_path:
-        if not pr.can(Permission.ADMIN_SYSTEM):
-            return _problem(403, "agent_needs_owner", "Only the Owner or an Admin can give an agent that capability.")
+        if not pr.is_protected:                         # 4.3 #30: the Owner's alone
+            return _problem(403, "agent_needs_owner", "Only the Owner can give an agent "
+                            "this power: working in a folder on the DisPatch computer.")
         p = Path(body.repo_path).expanduser()
         if not p.is_dir():
-            return _problem(422, "agent_invalid", "repo_path: that folder does not exist on this machine")
+            return _problem(422, "agent_invalid", "That folder doesn't exist on the DisPatch computer.")
         repo = str(p)
     thread_id = body.origin_thread_id
     if thread_id:
+        from . import ownership
         info = await mgr.hooks.thread_info(thread_id) if mgr.hooks.thread_info else None
-        allowed = {b.id for b in config.load_bots()} if pr.is_operator else policy.of(request).allowed_bot_ids(config.load_bots())
-        # characters.may_use: per-profile visibility (the character's profiles list), as in the roster.
-        if (info is None or info.get("bot_id") not in allowed
-                or not characters.may_use_id(info.get("bot_id"), pr)):
+        # 4.0: a task posts into its origin chat, so that chat must be the dispatcher's own.
+        if info is not None and not ownership.may_see_thread(
+                pr, info.get("owner_profile_id"), write=True):
             raise HTTPException(404, "Thread not found")
-        if info.get("restricted_visible", True):
-            # What the agent is asked and what it answers is posted into this chat; a Restricted
-            # profile can read this one, so the task cannot start from here.
-            return _problem(409, "task_thread_not_allowed",
-                            "Tasks cannot be assigned from a chat that Restricted profiles can read.")
+        # characters.may_use (4.0): the character must be one the dispatcher may use - the
+        # same rule for every role, Admins included.
+        if info is None or not characters.may_use_id(info.get("bot_id"), pr):
+            raise HTTPException(404, "Thread not found")
+        # (3.x refused a chat a Restricted profile could read. 4.0: what the agent is asked and
+        # answers lands in the dispatcher's OWN chat - the ownership check above - and the shared
+        # default profile can never dispatch: the lock-target fence removes dispatch_agents.)
     try:
         row = await mgr.dispatch(agent=agent, prompt=body.prompt, owner=agents_service.principal_key(pr),
                                  origin_thread_id=thread_id, origin_message_id=body.origin_message_id,
@@ -648,9 +718,10 @@ async def list_tasks(request: Request, state: str | None = None, agent_id: str |
                 date.fromisoformat(v[:10])
             except ValueError:
                 return _problem(422, "validation_error", f"{label}: use YYYY-MM-DD")
-    # Only an Owner/Admin may look at other people's tasks; everyone else is pinned to their own.
+    # 4.0: everyone is pinned to their own tasks, Admins included (``profile`` is
+    # accepted for old clients and ignored). An open install (no accounts) sees all.
     owner: str | None
-    if pr.is_operator:
+    if pr.kind == "open":
         owner = profile or None
     else:
         owner = agents_service.principal_key(pr)

@@ -29,7 +29,7 @@ async function boot() {
   globalThis.fetch = async (u) => (String(u).startsWith('/static/locales/en.json')
     ? { ok: true, status: 200, json: async () => EN, headers: new win.Headers() }
     : { ok: false, status: 404, json: async () => ({}), headers: new win.Headers() });
-  const i18n = await import('../static/js/i18n.js?v=4');
+  const i18n = await import('../static/js/i18n.js?v=5');
   await i18n.init('en');
   return { win, M: await import(`../static/js/chatdrop.js?t=${Math.random()}`) };
 }
@@ -117,7 +117,7 @@ test('roles: only the targets this profile may use; none = no overlay', { skip: 
   ({ win, M } = await boot());
   r = make(win, M, { server: 'send' });
   fire(win, r.host, 'dragenter');
-  assert.match(r.overlay().textContent, /Send to your assistants/, 'a Restricted device: its one-way drop');
+  assert.match(r.overlay().textContent, /Send to your bots/, 'a Restricted device: its one-way drop');
   ({ win, M } = await boot());
   r = make(win, M, { insert: false, server: '' });
   const ev = fire(win, r.host, 'dragenter');
@@ -129,11 +129,11 @@ test('roles: only the targets this profile may use; none = no overlay', { skip: 
 
 test('main.js: the overlay replaces the old straight-to-composer drop and picks the right paths', () => {
   const main = read('js/main.js');
-  assert.match(main, /import \{ createChatDrop \} from '\.\/chatdrop\.js\?v=1';/);
+  assert.match(main, /import \{ createChatDrop \} from '\.\/chatdrop\.js\?v=4';/);
   assert.match(main, /createChatDrop\(\{\s+host: \$\('chatview'\)/);
   assert.match(main, /onInsert: \(files\) => handleFiles\(files\)/);
-  assert.match(main, /uploadToFileServer\(files\); return;/);
-  assert.match(main, /openDropSheet\(\);\s+sendDrops\(files\);/);
+  assert.match(main, /onServer: \(files\) => \{ uploadToFileServer\(files\); \}/);
+  assert.doesNotMatch(main, /openDropSheet|sendDrops/, 'the one-way drop sheet is gone with the locked side');
   assert.doesNotMatch(main, /cv\.addEventListener\('drop'/);
   for (const k of ['insert_title', 'server_title', 'send_title', 'cancel_hint']) assert.ok(EN.chatdrop[k], k);
 });

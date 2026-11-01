@@ -185,65 +185,6 @@
         "title": "AgentPatch",
         "type": "object"
       },
-      "AgentProfileBudgetIn": {
-        "additionalProperties": false,
-        "properties": {
-          "max_tokens": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 1000000000.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Tokens"
-          },
-          "max_turns": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 100000.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Turns"
-          },
-          "max_wall_clock_s": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 604800.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Wall Clock S"
-          },
-          "usd_per_day": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 100000.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Usd Per Day"
-          }
-        },
-        "title": "AgentProfileBudgetIn",
-        "type": "object"
-      },
       "AgentSecretIn": {
         "additionalProperties": false,
         "properties": {
@@ -263,6 +204,58 @@
       "AgentSettingsIn": {
         "additionalProperties": false,
         "properties": {
+          "approval_timeout_s": {
+            "anyOf": [
+              {
+                "maximum": 86400.0,
+                "minimum": 60.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Timeout S"
+          },
+          "default_max_turns": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Max Turns"
+          },
+          "default_max_usd": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 0.01,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Max Usd"
+          },
+          "default_max_usd_per_day": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 0.01,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Max Usd Per Day"
+          },
           "max_concurrent": {
             "anyOf": [
               {
@@ -398,6 +391,47 @@
         "title": "AgentTaskResumeIn",
         "type": "object"
       },
+      "ArchiveIn": {
+        "additionalProperties": false,
+        "properties": {
+          "months": {
+            "anyOf": [
+              {
+                "maximum": 120.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months"
+          }
+        },
+        "title": "ArchiveIn",
+        "type": "object"
+      },
+      "BackendsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed"
+          }
+        },
+        "title": "BackendsIn",
+        "type": "object"
+      },
       "BackupCreateIn": {
         "additionalProperties": false,
         "properties": {
@@ -428,31 +462,6 @@
         "title": "BackupCreateIn",
         "type": "object"
       },
-      "Body_drop_file_api_drop_post": {
-        "properties": {
-          "file": {
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "type": "string"
-          },
-          "thread_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Thread Id"
-          }
-        },
-        "required": [
-          "file"
-        ],
-        "title": "Body_drop_file_api_drop_post",
-        "type": "object"
-      },
       "Body_file_upload_api_files_post": {
         "properties": {
           "file": {
@@ -465,6 +474,48 @@
           "file"
         ],
         "title": "Body_file_upload_api_files_post",
+        "type": "object"
+      },
+      "Body_me_avatar_set_api_me_avatar_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_me_avatar_set_api_me_avatar_post",
+        "type": "object"
+      },
+      "Body_my_character_avatar_api_me_characters__bot_id__avatar_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_my_character_avatar_api_me_characters__bot_id__avatar_post",
+        "type": "object"
+      },
+      "Body_people_avatar_set_api_people__profile_id__avatar_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_people_avatar_set_api_people__profile_id__avatar_post",
         "type": "object"
       },
       "Body_pin_thread_avatar_api_threads__thread_id__avatar_post": {
@@ -592,22 +643,6 @@
             ],
             "title": "Agent"
           },
-          "audience": {
-            "anyOf": [
-              {
-                "enum": [
-                  "all",
-                  "members",
-                  "restricted"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Audience"
-          },
           "backend": {
             "default": "direct",
             "enum": [
@@ -622,11 +657,6 @@
             "maxLength": 8,
             "title": "Emoji",
             "type": "string"
-          },
-          "hide_unlocked": {
-            "default": false,
-            "title": "Hide Unlocked",
-            "type": "boolean"
           },
           "id": {
             "anyOf": [
@@ -657,11 +687,6 @@
             "title": "Quick Actions",
             "type": "boolean"
           },
-          "safe": {
-            "default": false,
-            "title": "Safe",
-            "type": "boolean"
-          },
           "tools": {
             "anyOf": [
               {
@@ -672,11 +697,6 @@
               }
             ],
             "title": "Tools"
-          },
-          "visible": {
-            "default": true,
-            "title": "Visible",
-            "type": "boolean"
           }
         },
         "required": [
@@ -687,22 +707,6 @@
       },
       "BotOrderItem": {
         "properties": {
-          "audience": {
-            "anyOf": [
-              {
-                "enum": [
-                  "all",
-                  "members",
-                  "restricted"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Audience"
-          },
           "avatar_pool": {
             "anyOf": [
               {
@@ -713,17 +717,6 @@
               }
             ],
             "title": "Avatar Pool"
-          },
-          "hide_unlocked": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Hide Unlocked"
           },
           "id": {
             "title": "Id",
@@ -755,28 +748,6 @@
               }
             ],
             "title": "Reactions"
-          },
-          "safe": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Safe"
-          },
-          "visible": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Visible"
           },
           "voice": {
             "anyOf": [
@@ -813,22 +784,6 @@
         "additionalProperties": false,
         "description": "Body of PATCH /api/bots/{id}: present keys are set, absent ones left\nalone. Strict: an unknown key is a 422.",
         "properties": {
-          "audience": {
-            "anyOf": [
-              {
-                "enum": [
-                  "all",
-                  "members",
-                  "restricted"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Audience"
-          },
           "avatar_pool": {
             "anyOf": [
               {
@@ -851,17 +806,6 @@
               }
             ],
             "title": "Emoji"
-          },
-          "hide_unlocked": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Hide Unlocked"
           },
           "image_jobs": {
             "anyOf": [
@@ -933,17 +877,6 @@
             ],
             "title": "Reactions"
           },
-          "safe": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Safe"
-          },
           "tools": {
             "anyOf": [
               {
@@ -954,17 +887,6 @@
               }
             ],
             "title": "Tools"
-          },
-          "visible": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Visible"
           }
         },
         "title": "BotPatchIn",
@@ -984,22 +906,6 @@
               }
             ],
             "title": "Agent"
-          },
-          "audience": {
-            "anyOf": [
-              {
-                "enum": [
-                  "all",
-                  "members",
-                  "restricted"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Audience"
           },
           "backend": {
             "default": "direct",
@@ -1039,6 +945,11 @@
             "maxLength": 8,
             "title": "Emoji",
             "type": "string"
+          },
+          "hidden": {
+            "default": false,
+            "title": "Hidden",
+            "type": "boolean"
           },
           "id": {
             "anyOf": [
@@ -1100,20 +1011,6 @@
             ],
             "title": "Personality"
           },
-          "profiles": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profiles"
-          },
           "quick_actions": {
             "default": true,
             "title": "Quick Actions",
@@ -1164,22 +1061,6 @@
               }
             ],
             "title": "Agent"
-          },
-          "audience": {
-            "anyOf": [
-              {
-                "enum": [
-                  "all",
-                  "members",
-                  "restricted"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Audience"
           },
           "avatar_pool": {
             "anyOf": [
@@ -1240,7 +1121,7 @@
             ],
             "title": "Emoji"
           },
-          "hide_unlocked": {
+          "hidden": {
             "anyOf": [
               {
                 "type": "boolean"
@@ -1249,7 +1130,7 @@
                 "type": "null"
               }
             ],
-            "title": "Hide Unlocked"
+            "title": "Hidden"
           },
           "image_jobs": {
             "anyOf": [
@@ -1323,20 +1204,6 @@
             ],
             "title": "Personality"
           },
-          "profiles": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profiles"
-          },
           "quick_actions": {
             "anyOf": [
               {
@@ -1370,17 +1237,6 @@
             ],
             "title": "Reactions"
           },
-          "safe": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Safe"
-          },
           "tools": {
             "anyOf": [
               {
@@ -1391,17 +1247,6 @@
               }
             ],
             "title": "Tools"
-          },
-          "visible": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Visible"
           },
           "voice": {
             "anyOf": [
@@ -1451,22 +1296,63 @@
             "title": "Expect"
           },
           "id": {
-            "maxLength": 32,
-            "minLength": 32,
-            "title": "Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
           },
           "order": {
-            "pattern": "^(newest|oldest)$",
-            "title": "Order",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^(newest|oldest)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "pattern": "^(all|hour|day)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          }
+        },
+        "title": "ClearIn",
+        "type": "object"
+      },
+      "CliPresetsIn": {
+        "additionalProperties": false,
+        "properties": {
+          "presets": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 16,
+            "title": "Presets",
+            "type": "array"
           }
         },
         "required": [
-          "id",
-          "order"
+          "presets"
         ],
-        "title": "ClearIn",
+        "title": "CliPresetsIn",
         "type": "object"
       },
       "CommentIn": {
@@ -1743,6 +1629,22 @@
         "title": "DailyThreadIn",
         "type": "object"
       },
+      "DeleteIn": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm_token": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Confirm Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirm_token"
+        ],
+        "title": "DeleteIn",
+        "type": "object"
+      },
       "DetectIn": {
         "additionalProperties": false,
         "properties": {
@@ -1761,36 +1663,6 @@
           }
         },
         "title": "DetectIn",
-        "type": "object"
-      },
-      "DeviceIn": {
-        "additionalProperties": false,
-        "properties": {
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 60,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "profile_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profile Id"
-          }
-        },
-        "title": "DeviceIn",
         "type": "object"
       },
       "DiscoverIn": {
@@ -1813,19 +1685,24 @@
         "title": "DiscoverIn",
         "type": "object"
       },
-      "FamilyIn": {
+      "DraftIn": {
         "additionalProperties": false,
         "properties": {
-          "install_animal_friends": {
-            "default": false,
-            "title": "Install Animal Friends",
-            "type": "boolean"
-          },
-          "install_assistants": {
-            "default": false,
-            "title": "Install Assistants",
-            "type": "boolean"
-          },
+          "description": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "title": "DraftIn",
+        "type": "object"
+      },
+      "FamilyIn": {
+        "properties": {
           "people": {
             "items": {
               "$ref": "#/components/schemas/Person"
@@ -1882,7 +1759,7 @@
         "type": "object"
       },
       "FireReactionIn": {
-        "description": "Fire a reaction overlay onto every connected device.\n\n`reaction` is an id, alias, or name. Target a thread (so the collapsed trace\nlands in the right conversation and Safe-Mode scoping can be applied) or\nleave it off for an app-wide pop.",
+        "description": "Fire a reaction overlay onto every connected device.\n\n`reaction` is an id, alias, or name. Target a thread (so the collapsed trace\nlands in the right conversation and its owner's sockets get it) or\nleave it off for an app-wide pop.",
         "properties": {
           "actor": {
             "anyOf": [
@@ -2100,6 +1977,37 @@
         "title": "GenerateReactionIn",
         "type": "object"
       },
+      "GiveToIn": {
+        "additionalProperties": false,
+        "properties": {
+          "give_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Give To"
+          },
+          "token": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "give_to",
+          "token"
+        ],
+        "title": "GiveToIn",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2111,6 +2019,31 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HouseholdIn": {
+        "additionalProperties": false,
+        "properties": {
+          "household_bots": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "const": "all",
+                "type": "string"
+              }
+            ],
+            "title": "Household Bots"
+          }
+        },
+        "required": [
+          "household_bots"
+        ],
+        "title": "HouseholdIn",
         "type": "object"
       },
       "ImageJobIn": {
@@ -2252,6 +2185,20 @@
               }
             ],
             "title": "Date"
+          },
+          "delivery_key": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9._:@/+-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Key"
           },
           "media_url": {
             "anyOf": [
@@ -2476,6 +2423,81 @@
         "title": "JobIn",
         "type": "object"
       },
+      "KitChatIn": {
+        "additionalProperties": false,
+        "properties": {
+          "audience": {
+            "default": "everyone",
+            "enum": [
+              "everyone",
+              "admins"
+            ],
+            "title": "Audience",
+            "type": "string"
+          },
+          "body": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "pattern": "^c[0-9a-f]{8}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "resend": {
+            "default": true,
+            "title": "Resend",
+            "type": "boolean"
+          },
+          "title": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "body"
+        ],
+        "title": "KitChatIn",
+        "type": "object"
+      },
+      "KitIn": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_clone": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Clone"
+          },
+          "chats": {
+            "items": {
+              "$ref": "#/components/schemas/KitChatIn"
+            },
+            "maxItems": 20,
+            "title": "Chats",
+            "type": "array"
+          }
+        },
+        "title": "KitIn",
+        "type": "object"
+      },
       "LoginIn": {
         "additionalProperties": false,
         "properties": {
@@ -2574,7 +2596,7 @@
         "type": "object"
       },
       "MessageFeedbackIn": {
-        "description": "Thumbs feedback on one of the bot's own replies.\n\nLiteral enums ONLY, never free text — that is the whole security property.\nThis route is reachable from a locked Safe-Mode device, and the vote it\nrecords is later quoted back into the agent's own prompt (see\nmain._pending_feedback_lines): if `reason` were a free string, a Safe-Mode\ncaller could inject arbitrary prompt text through it. Closed vocabularies\ncan't do that no matter who is asking.",
+        "description": "Thumbs feedback on one of the bot's own replies.\n\nLiteral enums ONLY, never free text — that is the whole security property.\nAny profile that may chat can vote, and the vote it records is later quoted\nback into the agent's own prompt (see main._pending_feedback_lines): if\n`reason` were a free string, a caller could inject arbitrary prompt text\nthrough it. Closed vocabularies\ncan't do that no matter who is asking.",
         "properties": {
           "reason": {
             "anyOf": [
@@ -2610,6 +2632,263 @@
         "title": "MessageFeedbackIn",
         "type": "object"
       },
+      "MyCharacterCreateIn": {
+        "additionalProperties": false,
+        "description": "What the editor sends for a new bot. Everything else (flags, agents, pools, audience)\nis household and is not accepted here.",
+        "properties": {
+          "color": {
+            "default": "",
+            "maxLength": 32,
+            "title": "Color",
+            "type": "string"
+          },
+          "connection": {
+            "anyOf": [
+              {
+                "maxLength": 48,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 400,
+            "title": "Description",
+            "type": "string"
+          },
+          "emoji": {
+            "default": "",
+            "maxLength": 8,
+            "title": "Emoji",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "persona": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persona"
+          },
+          "personality": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personality"
+          },
+          "quick_actions": {
+            "default": true,
+            "title": "Quick Actions",
+            "type": "boolean"
+          },
+          "tools": {
+            "default": true,
+            "title": "Tools",
+            "type": "boolean"
+          },
+          "voice": {
+            "default": "",
+            "maxLength": 80,
+            "title": "Voice",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MyCharacterCreateIn",
+        "type": "object"
+      },
+      "MyCharacterPatchIn": {
+        "additionalProperties": false,
+        "description": "Present keys are set, absent ones left alone; ``connection`` null/\"\" detaches.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "connection": {
+            "anyOf": [
+              {
+                "maxLength": 48,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 400,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "emoji": {
+            "anyOf": [
+              {
+                "maxLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emoji"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "persona": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persona"
+          },
+          "personality": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personality"
+          },
+          "quick_actions": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Actions"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools"
+          },
+          "voice": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice"
+          }
+        },
+        "title": "MyCharacterPatchIn",
+        "type": "object"
+      },
+      "MyOrderIn": {
+        "additionalProperties": false,
+        "description": "``PUT /api/me/characters/order`` (4.3 F1a): the caller's own bot ids, first to last.",
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "MyOrderIn",
+        "type": "object"
+      },
       "NetworkIn": {
         "additionalProperties": false,
         "properties": {
@@ -2641,6 +2920,59 @@
           }
         },
         "title": "NetworkIn",
+        "type": "object"
+      },
+      "OidcConfigIn": {
+        "additionalProperties": false,
+        "properties": {
+          "clear_secret": {
+            "default": false,
+            "title": "Clear Secret",
+            "type": "boolean"
+          },
+          "client_id": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Secret"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "issuer": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Issuer",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "maxLength": 60,
+            "title": "Label",
+            "type": "string"
+          },
+          "scopes": {
+            "default": "openid email profile",
+            "maxLength": 512,
+            "title": "Scopes",
+            "type": "string"
+          }
+        },
+        "title": "OidcConfigIn",
         "type": "object"
       },
       "OwnPinIn": {
@@ -2708,6 +3040,21 @@
       "Person": {
         "additionalProperties": false,
         "properties": {
+          "household_bots": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Household Bots"
+          },
           "name": {
             "maxLength": 40,
             "minLength": 1,
@@ -2721,8 +3068,10 @@
             "type": "string"
           },
           "role": {
-            "default": "member",
+            "default": "user",
             "enum": [
+              "user",
+              "basic",
               "member",
               "restricted"
             ],
@@ -2744,18 +3093,6 @@
             "maxLength": 120,
             "title": "Avatar",
             "type": "string"
-          },
-          "budgets": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Budgets"
           },
           "denies": {
             "anyOf": [
@@ -2784,6 +3121,23 @@
               }
             ],
             "title": "Grants"
+          },
+          "household_bots": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Household Bots"
           },
           "name": {
             "maxLength": 40,
@@ -2816,9 +3170,11 @@
             "title": "Pin"
           },
           "role": {
-            "default": "member",
+            "default": "user",
             "enum": [
               "admin",
+              "user",
+              "basic",
               "member",
               "restricted"
             ],
@@ -2860,18 +3216,6 @@
             ],
             "title": "Avatar"
           },
-          "budgets": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Budgets"
-          },
           "denies": {
             "anyOf": [
               {
@@ -2911,6 +3255,23 @@
             ],
             "title": "Grants"
           },
+          "household_bots": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Household Bots"
+          },
           "name": {
             "anyOf": [
               {
@@ -2929,6 +3290,8 @@
               {
                 "enum": [
                   "admin",
+                  "user",
+                  "basic",
                   "member",
                   "restricted"
                 ],
@@ -3048,15 +3411,10 @@
         "title": "ReactionSettingsIn",
         "type": "object"
       },
-      "RestoreIn": {
+      "RevealIn": {
         "additionalProperties": false,
         "properties": {
-          "confirm": {
-            "default": false,
-            "title": "Confirm",
-            "type": "boolean"
-          },
-          "passphrase": {
+          "password": {
             "anyOf": [
               {
                 "maxLength": 256,
@@ -3066,10 +3424,234 @@
                 "type": "null"
               }
             ],
-            "title": "Passphrase"
+            "title": "Password"
+          },
+          "pin": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pin"
           }
         },
-        "title": "RestoreIn",
+        "title": "RevealIn",
+        "type": "object"
+      },
+      "RoleChangeIn": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm_token": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm Token"
+          },
+          "household_bots": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "const": "all",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Household Bots"
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "user",
+              "basic",
+              "member",
+              "restricted"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "RoleChangeIn",
+        "type": "object"
+      },
+      "RunIn": {
+        "additionalProperties": false,
+        "properties": {
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "steps": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 40,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steps"
+          }
+        },
+        "title": "RunIn",
+        "type": "object"
+      },
+      "ScheduleIn": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "prompt": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "rule": {
+            "additionalProperties": true,
+            "title": "Rule",
+            "type": "object"
+          },
+          "thread_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id"
+          },
+          "tz": {
+            "default": "UTC",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Tz",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "prompt",
+          "rule"
+        ],
+        "title": "ScheduleIn",
+        "type": "object"
+      },
+      "SchedulePatch": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "maxLength": 20000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "rule": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule"
+          },
+          "thread_id": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Id"
+          },
+          "tz": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tz"
+          }
+        },
+        "title": "SchedulePatch",
         "type": "object"
       },
       "ScoreIn": {
@@ -3196,6 +3778,8 @@
                 "items": {
                   "type": "string"
                 },
+                "maxItems": 64,
+                "minItems": 1,
                 "type": "array"
               },
               {
@@ -3203,20 +3787,6 @@
               }
             ],
             "title": "Only"
-          },
-          "profiles": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profiles"
           }
         },
         "title": "StarterPackInstallIn",
@@ -3268,6 +3838,22 @@
           }
         },
         "title": "TagsIn",
+        "type": "object"
+      },
+      "TokenIn": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "TokenIn",
         "type": "object"
       },
       "UpdateBotOrderIn": {
@@ -3435,12 +4021,70 @@
         ],
         "title": "WizardConnectionIn",
         "type": "object"
+      },
+      "app__backup_api__RestoreIn": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "passphrase": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passphrase"
+          }
+        },
+        "title": "RestoreIn",
+        "type": "object"
+      },
+      "app__maintenance_api__RestoreIn": {
+        "additionalProperties": false,
+        "properties": {
+          "date": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{8}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 5000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Names"
+          }
+        },
+        "title": "RestoreIn",
+        "type": "object"
       }
     }
   },
   "info": {
     "title": "DisPatch Chat",
-    "version": "3.1.0"
+    "version": "4.3.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -3462,7 +4106,7 @@
     },
     "/api/advisor/digest": {
       "post": {
-        "description": "Summarise a day of advisor chat into the corpus (default: yesterday).\n\nRun by a nightly cron on the box; idempotent unless `force`. `force`\n(rewrite an existing digest, one cloud call per advisor) is honoured for\na real unlocked session only: a machine caller always gets the\nidempotent behaviour, so a loop on the machine surface cannot burn\nprovider spend or churn the corpus.",
+        "description": "Summarise a day of advisor chat into the corpus (default: yesterday).\n\nRun by a nightly cron on the box; idempotent unless `force`. `force`\n(rewrite an existing digest, one cloud call per advisor) is honoured for\na real signed-in session only: a machine caller always gets the\nidempotent behaviour, so a loop on the machine surface cannot burn\nprovider spend or churn the corpus.",
         "operationId": "advisor_digest_api_advisor_digest_post",
         "parameters": [
           {
@@ -3591,7 +4235,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -3738,7 +4382,7 @@
     },
     "/api/advisor/requests/{rid}/send": {
       "post": {
-        "description": "The handoff card's Send button. A real unlocked session only: the\nmachine surface must never be able to approve its own handoff.",
+        "description": "The handoff card's Send button. A real signed-in session only: the\nmachine surface must never be able to approve its own handoff.",
         "operationId": "advisor_request_send_api_advisor_requests__rid__send_post",
         "parameters": [
           {
@@ -3887,7 +4531,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -4067,6 +4711,72 @@
         "summary": "List Backends"
       }
     },
+    "/api/agents/claude/routes": {
+      "get": {
+        "operationId": "claude_routes_api_agents_claude_routes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Claude Routes"
+      }
+    },
+    "/api/agents/cli-presets": {
+      "get": {
+        "operationId": "get_cli_presets_api_agents_cli_presets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Cli Presets"
+      },
+      "put": {
+        "operationId": "put_cli_presets_api_agents_cli_presets_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliPresetsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Cli Presets"
+      }
+    },
     "/api/agents/credentials/claude": {
       "delete": {
         "operationId": "delete_claude_key_api_agents_credentials_claude_delete",
@@ -4131,9 +4841,9 @@
         "summary": "Put Claude Credentials"
       }
     },
-    "/api/agents/profile-budgets": {
-      "get": {
-        "operationId": "get_profile_budgets_api_agents_profile_budgets_get",
+    "/api/agents/retention/purge": {
+      "post": {
+        "operationId": "purge_now_api_agents_retention_purge_post",
         "responses": {
           "200": {
             "content": {
@@ -4144,19 +4854,126 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Get Profile Budgets"
+        "summary": "Purge Now"
       }
     },
-    "/api/agents/profile-budgets/{profile_id}": {
-      "put": {
-        "operationId": "put_profile_budget_api_agents_profile_budgets__profile_id__put",
+    "/api/agents/schedules": {
+      "get": {
+        "operationId": "list_schedules_api_agents_schedules_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "mine",
+              "title": "Scope",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Schedules"
+      },
+      "post": {
+        "operationId": "create_schedule_api_agents_schedules_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Schedule"
+      }
+    },
+    "/api/agents/schedules/{schedule_id}": {
+      "delete": {
+        "operationId": "delete_schedule_api_agents_schedules__schedule_id__delete",
         "parameters": [
           {
             "in": "path",
-            "name": "profile_id",
+            "name": "schedule_id",
             "required": true,
             "schema": {
-              "title": "Profile Id",
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Schedule"
+      },
+      "patch": {
+        "operationId": "patch_schedule_api_agents_schedules__schedule_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "title": "Schedule Id",
               "type": "string"
             }
           }
@@ -4165,7 +4982,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AgentProfileBudgetIn"
+                "$ref": "#/components/schemas/SchedulePatch"
               }
             }
           },
@@ -4191,23 +5008,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Put Profile Budget"
-      }
-    },
-    "/api/agents/retention/purge": {
-      "post": {
-        "operationId": "purge_now_api_agents_retention_purge_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Purge Now"
+        "summary": "Patch Schedule"
       }
     },
     "/api/agents/secrets": {
@@ -4690,7 +5491,7 @@
     },
     "/api/apps/jobboard": {
       "get": {
-        "description": "The board view. Filterable by state, source agent, tag, thread.\n\nA Safe-Mode caller gets the empty shape — never the row contents,\nmatching the existing redaction pattern.\n\n``thread_id`` filters to one monthly discussion thread — the chat\npanel uses this to paint the messages for a specific month.",
+        "description": "The board view. Filterable by state, source agent, tag, thread.\n\n``thread_id`` filters to one monthly discussion thread — the chat\npanel uses this to paint the messages for a specific month.",
         "operationId": "list_jobs_api_apps_jobboard_get",
         "parameters": [
           {
@@ -4878,7 +5679,7 @@
     },
     "/api/apps/jobboard/feedback": {
       "get": {
-        "description": "Merged vote + free-text feedback feed, newest first — the read side\nof the ``POST .../feedback`` endpoint below, for an agent to catch up\non what the humans said without re-reading every monthly thread.\n\nMachine-readable without a session from loopback, exactly like\n``GET /api/jobs`` (the shell puts a mounted app's whole API on the\nmachine-inbound surface). Safe-Mode/decoy\ncallers get the empty shape.\n\nMUST stay registered before ``/{job_id}`` — see the route-order note\nat the top of the read-paths section, \"feedback\" would otherwise be\nswallowed as a job_id.",
+        "description": "Merged vote + free-text feedback feed, newest first — the read side\nof the ``POST .../feedback`` endpoint below, for an agent to catch up\non what the humans said without re-reading every monthly thread.\n\nMachine-readable without a session from loopback, exactly like\n``GET /api/jobs`` (the shell puts a mounted app's whole API on the\nmachine-inbound surface).\n\nMUST stay registered before ``/{job_id}`` — see the route-order note\nat the top of the read-paths section, \"feedback\" would otherwise be\nswallowed as a job_id.",
         "operationId": "list_feedback_api_apps_jobboard_feedback_get",
         "parameters": [
           {
@@ -5042,7 +5843,7 @@
     },
     "/api/apps/jobboard/months": {
       "get": {
-        "description": "All monthly discussion threads for ``bot_id``, newest first.\n\nEach entry carries the canonical ``{year, month, key, label}``\npayload so the frontend month picker doesn't have to parse the\nthread title itself. The thread is also returned so the UI can\nnavigate straight into the chat.\n\nSafe-Mode callers get an empty list — a locked device must never\nsee job metadata, even the title of a monthly thread (the title\nembeds the year/month).",
+        "description": "All monthly discussion threads for ``bot_id``, newest first.\n\nEach entry carries the canonical ``{year, month, key, label}``\npayload so the frontend month picker doesn't have to parse the\nthread title itself. The thread is also returned so the UI can\nnavigate straight into the chat.",
         "operationId": "list_months_api_apps_jobboard_months_get",
         "parameters": [
           {
@@ -5084,7 +5885,7 @@
     },
     "/api/apps/jobboard/profile": {
       "get": {
-        "description": "The current preference profile. Decoy callers get the empty shape.",
+        "description": "The current preference profile.",
         "operationId": "get_profile_api_apps_jobboard_profile_get",
         "responses": {
           "200": {
@@ -5480,7 +6281,7 @@
         "summary": "Api Token Get"
       },
       "post": {
-        "description": "Rotate the machine API key (shown once) and/or change how machines are\nrecognised. The Owner and Admins.",
+        "description": "Rotate the machine API key (shown once) and/or change how machines are\nrecognised. The Owner only (host tier, route policy ``host=True``; checked here too): a\nsecond Admin reads the settings but never changes who reaches DisPatch without a credential.",
         "operationId": "api_token_set_api_auth_api_token_post",
         "requestBody": {
           "content": {
@@ -5534,6 +6335,7 @@
     },
     "/api/auth/lock": {
       "post": {
+        "description": "Lock = sign out on this device and land on the lock target (4.0, BUILD-PLAN-v2 §1.4):\nthe default profile (``lock_target: default_profile``) or the profile list. The push\nsubscription of the session being closed goes with it (a signed-out device pings nobody).",
         "operationId": "auth_lock_api_auth_lock_post",
         "responses": {
           "200": {
@@ -5602,7 +6404,7 @@
     },
     "/api/auth/password": {
       "post": {
-        "description": "Set or change YOUR password (Owner or Admin).\n\nThe first password of a PIN-only owner (the migration leaves it unset) is\nconfirmed with the install PIN; after that, with the current password.",
+        "description": "Set or change YOUR password (any Admin).\n\nThe first password is confirmed with the PIN the Admin signs in with: the install PIN for\nthe main Admin (a 3.x migration leaves a PIN-only one), the Admin's own PIN for any other\nAdmin (an Admin with no credential at all needs none); after that, with the current\npassword.",
         "operationId": "auth_password_api_auth_password_post",
         "requestBody": {
           "content": {
@@ -5639,7 +6441,7 @@
     },
     "/api/auth/pin": {
       "post": {
-        "description": "Change YOUR OWN PIN (3.2): a Member, or an Admin who uses one.\n\nConfirmed with the current PIN (an Admin without a PIN yet confirms with the password).\nThe Owner's PIN is the install PIN and changes through ``/api/auth/setup``; a Restricted\nprofile's PIN is set for it by the Owner or an Admin (People & Access). Throttled like\nevery other credential check.",
+        "description": "Change YOUR OWN PIN: any signed-in Admin, User or Basic profile.\n\nConfirmed with the current PIN (an Admin without a PIN yet confirms with the password; a\nprofile with no credential at all sets its first PIN). The first Admin's PIN is the install\nPIN and changes through ``/api/auth/setup``; the default profile is shared by everyone who\nuses the device and never has a PIN at all (409 ``default_profile_no_credential``, 4.3\nFable). Throttled like every other credential check.",
         "operationId": "auth_own_pin_api_auth_pin_post",
         "requestBody": {
           "content": {
@@ -5715,7 +6517,7 @@
     },
     "/api/auth/remember-config": {
       "post": {
-        "description": "Toggle the remember-device feature (0 = off, N = sliding days).\n\nRequires an unlocked session once a PIN exists. Enabling only makes the\nunlock screen OFFER the checkbox — becoming remembered still takes a\ncorrect PIN — and disabling forgets every remembered device.",
+        "description": "Toggle the remember-device feature (0 = off, N = sliding days).\n\nRequires a signed-in session once a PIN exists. Enabling only makes the\nunlock screen OFFER the checkbox — becoming remembered still takes a\ncorrect PIN — and disabling forgets every remembered device.",
         "operationId": "auth_remember_config_api_auth_remember_config_post",
         "requestBody": {
           "content": {
@@ -6159,6 +6961,43 @@
         "summary": "Pending"
       }
     },
+    "/api/backups/recovery-key/reveal": {
+      "post": {
+        "description": "Show the recovery key DisPatch generated (and keeps as the backup passphrase) once more.\n\nOnly the protected Admin, signed in as a profile (route policy ``host=True``; checked here as\nwell so it holds before the host tier is enforced), and only after typing the PIN or the\npassword again: verified through ``auth_attempts.guarded_verify`` (refused before verifying\nonce the throttle trips). Audited either way; the answer is never cached. A passphrase a person\nchose is never shown: 404 ``no_generated_key``.",
+        "operationId": "reveal_recovery_key_api_backups_recovery_key_reveal_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevealIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reveal Recovery Key"
+      }
+    },
     "/api/backups/{backup_id}": {
       "delete": {
         "operationId": "delete_backup_api_backups__backup_id__delete",
@@ -6214,7 +7053,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RestoreIn"
+                "$ref": "#/components/schemas/app__backup_api__RestoreIn"
               }
             }
           },
@@ -6263,7 +7102,7 @@
               "schema": {
                 "anyOf": [
                   {
-                    "$ref": "#/components/schemas/RestoreIn"
+                    "$ref": "#/components/schemas/app__backup_api__RestoreIn"
                   },
                   {
                     "type": "null"
@@ -6299,7 +7138,7 @@
     },
     "/api/bots": {
       "get": {
-        "description": "The roster as this client is allowed to see it.\n\nSession-exempt for machines so an on-box agent gets the TRUE roster (see\n_is_inbound). Everyone else sees the characters their audience (and, for a Member or\nRestricted profile, the character's profile list) allows - characters.may_use.",
+        "description": "The roster as this client is allowed to see it.\n\nSession-exempt for machines so an on-box agent gets the TRUE roster (see\n_is_inbound). Everyone else sees the characters its profile may use and that are on\nits rail (characters.visible_bots).",
         "operationId": "get_bots_api_bots_get",
         "responses": {
           "200": {
@@ -6354,7 +7193,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           }
         },
         "summary": "Get Bots"
@@ -6662,7 +7501,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -6930,7 +7769,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -7076,7 +7915,7 @@
     },
     "/api/bots/{bot_id}/avatar/full": {
       "get": {
-        "description": "Full-resolution avatar: `<stem>-full.<ext>` if present, else the regular one.\n\nHad NO gate of its own — it relied entirely on the middleware's decoy\nblocklist. Adding avatar routes to the inbound allowlist took that away and\nleft a locked browser tab able to fetch any bot's full-resolution face.\nGuarded here now, where it cannot be removed by a change somewhere else.\nFull-res is PIN-gated even for safe bots, which is why this is the strict\nagents-yes/browser-no guard rather than the per-bot one.",
+        "description": "Full-resolution avatar: `<stem>-full.<ext>` if present, else the regular one.\n\nA character the caller may use (_require_bot_use), checked here as well as at the\ngate, where it cannot be removed by a change somewhere else.",
         "operationId": "get_bot_avatar_full_api_bots__bot_id__avatar_full_get",
         "parameters": [
           {
@@ -7259,7 +8098,7 @@
     },
     "/api/bots/{bot_id}/avatar/thumb": {
       "get": {
-        "description": "The 128×128 thumbnail: `<stem>-thumb.<ext>` if present, else the face\ndownscaled on the fly.\n\nSafe Mode may see a SAFE bot's thumbnail by design — same rule as the\nmain `/avatar` route. Thumbnail is a small image (≤6 KB), so unlike the\nfull-res the cost of leaking one is negligible and the PIN gate would\nbe more friction than protection.\n\nFalls back to the face crop when no thumb file was ever written (the\npre-thumb deploys have only `<stem>-face.<ext>`). Browser-side scaling\nis wasteful but not broken, and the upload path will create a real\nthumb on the next avatar change.",
+        "description": "The 128×128 thumbnail: `<stem>-thumb.<ext>` if present, else the face\ndownscaled on the fly.\n\nA character the caller may use (_require_bot_use) — same rule as the main\n`/avatar` route.\n\nFalls back to the face crop when no thumb file was ever written (the\npre-thumb deploys have only `<stem>-face.<ext>`). Browser-side scaling\nis wasteful but not broken, and the upload path will create a real\nthumb on the next avatar change.",
         "operationId": "get_bot_avatar_thumb_api_bots__bot_id__avatar_thumb_get",
         "parameters": [
           {
@@ -7297,7 +8136,7 @@
     },
     "/api/bots/{bot_id}/models": {
       "get": {
-        "description": "The models this bot is allowed to answer with — for the per-thread\nmodel override chip.\n\nOperator-only (see _require_operator_session): a model name is\nconfiguration, not something Safe Mode or a machine caller needs to see.\nThe gateway's own list, not a guess — offering a model it will refuse is\na worse experience than not offering it, and only the gateway knows\nwhich ones this agent is actually allowed to use. An API bot (Connect an\nAI, no OpenClaw seat) has exactly one model, ever: its own configured one.",
+        "description": "The models this bot is allowed to answer with — for the per-thread\nmodel override chip.\n\nOperator-only (see _require_operator_session): a model name is\nconfiguration, not something a non-operator or a machine caller needs to see.\nThe gateway's own list, not a guess — offering a model it will refuse is\na worse experience than not offering it, and only the gateway knows\nwhich ones this agent is actually allowed to use. An API bot (Connect an\nAI, no OpenClaw seat) has exactly one model, ever: its own configured one.",
         "operationId": "bot_models_api_bots__bot_id__models_get",
         "parameters": [
           {
@@ -7409,7 +8248,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -7573,6 +8412,23 @@
         "summary": "List All Characters"
       }
     },
+    "/api/characters/manage": {
+      "get": {
+        "description": "The Characters page (4.2): ``{me, profiles, mine, household}``, every row from one\nserializer (``characters_manage.manage_row``). Templates (Household) are for Admins and are\nfetched here - the ``bots`` frame never carries them.",
+        "operationId": "manage_characters_api_characters_manage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Manage Characters"
+      }
+    },
     "/api/characters/order": {
       "put": {
         "operationId": "put_order_api_characters_order_put",
@@ -7625,8 +8481,93 @@
         "summary": "Personality Presets"
       }
     },
+    "/api/characters/{bot_id}/clone": {
+      "post": {
+        "description": "\"Get my copy\": 201 with the new copy, or 200 with the one the profile already has.",
+        "operationId": "clone_character_api_characters__bot_id__clone_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clone Character"
+      }
+    },
+    "/api/characters/{bot_id}/clone-to/{profile_id}": {
+      "post": {
+        "operationId": "clone_character_to_api_characters__bot_id__clone_to__profile_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clone Character To"
+      }
+    },
     "/api/characters/{character_id}": {
       "delete": {
+        "description": "Delete a template (copies detach), or - the Owner only - one of his own protected bots\n(agent / app bot, Sage) on purpose, with its chats. The call itself is the confirmation\n(the page asks first); anyone else's personal bot is 404.",
         "operationId": "delete_character_api_characters__character_id__delete",
         "parameters": [
           {
@@ -7697,6 +8638,7 @@
         "summary": "Get Character"
       },
       "patch": {
+        "description": "The one edit route (4.2): a template (``manage_characters``), an own bot or a copy (its\nowner, ``create_characters``; a copy stores overrides) or the Owner's agent bot. The allowlist\nis per kind and server-side (``characters_manage``); answers 404 for a bot that is not the\ncaller's, 403 without permission, 422 for a field the kind does not take.",
         "operationId": "patch_character_api_characters__character_id__patch",
         "parameters": [
           {
@@ -7740,6 +8682,377 @@
           }
         },
         "summary": "Patch Character"
+      }
+    },
+    "/api/characters/{character_id}/delete-preview": {
+      "get": {
+        "description": "What deleting a household character leaves behind, as numbers: the chats people have\nwith it (they stay, but can no longer be continued) and how many profiles they belong to.\nCopies people made of it are their own bots and are not touched.",
+        "operationId": "character_delete_preview_api_characters__character_id__delete_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "character_id",
+            "required": true,
+            "schema": {
+              "title": "Character Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Character Delete Preview"
+      }
+    },
+    "/api/characters/{character_id}/give-to": {
+      "put": {
+        "operationId": "put_give_to_api_characters__character_id__give_to_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "character_id",
+            "required": true,
+            "schema": {
+              "title": "Character Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GiveToIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Give To"
+      }
+    },
+    "/api/characters/{character_id}/give-to/preview": {
+      "get": {
+        "description": "What ticking exactly ``give_to`` (JSON: ``\"everyone\"`` or ``[\"<profile id>\", ...]``) does,\nas profile ids: ``add``, ``remove`` (a copy nobody wrote in), ``detach`` (a copy with chats,\nkept as the owner's own bot), and a ``token`` the PUT must carry.",
+        "operationId": "give_to_preview_api_characters__character_id__give_to_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "character_id",
+            "required": true,
+            "schema": {
+              "title": "Character Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "give_to",
+            "required": true,
+            "schema": {
+              "maxLength": 4000,
+              "title": "Give To",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Give To Preview"
+      }
+    },
+    "/api/characters/{character_id}/kit": {
+      "delete": {
+        "operationId": "delete_kit_api_characters__character_id__kit_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "character_id",
+            "required": true,
+            "schema": {
+              "title": "Character Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Kit"
+      },
+      "get": {
+        "operationId": "get_kit_api_characters__character_id__kit_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "character_id",
+            "required": true,
+            "schema": {
+              "title": "Character Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Kit"
+      },
+      "put": {
+        "operationId": "put_kit_api_characters__character_id__kit_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "character_id",
+            "required": true,
+            "schema": {
+              "title": "Character Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KitIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Kit"
+      }
+    },
+    "/api/characters/{character_id}/kit/push": {
+      "post": {
+        "operationId": "push_kit_api_characters__character_id__kit_push_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "character_id",
+            "required": true,
+            "schema": {
+              "title": "Character Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Push Kit"
+      }
+    },
+    "/api/characters/{character_id}/stop-sharing": {
+      "post": {
+        "operationId": "stop_sharing_api_characters__character_id__stop_sharing_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "character_id",
+            "required": true,
+            "schema": {
+              "title": "Character Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Sharing"
+      }
+    },
+    "/api/characters/{character_id}/stop-sharing/preview": {
+      "post": {
+        "operationId": "stop_sharing_preview_api_characters__character_id__stop_sharing_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "character_id",
+            "required": true,
+            "schema": {
+              "title": "Character Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Sharing Preview"
       }
     },
     "/api/connections": {
@@ -8171,7 +9484,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -8353,46 +9666,9 @@
         ]
       }
     },
-    "/api/drop": {
-      "post": {
-        "description": "One-way file drop — the only upload path a LOCKED device gets on its own.\n\nDeliberately reachable in Safe Mode (it is NOT in `_decoy_blocked`): a family\ndevice can push a file to the box without a PIN. Everything about it is\none-way:\n\n- Bytes land in the File Server store tagged `source=\"fileserver\"`, so\n  `_block_fileserver_read` bars the sender from ever pulling one back even\n  if the `/api/files*` path gate were to change.\n- The notice posted into chat is TEXT ONLY (no `media_url`), and its\n  `[[doc:...]]` link is stripped by `_strip_media_text` for Safe-Mode\n  viewers — the sender sees that their file arrived and its name, an\n  unlocked viewer gets the download link.\n- Decoy uploads spend the same daily per-client byte budget as\n  `/api/upload` (`DECOY_UPLOAD_QUOTA`), so this can't be used to fill the\n  disk.\n\nThe upload is reported as successful once the bytes are safely stored; a\nfailure to post the chat notice is logged and surfaced as `notice: false`\nrather than losing a file the sender was told had failed.",
-        "operationId": "drop_file_api_drop_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_drop_file_api_drop_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Drop File"
-      }
-    },
     "/api/export": {
       "get": {
-        "description": "Export all messages (or one bot / one thread) as JSON, Markdown, or HTML.\n\nThe user's 'retrieve ALL messages' guarantee: a single action that dumps the\nfull conversation history into an open, human-readable + re-importable file.",
+        "description": "Export YOUR messages (or one bot / one thread of yours) as JSON, Markdown, or HTML.\n\nThe 'retrieve ALL my messages' guarantee: a single action that dumps the caller's whole\nconversation history into an open, human-readable + re-importable file. 4.0: own\nthreads only, for everyone - the full dump of every profile's chats is the encrypted\nbackup (Settings > System > Backups, admin_system), not this route.",
         "operationId": "export_all_api_export_get",
         "parameters": [
           {
@@ -8463,7 +9739,7 @@
     },
     "/api/extensions": {
       "get": {
-        "description": "Operator, or an authenticated on-box machine (the deploy check reads it\nwith a plain loopback curl); ``detail`` operators only. A locked device\n(2.3.4) gets the mount rows and each one's ``locked_status`` only.",
+        "description": "Anyone who may chat, or an authenticated on-box machine (the deploy check reads it\nwith a plain loopback curl); ``detail`` operators only.",
         "operationId": "api_extensions_api_extensions_get",
         "responses": {
           "200": {
@@ -8480,6 +9756,7 @@
     },
     "/api/files": {
       "get": {
+        "description": "The caller's OWN files (``files_read``; 4.0 per owner). A machine lists the\nprotected Admin's (its sphere), an open install everything.",
         "operationId": "file_list_api_files_get",
         "responses": {
           "200": {
@@ -8580,7 +9857,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -8678,7 +9955,7 @@
         "summary": "File List"
       },
       "post": {
-        "description": "Upload any file type to the File Server.",
+        "description": "Upload any file type to the File Server (``files_upload``), owned by the uploader.",
         "operationId": "file_upload_api_files_post",
         "requestBody": {
           "content": {
@@ -8715,7 +9992,7 @@
     },
     "/api/files/wipe": {
       "post": {
-        "description": "Delete every file uploaded at or before `before` (ISO timestamp).\n\nPowers the per-day \"delete this and previous files\" buttons. The sharpest\nroute in the app to leave on a prefix tuple alone — one call empties the\nFile Server — so it re-derives the gate itself.",
+        "description": "Delete every one of the CALLER'S OWN File Server files uploaded at or before\n`before` (ISO timestamp; ``files_read``, 4.0 per owner).\n\nPowers the per-day \"delete this and previous files\" buttons of the caller's own list:\nnobody's files but the caller's are touched, Admins included.",
         "operationId": "file_wipe_api_files_wipe_post",
         "requestBody": {
           "content": {
@@ -9251,7 +10528,7 @@
     },
     "/api/health": {
       "get": {
-        "description": "Liveness + degraded-state signals.\n\nDeliberately un-gated so the container healthcheck works before (and\nwithout) a PIN — it reads `status` and `db_integrity_ok`, and those two\nare always present. Everything else is operator detail: the absolute data\ndirectory, whether an agent CLI is installed, whether the gateway answers,\nhow many clients are connected. On a 0.0.0.0-bound service that is free\nreconnaissance for anyone who can reach the port, so it is withheld unless\nthe caller holds a full session — or no PIN is configured at all, the\nstate in which the whole app is open by design.\n\nAn ON-BOX MACHINE caller gets the detail too. Monitoring is the whole\nreason those fields exist — `avatar_snapshots_missing` says a chat is\nshowing the wrong face, `truncation_unrepaired` says replies are being\ndelivered cut short — and a cron job or a smoke script holds no session\nand never will. Withholding them from the one caller whose job is to\nnotice made every signal here invisible to anything but a human with the\nPIN, which is the failure mode this app keeps re-learning: a fault that\nreports nothing looks exactly like health.\n\nThe test is the same one the auth gate's machine branch uses (loopback\nsocket, no proxy header, no browser fingerprint), so nothing reachable\nfrom a browser tab widens by it — a locked tab on this very box still gets\nthe two-field body, because a browser stamps Sec-Fetch-*/Origin and a\nremote caller is not on loopback.",
+        "description": "Liveness + degraded-state signals.\n\nDeliberately un-gated so the container healthcheck works before (and\nwithout) a PIN — it reads `status` and `db_integrity_ok`, and those two\nare always present. Everything else is operator detail: the absolute data\ndirectory, whether an agent CLI is installed, whether the gateway answers,\nhow many clients are connected. On a 0.0.0.0-bound service that is free\nreconnaissance for anyone who can reach the port, so it is withheld unless\nthe caller holds a full session — or no PIN is configured at all, the\nstate in which the whole app is open by design.\n\nAn ON-BOX MACHINE caller gets the detail too. Monitoring is the whole\nreason those fields exist — `avatar_snapshots_missing` says a chat is\nshowing the wrong face, `truncation_unrepaired` says replies are being\ndelivered cut short — and a cron job or a smoke script holds no session\nand never will. Withholding them from the one caller whose job is to\nnotice made every signal here invisible to anything but a human with the\nPIN, which is the failure mode this app keeps re-learning: a fault that\nreports nothing looks exactly like health.\n\nThe test is the same one the auth gate's machine branch uses (loopback\nsocket, no proxy header, no browser fingerprint), so nothing reachable\nfrom a browser tab widens by it — a signed-out tab on this very box still gets\nthe two-field body, because a browser stamps Sec-Fetch-*/Origin and a\nremote caller is not on loopback.",
         "operationId": "health_api_health_get",
         "responses": {
           "200": {
@@ -9266,9 +10543,209 @@
         "summary": "Health"
       }
     },
+    "/api/health/invariants": {
+      "get": {
+        "operationId": "health_invariants_api_health_invariants_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "Stable slug. Branch on THIS, never on the prose.",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "description": "The human-readable message. Unchanged from before problem documents existed."
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "Relative URI naming the problem type.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "code",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "A remote caller needs X-API-Key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "Stable slug. Branch on THIS, never on the prose.",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "description": "The human-readable message. Unchanged from before problem documents existed."
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "Relative URI naming the problem type.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "code",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The caller's profile (or API key) lacks the permission this needs."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "Stable slug. Branch on THIS, never on the prose.",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "description": "The human-readable message. Unchanged from before problem documents existed."
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "Relative URI naming the problem type.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "code",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "No such thread, bot, message or reaction."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "Stable slug. Branch on THIS, never on the prose.",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "description": "The human-readable message. Unchanged from before problem documents existed."
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "Relative URI naming the problem type.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "code",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The request body failed validation."
+          }
+        },
+        "summary": "Health Invariants"
+      }
+    },
     "/api/image-jobs": {
       "post": {
-        "description": "Ask for a picture. Returns in milliseconds; the picture arrives later.\n\nThe gate is the reaction fire's gate, for the same reasons: a locked device\ngets no path at all, an unknown thread refuses loudly rather than\nsucceeding into nowhere, and the bot must have the capability switched on.\nThe one addition is that the bot has to be the thread's OWN bot — the\nplaceholder is persisted as an assistant message and will be attributed to\nwhoever owns the thread regardless, so accepting a mismatch would let one\nbot put a picture in another's conversation under that bot's name.",
+        "description": "Ask for a picture. Returns in milliseconds; the picture arrives later.\n\n``use_images`` (a person) or ``machine:image_jobs``; an unknown thread refuses\nloudly rather than succeeding into nowhere, the caller must own the thread, and\nthe bot must have the capability switched on.\nThe one addition is that the bot has to be the thread's OWN bot — the\nplaceholder is persisted as an assistant message and will be attributed to\nwhoever owns the thread regardless, so accepting a mismatch would let one\nbot put a picture in another's conversation under that bot's name.",
         "operationId": "image_job_create_api_image_jobs_post",
         "requestBody": {
           "content": {
@@ -9379,7 +10856,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -9525,7 +11002,7 @@
     },
     "/api/image-jobs/{job_id}": {
       "get": {
-        "description": "One job's state. Machine-facing, same gate as creating one.",
+        "description": "One job's state. Machine-facing, same gate as creating one (``use_images``).",
         "operationId": "image_job_status_api_image_jobs__job_id__get",
         "parameters": [
           {
@@ -9637,7 +11114,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -9737,7 +11214,7 @@
     },
     "/api/image-jobs/{job_id}/callback": {
       "post": {
-        "description": "The rig saying \"this one is done\". A poke, never content.\n\nThe BODY IS IGNORED. The rig posts what `get_job` would have returned, and\ntrusting it would make a forged POST able to write a picture URL, an error\nstring or a state into a family thread. Instead this advances the job\nthrough exactly the path the sweep uses, which re-polls the rig itself — so\nthe worst a forged callback can do is cost one extra `get_job`.\n\nIts credential is the per-job token minted at submit time and given only to\nthe image server. That is why this route is exempt from the api_token check\nthe rest of the machine surface uses (see the auth middleware): the caller\nis a LAN peer, holding a capability scoped to one job, that expires with\nthe job. A browser never reaches here — a locked tab gets Safe Mode's 403.\n\nThe sweep is unchanged and still runs on its own cadence. A callback only\nmakes a terminal transition arrive sooner; a callback that never comes is\nthe case the sweep has always covered.",
+        "description": "The rig saying \"this one is done\". A poke, never content.\n\nThe BODY IS IGNORED. The rig posts what `get_job` would have returned, and\ntrusting it would make a forged POST able to write a picture URL, an error\nstring or a state into a family thread. Instead this advances the job\nthrough exactly the path the sweep uses, which re-polls the rig itself — so\nthe worst a forged callback can do is cost one extra `get_job`.\n\nIts credential is the per-job token minted at submit time and given only to\nthe image server. That is why this route is exempt from the api_token check\nthe rest of the machine surface uses (see the auth middleware): the caller\nis a LAN peer, holding a capability scoped to one job, that expires with\nthe job. Only the rig calls it: a browser-shaped request is refused before the\ntoken is looked at (a page holding a leaked token is not the rig).\n\nThe sweep is unchanged and still runs on its own cadence. A callback only\nmakes a terminal transition arrive sooner; a callback that never comes is\nthe case the sweep has always covered.",
         "operationId": "image_job_callback_api_image_jobs__job_id__callback_post",
         "parameters": [
           {
@@ -9849,7 +11326,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -9949,7 +11426,7 @@
     },
     "/api/inject": {
       "post": {
-        "description": "Push a message into the chat from OpenClaw (proactive / scheduled).\n\nUsed by OpenClaw cron/timers, e.g. a morning briefing into a daily thread.\nResolves the target thread, persists, and broadcasts to all clients.\n\nSession-exempt for MACHINES (see _is_inbound) — but a browser tab with no\nsession is Safe Mode even on loopback, same as the reaction routes: this\nbox's own idle-locked tab must not be able to write into any thread (or\nfire `:react:` markers) via the machine-to-machine bypass.",
+        "description": "Push a message into the chat from OpenClaw (proactive / scheduled).\n\nUsed by OpenClaw cron/timers, e.g. a morning briefing into a daily thread.\nResolves the target thread, persists, and broadcasts to all clients.\n\nSession-exempt for MACHINES (see _is_inbound) — a browser tab is judged as\nthe person it is (the gate never hands a browser the machine bypass): this\nbox's own signed-out tab must not be able to write into any thread (or fire\n`:react:` markers) via the machine-to-machine bypass.",
         "operationId": "inject_message_api_inject_post",
         "requestBody": {
           "content": {
@@ -10060,7 +11537,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -10160,7 +11637,7 @@
     },
     "/api/jobs": {
       "get": {
-        "description": "The board view. Filterable by state, source agent, tag, thread.\n\nA Safe-Mode caller gets the empty shape — never the row contents,\nmatching the existing redaction pattern.\n\n``thread_id`` filters to one monthly discussion thread — the chat\npanel uses this to paint the messages for a specific month.",
+        "description": "The board view. Filterable by state, source agent, tag, thread.\n\n``thread_id`` filters to one monthly discussion thread — the chat\npanel uses this to paint the messages for a specific month.",
         "operationId": "list_jobs_api_jobs_get",
         "parameters": [
           {
@@ -10348,7 +11825,7 @@
     },
     "/api/jobs/feedback": {
       "get": {
-        "description": "Merged vote + free-text feedback feed, newest first — the read side\nof the ``POST .../feedback`` endpoint below, for an agent to catch up\non what the humans said without re-reading every monthly thread.\n\nMachine-readable without a session from loopback, exactly like\n``GET /api/jobs`` (the shell puts a mounted app's whole API on the\nmachine-inbound surface). Safe-Mode/decoy\ncallers get the empty shape.\n\nMUST stay registered before ``/{job_id}`` — see the route-order note\nat the top of the read-paths section, \"feedback\" would otherwise be\nswallowed as a job_id.",
+        "description": "Merged vote + free-text feedback feed, newest first — the read side\nof the ``POST .../feedback`` endpoint below, for an agent to catch up\non what the humans said without re-reading every monthly thread.\n\nMachine-readable without a session from loopback, exactly like\n``GET /api/jobs`` (the shell puts a mounted app's whole API on the\nmachine-inbound surface).\n\nMUST stay registered before ``/{job_id}`` — see the route-order note\nat the top of the read-paths section, \"feedback\" would otherwise be\nswallowed as a job_id.",
         "operationId": "list_feedback_api_jobs_feedback_get",
         "parameters": [
           {
@@ -10512,7 +11989,7 @@
     },
     "/api/jobs/months": {
       "get": {
-        "description": "All monthly discussion threads for ``bot_id``, newest first.\n\nEach entry carries the canonical ``{year, month, key, label}``\npayload so the frontend month picker doesn't have to parse the\nthread title itself. The thread is also returned so the UI can\nnavigate straight into the chat.\n\nSafe-Mode callers get an empty list — a locked device must never\nsee job metadata, even the title of a monthly thread (the title\nembeds the year/month).",
+        "description": "All monthly discussion threads for ``bot_id``, newest first.\n\nEach entry carries the canonical ``{year, month, key, label}``\npayload so the frontend month picker doesn't have to parse the\nthread title itself. The thread is also returned so the UI can\nnavigate straight into the chat.",
         "operationId": "list_months_api_jobs_months_get",
         "parameters": [
           {
@@ -10554,7 +12031,7 @@
     },
     "/api/jobs/profile": {
       "get": {
-        "description": "The current preference profile. Decoy callers get the empty shape.",
+        "description": "The current preference profile.",
         "operationId": "get_profile_api_jobs_profile_get",
         "responses": {
           "200": {
@@ -11315,19 +12792,34 @@
         "summary": "Mail Status"
       }
     },
-    "/api/me/activity": {
+    "/api/maintenance/images/preview": {
       "get": {
-        "description": "A profile's own summary - the disclosure the Restricted UI links to.",
-        "operationId": "my_activity_api_me_activity_get",
+        "operationId": "images_preview_api_maintenance_images_preview_get",
         "parameters": [
           {
             "in": "query",
-            "name": "days",
+            "name": "mode",
             "required": false,
             "schema": {
-              "default": 7,
-              "title": "Days",
-              "type": "integer"
+              "default": "months",
+              "title": "Mode",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "months",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Months"
             }
           }
         ],
@@ -11351,12 +12843,941 @@
             "description": "Validation Error"
           }
         },
-        "summary": "My Activity"
+        "summary": "Images Preview"
+      }
+    },
+    "/api/maintenance/images/restore": {
+      "post": {
+        "operationId": "images_restore_api_maintenance_images_restore_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/app__maintenance_api__RestoreIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Images Restore"
+      }
+    },
+    "/api/maintenance/retention": {
+      "get": {
+        "operationId": "get_retention_api_maintenance_retention_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Retention"
+      },
+      "put": {
+        "operationId": "put_retention_api_maintenance_retention_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Retention"
+      }
+    },
+    "/api/maintenance/run": {
+      "post": {
+        "operationId": "run_now_api_maintenance_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RunIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Now"
+      }
+    },
+    "/api/maintenance/status": {
+      "get": {
+        "operationId": "get_status_api_maintenance_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Status"
+      }
+    },
+    "/api/maintenance/storage": {
+      "get": {
+        "operationId": "get_storage_api_maintenance_storage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Storage"
+      }
+    },
+    "/api/maintenance/storage/refresh": {
+      "post": {
+        "operationId": "refresh_storage_api_maintenance_storage_refresh_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Refresh Storage"
+      }
+    },
+    "/api/me/archive": {
+      "get": {
+        "description": "The caller's own setting; with ``?months=N`` also how many of their chats that would archive.",
+        "operationId": "get_my_archive_api_me_archive_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "months",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Months"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get My Archive"
+      },
+      "put": {
+        "operationId": "put_my_archive_api_me_archive_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put My Archive"
+      }
+    },
+    "/api/me/avatar": {
+      "delete": {
+        "operationId": "me_avatar_clear_api_me_avatar_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Me Avatar Clear"
+      },
+      "post": {
+        "description": "Your own profile picture (PNG, JPEG, WebP, GIF or a short MP4/WebM/MOV video, 20 MB at\nmost; stored as a 256 px WebP, a moving one as a small looping WebP). Any profile, the shared\ndefault one included.\n``crop_x``/``crop_y``/``crop_size``: the face square placed in the face picker, as fractions\n(top-left corner; side of the shorter edge); a centred square without them.",
+        "operationId": "me_avatar_set_api_me_avatar_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "crop_x",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop X"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_y",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop Y"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_size",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop Size"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_me_avatar_set_api_me_avatar_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Me Avatar Set"
+      }
+    },
+    "/api/me/backends": {
+      "get": {
+        "description": "The connections the caller's own bots may use: chat-capable household connections\nwithin the profile's ``backends.allowed``. No key, no base URL, no usage - those stay\nwith the Admin's Connections page. A profile without ``choose_backend`` gets an empty\nlist (its bots run on the household default).",
+        "operationId": "my_backends_api_me_backends_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Backends"
+      }
+    },
+    "/api/me/characters": {
+      "get": {
+        "operationId": "my_characters_api_me_characters_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Characters"
+      },
+      "post": {
+        "operationId": "my_character_create_api_me_characters_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MyCharacterCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Character Create"
+      }
+    },
+    "/api/me/characters/draft": {
+      "post": {
+        "operationId": "draft_character_api_me_characters_draft_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft Character"
+      }
+    },
+    "/api/me/characters/order": {
+      "put": {
+        "description": "Reorder the caller's own bots (copies, own bots; the Owner's agent bots too) in the slots\nthey already hold in the roster: no other profile's bot moves. Every id must be the caller's\n(else 404 ``bot_not_found``), none twice (422 ``order_invalid``). The ``bots`` frame goes to\nthe caller's own sockets only. Returns ``{ok, order}``.",
+        "operationId": "my_characters_order_api_me_characters_order_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MyOrderIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Characters Order"
+      }
+    },
+    "/api/me/characters/{bot_id}": {
+      "delete": {
+        "description": "Delete one of your own bots and your chats with it. A bot Reset profile keeps (an agent\nor app bot, Sage) is the Owner's to delete on purpose: it needs ``?confirm=true`` (409\n``confirm_required`` without it, nothing changes); anyone else gets 409\n``agent_bot_protected``.",
+        "operationId": "my_character_delete_api_me_characters__bot_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confirm",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Character Delete"
+      },
+      "get": {
+        "operationId": "my_character_api_me_characters__bot_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Character"
+      },
+      "patch": {
+        "operationId": "my_character_patch_api_me_characters__bot_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MyCharacterPatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Character Patch"
+      }
+    },
+    "/api/me/characters/{bot_id}/avatar": {
+      "post": {
+        "description": "``crop_x``/``crop_y``/``crop_size``: the face square the user placed in the face picker,\nas fractions of the picture (top-left corner, side of the shorter edge); a centred square\nwithout them.",
+        "operationId": "my_character_avatar_api_me_characters__bot_id__avatar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_x",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop X"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_y",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop Y"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_size",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop Size"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_my_character_avatar_api_me_characters__bot_id__avatar_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Character Avatar"
+      }
+    },
+    "/api/me/characters/{bot_id}/delete-preview": {
+      "get": {
+        "description": "``{\"chats\", \"agent\", \"kept_by_reset\"}``: what deleting this bot of yours takes with it.",
+        "operationId": "my_character_delete_preview_api_me_characters__bot_id__delete_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Character Delete Preview"
+      }
+    },
+    "/api/me/characters/{bot_id}/reset": {
+      "post": {
+        "description": "Reset one of your own copies of a household-managed bot: its name, emoji, description,\ncolour, personality, quick actions, lookups switch and picture go back to the household's,\nand the household's chats for it whose thread you deleted are posted again. Your other\nchats are never touched; connection and model stay. Not a copy of a managed bot: 422\n``not_managed``; anyone else's bot: 404.",
+        "operationId": "my_character_reset_api_me_characters__bot_id__reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Character Reset"
+      }
+    },
+    "/api/me/characters/{bot_id}/share": {
+      "post": {
+        "description": "An Admin shares one of its own direct bots with the household: a new template, and the\noriginal becomes the caller's linked copy of it.",
+        "operationId": "share_character_api_me_characters__bot_id__share_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Share Character"
+      }
+    },
+    "/api/me/export": {
+      "get": {
+        "operationId": "my_export_api_me_export_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Export"
+      }
+    },
+    "/api/me/personas": {
+      "get": {
+        "description": "The personality presets, for the owner's bot editor (the Admin manager reads the same\nlist at ``/api/characters/personas``). Preset texts are shipped content, not anyone's data.",
+        "operationId": "my_personas_api_me_personas_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Personas"
+      }
+    },
+    "/api/me/reset": {
+      "post": {
+        "operationId": "my_reset_api_me_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Reset"
+      }
+    },
+    "/api/me/reset/preview": {
+      "get": {
+        "operationId": "my_reset_preview_api_me_reset_preview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Reset Preview"
       }
     },
     "/api/media": {
       "get": {
-        "description": "Serve a local image/video file, but only from allow-listed base directories.",
+        "description": "Serve a local image/video file, but only from allow-listed base directories.\n\nThe media store is every signed-in role's (``use_chat``: the same files `/media/`\nserves). The agents' own media folders hold what agent bots produced, so they need\n``dispatch_agents`` (Admins always).",
         "operationId": "serve_media_api_media_get",
         "parameters": [
           {
@@ -11505,7 +13926,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -11603,7 +14024,7 @@
         "summary": "Delete Message Endpoint"
       },
       "patch": {
-        "description": "Rewrite a message's text, or take it out of the model's context.\n\nFull session only. Safe Mode is VIEW + SEND, and editing the transcript is\nneither — `_deny_decoy_mutation` is the same gate the sibling delete and\nchecklist routes carry, stated here because a locked tablet rewriting what\nsomebody said is the worst version of this feature.",
+        "description": "Rewrite a message's text, or take it out of the model's context.\n\n``manage_history`` (the route's permission) on the caller's own thread, the same\ngate the sibling delete and checklist routes carry.",
         "operationId": "edit_message_endpoint_api_messages__message_id__patch",
         "parameters": [
           {
@@ -11727,7 +14148,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -11827,7 +14248,7 @@
     },
     "/api/messages/{message_id}/checklist": {
       "patch": {
-        "description": "Persist a checklist message's checkbox state (and resulting row order).\n\nThe frontend renders a ```checklist fenced table as an interactive widget;\nthis is where its checked rows are stored, on the message itself, so the\nstate survives a reload and reaches every other device via the broadcast\nbelow. Full-session only — Safe Mode is VIEW + SEND, so a locked device\nsees the checkboxes but cannot change them (_deny_decoy_mutation).",
+        "description": "Persist a checklist message's checkbox state (and resulting row order).\n\nThe frontend renders a ```checklist fenced table as an interactive widget;\nthis is where its checked rows are stored, on the message itself, so the\nstate survives a reload and reaches every other device via the broadcast\nbelow. ``manage_history`` (the route's permission) on the caller's own thread.",
         "operationId": "update_message_checklist_api_messages__message_id__checklist_patch",
         "parameters": [
           {
@@ -11877,7 +14298,7 @@
     },
     "/api/messages/{message_id}/feedback": {
       "post": {
-        "description": "Rate one of the bot's own replies: thumbs up/down, optional reason.\n\nFEATURE 28. `vote` and `reason` are closed Pydantic Literals\n(MessageFeedbackIn) — that is the entire security property. This route is\nreachable from a locked Safe-Mode device, and the vote it records is later\nquoted back into the agent's own prompt (_compose_agent_text /\n_pending_feedback_lines): nothing free-text ever reaches that quote,\nbecause nothing free-text is accepted here.\n\nThe vote is stored `pending: true` and surfaces on the thread's NEXT turn\nas a fixed-template line, then marked delivered so it is never repeated.\n\nTier: allowed in Safe Mode for SAFE bots (the family is exactly who rates\na reply) — _deny_decoy_thread scopes it the same way every other\nthread-scoped decoy-readable route does — and rate-limited by the same\ndaily-budget mechanism as every other decoy action (DECOY_FEEDBACK_QUOTA).",
+        "description": "Rate one of the bot's own replies: thumbs up/down, optional reason.\n\nFEATURE 28. `vote` and `reason` are closed Pydantic Literals\n(MessageFeedbackIn) — that is the entire security property. The vote it\nrecords is later quoted back into the agent's own prompt (_compose_agent_text /\n_pending_feedback_lines): nothing free-text ever reaches that quote,\nbecause nothing free-text is accepted here.\n\nThe vote is stored `pending: true` and surfaces on the thread's NEXT turn\nas a fixed-template line, then marked delivered so it is never repeated.\n\n``use_chat`` on the caller's own thread (_require_message -> _thread_access).",
         "operationId": "message_feedback_api_messages__message_id__feedback_post",
         "parameters": [
           {
@@ -11999,7 +14420,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -12092,52 +14513,6 @@
               }
             },
             "description": "The request body failed validation."
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
-                }
-              },
-              "application/problem+json": {
-                "schema": {
-                  "properties": {
-                    "code": {
-                      "description": "Stable slug. Branch on THIS, never on the prose.",
-                      "type": "string"
-                    },
-                    "detail": {
-                      "description": "The human-readable message. Unchanged from before problem documents existed."
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "description": "Relative URI naming the problem type.",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "code",
-                    "detail"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Rate limited; the refusal is final, do not retry."
           }
         },
         "summary": "Message Feedback"
@@ -12145,7 +14520,7 @@
     },
     "/api/messages/{message_id}/mood-face": {
       "get": {
-        "description": "The face this ONE reply wears for its mood — see _prepare_persist.\n\nA message earns a `metadata.mood` at persist time, only when its bot\nalready has an operator-dropped face for that mood (avatar_pool.\nhas_mood_face); this route resolves the actual picture, hashed on the\nmessage id so the same message always shows the same face (a reload, a\nsecond device, a retry all agree). It is a REUSABLE pool — unlike the\nthread-avatar snapshot above, drawing one never moves or deletes it, and\nthis route never writes to the thread's own avatar_snapshot; the thread\nkeeps the face it was born under regardless of any reply's mood.\n\nGated exactly like GET /api/threads/{id}/avatar: full-session sees any\nbot, Safe Mode only a safe bot's own thread (_deny_decoy_thread).",
+        "description": "The face this ONE reply wears for its mood — see _prepare_persist.\n\nA message earns a `metadata.mood` at persist time, only when its bot\nalready has an operator-dropped face for that mood (avatar_pool.\nhas_mood_face); this route resolves the actual picture, hashed on the\nmessage id so the same message always shows the same face (a reload, a\nsecond device, a retry all agree). It is a REUSABLE pool — unlike the\nthread-avatar snapshot above, drawing one never moves or deletes it, and\nthis route never writes to the thread's own avatar_snapshot; the thread\nkeeps the face it was born under regardless of any reply's mood.\n\nGated exactly like GET /api/threads/{id}/avatar: the caller's own thread, with a\ncharacter it may use (_thread_access).",
         "operationId": "get_message_mood_face_api_messages__message_id__mood_face_get",
         "parameters": [
           {
@@ -12257,7 +14632,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -12353,6 +14728,239 @@
           }
         },
         "summary": "Get Message Mood Face"
+      }
+    },
+    "/api/oidc/callback": {
+      "get": {
+        "operationId": "oidc_callback_api_oidc_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Oidc Callback"
+      }
+    },
+    "/api/oidc/config": {
+      "get": {
+        "operationId": "oidc_config_get_api_oidc_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Oidc Config Get"
+      },
+      "put": {
+        "operationId": "oidc_config_put_api_oidc_config_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcConfigIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Oidc Config Put"
+      }
+    },
+    "/api/oidc/links": {
+      "get": {
+        "operationId": "oidc_links_api_oidc_links_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Oidc Links"
+      }
+    },
+    "/api/oidc/links/{profile_id}": {
+      "delete": {
+        "operationId": "oidc_unlink_api_oidc_links__profile_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Oidc Unlink"
+      }
+    },
+    "/api/oidc/start": {
+      "get": {
+        "operationId": "oidc_start_api_oidc_start_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "link",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Link"
+            }
+          },
+          {
+            "in": "query",
+            "name": "remember",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Remember",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Oidc Start"
       }
     },
     "/api/openclaw/import": {
@@ -12638,43 +15246,6 @@
         "summary": "People Devices"
       }
     },
-    "/api/people/devices/this": {
-      "put": {
-        "description": "Bind THIS browser to a default profile (``null`` unbinds): a device bound to a\nRestricted profile opens as that profile with nobody signed in.",
-        "operationId": "people_bind_this_device_api_people_devices_this_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeviceIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "People Bind This Device"
-      }
-    },
     "/api/people/devices/{device_id}": {
       "delete": {
         "operationId": "people_forget_device_api_people_devices__device_id__delete",
@@ -12714,6 +15285,7 @@
     },
     "/api/people/{profile_id}": {
       "delete": {
+        "description": "4.0: deleting a profile deletes its chats, characters, files and cloned voices, so it\ngoes through ``profiles_service.delete_profile`` with the counts confirmed first:\n``GET /api/people/{id}/delete/preview`` then ``POST /api/people/{id}/delete``.",
         "operationId": "people_delete_api_people__profile_id__delete",
         "parameters": [
           {
@@ -12749,6 +15321,7 @@
         "summary": "People Delete"
       },
       "patch": {
+        "description": "Name, picture, grants / denies, timeout, disabled. 4.0: a role change and the\nhousehold list go through ``profiles_service`` (``POST /api/people/{id}/role`` with its\npreview token - a User -> Basic change deletes content - and\n``PUT /api/people/{id}/household-bots``), so the wipe can never be skipped.",
         "operationId": "people_patch_api_people__profile_id__patch",
         "parameters": [
           {
@@ -12794,9 +15367,317 @@
         "summary": "People Patch"
       }
     },
+    "/api/people/{profile_id}/avatar": {
+      "delete": {
+        "operationId": "people_avatar_clear_api_people__profile_id__avatar_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Avatar Clear"
+      },
+      "post": {
+        "operationId": "people_avatar_set_api_people__profile_id__avatar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_x",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop X"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_y",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop Y"
+            }
+          },
+          {
+            "in": "query",
+            "name": "crop_size",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crop Size"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_people_avatar_set_api_people__profile_id__avatar_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Avatar Set"
+      }
+    },
+    "/api/people/{profile_id}/backends": {
+      "put": {
+        "operationId": "people_backends_api_people__profile_id__backends_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackendsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Backends"
+      }
+    },
+    "/api/people/{profile_id}/delete": {
+      "post": {
+        "operationId": "people_delete_api_people__profile_id__delete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Delete"
+      }
+    },
+    "/api/people/{profile_id}/delete/preview": {
+      "get": {
+        "operationId": "people_delete_preview_api_people__profile_id__delete_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Delete Preview"
+      }
+    },
+    "/api/people/{profile_id}/household-bots": {
+      "put": {
+        "operationId": "people_household_api_people__profile_id__household_bots_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HouseholdIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Household"
+      }
+    },
     "/api/people/{profile_id}/password": {
       "post": {
-        "description": "Set another Admin's password (the Owner or an Admin). Your own is /api/auth/password;\nthe Owner's is the Owner's alone.",
+        "description": "Set another Admin's password (an Admin). Your own is /api/auth/password;\nthe protected main Admin's is theirs alone.",
         "operationId": "people_set_password_api_people__profile_id__password_post",
         "parameters": [
           {
@@ -12922,6 +15803,183 @@
           }
         },
         "summary": "People Set Pin"
+      }
+    },
+    "/api/people/{profile_id}/reset": {
+      "post": {
+        "operationId": "people_reset_api_people__profile_id__reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Reset"
+      }
+    },
+    "/api/people/{profile_id}/reset/preview": {
+      "get": {
+        "operationId": "people_reset_preview_api_people__profile_id__reset_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Reset Preview"
+      }
+    },
+    "/api/people/{profile_id}/role": {
+      "post": {
+        "operationId": "people_role_api_people__profile_id__role_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleChangeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Role"
+      }
+    },
+    "/api/people/{profile_id}/role/preview": {
+      "get": {
+        "operationId": "people_role_preview_api_people__profile_id__role_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "title": "Profile Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "role",
+            "required": true,
+            "schema": {
+              "title": "Role",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "People Role Preview"
       }
     },
     "/api/people/{profile_id}/sign-out": {
@@ -13243,6 +16301,44 @@
         "summary": "Practice Proxy"
       }
     },
+    "/api/profile-avatars/{name}": {
+      "get": {
+        "description": "A profile picture, for anyone (the sign-in screen shows them). The name is\nunguessable-by-listing (it carries the content hash), content-addressed, so it is cached\nfor a year; a changed picture is a new name.",
+        "operationId": "profile_avatar_file_api_profile_avatars__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Profile Avatar File"
+      }
+    },
     "/api/push/subscribe": {
       "delete": {
         "operationId": "push_unsubscribe_api_push_subscribe_delete",
@@ -13292,7 +16388,7 @@
     },
     "/api/quick-actions": {
       "get": {
-        "description": "The quick actions in use (defaults + `<data>/quick-actions.yaml`), in\ndisplay order. Public, Safe Mode included: they are only prompt templates.",
+        "description": "The quick actions in use (defaults + `<data>/quick-actions.yaml`), in\ndisplay order. Public: they are only prompt templates.",
         "operationId": "get_quick_actions_api_quick_actions_get",
         "responses": {
           "200": {
@@ -13309,7 +16405,7 @@
     },
     "/api/reactions": {
       "get": {
-        "description": "The pack as this client is allowed to see it.\n\nSafe Mode gets only the reactions flagged `safe` and no management\naffordances — the same shape the Bot Manager uses for safe bots.\n\nSession-exempt for machines (see _INBOUND_REACTION) so `dispatch-react\n--list` and on-box agents get the TRUE pack + pool + reaction_bots — but a\nbrowser tab with no session is Safe Mode even on loopback, same as fire.",
+        "description": "The pack as this client is allowed to see it: the whole pack for every role\n(4.0), the management affordances and the pool's detail only with ``manage_characters``.\n\nSession-exempt for machines (see _INBOUND_REACTION) so `dispatch-react --list` and\non-box agents get the TRUE pack + pool + reaction_bots.",
         "operationId": "reactions_list_api_reactions_get",
         "responses": {
           "200": {
@@ -13319,6 +16415,52 @@
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "Stable slug. Branch on THIS, never on the prose.",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "description": "The human-readable message. Unchanged from before problem documents existed."
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "Relative URI naming the problem type.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "code",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "A remote caller needs X-API-Key."
           },
           "403": {
             "content": {
@@ -13364,7 +16506,99 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "Stable slug. Branch on THIS, never on the prose.",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "description": "The human-readable message. Unchanged from before problem documents existed."
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "Relative URI naming the problem type.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "code",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "No such thread, bot, message or reaction."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "Stable slug. Branch on THIS, never on the prose.",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "description": "The human-readable message. Unchanged from before problem documents existed."
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "Relative URI naming the problem type.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "code",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The request body failed validation."
           }
         },
         "summary": "Reactions List"
@@ -13407,7 +16641,7 @@
     },
     "/api/reactions/fire": {
       "post": {
-        "description": "Pop a reaction on every connected device.\n\nReachable by OpenClaw over loopback and by a remote caller with the API\nkey — the same inbound rules as /api/inject. Browsers have no fire\ncontrol: reactions belong to the bots (the composer button was removed\nfor good on 2026-08-01), so the only in-app caller left is the Reaction\nManager's Test button, which fires as the enabled reaction bot.",
+        "description": "Pop a reaction on every connected device.\n\nReachable by OpenClaw over loopback and by a remote caller with the API\nkey — the same inbound rules as /api/inject. Browsers have no fire\ncontrol: reactions belong to the bots (the composer button was removed\nfor good on 2026-08-01), so the only in-app caller left is the Reaction\nManager's Test button, which fires as the enabled reaction bot. The route is\nmachine-only (machine:reactions); a person is refused at the gate (agents_only).",
         "operationId": "reactions_fire_api_reactions_fire_post",
         "requestBody": {
           "content": {
@@ -13518,7 +16752,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -14110,7 +17344,7 @@
     },
     "/api/search": {
       "get": {
-        "description": "Full-text search across every thread's messages (FTS5, LIKE fallback).",
+        "description": "Full-text search across the CALLER'S OWN conversations (FTS5, LIKE fallback).\n\n4.0: every role searches its own chats, and only those - Admins included (before 4.0\nthis read every thread in the house), Basic profiles too (their chats are theirs).",
         "operationId": "search_messages_api_search_get",
         "parameters": [
           {
@@ -14388,6 +17622,53 @@
         "summary": "Install Starter Pack"
       }
     },
+    "/api/starter-packs/{pack_id}/pictures/{character_id}": {
+      "get": {
+        "description": "The small picture a pack ships for one of its characters (the thumb, else the face).\nOnly a character of that pack, from the pack's own folder: never a path the caller names.",
+        "operationId": "starter_pack_picture_api_starter_packs__pack_id__pictures__character_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pack_id",
+            "required": true,
+            "schema": {
+              "title": "Pack Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "character_id",
+            "required": true,
+            "schema": {
+              "title": "Character Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Starter Pack Picture"
+      }
+    },
     "/api/studioforge/status": {
       "get": {
         "operationId": "studioforge_status_api_studioforge_status_get",
@@ -14445,6 +17726,23 @@
           }
         },
         "summary": "Support Bundle"
+      }
+    },
+    "/api/system/host-check": {
+      "get": {
+        "description": "The Host guard's mode, the names this machine answers to and the unknown ones seen\nsince the server started (name, count, last seen) - what Settings > System > Network shows\nso the Owner can add names before switching to ``enforce``.",
+        "operationId": "host_check_status_api_system_host_check_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Host Check Status"
       }
     },
     "/api/tasks": {
@@ -14964,15 +18262,23 @@
     },
     "/api/threads": {
       "get": {
+        "description": "The caller's OWN threads, one page at a time (4.0 scale): page one is every pinned\nthread plus the ``limit`` (default 50) most recently updated others; ``next_cursor``\n(null at the end) fetches the next page. ``bot_id``: one character's threads (what 3.x\nclients ask; on a small install page one is the whole 3.x answer), else every character's.\n``archived=1``: the Archived view. ``include_archived=1`` (3.x): both, merged.",
         "operationId": "list_threads_api_threads_get",
         "parameters": [
           {
             "in": "query",
             "name": "bot_id",
-            "required": true,
+            "required": false,
             "schema": {
-              "title": "Bot Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bot Id"
             }
           },
           {
@@ -14983,6 +18289,45 @@
               "default": false,
               "title": "Include Archived",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 600,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],
@@ -15085,7 +18430,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -15295,7 +18640,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -15516,7 +18861,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -15725,7 +19070,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -15946,7 +19291,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -16046,7 +19391,7 @@
     },
     "/api/threads/{thread_id}/abort": {
       "post": {
-        "description": "Stop a turn in flight.\n\nA MUTATION, and gated like every other one: Safe Mode may view and send,\nnever cancel. A locked tablet that could abort a turn could silence any\nconversation in the house.",
+        "description": "Stop a turn in flight: ``manage_history`` (the route's permission), on the\ncaller's own thread.",
         "operationId": "abort_turn_api_threads__thread_id__abort_post",
         "parameters": [
           {
@@ -16158,7 +19503,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -16258,7 +19603,7 @@
     },
     "/api/threads/{thread_id}/avatar": {
       "get": {
-        "description": "The bot's face as it was when this thread started. `?full=1` for the\nfull-resolution half, so a lightbox opens the SAME picture as the thumbnail\nit was clicked from rather than today's avatar.\n\nServed BY THREAD, not by snapshot hash, and that is the security design\nrather than a convenience. Snapshots are content-addressed, so the id says\nnothing about which bot it belongs to — a hash-keyed route would have had to\nreverse-map it to decide whether a Safe-Mode session may see it, and the\nobvious \"any thread references it\" answer leaks a non-safe bot's face the\nmoment one safe bot ever shared the same picture. Going through the thread\nmeans the existing _deny_decoy_bot rule applies unchanged: if you may not\nsee the thread, you may not see its avatar.\n\nImmutable by construction (the filename IS the hash of the bytes), so it is\nsafe to cache hard.",
+        "description": "The bot's face as it was when this thread started. `?full=1` for the\nfull-resolution half, so a lightbox opens the SAME picture as the thumbnail\nit was clicked from rather than today's avatar.\n\nServed BY THREAD, not by snapshot hash, and that is the security design\nrather than a convenience. Snapshots are content-addressed, so the id says\nnothing about which bot it belongs to — a hash-keyed route would have had to\nreverse-map it to decide who may see it, and the obvious \"any thread references\nit\" answer leaks one character's face the moment another ever shared the same\npicture. Going through the thread means ownership and _require_bot_use apply\nunchanged: if you may not see the thread, you may not see its avatar.\n\nImmutable by construction (the filename IS the hash of the bytes), so it is\nsafe to cache hard.",
         "operationId": "get_thread_avatar_api_threads__thread_id__avatar_get",
         "parameters": [
           {
@@ -16380,7 +19725,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -16663,7 +20008,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -16763,6 +20108,7 @@
     },
     "/api/threads/{thread_id}/messages": {
       "get": {
+        "description": "The newest ``limit`` messages (default 100), oldest first; ``before`` (or the 3.x name\n``before_id``: a message id of this thread) pages further back, ``has_more`` says whether\nthere is more. A keyset read on ``(created_at, rowid)`` - the same cost on page 1 and 500.",
         "operationId": "get_messages_api_threads__thread_id__messages_get",
         "parameters": [
           {
@@ -16779,7 +20125,7 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 200,
+              "default": 100,
               "maximum": 500,
               "minimum": 1,
               "title": "Limit",
@@ -16793,6 +20139,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 200,
                   "type": "string"
                 },
                 {
@@ -16800,6 +20147,23 @@
                 }
               ],
               "title": "Before Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
             }
           }
         ],
@@ -16902,7 +20266,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -17124,7 +20488,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -17224,7 +20588,7 @@
     },
     "/api/threads/{thread_id}/read": {
       "post": {
-        "description": "Mark a thread read (clears its unread indicator on every device).\n\nTHE MISSING `_deny_decoy_mutation` HERE IS DELIBERATE — every sibling\nroute (patch, delete, archive) has one, so its absence looks like an\noversight and has been \"fixed\" by review more than once.\n\nSafe Mode is view + send, and this endpoint is the *view* half writing\ndown that the view happened: the locked tab calls it when a family member\nopens a thread on the tablet, and denying it would leave a dot that never\nclears on exactly the devices the tier exists for. The blast radius is one\nboolean on a thread the caller is already allowed to READ — Safe Mode's\nbot gate still applies through `_deny_decoy_thread` below, so a locked\ncaller can no more clear a non-safe bot's dot than see it. Nothing is\ncreated, renamed, deleted or sent.",
+        "description": "Mark a thread read (clears its unread indicator on every device).\n\n``use_chat``, not ``manage_history``: this is the *view* half writing down that the\nview happened, on a thread the caller owns (_thread_access). Nothing is created,\nrenamed, deleted or sent.",
         "operationId": "mark_read_api_threads__thread_id__read_post",
         "parameters": [
           {
@@ -17336,7 +20700,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -17663,7 +21027,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -17763,7 +21127,7 @@
     },
     "/api/upload": {
       "post": {
-        "description": "Upload a file for chat sharing.\n\nRaster images and videos are stored inline for in-bubble rendering; every\nother file type (documents, archives, binaries — anything) is stored via the\nFile Server and shared as a download link, so the composer \"＋\" accepts any\nfile from the unlocked side.",
+        "description": "Upload a file for chat sharing (``attach_files``; a machine: ``machine:upload``).\n\nRaster images and videos are stored inline for in-bubble rendering; every\nother file type (documents, archives, binaries — anything) is stored as a\n``source='chat'`` file owned by the uploader and shared as a download link, so\nthe composer \"＋\" accepts any file.",
         "operationId": "upload_media_api_upload_post",
         "requestBody": {
           "content": {
@@ -17874,7 +21238,7 @@
                 }
               }
             },
-            "description": "Safe Mode: this caller holds no full session."
+            "description": "The caller's profile (or API key) lacks the permission this needs."
           },
           "404": {
             "content": {
@@ -18020,6 +21384,7 @@
     },
     "/api/users/{profile_id}": {
       "delete": {
+        "description": "Erase a profile. One removal path: this is ``POST /api/people/{id}/delete`` (the same\n``profiles_api.people_delete``, so the same rank rules, the same purge of the profile's bots,\nchats, files, pictures, voices and push subscriptions, the same audit line) with the\nconfirmation token minted here, because this route is the older one-call form. The protected\nAdmin cannot be deleted and nobody deletes the profile they are using.",
         "operationId": "erase_user_api_users__profile_id__delete",
         "parameters": [
           {

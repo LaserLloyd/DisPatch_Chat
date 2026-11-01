@@ -58,7 +58,7 @@ test('the SDK reads the SAME storage keys, languages and theme sheets as the she
 
 test('the SDK has no side effects at import and imports only util.js from the shell', () => {
   const imports = [...SDK_SRC.matchAll(/^import .* from '([^']+)';$/gm)].map((m) => m[1]);
-  assert.deepEqual(imports, ['./util.js?v=20']);
+  assert.deepEqual(imports, ['./util.js?v=23']);
   // No top-level listener, fetch or DOM write (they all live inside functions).
   const top = SDK_SRC.split('\n').filter((l) => /^(?:window|document|fetch|addEventListener)\b/.test(l));
   assert.deepEqual(top, []);
@@ -76,7 +76,7 @@ test('appIdFromPath', { skip: dom.skip }, async () => {
 
 // ------------------------------------------------------------------ api()
 
-test('api(): same-origin JSON with credentials, query + body, DecoyError, server detail', { skip: dom.skip }, async () => {
+test('api(): same-origin JSON with credentials, query + body, server detail; a 403 is a plain error', { skip: dom.skip }, async () => {
   const { calls, routes } = setupDom(PAGE, 'http://127.0.0.1:8765/apps/demo/');
   const sdk = await freshSdk();
   routes['GET /api/apps/demo/items?state=yes&n=2'] = () => [200, { items: [1] }];
@@ -90,14 +90,17 @@ test('api(): same-origin JSON with credentials, query + body, DecoyError, server
   assert.deepEqual(calls[1].body, { a: 1 });
   assert.equal(calls[1].opts.headers['Content-Type'], 'application/json');
 
+  // 4.0: no Safe Mode, so even a 3.x-shaped `decoy` body is an ordinary 403 (DecoyError is a
+  // deprecated export that is never thrown).
   routes['GET /api/apps/demo/secret'] = () => [403, { detail: 'Unlock for full access', decoy: true }];
-  await assert.rejects(sdk.api('/api/apps/demo/secret'), (e) => e instanceof sdk.DecoyError && e.status === 403);
+  await assert.rejects(sdk.api('/api/apps/demo/secret'), (e) => e.status === 403 && !(e instanceof sdk.DecoyError));
+  assert.equal(typeof sdk.DecoyError, 'function');
 
   routes['GET /api/apps/demo/bad'] = () => [422, { detail: [{ msg: 'field required' }] }];
   await assert.rejects(sdk.api('/api/apps/demo/bad'), (e) => e.status === 422 && e.message === 'field required' && !(e instanceof sdk.DecoyError));
   routes['GET /api/apps/demo/gone'] = () => [404, { detail: 'Job not found' }];
   await assert.rejects(sdk.api('/api/apps/demo/gone'), (e) => e.status === 404 && e.message === 'Job not found');
-  // A plain 403 (not the decoy shape) is an ordinary error.
+  // A plain 403 is an ordinary error.
   routes['GET /api/apps/demo/forbidden'] = () => [403, { detail: 'nope' }];
   await assert.rejects(sdk.api('/api/apps/demo/forbidden'), (e) => e.status === 403 && !(e instanceof sdk.DecoyError));
 
@@ -232,7 +235,7 @@ test('theme(): framed, it copies the shell’s own attributes and links the toke
   assert.equal(root.getAttribute('data-palette'), 'forest');
   assert.equal(root.getAttribute('data-theme'), 'dark');
   const links = [...win.document.head.querySelectorAll('link[rel="stylesheet"]')].map((l) => l.getAttribute('href'));
-  assert.deepEqual(links, ['/static/theme.css?v=7', '/static/ui-theme/ui-theme.css', '/static/ui-theme/adapters/dispatch-extra.css', '/apps/demo/app.css'],
+  assert.deepEqual(links, ['/static/theme.css?v=8', '/static/ui-theme/ui-theme.css', '/static/ui-theme/adapters/dispatch-extra.css', '/apps/demo/app.css'],
     'tokens first, the app’s own sheet last (it wins ties)');
   sdk.theme();
   assert.equal(win.document.head.querySelectorAll('link[rel="stylesheet"]').length, 4, 'idempotent');

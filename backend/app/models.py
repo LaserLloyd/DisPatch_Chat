@@ -17,7 +17,7 @@ class BotOut(BaseModel):
     model_hint: str = ""
     order: int = 0
     visible: bool = True
-    safe: bool = False
+    hidden: bool = False
     color: str = ""
     reactions: bool = False       # may this bot fire reaction images?
     image_jobs: bool = False      # may this bot request a generated picture?
@@ -45,8 +45,7 @@ class ThreadOut(BaseModel):
     avatar_url: str = ""              # resolved snapshot URL, "" when none
     # Per-thread UI choices: {"model": str, "thinking": str, "scene": str}.
     # None means "the bot's own defaults" — which is every thread that predates
-    # the feature. REDACTED for a locked device (see _redact_thread_dict): a
-    # model name is operator configuration, not family-facing.
+    # the feature.
     prefs: dict | None = None
     # Which profile this conversation belongs to (4.0 ownership). SERVER-SIDE ONLY:
     # ``exclude=True`` keeps it out of every model_dump / JSON response and WS frame, so
@@ -65,18 +64,14 @@ class MessageOut(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
-class CreateThreadIn(BaseModel):
-    bot_id: str
+#: 3.x visibility keys a client may no longer send: who uses a character is each profile's
+#: household list (People), and the Admin's "Hide" is PATCH /api/characters/{id} ``hidden``.
+LEGACY_BOT_KEYS = ("visible", "safe", "hide_unlocked", "audience", "profiles")
 
 
 class BotOrderItem(BaseModel):
     id: str
     order: int = 0
-    visible: bool | None = None   # pre-2.4.2 clients: False = "neither", True = no change
-    safe: bool | None = None      # None = leave unchanged ("Show locked", Safe-Mode gate)
-    hide_unlocked: bool | None = None  # None = leave unchanged (NOT "Show unlocked", 2.4.0)
-    # 3.0: who the character is for. Wins over `safe`/`hide_unlocked` when present.
-    audience: Literal["all", "members", "restricted"] | None = None
     reactions: bool | None = None # None = leave unchanged (reaction images)
     avatar_pool: bool | None = None  # None = leave unchanged (thread avatar pool)
     image_jobs: bool | None = None   # None = leave unchanged ([[pic:]] pictures, 2.3.7)
@@ -85,6 +80,16 @@ class BotOrderItem(BaseModel):
     # (422), and without the add-on only "" or the stored value is accepted.
     voice: str | None = Field(default=None, max_length=80)
     voice_rp: str | None = Field(default=None, max_length=32)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_legacy_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            sent = [k for k in LEGACY_BOT_KEYS if k in data]
+            if sent:
+                raise ValueError(f"{sent[0]!r} is no longer accepted (4.0: People decides who "
+                                 "uses a character; use 'hidden' on the character to hide it)")
+        return data
 
 
 class UpdateBotOrderIn(BaseModel):
@@ -117,11 +122,7 @@ class BotCreateIn(BaseModel):
     backend: Literal["direct", "agent"] = "direct"
     agent: str | None = Field(default=None, pattern=AGENT_ID_PATTERN)
     model_hint: str = Field(default="", max_length=60)
-    safe: bool = False
-    hide_unlocked: bool = False
-    audience: Literal["all", "members", "restricted"] | None = None   # 3.0; wins over the flags
     quick_actions: bool = True
-    visible: bool = True             # pre-2.4.2: False = "neither" (config.fold_visible)
     tools: bool | None = None        # direct-API bots only; default on
 
     @field_validator("name", "emoji", "model_hint")
@@ -148,10 +149,6 @@ class BotPatchIn(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=40)
     emoji: str | None = Field(default=None, max_length=8)
     model_hint: str | None = Field(default=None, max_length=60)
-    visible: bool | None = None      # pre-2.4.2: False = "neither", True = no change
-    safe: bool | None = None
-    hide_unlocked: bool | None = None
-    audience: Literal["all", "members", "restricted"] | None = None   # 3.0; wins over the flags
     quick_actions: bool | None = None
     reactions: bool | None = None
     avatar_pool: bool | None = None
@@ -218,6 +215,10 @@ class InjectIn(BaseModel):
     # "<bot> posted"; a string is the title ("Morning brief posted"). The
     # push never carries the content.
     notify: bool | str | None = Field(default=None)
+    # 4.0 idempotency: a caller-chosen key (a run id, a cron slot). A second inject with the
+    # same key stores nothing and answers the first one's message with `duplicate: true`.
+    delivery_key: str | None = Field(default=None, min_length=1, max_length=160,
+                                     pattern=r"^[A-Za-z0-9._:@/+-]+$")
 
     _validate_date = field_validator("date")(_check_real_date)
 
@@ -256,15 +257,15 @@ class FireReactionIn(BaseModel):
     """Fire a reaction overlay onto every connected device.
 
     `reaction` is an id, alias, or name. Target a thread (so the collapsed trace
-    lands in the right conversation and Safe-Mode scoping can be applied) or
+    lands in the right conversation and its owner's sockets get it) or
     leave it off for an app-wide pop.
     """
     reaction: str = Field(..., max_length=64)
     thread_id: str | None = Field(default=None, max_length=128)
     bot_id: str | None = Field(default=None, max_length=64)
     actor: str | None = Field(default=None, max_length=60)   # display name
-    # Drives the overlay's byline + icon. View-tier decisions still come from
-    # the session/decoy state, but "agent" fires must also resolve actor/bot_id
+    # Drives the overlay's byline + icon. Who sees it is the WS scoper's decision,
+    # but "agent" fires must also resolve actor/bot_id
     # to a reactions-enabled bot (fire_reaction) so bot names can't be spoofed.
     actor_kind: Literal["user", "agent"] | None = None
     caption: str | None = Field(default=None, max_length=120)
@@ -351,10 +352,10 @@ class MessageFeedbackIn(BaseModel):
     """Thumbs feedback on one of the bot's own replies.
 
     Literal enums ONLY, never free text — that is the whole security property.
-    This route is reachable from a locked Safe-Mode device, and the vote it
-    records is later quoted back into the agent's own prompt (see
-    main._pending_feedback_lines): if `reason` were a free string, a Safe-Mode
-    caller could inject arbitrary prompt text through it. Closed vocabularies
+    Any profile that may chat can vote, and the vote it records is later quoted
+    back into the agent's own prompt (see main._pending_feedback_lines): if
+    `reason` were a free string, a caller could inject arbitrary prompt text
+    through it. Closed vocabularies
     can't do that no matter who is asking.
     """
     vote: Literal["up", "down"]

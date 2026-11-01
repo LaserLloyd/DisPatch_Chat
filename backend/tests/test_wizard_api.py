@@ -1,14 +1,15 @@
 """The first-run wizard (3.0, W5), driven entirely through the API, as a script or a test would.
 
 Six steps: owner account (POST /api/auth/setup), first connection (detect + Test), voice (a link),
-family (profiles + Animal Friends), network exposure, done.
+people (Users and Basic profiles, plus the default profile), network exposure, done.
 """
 from __future__ import annotations
 
 import httpx
 import pytest
+from profiles_fixtures import add_atlas_template
 
-from app import config, connections, llm_api, settings_store
+from app import accounts, config, connections, llm_api, profiles_service, settings_store
 
 
 def _mock_http(monkeypatch, handler):
@@ -40,6 +41,7 @@ def test_a_fresh_install_needs_the_wizard_and_says_only_that_to_a_stranger(world
 def test_the_whole_wizard_by_api(world, monkeypatch):
     _lm_studio_on_loopback(monkeypatch)
     config.upsert_bot(config.Bot(id="helper", name="Helper", advisor={"providers": [], "tools": True}))
+    add_atlas_template()                       # 4.2: a fresh install ships Atlas as a template
     c = world.client()
     # 1. owner (W4's setup flow, allowed from this computer)
     assert c.post("/api/auth/setup", json={"name": "Olive", "password": "owner-pass1", "new_pin": "2468"}).status_code == 200
@@ -54,7 +56,9 @@ def test_the_whole_wizard_by_api(world, monkeypatch):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["test"]["ok"] is True and body["connection"]["models"] == ["qwen2.5-7b"]
-    assert body["assigned"] == {"character": "helper", "model": "qwen2.5-7b"}
+    assigned = body["assigned"]
+    assert {k: assigned[k] for k in ("character", "model")} == {"character": "helper", "model": "qwen2.5-7b"}
+    assert assigned["name"] == config.get_bot("helper").name         # the wizard shows the name, not the id
     assert settings_store.get("connections.default") == body["connection"]["id"]
     bot = config.get_bot(body["assigned"]["character"])
     assert bot.advisor["providers"][0]["connection"] == body["connection"]["id"]
@@ -64,16 +68,23 @@ def test_the_whole_wizard_by_api(world, monkeypatch):
     assert c.post("/api/wizard/step/voice", json={"status": "skipped"}).json() == {"step": "voice", "status": "skipped"}
     assert c.post("/api/wizard/step/connection", json={"status": "skipped"}).status_code == 409
     assert c.post("/api/wizard/step/nope", json={}).status_code == 404
-    # 4. family: a member, a child, and the Animal Friends pack
+    # 4. people: a User, a Basic profile and the default profile the lock lands on
     fam = c.post("/api/wizard/family", json={
-        "people": [{"name": "Max", "role": "member", "pin": "5555"}, {"name": "Mia", "role": "restricted"}],
-        "install_animal_friends": True})
+        "people": [{"name": "Max", "role": "user", "pin": "5555"}, {"name": "Mia", "role": "basic"}]})
     assert fam.status_code == 200, fam.text
     fb = fam.json()
-    assert [p["role"] for p in fb["created"]] == ["member", "restricted"] and len(fb["restricted"]) == 1
-    assert fb["packs"]["animal_friends"]["installed"] == ["otto", "hazel", "hoot", "pip", "maple", "bruno"]
-    otto = config.get_bot("otto")
-    assert otto.audience == "restricted" and otto.advisor["providers"][0]["connection"] == body["connection"]["id"]
+    assert [p["role"] for p in fb["created"]] == ["user", "basic"] and len(fb["basic"]) == 1
+    max_id = fb["created"][0]["id"]
+    atlas = [b for b in config.load_bots() if b.scope == "personal" and b.owner_profile == max_id]
+    assert len(atlas) == 1 and atlas[0].advisor["providers"][0]["connection"] == body["connection"]["id"]
+    # Mia (Basic) gets no bot of her own, only a managed Atlas copy; DisPatch is a User with its own
+    # Atlas and the lock target
+    # (a Basic profile's default household is every shown direct bot: Atlas and the helper template)
+    assert sorted(b.template for b in config.load_bots() if b.owner_profile == fb["basic"][0]) == ["atlas", "helper"]
+    dispatch = accounts.get_profile(fb["default_profile"])
+    assert dispatch.name == "DisPatch" and dispatch.role.value == "user" and not dispatch.has_pin
+    assert profiles_service.lock_target_profile_id() == dispatch.id
+    assert profiles_service.has_atlas(dispatch.id)
     # 5. network: local-only by default
     net = c.post("/api/wizard/network", json={"exposure": "local"}).json()
     assert net["exposure"] == "local" and not net["mismatch"] and settings_store.get("system.network_exposure") == "local"
@@ -128,11 +139,11 @@ def test_the_wizard_routes_follow_the_permissions(world):
     people = {p["name"]: p for p in owner.get("/api/people").json()["profiles"]}
     world.login(members, profile_id=people["Max"]["id"], pin="5555")
     for c in (members, world.client(("203.0.113.93", 44004))):
-        assert c.post("/api/wizard/detect", json={}).status_code == 403
-        assert c.post("/api/wizard/connection", json={"type": "ollama"}).status_code == 403
-        assert c.post("/api/wizard/family", json={"people": []}).status_code == 403
-        assert c.post("/api/wizard/network", json={"exposure": "local"}).status_code == 403
-        assert c.post("/api/wizard/finish").status_code == 403
+        assert c.post("/api/wizard/detect", json={}).status_code in (401, 403)
+        assert c.post("/api/wizard/connection", json={"type": "ollama"}).status_code in (401, 403)
+        assert c.post("/api/wizard/family", json={"people": []}).status_code in (401, 403)
+        assert c.post("/api/wizard/network", json={"exposure": "local"}).status_code in (401, 403)
+        assert c.post("/api/wizard/finish").status_code in (401, 403)
         assert c.get("/api/wizard").json().keys() == {"needed", "claimed"}      # no checklist for them
     assert "steps" in owner.get("/api/wizard").json()
 
@@ -201,14 +212,3 @@ def test_a_wizard_connection_becomes_the_default_when_the_stored_one_is_gone(wor
     assert body["test"]["ok"] is True
     assert settings_store.get("connections.default") == body["connection"]["id"] != gone
     assert c.get("/api/connections").json()["default"] == body["connection"]["id"]
-
-
-def test_a_starter_pack_ignores_a_dangling_default_connection(world):
-    c = world.create_owner()
-    _dangling_default()
-    assert c.get("/api/connections").json()["default"] == ""
-    fam = c.post("/api/wizard/family", json={"people": [], "install_animal_friends": True})
-    assert fam.status_code == 200, fam.text
-    assert fam.json()["packs"]["animal_friends"]["installed"]
-    otto = config.get_bot("otto")
-    assert not any((p or {}).get("connection") for p in (otto.advisor or {}).get("providers", []))

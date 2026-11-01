@@ -144,9 +144,13 @@ def _security_read(d: SettingDef) -> Any:
         "lock_timeout_seconds": cfg.lock_timeout,
         "remember_device_days": cfg.remember_days,
         "machine_loopback_trust": cfg.machine_loopback_trust,
-        "anonymous_access": cfg.anonymous_access,
-        "session_timeout_member": cfg.session_timeouts.get("member"),
-        "session_timeout_restricted": cfg.session_timeouts.get("restricted"),
+        # 4.0: keyed by Role value (session_timeout_user / _basic in security.yaml).
+        "session_timeout_user": cfg.session_timeouts.get("user"),
+        "session_timeout_basic": cfg.session_timeouts.get("basic"),
+        "lock_target": cfg.lock_target,
+        "default_profile": cfg.default_profile or "",
+        "host_check": cfg.host_check,
+        "allowed_hosts": list(cfg.allowed_hosts or []),
     }.get(n, MISSING)
 
 
@@ -156,16 +160,34 @@ def _security_write(d: SettingDef, value: Any) -> None:
     if n == "remember_device_days":
         auth.set_remember_days(int(value))          # also forgets devices when it goes to 0
         return
+    if n in ("lock_target", "default_profile"):
+        # Validated and fence-checked in one place (auth.set_lock_target).
+        from . import accounts
+        cfg = auth.load()
+        target = str(value) if n == "lock_target" else cfg.lock_target
+        pid = (str(value) or None) if n == "default_profile" else cfg.default_profile
+        try:
+            auth.set_lock_target(target, pid)
+        except accounts.AccountError as e:
+            raise SettingError(d.key, str(e)) from e
+        return
     with auth._lock:
         cfg = auth.load()
         if n == "lock_timeout_seconds":
             cfg.lock_timeout = int(value)
         elif n == "machine_loopback_trust":
             cfg.machine_loopback_trust = bool(value)
-        elif n == "anonymous_access":
-            cfg.anonymous_access = str(value)
-        elif n in ("session_timeout_member", "session_timeout_restricted"):
-            cfg.session_timeouts = {**cfg.session_timeouts, n.rsplit("_", 1)[1]: int(value)}
+        elif n == "host_check":
+            cfg.host_check = str(value) if str(value) in auth.HOST_CHECK_MODES else "log"
+        elif n == "allowed_hosts":
+            from . import policy
+            try:
+                cfg.allowed_hosts = policy.normalize_host_entries(value or [])
+            except ValueError as e:
+                raise SettingError(d.key, f"{d.label}: {e}") from e
+        elif n in ("session_timeout_user", "session_timeout_basic"):
+            role = "user" if n == "session_timeout_user" else "basic"
+            cfg.session_timeouts = {**cfg.session_timeouts, role: int(value)}
         else:                                       # pragma: no cover - schema/adapter drift
             raise SettingError(d.key, f"{d.label}: no writer for this setting")
         auth._write(cfg)
@@ -226,6 +248,13 @@ def _env_hit(d: SettingDef) -> tuple[str, str] | None:
         if name in os.environ:
             return name, os.environ[name]
     return None
+
+
+def env_pinned(key: str) -> str | None:
+    """The environment variable that sets ``key`` (a write would be refused), or None."""
+    d = settings_schema.get_def(key)
+    hit = _env_hit(d) if d is not None else None
+    return hit[0] if hit else None
 
 
 def _row(key: str) -> sqlite3.Row | None:
@@ -301,10 +330,6 @@ def get(key: str, default: Any = MISSING) -> Any:
     if default is MISSING:
         raise KeyError(key)
     return default
-
-
-def all_resolved(defs: list[SettingDef] | None = None) -> dict[str, Resolved]:
-    return {d.key: resolve(d.key) for d in (defs or settings_schema.all_defs())}
 
 
 def extra_values() -> dict[str, Any]:
@@ -402,15 +427,60 @@ def set_many(changes: dict[str, Any], *, actor: str = "", reset: list[str] | Non
         if d is None:
             continue
         if d.owner_only and not owner:
-            res.errors[k] = f"{d.label}: only the Owner or an Admin can change this"
+            res.errors[k] = f"{d.label}: only an Admin can change this"
             continue
         hit = _env_hit(d)
         if hit is not None:
             res.errors[k] = (f"{d.label} is set by the environment variable {hit[0]}; "
                              "change it there (or unset it) and restart")
+    # The lock target and the default profile are one decision (auth.set_lock_target): check
+    # the pair they make together BEFORE anything is written, so a refusal is a 422 with the
+    # reason and never a half-applied PATCH, and apply them in one step below.
+    lock_keys = [k for k in ("people.lock_target", "people.default_profile") if k in coerced or k in reset]
+    lock_pair: tuple[str, str | None] | None = None
+    if lock_keys and not res.errors:
+        from . import accounts, auth
+        cfg = auth.load()
+
+        def _want(key: str, now: Any) -> Any:
+            if key in reset:
+                d = settings_schema.get_def(key)
+                return d.default if d is not None else now
+            return coerced.get(key, now)
+        target = str(_want("people.lock_target", cfg.lock_target) or "profile_list")
+        pid = str(_want("people.default_profile", cfg.default_profile or "") or "") or None
+        try:
+            auth.check_lock_target(target, pid)
+            if "people.default_profile" in coerced and pid and target != "default_profile":
+                # A default profile named now is checked now, not only when the landing is
+                # switched to it later (which would then refuse a choice made long before).
+                auth.check_lock_target("default_profile", pid)
+            lock_pair = (target, pid)
+        except accounts.AccountError as e:
+            for k in lock_keys:
+                res.errors[k] = str(e)
+    # 4.3 Fable: every allowed_hosts entry must be a name, an address or *.name (a bare "*"
+    # would switch the Host guard off), checked before anything is written.
+    if "people.allowed_hosts" in coerced:
+        from . import policy
+        try:
+            coerced["people.allowed_hosts"] = policy.normalize_host_entries(coerced["people.allowed_hosts"])
+        except ValueError as e:
+            res.errors["people.allowed_hosts"] = f"{settings_schema.get_def('people.allowed_hosts').label}: {e}"
     if res.errors:
         return res
     with _lock:
+        if lock_pair is not None:
+            from . import auth
+            auth.set_lock_target(*lock_pair)
+            for k in lock_keys:
+                if k in reset:
+                    _del_row(k)
+                else:
+                    _put_row(k, coerced[k], "user", actor)
+                res.changed.append(k)
+            coerced = {k: v for k, v in coerced.items() if k not in lock_keys}
+            reset = [k for k in reset if k not in lock_keys]
         for k in reset:
             d = settings_schema.get_def(k)
             assert d is not None
@@ -486,6 +556,10 @@ _SECRETISH = re.compile(r"(key|token|secret|password|passwd|pin|hash|salt|creden
 _SECURITY_INTERNAL = frozenset({"pin", "pin_hash", "salt", "iterations", "recovery_hash",
                                 "recovery_salt", "api_token"})
 _SECURITY_MAPPED = frozenset({"lock_timeout_seconds", "remember_device_days", "machine_loopback_trust",
+                              "session_timeout_user", "session_timeout_basic",
+                              "lock_target", "default_profile",
+                              "host_check", "allowed_hosts",
+                              # 3.x names: read by auth.load as fallbacks / by migration 010
                               "anonymous_access", "session_timeout_member",
                               "session_timeout_restricted"})
 
@@ -644,6 +718,18 @@ def _meta_ro() -> dict[str, str]:
 # --------------------------------------------------------------------------- #
 
 
+def masked(value: Any) -> dict:
+    """What the API shows for a value whose meaning the schema does not know (4.3, N-17): that
+    it is there, its JSON type and its length, never the value (a namespace writer may store a
+    token under any key name)."""
+    kind = ("null" if value is None else "boolean" if isinstance(value, bool)
+            else "number" if isinstance(value, (int, float)) else "string" if isinstance(value, str)
+            else "list" if isinstance(value, list) else "object" if isinstance(value, dict)
+            else "other")
+    length = len(value) if isinstance(value, (str, list, dict)) else len(json.dumps(value, default=str))
+    return {"masked": True, "type": kind, "length": length}
+
+
 def values_document(*, group: str | None = None, level: str | None = None,
                     q: str | None = None) -> dict:
     defs = settings_schema.all_defs()
@@ -664,6 +750,7 @@ def values_document(*, group: str | None = None, level: str | None = None,
         "schema": settings_schema.SCHEMA_VERSION,
         "values": values,
         "restart_required": sorted(k for k, v in values.items() if v["restart_pending"]),
-        "unknown": unknown(),
-        "extra": extra_values() if not (group or needle) else {},
+        # Keys the schema does not define: never their values (4.3, N-17).
+        "unknown": [{**u, "value": masked(u.get("value"))} for u in unknown()],
+        "extra": ({k: masked(v) for k, v in extra_values().items()} if not (group or needle) else {}),
     }

@@ -62,6 +62,19 @@ export function loadStyle(href) {
   return p;
 }
 
+// The API layer throws Error("409: <server sentence>") and keeps the number on
+// err.status; people should only ever read the sentence. toast() runs every
+// message through this, so no caller has to remember to strip it.
+const STATUS_PREFIX = /^\d{3}:\s*/;
+export function toastText(msg) { return String(msg ?? '').replace(STATUS_PREFIX, ''); }
+
+/** An API error as a sentence for people: the server's words plus its fix, no status number. */
+export function errorText(e) {
+  if (!e) return '';
+  const msg = toastText(e.userMessage || e.message || e);
+  return e.fix ? `${msg} ${e.fix}` : msg;
+}
+
 export function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -132,7 +145,7 @@ const LEADING_GLYPH = /^(?:[\p{Extended_Pictographic}←-⇿⌀-➿⬀-⯿️‍
  *  guard, the image lightbox, the Local Viewer and the job detail overlay.
  *  Each wrote the attribute unconditionally, so whichever surface closed FIRST
  *  lifted it for all of them. Two real paths hit this: closing an avatar
- *  lightbox opened from the Bot Manager re-enabled the Bot Manager's backdrop
+ *  lightbox opened from Settings re-enabled the Settings backdrop
  *  underneath, and the drop backdrop toggling during a drag made the guard
  *  decide "no modal is open" and strip the job overlay's inert. Either way Tab
  *  escapes a dialog that declares aria-modal — the exact promise the trap
@@ -173,12 +186,6 @@ export function releaseInert(token) {
   }
 }
 
-/** Escape hatch for a hard reset (a lock, a view teardown): drop every hold. */
-export function resetInert() {
-  _inertHeld.clear();
-  for (const node of _inertTargets()) node.removeAttribute('inert');
-}
-
 export function glyphless(s) {
   return String(s ?? '').replace(LEADING_GLYPH, '').trim();
 }
@@ -190,17 +197,28 @@ export function iconLabel(icon, label) {
   return [railIcon(icon), document.createTextNode(text ? ` ${text}` : '')];
 }
 
-/** One icon: an array of path `d` strings on a 24×24 grid → an <svg>. */
+/** One icon. The shared set (RAIL_ICONS values) draws from the ThemeForge sprite:
+ *  `<svg><use href="/static/ui-theme/icons.svg#name"/></svg>`, the name found through
+ *  ICON_MAP, so a theme's colour and stroke weight apply (`--icon-stroke`). An array of
+ *  path `d` strings that is not in the shared set (an app's own glyph) is drawn inline
+ *  on the same 24x24 grid, as before. */
 export function railIcon(paths) {
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('fill', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('rail-icon');
+  const sprite = SPRITE_NAME.get(paths);
+  if (sprite) {
+    const use = document.createElementNS(SVG_NS, 'use');
+    use.setAttribute('href', `${ICON_SPRITE}#${sprite}`);
+    svg.append(use);
+    return svg;
+  }
   svg.setAttribute('stroke', 'currentColor');
   svg.setAttribute('stroke-width', '1.8');
   svg.setAttribute('stroke-linecap', 'round');
   svg.setAttribute('stroke-linejoin', 'round');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.classList.add('rail-icon');
   for (const d of paths) {
     const p = document.createElementNS(SVG_NS, 'path');
     p.setAttribute('d', d);
@@ -211,7 +229,7 @@ export function railIcon(paths) {
 
 /** The shared set, named by meaning.
  *
- *  Grew past the rail in 2026-09: the tab bar, the settings tab strip, the
+ *  Grew past the rail in 2026-09: the tab bar, the Settings nav, the
  *  chat header and the composer all shipped colour EMOJI as their glyphs, and
  *  emoji are drawn by the platform in its own palette. They cannot take a
  *  theme. Next to the rail's line art — and on Paper or Daylight especially —
@@ -353,7 +371,7 @@ export const RAIL_ICONS = {
     'M9 15.3h3.8',
   ],
 
-  // --- The settings tab strip ----------------------------------------------
+  // --- The Settings nav (once a tab strip) ---------------------------------
   bolt: ['M13.5 3 5.5 13.5h5.2L10 21l8.2-10.6H13Z'],          // reactions
   pulse: ['M3 12.5h3.6L9 5.5l4.2 13 2.4-6h5.4'],              // host health
   chip: [                                                      // AI models
@@ -544,3 +562,75 @@ export const RAIL_ICONS = {
     'M12 14.7a2.7 2.7 0 1 0 0-5.4 2.7 2.7 0 0 0 0 5.4Z',
   ],
 };
+
+/** RAIL_ICONS key -> ThemeForge 2.0.1 icon name (BUILD-PLAN-v2 §9). 67 keys, one per
+ *  RAIL_ICONS entry; every value exists in ui-theme/icons.json of ThemeForge v2.0.1.
+ *  railIcon()/uiIcon() draw the icon from the vendored sprite
+ *  (`<use href="/static/ui-theme/icons.svg#<name>">`) through this map. */
+export const ICON_MAP = Object.freeze({
+  nim: 'image-off', privacy: 'eye-off', avatars: 'user', link: 'link', moon: 'moon', sun: 'sun',
+  lock: 'lock', unlock: 'lock-open', folder: 'folder', upload: 'upload',
+  'viewer-back': 'arrow-left', 'viewer-open': 'external-link', 'viewer-download': 'download',
+  'viewer-reload': 'refresh-cw', 'viewer-folder': 'folder', 'viewer-file': 'file-text',
+  gear: 'settings', bots: 'bot', chats: 'messages-square', messages: 'message-circle',
+  jobs: 'clipboard-list', bolt: 'zap', pulse: 'activity', chip: 'cpu', palette: 'palette',
+  device: 'smartphone', shield: 'shield', images: 'image', camera: 'camera', plug: 'plug',
+  search: 'search', plus: 'plus', close: 'x', back: 'arrow-left', forward: 'arrow-right',
+  'chevron-down': 'chevron-down', popout: 'external-link', menu: 'menu', copy: 'copy',
+  tick: 'check', reply: 'reply', regenerate: 'refresh-cw', attach: 'paperclip', send: 'send',
+  stop: 'square', tools: 'wrench', terminal: 'terminal', mail: 'mail', users: 'users',
+  chart: 'chart-column', pin: 'pin', rename: 'pencil', archive: 'archive', trash: 'trash',
+  lifering: 'life-buoy', thumbsup: 'thumbs-up', thumbsdown: 'thumbs-down', sparkle: 'sparkles',
+  check: 'circle-check', alert: 'triangle-alert', history: 'history', disk: 'save',
+  database: 'database', help: 'circle-question-mark', user: 'user', brain: 'brain', eye: 'eye',
+});
+
+const ICON_SPRITE = '/static/ui-theme/icons.svg';
+// RAIL_ICONS value (the path array itself) -> sprite symbol name. railIcon() takes the
+// array, so callers stay as they are.
+const SPRITE_NAME = new Map(Object.entries(RAIL_ICONS).map(([key, paths]) => [paths, ICON_MAP[key]]));
+
+/** Any ThemeForge sprite symbol by its own name (`spriteIcon('play')`), for chrome that has
+ *  no RAIL_ICONS key (the 67-key map stays the shared set). Same <svg class="rail-icon">
+ *  as railIcon(), so the per-context size rules apply; `size` is the fallback width/height
+ *  attribute when none does. */
+export function spriteIcon(name, size = 16) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('width', String(size));
+  svg.setAttribute('height', String(size));
+  svg.classList.add('rail-icon');
+  const use = document.createElementNS(SVG_NS, 'use');
+  use.setAttribute('href', `${ICON_SPRITE}#${name}`);
+  svg.append(use);
+  return svg;
+}
+
+/** The same icon as markup, for template strings: `spriteIconHtml('check')`. */
+export function spriteIconHtml(name, size = 16) {
+  return `<svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="${size}" height="${size}"><use href="${ICON_SPRITE}#${name}"/></svg>`;
+}
+
+/** One named chrome icon: `uiIcon('gear')` or `uiIcon('gear', { label: 'Settings', size: 20 })`.
+ *
+ *  Draws the ThemeForge sprite symbol ICON_MAP names (the same <svg> railIcon() makes),
+ *  `size` sets width/height in px, and `label` makes the icon an image with that
+ *  accessible name instead of aria-hidden decoration. An unknown name returns null. */
+export function uiIcon(name, { label = '', size = 0 } = {}) {
+  const paths = RAIL_ICONS[name];
+  if (!paths || !ICON_MAP[name]) return null;
+  const svg = railIcon(paths);
+  svg.dataset.icon = name;
+  if (size > 0) {
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+  }
+  if (label) {
+    svg.removeAttribute('aria-hidden');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', String(label));
+  }
+  return svg;
+}

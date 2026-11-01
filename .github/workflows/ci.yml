@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+# Run every job below on your own machine first: `scripts/ci-local.sh`
+# (it mirrors this file job by job; it never pushes and never builds images).
+# Keep the two in step when you add or change a job.
+
 # Action majors are kept in step with .github/workflows/docker-publish.yml —
 # bump both together, or the two files drift into different runtimes.
 
@@ -110,10 +114,12 @@ jobs:
         # missing or changed overlay, or settings naming a theme the bundle lacks.
         # Fix: `python -m forgeui vendor` (docs/development.md, "Themes"). forgeui is
         # installed from a pinned ThemeForge commit, never PyPI (that name belongs to
-        # another project). TODO: switch to `@v1.2.0` once the owner tags that release.
+        # another project). Pinned to the v2.0.1 release commit. The distribution is
+        # named `themeforge` (it provides the `forgeui` module): a `forgeui @ git+...`
+        # requirement fails with "metadata name `themeforge` does not match".
         run: |
           uv venv --python 3.12 .forgeui-venv
-          uv pip install --python .forgeui-venv "forgeui @ git+https://github.com/LaserLloyd/ThemeForge@d70f6608bdf386fc095d43fc1caec61e88664795"
+          uv pip install --python .forgeui-venv "themeforge @ git+https://github.com/LaserLloyd/ThemeForge@9d5a2c25ad641423df3615a38c7642011a91833d"
           .forgeui-venv/bin/python -m forgeui vendor --check
       - uses: actions/setup-node@v4
         with:
@@ -124,9 +130,11 @@ jobs:
         # setup-node, not `apt-get install nodejs`: the distro package is years
         # behind and `node --test` (used below) needs a current runtime.
         run: |
+          # $RUNNER_TEMP, not /tmp: scripts/ci-local.sh runs this same loop on a
+          # developer machine where /tmp may be a small, quota'd tmpfs.
           for f in frontend/static/js/*.js frontend/static/sw.js; do
-            cp "$f" /tmp/check.mjs
-            node --check /tmp/check.mjs || { echo "::error file=$f::syntax error"; exit 1; }
+            cp "$f" "$RUNNER_TEMP/check.mjs"
+            node --check "$RUNNER_TEMP/check.mjs" || { echo "::error file=$f::syntax error"; exit 1; }
           done
           echo "All frontend modules parse."
       - name: Install test dependencies

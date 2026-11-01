@@ -492,12 +492,12 @@ def test_routes_serve_machines_and_full_sessions_only(client):
     r = client.get("/api/avatar-pool")
     assert r.status_code == 200
     assert r.json()["pools"]["main"]["ready"] == 1
-    # A sessionless BROWSER is Safe Mode even on loopback: refused.
+    # A sessionless BROWSER is signed out even on loopback: refused.
     assert client.get("/api/avatar-pool", headers=BROWSER).status_code in (401, 403)
 
 
-def test_locked_browser_cannot_manage_the_pool(client):
-    auth.set_pin("4321")               # PIN set, NOT unlocked -> decoy session
+def test_signed_out_browser_cannot_manage_the_pool(client):
+    auth.set_pin("4321")               # PIN set, NOT signed in -> signed out
     r = client.get("/api/avatar-pool", headers=BROWSER)
     assert r.status_code in (401, 403)
     r = client.put("/api/avatar-pool/main", headers=BROWSER, json={"target": 1})

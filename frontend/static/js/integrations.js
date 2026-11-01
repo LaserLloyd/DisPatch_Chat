@@ -14,8 +14,8 @@
 // and every route it calls is operator-only on the server. A key typed here is
 // sent once and never comes back (the server answers `has_key` only).
 
-import { t } from './i18n.js?v=4';
-import { el } from './util.js?v=20';
+import { t } from './i18n.js?v=5';
+import { el, spriteIcon } from './util.js?v=23';
 
 async function json(url, opts = {}) {
   const r = await fetch(url, { headers: { Accept: 'application/json' }, ...opts });
@@ -52,7 +52,8 @@ const note = (text, id) => el('p', { class: 'sec-note muted', id, text });
 
 // ===================== One key, every capability =====================
 
-const MARK = { ok: '✓', absent: '—', failed: '✗', skipped: '•' };
+const MARK = { ok: 'check', absent: null, failed: 'x', skipped: null };
+const MARK_TEXT = { absent: '—', skipped: '•' };
 
 // The last checklist, kept for the life of the page: connecting Atlas pushes a
 // new roster, and the AI tab re-mounts on that — which used to wipe the result
@@ -63,7 +64,7 @@ export function renderChecklist(list, rows) {
   list.replaceChildren(...(rows || []).map((r) => el('li', {
     class: `qs-row qs-${r.status}`, dataset: { cap: r.id, status: r.status },
   }, [
-    el('span', { class: 'qs-mark', 'aria-hidden': 'true', text: MARK[r.status] || '•' }),
+    el('span', { class: 'qs-mark', 'aria-hidden': 'true' }, [MARK[r.status] ? spriteIcon(MARK[r.status], 14) : (MARK_TEXT[r.status] || '•')]),
     el('span', { class: 'qs-text' }, [
       el('strong', { text: r.label }),
       r.detail ? el('span', { class: 'qs-detail', text: ` — ${r.detail}` }) : null,
@@ -84,10 +85,10 @@ export async function mountQuickSetup(host, deps = {}) {
     placeholder: t('integrations.qs_key_placeholder'),
   });
   const docs = el('a', { class: 'llm-docs', target: '_blank', rel: 'noopener noreferrer',
-    text: t('llm.docs_link') });
+    text: t('llm.docs_link'), title: t('llm.docs_link'), 'aria-label': t('llm.docs_link') });
   const what = note('', 'qs-what');
   const go = el('button', { type: 'button', class: 'btn-primary', id: 'qs-go',
-    text: t('integrations.qs_go') });
+    text: t('integrations.qs_go'), title: t('integrations.qs_go'), 'aria-label': t('integrations.qs_go') });
   const result = el('span', { class: 'llm-result', id: 'qs-result', role: 'status', 'aria-live': 'polite' });
   const list = el('ul', { class: 'qs-list', id: 'qs-list' });
   const paint = () => {
@@ -179,7 +180,7 @@ export async function mountImageSection(host, deps = {}) {
   const model = el('input', { type: 'text', id: 'img-model', autocomplete: 'off', spellcheck: 'false' });
   const key = el('input', { type: 'password', id: 'img-key', autocomplete: 'off', spellcheck: 'false' });
   const keyEnv = el('input', { type: 'text', id: 'img-key-env', autocomplete: 'off', spellcheck: 'false' });
-  const docs = el('a', { class: 'llm-docs', target: '_blank', rel: 'noopener noreferrer', text: t('llm.docs_link') });
+  const docs = el('a', { class: 'llm-docs', target: '_blank', rel: 'noopener noreferrer', text: t('llm.docs_link'), title: t('llm.docs_link'), 'aria-label': t('llm.docs_link') });
   const price = note('', 'img-price');
   const status = el('p', { class: 'sec-note', id: 'img-status', role: 'status' });
   const test = el('button', { type: 'button', class: 'btn-secondary', id: 'img-test', text: t('integrations.img_test') });

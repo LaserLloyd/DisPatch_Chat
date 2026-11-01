@@ -4,7 +4,7 @@
 // and can hand work to agents. Research goes out on its own; anything that
 // DOES something is proposed instead: the server posts the brief as an
 // ordinary assistant message whose metadata carries `advisor_handoff`, and
-// nothing runs until somebody with an unlocked session presses Send here.
+// nothing runs until a signed-in profile allowed to start agents presses Send here.
 //
 // The card's text comes from the SERVER-STAMPED metadata
 // (`advisor_handoff.brief`), never from the message body: a body is whatever
@@ -15,8 +15,8 @@
 // every transition and broadcasts `message_update`, so a reload — or another
 // device — shows the same state without asking.
 
-import { el } from './util.js?v=20';
-import { t } from './i18n.js?v=4';
+import { el } from './util.js?v=23';
+import { t } from './i18n.js?v=5';
 
 const STATES = ['proposed', 'running', 'done', 'failed', 'dismissed'];
 
@@ -50,11 +50,10 @@ export function handoffBodyMarkdown(msg) {
 }
 
 /**
- * The strip under a handoff card. `decoy` hides the buttons (a locked device
- * may see that something was proposed, never approve it). `send` / `dismiss`
- * are async callbacks taking (request id, card message id).
+ * The strip under a handoff card. `send` / `dismiss` are async callbacks taking
+ * (request id, card message id); the server checks who may send it.
  */
-export function handoffStripEl(msg, { decoy = false, send, dismiss } = {}) {
+export function handoffStripEl(msg, { send, dismiss } = {}) {
   const h = handoffState(msg);
   if (!h) return null;
   const strip = el('div', { class: `advisor-handoff advisor-${h.state}` });
@@ -63,7 +62,7 @@ export function handoffStripEl(msg, { decoy = false, send, dismiss } = {}) {
   if (h.state === 'failed' && h.error) {
     strip.append(el('span', { class: 'advisor-error', dir: 'auto', text: h.error }));
   }
-  if (!h.actionable || decoy) return strip;
+  if (!h.actionable) return strip;
 
   const sendBtn = el('button', { type: 'button', class: 'btn btn-primary advisor-send',
     text: t('advisor.send', { agent: h.agent }) });

@@ -2,7 +2,7 @@
 
 Two doors, both closed to the network on purpose:
 
-* ``python -m app owner reset`` / ``python -m app users passwd <owner>`` (``app/cli.py``) run in
+* ``python -m app admin reset`` / ``python -m app users passwd <owner>`` (``app/cli.py``) run in
   a terminal on the host, or inside the container with ``docker compose exec app ...``.
 * A **sentinel file** or an **environment variable**, read exactly once while the server starts
   (:func:`apply_startup_reset`, called from the lifespan and from nowhere else). No request
@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import accounts, auth, config, credentials
+from .contracts.permissions import Role
 
 log = logging.getLogger("local-chat.recovery")
 
@@ -71,10 +72,6 @@ class OwnerReset:
     setup_token: str
 
 
-def sentinel_path() -> Path:
-    return Path(config.DATA_DIR) / SENTINEL_NAME
-
-
 def sentinel_paths() -> list[Path]:
     return [Path(config.DATA_DIR) / n for n in SENTINEL_NAMES]
 
@@ -98,6 +95,9 @@ def reset_owner(*, via: str) -> OwnerReset:
     had_pin = cfg.pin_set
     had_password = bool(owner and owner.has_password)
     if owner is not None:
+        # 4.3 (#24): a full credential reset drops outside sign-ins too (else I11 fires and an
+        # IdP account would still open a profile whose local credentials were just cleared).
+        accounts.delete_oidc_links(owner.id)
         accounts.update_profile(owner.id, password_hash=None, pin_hash=None)
     if cfg.pin_set:
         auth.clear_pin()                 # security.yaml's PIN, the recovery code, the owner's sessions
@@ -119,7 +119,8 @@ def set_owner_password(name: str, password: str, *, via: str) -> tuple[accounts.
     created = False
     try:
         if owner is None:
-            owner = accounts.create_profile(name, "owner", password_hash=credentials.hash_secret(password))
+            owner = accounts.create_profile(name, Role.ADMIN, protected=True,
+                                            password_hash=credentials.hash_secret(password))
             created = True
         else:
             if owner.name.casefold() != name.strip().casefold():

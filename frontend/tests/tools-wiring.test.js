@@ -163,9 +163,8 @@ test('Settings → Plugins & Apps is an admin-only section; the tools table live
   assert.match(TOOLS, /cb\.addEventListener\('change', \(\) => \{ draft\[idx\]\.enabled = cb\.checked; draftDirty = true; saveSoon\(\); \}\);/);
 });
 
-test('the deep link opens only unlocked, after the feature probes', () => {
-  assert.match(MAIN, /if \(!state\.decoy\) openFromHash\(\);/);
-  assert.match(fnBody(TOOLS, 'openFromHash'), /deps\.state\.decoy/);
+test('the deep link opens after the feature probes', () => {
+  assert.match(MAIN, /await extLoader\.refresh\(\)\.catch\(\(\) => \{\}\);\s+openFromHash\(\);/);
 });
 
 test('api.js exposes the four tools calls', () => {
@@ -213,7 +212,7 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v183 (3.0.0, W5 + W11b, the api.js importer bumps, then the 2026-10-19 permission orders)', () => {
+test('the sw.js CACHE is local-chat-v202 (4.3.0 + the Fable review fixes + the packs round)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
   // v181: round-3 fixes (a later deep link wins over one still mounting; backups-card notes).
@@ -290,7 +289,7 @@ test('the sw.js CACHE is local-chat-v183 (3.0.0, W5 + W11b, the api.js importer 
   // v168: ForgeUI 1.2.0 vendored whole (ui-components + locales join SHELL; dispatch-extra.css).
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v183');
+  assert.equal(m[1], 'local-chat-v202');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {
@@ -388,18 +387,17 @@ test('the app tests are collected by npm test', () => {
 // enough that the behaviour, not just the text, can be pinned.
 // -----------------------------------------------------------------------------
 
-function appOpener({ decoy = false, bots = [], threads = [], apps = {} } = {}) {
+function appOpener({ apps = {} } = {}) {
   const hintKeyDecl = /const hintKey = \([^;]+;/.exec(MAIN);
   assert.ok(hintKeyDecl, 'main.js declares hintKey');
   const src = [
     hintKeyDecl[0],
     'const pendingHints = new Map();',
-    fnBody(MAIN, 'appThreadAllowed') + '\n}',
     fnBody(MAIN, 'openThreadFromApp') + '\n}',
     'return { openThreadFromApp, pendingHints, hintKey };',
   ].join('\n');
   const opened = [];
-  const state = { decoy, bots, threads, activeThreadId: null };
+  const state = { activeThreadId: null };
   const make = new Function('state', 'appForBot', 'openThread', 'syncAppHook', 'isMobile', 'navigate', src);
   const api = make(state, (b) => apps[b] || null, (id, o) => opened.push([id, o]), () => {}, () => false, () => {});
   return { ...api, opened, state };
@@ -424,20 +422,9 @@ test('an app hint is keyed by app AND thread, so another app on the same bot can
   assert.match(sync, /openThreadFromApp\(id, \{[^}]*appId: app\.id \}\)/);
 });
 
-test('Safe Mode: an app may only open a thread whose bot is in the (safe) roster', () => {
-  const safe = appOpener({ decoy: true, bots: [{ id: 'alpha' }],
-    threads: [{ id: 'thr-a', bot_id: 'Alpha' }, { id: 'thr-s', bot_id: 'scout' }] });
-  safe.openThreadFromApp('thr-s', { botId: 'scout', hint: { x: 1 }, appId: 'jobboard' });
-  safe.openThreadFromApp('thr-unknown', { botId: 'scout', appId: 'jobboard' });
-  safe.openThreadFromApp('thr-unknown', { appId: 'jobboard' });
-  // A thread known to belong to a hidden bot is refused even if the app claims a safe one.
-  safe.openThreadFromApp('thr-s', { botId: 'alpha', appId: 'jobboard' });
-  assert.deepEqual(safe.opened, [], 'nothing opened for a bot this session cannot see');
-  assert.equal(safe.pendingHints.size, 0, 'and no hint was parked');
-  safe.openThreadFromApp('thr-a', { botId: null, appId: 'x' });
-  assert.deepEqual(safe.opened, [['thr-a', { botId: null }]], 'the thread’s own bot is safe (case-blind)');
-  // Unlocked: unchanged.
-  const open = appOpener({ decoy: false, bots: [], threads: [] });
-  open.openThreadFromApp('thr-s', { botId: 'scout', appId: 'jobboard' });
-  assert.deepEqual(open.opened, [['thr-s', { botId: 'scout' }]]);
+test('an app opens a thread without a client-side roster check (the server owns who may read it)', () => {
+  const o = appOpener({});
+  o.openThreadFromApp('thr-x', { botId: 'scout', appId: 'jobboard' });
+  assert.deepEqual(o.opened, [['thr-x', { botId: 'scout' }]]);
+  assert.doesNotMatch(MAIN, /appThreadAllowed/);
 });

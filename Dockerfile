@@ -85,8 +85,21 @@ COPY backend/pyproject.toml backend/uv.lock ./
 # `--no-install-project`: install dependencies only, not this project. This
 # repo sets `[tool.uv] package = false` so there is nothing to install either
 # way, but stating it keeps the layer honest if that ever changes.
+# --- Optional: the Claude Agent backend (issue #12) --------------------------
+# `docker compose build --build-arg AGENTS_CLAUDE=1` adds the `agents-claude` extra
+# (claude-agent-sdk, pinned exactly in pyproject.toml). The SDK's wheel BUNDLES the
+# native `claude` CLI (claude_agent_sdk/_bundled/claude), so there is no Node.js and no
+# separate CLI install; it costs roughly 300 MB of image. At run time it writes its
+# config and transcripts under $HOME/.claude and its scratch under $TMPDIR, which the
+# runtime stage puts on /data (HOME=/data/home, TMPDIR=/data/tmp), so a read-only root
+# works. Both `uv sync` calls below pass the extra: the second one is exact and would
+# uninstall it otherwise.
+ARG AGENTS_CLAUDE=0
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-install-project
+    set -eu; \
+    case "$AGENTS_CLAUDE" in 0) extra="" ;; 1) extra="--extra agents-claude" ;; \
+      *) echo "AGENTS_CLAUDE must be 0 or 1, got: $AGENTS_CLAUDE"; exit 1 ;; esac; \
+    uv sync --locked --no-install-project $extra
 
 # --- Application layer -----------------------------------------------------
 COPY backend/ /app/backend/
@@ -95,7 +108,11 @@ COPY frontend/ /app/frontend/
 # Second sync is a near-no-op for a `package = false` project, but it is what
 # picks up the project itself the moment someone flips that flag.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked
+    set -eu; \
+    case "$AGENTS_CLAUDE" in 0) extra="" ;; 1) extra="--extra agents-claude" ;; \
+      *) echo "AGENTS_CLAUDE must be 0 or 1, got: $AGENTS_CLAUDE"; exit 1 ;; esac; \
+    uv sync --locked $extra; \
+    if [ "$AGENTS_CLAUDE" = "1" ]; then /app/.venv/bin/python -I -c "import claude_agent_sdk"; fi
 
 # --- Optional: voice chat (the DisPatch Voice add-on, MIT) -----------------
 # `docker compose build --build-arg VOICE=1`. AFTER the `uv sync` above, which
@@ -203,8 +220,15 @@ RUN set -eu; \
 # owned by the person running `docker compose up` is writable with no further
 # ceremony. Picking 999 or a random high id is "more correct" and generates a
 # permission-denied support thread for every single Linux user.
+#
+# HOME is /data/home, on the data volume, not /home/app in the image (issue #38).
+# Under a read-only root anything that writes to ~ would fail otherwise: the voice
+# add-on's rig token, the Claude Agent SDK's ~/.claude, Python's user caches. The
+# entrypoint creates it (0700) when it is missing; a bind mount carries it like
+# any other data.
 RUN groupadd --gid 1000 app \
- && useradd --uid 1000 --gid 1000 --create-home --shell /usr/sbin/nologin app
+ && useradd --uid 1000 --gid 1000 --home-dir /data/home --no-create-home \
+            --shell /usr/sbin/nologin app
 
 # --- Application -----------------------------------------------------------
 COPY --from=builder --chown=app:app /app/.venv   /app/.venv
@@ -236,6 +260,7 @@ ENV LOCAL_CHAT_DATA_DIR=/data \
     LOCAL_CHAT_HOST=0.0.0.0 \
     LOCAL_CHAT_PORT=8765 \
     TMPDIR=/data/tmp \
+    HOME=/data/home \
     DISPATCH_IMAGE_VERSION=${VERSION}
 
 # NOTE ON AVATARS: uploaded avatars are user data and are stored in the data
@@ -255,7 +280,8 @@ ENV LOCAL_CHAT_MIRROR=0
 # survive a restart, look fine for months, and then vanish the first time they
 # ran `docker compose down -v` or pruned. An unmounted container losing state
 # on removal is the honest, obvious failure. Compose mounts it explicitly.
-RUN install -d -o app -g app -m 0750 /data /data/tmp /data/avatars
+RUN install -d -o app -g app -m 0750 /data /data/tmp /data/avatars \
+ && install -d -o app -g app -m 0700 /data/home
 
 WORKDIR /app/backend
 USER app

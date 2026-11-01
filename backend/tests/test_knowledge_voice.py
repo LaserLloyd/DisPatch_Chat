@@ -147,6 +147,12 @@ def test_the_advisor_reads_a_voice_budget_from_config():
 # --------------------------------------------------------------------------- #
 
 
+
+async def _admin_thread(tid):
+    """What advisor.Hooks.get_thread returns: a thread owned by the protected Admin (NULL)."""
+    return SimpleNamespace(id=tid, owner_profile_id=None)
+
+
 @pytest.fixture
 def stub_advisor(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
@@ -156,7 +162,7 @@ def stub_advisor(tmp_path, monkeypatch):
     advisor._indexes.clear()
     old = advisor._hooks
     with StubLLM(delay_s=0.0, words_per_s=400, embed_delay_s=1.7) as stub:
-        config.upsert_bot(config.Bot(id="adv", name="Sage", advisor={
+        config.upsert_bot(config.Bot(id="adv", name="Nova", advisor={
             "owner": "Sam", "knowledge_dir": str(_corpus(tmp_path)),
             "providers": [{"provider": "custom", "base_url": stub.base_url, "model": "m"}],
             "embeddings": {"base_url": stub.base_url, "model": "emb"}}))
@@ -175,7 +181,8 @@ def stub_advisor(tmp_path, monkeypatch):
             list_messages=list_messages, deliver=deliver, set_status=noop,
             broadcast=noop, thread_update=noop, open_stream=lambda t, p: None,
             close_stream=lambda t, p: True, sanitize_delta=lambda s: s,
-            ask_agent=noop, threads_since=noop, data_dir=tmp_path))
+            ask_agent=noop, threads_since=noop, data_dir=tmp_path,
+            get_thread=_admin_thread))
         yield stub
     advisor._hooks = old
     advisor._indexes.clear()

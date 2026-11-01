@@ -47,14 +47,14 @@ def test_premigration_copies_from_the_entrypoint_are_listed_and_pruned_by_stamp(
     assert names == {"3.0.0-b1-20260101-020202", "dev-20260101-030303", "3.0.0-20260101-010101",
                      "unrecorded-20260101-040404"}
     assert backups.resolve_id("premigration:dev-20260101-030303")[1].is_dir()
-    # migrate.backup() prunes to the newest five BY STAMP, across the two writers.
+    # migrate.backup() prunes to the newest KEEP_BACKUPS BY STAMP, across the two writers.
     (root / "9.9.9-20250101-000000").mkdir()
     (root / "9.9.9-20250101-000000" / "chats.db").write_bytes(b"old")
     migrate.backup("3.0.0")
     kept = sorted(p.name for p in root.iterdir() if p.is_dir() and migrate._BACKUP_DIR_RE.match(p.name))
     assert len(kept) == migrate.KEEP_BACKUPS
     assert "9.9.9-20250101-000000" not in kept           # oldest stamp went, despite the highest version
-    assert "3.0.0-20260101-010101" in kept
+    assert {"unrecorded-20260101-040404", "dev-20260101-030303"} <= set(kept)  # newest stamps
 
 
 def test_the_default_theme_setting_offers_every_vendored_theme():

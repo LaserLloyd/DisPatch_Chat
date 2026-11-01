@@ -57,7 +57,8 @@ def test_tools_yaml_rows_are_manifests_too(world, tmp_path_factory):
     by = _by_id()
     if sys.platform != "win32":
         n = by["notes"]["manifest"]
-        assert (n["kind"], n["restricted_ok"], n["permissions_requested"]) == ("static", True, ["ui"])
+        # restricted_ok stays in the published schema (deprecated) but DisPatch writes False.
+        assert (n["kind"], n["restricted_ok"], n["permissions_requested"]) == ("static", False, ["ui"])
     b = by["bench"]["manifest"]
     assert b["kind"] == "url" and b["network"] == ["bench.example.net"]
     assert b["permissions_requested"] == ["network:bench.example.net"]
@@ -70,7 +71,7 @@ def test_the_manifests_route_needs_manage_plugins(world):
     assert r.status_code == 200 and "permission_labels" in r.json()
     assert {x["manifest"]["id"] for x in r.json()["manifests"]} >= {"jobboard", "imagestudio"}
     stranger = world.client(("203.0.113.80", 43001))
-    assert stranger.get("/api/plugins/manifests").status_code == 403
+    assert stranger.get("/api/plugins/manifests").status_code in (401, 403)
 
 
 # --------------------------------------------------------------------------- #

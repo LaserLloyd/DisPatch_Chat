@@ -38,7 +38,7 @@ function fakeWin({ secure = true, apis = true, vapid = { public_key: 'AQ', subsc
   win.fetch = async (url, opts = {}) => {
     calls.push({ url, method: opts.method || 'GET' });
     const body = vapidStatus === 200 ? vapid
-      : { detail: 'Notifications need a remembered device: lock, then unlock with "Remember this device" ticked.' };
+      : { detail: 'Notifications need a remembered device: sign out, then sign in again with "Keep this device signed in" ticked.' };
     return { ok: vapidStatus === 200, status: vapidStatus, statusText: '', json: async () => body };
   };
   return { win, calls };
@@ -60,10 +60,9 @@ test('urlBase64ToUint8Array decodes an unpadded base64url key', () => {
   assert.deepEqual(Array.from(urlBase64ToUint8Array('BAEC_-8')), [4, 1, 2, 255, 239]);
 });
 
-test('Safe Mode: the row is not built at all', { skip: domSkip(jsdom ? false : 'jsdom is not installed') }, () => {
-  const { win, calls } = fakeWin();
-  assert.equal(pushRow(t, { decoy: true, win }), null);
-  assert.equal(calls.length, 0, 'a locked device asks the server nothing');
+test('the row is built for every signed-in profile (no Safe Mode; `decoy` is ignored)', { skip: domSkip(jsdom ? false : 'jsdom is not installed') }, () => {
+  const { win } = fakeWin();
+  assert.ok(pushRow(t, { decoy: true, win }));
 });
 
 test('plain http (not a secure context): disabled, says to use the https address',
@@ -115,8 +114,9 @@ test('sw.js shows a title only and opens the thread on click', () => {
   assert.match(SW, /'\/static\/js\/push\.js'/);
 });
 
-test('main.js mounts the row and hides the Notifications card in Safe Mode', () => {
+test('main.js mounts the Notifications row for every profile', () => {
   const MAIN = readFileSync(join(HERE, '..', 'static', 'js', 'main.js'), 'utf8');
-  assert.match(MAIN, /notifyGroup\.hidden = !!state\.decoy/);
-  assert.match(MAIN, /pushRow\(t, \{ decoy: !!state\.decoy/);
+  // 4.3 Fable: the card shows whenever the row is built (every profile that may use notifications).
+  assert.match(MAIN, /notifyGroup\.hidden = !pushEl/);
+  assert.match(MAIN, /pushRow\(t, \{\s*onToast: toast,/);
 });

@@ -1,5 +1,9 @@
 # Remote Access & Authentication Design
 
+> **Historical design note (3.x).** It uses the 3.x access words Safe Mode, locked device, Restricted
+> and Owner. 4.0 replaced them with Admin, User and Basic profiles and private chats; see
+> [../security.md](../security.md) for how access works now. Everything else here is kept as written.
+
 **Target:** open-source, self-hosted chat app — FastAPI + vanilla-JS PWA, single process, SQLite.
 **Status:** design proposal for the public-GitHub release.
 **Date:** 2026-08-03.
