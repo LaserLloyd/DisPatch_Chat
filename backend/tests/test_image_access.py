@@ -104,3 +104,19 @@ def test_user_cannot_patch_the_matrix(people):
     assert settings_store.get(image_access.setting_key("civitai", "user")) is False
     r = owner.patch("/api/settings", json={"set": {image_access.setting_key("civitai", "user"): True}})
     assert r.status_code == 200, r.text
+
+
+def test_only_the_owner_changes_the_matrix_and_the_key(people):
+    """A second Admin must not switch on its own row (Civitai bills the Owner's Buzz)."""
+    world, owner, _p = people
+    c = world.client(LAN)
+    assert world.login(c, name="Ada", password="pw-pass-1234").status_code == 200  # scrub-ok: the throwaway test password above
+    for k in KEYS:
+        r = c.patch("/api/settings", json={"set": {k: True}})
+        assert r.status_code == 403 and r.json()["error"]["code"] == "host_owner_only", (k, r.text)
+        assert "Owner" in r.json()["detail"], r.text
+    r = c.patch("/api/settings", json={"set": {"connections.image_civitai_key": "civ-x-123456"}})  # scrub-ok: a fake key
+    assert r.status_code == 403, r.text
+    assert settings_store.get(image_access.setting_key("civitai", "basic")) is False
+    r = owner.patch("/api/settings", json={"set": {image_access.setting_key("civitai", "basic"): True}})
+    assert r.status_code == 200, r.text

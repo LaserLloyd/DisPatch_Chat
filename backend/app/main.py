@@ -2686,7 +2686,7 @@ async def _thread_owner_can(thread_id: str, permission: Permission | str) -> boo
 
 
 #: The refusal when a profile type is not allowed the standard image generators.
-IMAGE_NOT_ALLOWED = "this profile type may not use the image generators (ask an Admin)"
+IMAGE_NOT_ALLOWED = "this profile type may not use the image generators (ask the Owner)"
 
 
 async def _thread_owner_may_generate(thread_id: str, generator: str) -> bool:
@@ -8987,7 +8987,8 @@ async def llm_quicksetup(request: Request, payload: dict = Body(...)):
             api_key=str(payload.get("api_key") or ""),
             api_key_env=api_key_env,
             target=target,
-            test=test)
+            test=test,
+            test_images=image_access.allows(policy.of(request).principal, "standard"))
     except llm_api.ApiError as e:
         raise _llm_error(e) from e
     await manager.broadcast(

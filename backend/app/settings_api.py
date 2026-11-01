@@ -42,7 +42,20 @@ HOST_SETTING_KEYS: frozenset[str] = frozenset({
     "people.host_check",           # whether strangers' Host names are refused (4.3 Fable)
     "people.allowed_hosts",        # the names this install answers to (4.3 Fable)
     "people.machine_loopback_trust",  # who reaches DisPatch without a key (4.3 Fable; = POST /api/auth/api-token)
+    # Civitai round: who may make pictures (Civitai bills the Owner's Buzz with no limit) and
+    # the Civitai key are the Owner's alone, so a second Admin cannot switch on its own row.
+    "connections.image_access.standard_admin",
+    "connections.image_access.standard_user",
+    "connections.image_access.standard_basic",
+    "connections.image_access.civitai_admin",
+    "connections.image_access.civitai_user",
+    "connections.image_access.civitai_basic",
+    "connections.image_civitai_key",
 })
+#: The Civitai-round subset of HOST_SETTING_KEYS (their refusal names pictures, not programs).
+IMAGE_OWNER_KEYS: frozenset[str] = frozenset(
+    k for k in HOST_SETTING_KEYS if k.startswith(("connections.image_access.", "connections.image_civitai_key")))
+IMAGE_OWNER_DETAIL = "Only the Owner decides who may make pictures and sets the Civitai key."
 
 
 def _with_plugins() -> None:
@@ -89,7 +102,9 @@ async def settings_patch(request: Request, payload: dict[str, Any] = Body(...)):
         # or writes is the Owner's alone, like the harness and the local file viewer.
         host = sorted(k for k in {*changes, *reset} if k in HOST_SETTING_KEYS)
         if host:
-            raise fail(403, "host_owner_only", policy.HOST_DETAIL)
+            detail = (IMAGE_OWNER_DETAIL if all(k in IMAGE_OWNER_KEYS for k in host)
+                      else policy.HOST_DETAIL)
+            raise fail(403, "host_owner_only", detail)
     if not is_owner:
         locked = [k for k in {*changes, *reset}
                   if (d := settings_schema.get_def(k)) is not None and d.owner_only]

@@ -162,6 +162,7 @@ CIVITAI_SUBMIT_WAIT_S = 55
 CIVITAI_POLL_WAIT_S = 30
 CIVITAI_DEADLINE_S = 170
 CIVITAI_MIN_POLL_GAP_S = 2.0
+CIVITAI_CANCEL_TIMEOUT_S = 10.0
 CIVITAI_MAX_N = 4
 CIVITAI_STEPS = 25
 CIVITAI_CFG = 7
@@ -172,6 +173,8 @@ CIVITAI_MODEL_FIELD = "model"
 CIVITAI_SIZES: tuple[tuple[int, int], ...] = (
     (1024, 1024), (1152, 896), (896, 1152), (1216, 832), (832, 1216),
     (1344, 768), (768, 1344), (1536, 640), (640, 1536))
+#: A workflow id goes into a URL path that carries the key, so only plain id characters.
+_WORKFLOW_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,128}")
 _AIR_RE = re.compile(r"urn:air:sdxl:checkpoint:civitai:\d+@\d+")
 _CIVITAI_HOSTS = frozenset({"civitai.com", "www.civitai.com",
                             "civitai.red", "www.civitai.red"})
@@ -791,29 +794,40 @@ async def _civitai_batch(client: httpx.AsyncClient, res: Resolved,
     if not isinstance(wf, dict):
         raise image_jobs.ImageJobError(f"{label} sent a reply that is not JSON")
     wid = str(wf.get("id") or wf.get("workflowId") or "")
+    if wid and not _WORKFLOW_ID_RE.fullmatch(wid):
+        raise image_jobs.ImageJobError(f"{label} sent a workflow id that is not valid")
     wf_url = f"{base}/v2/consumer/workflows/{wid}"
     last_req = _monotonic()
     terminal = ("succeeded", "failed", "expired", "canceled")
-    while str(wf.get("status") or "").lower() not in terminal:
-        if not wid:
-            raise image_jobs.ImageJobError(f"{label} returned no picture")
-        gap = CIVITAI_MIN_POLL_GAP_S - (_monotonic() - last_req)
-        await _sleep(max(0.0, gap))
-        if _monotonic() - started >= CIVITAI_DEADLINE_S:
-            with contextlib.suppress(Exception):
-                await client.put(wf_url, json={"status": "canceled"}, headers=headers)
-            raise image_jobs.ImageJobError(
-                f"{label} took too long; the request was cancelled")
-        last_req = _monotonic()
-        try:
-            g = await client.get(f"{wf_url}?wait={CIVITAI_POLL_WAIT_S}", headers=headers)
-        except httpx.TransportError:
-            continue                       # the deadline still bounds the loop
-        if g.status_code >= 400:
-            raise _error_from_status(g, label)
-        wf = g.json()
-        if not isinstance(wf, dict):
-            raise image_jobs.ImageJobError(f"{label} sent a reply that is not JSON")
+    try:
+        while str(wf.get("status") or "").lower() not in terminal:
+            if not wid:
+                raise image_jobs.ImageJobError(f"{label} returned no picture")
+            gap = CIVITAI_MIN_POLL_GAP_S - (_monotonic() - last_req)
+            await _sleep(max(0.0, gap))
+            if _monotonic() - started >= CIVITAI_DEADLINE_S:
+                raise image_jobs.ImageJobError(
+                    f"{label} took too long; the request was cancelled")
+            last_req = _monotonic()
+            try:
+                g = await client.get(f"{wf_url}?wait={CIVITAI_POLL_WAIT_S}", headers=headers)
+            except httpx.TransportError:
+                continue                       # the deadline still bounds the loop
+            if g.status_code >= 400:
+                raise _error_from_status(g, label)
+            wf = g.json()
+            if not isinstance(wf, dict):
+                raise image_jobs.ImageJobError(f"{label} sent a reply that is not JSON")
+    except BaseException:
+        # Giving up for ANY reason (deadline, a poll error, the request being cancelled)
+        # before a terminal status: ask Civitai to stop, so no Buzz is spent on a picture
+        # nobody will receive. Best effort and bounded; the original error still raises.
+        if wid:
+            with contextlib.suppress(BaseException):
+                await asyncio.wait_for(
+                    client.put(wf_url, json={"status": "canceled"}, headers=headers),
+                    CIVITAI_CANCEL_TIMEOUT_S)
+        raise
     if str(wf.get("status")).lower() != "succeeded":
         raise image_jobs.ImageJobError(_civitai_reason(wf))
     rows = _civitai_images(wf)

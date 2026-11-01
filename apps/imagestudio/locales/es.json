@@ -117,5 +117,5 @@
   "cost.estimate_one": "Unos {buzz} Buzz por {n} imagen (estimación de Civitai)",
   "cost.estimate_other": "Unos {buzz} Buzz por {n} imágenes (estimación de Civitai)",
   "cost.estimate_failed": "Civitai no pudo estimar el coste",
-  "provider.not_allowed": "Tu tipo de perfil no puede usar los generadores de imágenes aquí. Pídeselo a un administrador."
+  "provider.not_allowed": "Tu tipo de perfil no puede usar los generadores de imágenes aquí. Pídeselo al Owner."
 }

@@ -299,6 +299,11 @@ export const HOST_KEYS = new Set([
   'system.log_file', 'tools.mail_data_dir', 'tools.practice_pin_file', 'tools.practice_url', 'tools.mail_remote_url',
   'people.host_check', 'people.allowed_hosts',
   'people.machine_loopback_trust',   // who reaches DisPatch without a key (4.3 Fable)
+  // Civitai round: who may make pictures, and the Civitai key (Civitai bills the Owner's Buzz)
+  'connections.image_access.standard_admin', 'connections.image_access.standard_user',
+  'connections.image_access.standard_basic', 'connections.image_access.civitai_admin',
+  'connections.image_access.civitai_user', 'connections.image_access.civitai_basic',
+  'connections.image_civitai_key',
 ]);
 /** Is this row's control locked for this session? `env` = an environment variable sets it. */
 export function rowLocked(row, ctx) {

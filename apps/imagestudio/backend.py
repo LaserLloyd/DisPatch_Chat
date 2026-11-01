@@ -98,7 +98,7 @@ CIVITAI_MODEL_NAMES = {
     "urn:air:sdxl:checkpoint:civitai:827184@2883731": "WAI-illustrious-SDXL v17",
 }
 KNOWN_MODELS = {"minimax": ["image-01", "image-01-live"], "civitai": list(CIVITAI_MODEL_NAMES)}
-NOT_ALLOWED = ("Your profile type can't use {label}. Ask an Admin "
+NOT_ALLOWED = ("Your profile type can't use {label}. Ask the Owner "
                "(Settings → AI & Connections → Image generation).")
 
 #: Guards the ledger file (append in _store, rewrite in clear); never held across a provider call.

@@ -108,9 +108,11 @@ async def _test_embeddings(base_url: str, key: str, model: str) -> str:
 
 async def run(provider: str, api_key: str = "", api_key_env: str = "", *,
               target: str = llm_api.DEFAULT_DIRECT_TARGET,
-              test: bool = True) -> dict:
+              test: bool = True, test_images: bool = True) -> dict:
     """Configure and (optionally) test every capability. Raises
-    llm_api.ApiError for a request that cannot be configured at all."""
+    llm_api.ApiError for a request that cannot be configured at all.
+    ``test_images=False`` (the caller's profile type may not use the standard image
+    generators) configures the image provider without making the metered test picture."""
     plan = PLANS.get((provider or "").strip().lower())
     if plan is None:
         raise llm_api.ApiError("Unknown provider",
@@ -142,7 +144,7 @@ async def run(provider: str, api_key: str = "", api_key_env: str = "", *,
         cfg = {"provider": plan.image_preset, "base_url": "", "model": "",
                "api_key": "", "api_key_env": ""}
         await _to_thread(image_providers.save_config, cfg)
-        if test:
+        if test and test_images:
             try:
                 res = image_providers.resolve(cfg)
                 await image_providers.generate(res, image_jobs.ImageSpec(

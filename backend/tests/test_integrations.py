@@ -176,6 +176,20 @@ def test_one_minimax_key_sets_up_chat_and_pictures(env, monkeypatch):
     assert {q.url.host for q in seen} == {"api.minimax.io"}
 
 
+def test_quicksetup_makes_no_test_picture_without_the_standard_switch(env, monkeypatch):
+    """Civitai round: quick setup's live test picture is metered too; skipped (still configured)
+    when the caller's profile type may not use the standard image generators."""
+    from app import image_access
+    seen = _fake(monkeypatch, _provider_handler)
+    c = env(real_defaults=True)
+    monkeypatch.setattr(image_access, "allows", lambda principal, generator: False)
+    r = c.post("/api/llm/quicksetup", json={"provider": "minimax", "api_key": "mm-one"})
+    assert r.status_code == 200, r.text
+    assert _rows(r)["images"] == "skipped"
+    assert not [q for q in seen if q.url.path.endswith("/image_generation")]
+    assert image_providers.load_config()["provider"] == "minimax"
+
+
 def test_openai_also_gets_embeddings(env, monkeypatch):
     seen = _fake(monkeypatch, _provider_handler)
     c = env(real_defaults=True)

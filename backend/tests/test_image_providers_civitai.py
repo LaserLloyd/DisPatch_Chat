@@ -138,6 +138,36 @@ async def test_deadline_cancels():
     assert len(puts) == 1 and json.loads(puts[0].content) == {"status": "canceled"}
 
 
+# 4b --------------------------------------------- giving up for another reason
+async def test_poll_error_cancels_the_workflow():
+    f = Fake(router(lambda r: httpx.Response(202, json=wf("processing")),
+                    lambda r: httpx.Response(500, json={"detail": "boom"})))
+    with pytest.raises(image_jobs.ImageJobError):
+        await ip.generate_batch(res(), spec())
+    puts = f.of("PUT")
+    assert len(puts) == 1 and puts[0].url.path.endswith("/workflows/wf1")
+
+
+async def test_cancelled_request_cancels_the_workflow(monkeypatch):
+    import asyncio
+    f = Fake(router(lambda r: httpx.Response(202, json=wf("processing")),
+                    lambda r: httpx.Response(200, json=wf("processing"))))
+
+    async def cancelled(_s):
+        raise asyncio.CancelledError
+    monkeypatch.setattr(ip, "_sleep", cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        await ip.generate_batch(res(), spec())
+    assert len(f.of("PUT")) == 1
+
+
+async def test_a_strange_workflow_id_is_refused():
+    f = Fake(router(lambda r: httpx.Response(202, json=dict(wf("processing"), id="../../x?y"))))
+    with pytest.raises(image_jobs.ImageJobError, match="workflow id"):
+        await ip.generate_batch(res(), spec())
+    assert not f.of("GET") and not f.of("PUT")
+
+
 # 5 ---------------------------------------------------------------- terminal failures
 @pytest.mark.parametrize("doc,msg", [
     (wf("failed", reason="blocked"), "refused this prompt"),

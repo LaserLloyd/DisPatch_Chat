@@ -72,7 +72,7 @@ import {
 } from './settings-nav.js?v=15';
 import { mountSettingsResize } from './settings-resize.js?v=2';
 import { mountConnections } from './connections.js?v=5';
-import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=8';
+import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=9';
 import { mountBackups } from './backup.js?v=5';
 import { maybeStartWizard } from './wizard.js?v=7';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
