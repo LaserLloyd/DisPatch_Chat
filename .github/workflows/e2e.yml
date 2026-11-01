@@ -27,9 +27,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      DISPATCH_E2E_DATA: ${{ runner.temp }}/dispatch-e2e
       PLAYWRIGHT_VERSION: "1.64.1"
     steps:
+      - name: Scratch dir for the run
+        # The runner context is not available in job-level env, so the path is set here.
+        run: echo "DISPATCH_E2E_DATA=$RUNNER_TEMP/dispatch-e2e" >> "$GITHUB_ENV"
       - uses: actions/checkout@v6
       - name: Install uv
         # Exact version, like ci.yml (setup-uv publishes no moving major tags).
