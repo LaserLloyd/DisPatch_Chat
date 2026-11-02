@@ -511,22 +511,46 @@ def _error_from_status(r: httpx.Response, label: str) -> image_jobs.ImageJobErro
     return image_jobs.ImageJobError(f"{who} answered: {msg}")
 
 
+DOWNLOAD_MAX_REDIRECTS = 3
+
+
 async def _download(client: httpx.AsyncClient, url: str) -> bytes:
+    """The picture's bytes. Redirects are followed by hand (the client never
+    follows them): at most DOWNLOAD_MAX_REDIRECTS hops, relative Locations
+    resolve against the current URL, and every hop must be https. Civitai's
+    picture links answer 301 to a signed link on the same host; an unfollowed
+    3xx used to be read as an empty picture. No hop carries a key."""
     if urlparse(url).scheme not in ("http", "https"):
         raise image_jobs.ImageJobError("the provider named a non-web image URL")
-    chunks: list[bytes] = []
-    total = 0
-    async with client.stream("GET", url) as resp:
-        if resp.status_code >= 400:
-            raise image_jobs.ImageJobError(
-                f"could not download the picture (HTTP {resp.status_code})",
-                code="blob_gone" if resp.status_code in (403, 404, 410) else "")
-        async for chunk in resp.aiter_bytes():
-            total += len(chunk)
-            if total > image_jobs.FETCH_MAX_BYTES:
-                raise image_jobs.ImageJobError("image is implausibly large")
-            chunks.append(chunk)
-    return b"".join(chunks)
+    for _hop in range(DOWNLOAD_MAX_REDIRECTS + 1):
+        chunks: list[bytes] = []
+        total = 0
+        async with client.stream("GET", url) as resp:
+            if resp.is_redirect:
+                loc = resp.headers.get("location", "")
+                if not loc:
+                    raise image_jobs.ImageJobError(
+                        f"could not download the picture (HTTP {resp.status_code} "
+                        "without a location)")
+                url = str(resp.url.join(loc))
+                if urlparse(url).scheme != "https":
+                    raise image_jobs.ImageJobError(
+                        "the picture link redirected to a non-https URL")
+                continue
+            if resp.status_code >= 400:
+                raise image_jobs.ImageJobError(
+                    f"could not download the picture (HTTP {resp.status_code})",
+                    code="blob_gone" if resp.status_code in (403, 404, 410) else "")
+            if resp.status_code != 200:
+                raise image_jobs.ImageJobError(
+                    f"could not download the picture (HTTP {resp.status_code})")
+            async for chunk in resp.aiter_bytes():
+                total += len(chunk)
+                if total > image_jobs.FETCH_MAX_BYTES:
+                    raise image_jobs.ImageJobError("image is implausibly large")
+                chunks.append(chunk)
+        return b"".join(chunks)
+    raise image_jobs.ImageJobError("the picture link redirected too many times")
 
 
 def _b64(s: str) -> bytes:

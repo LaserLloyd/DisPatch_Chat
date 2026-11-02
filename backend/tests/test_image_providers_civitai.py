@@ -371,3 +371,36 @@ def test_size_nearest():
     assert ip.civitai_size("1:1") == (1024, 1024)
     assert ip.civitai_size("9:16") == (768, 1344)
     assert ip.civitai_size("bogus") == (1024, 1024)
+
+
+# live 2026-11-02 ------------------------------------------------- blob redirect
+# Civitai's picture URL answers 301 with a RELATIVE Location on the same host;
+# the downloader used to read the empty 301 body as the picture ("empty response").
+async def test_blob_relative_301_is_followed():
+    def blob(req):
+        if req.url.path == "/a.png":
+            return httpx.Response(301, headers={"location": "/signed/a.png?sig=1"})
+        return blob_ok(req)
+    f = Fake(router(lambda r: httpx.Response(200, json=wf()), blob=blob))
+    out = await ip.generate_batch(res(), spec())
+    assert out[0].startswith(b"\x89PNG")
+    hops = [r for r in f.requests if r.url.host == "blob.civitai.com"]
+    assert [r.url.path for r in hops] == ["/a.png", "/signed/a.png"]
+    assert all("authorization" not in r.headers for r in hops)
+
+
+async def test_blob_redirect_to_plain_http_is_refused():
+    def blob(req):
+        return httpx.Response(302, headers={"location": "http://127.0.0.1/x.png"})
+    Fake(router(lambda r: httpx.Response(200, json=wf()), blob=blob))
+    with pytest.raises(image_jobs.ImageJobError, match="non-https"):
+        await ip.generate_batch(res(), spec())
+
+
+async def test_blob_redirect_loop_is_bounded():
+    def blob(req):
+        return httpx.Response(301, headers={"location": "/again.png"})
+    f = Fake(router(lambda r: httpx.Response(200, json=wf()), blob=blob))
+    with pytest.raises(image_jobs.ImageJobError, match="redirect"):
+        await ip.generate_batch(res(), spec())
+    assert len([r for r in f.requests if r.url.host == "blob.civitai.com"]) <= ip.DOWNLOAD_MAX_REDIRECTS + 1
