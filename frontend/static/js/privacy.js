@@ -58,6 +58,7 @@ export const APP_KEYS = [
   'dispatch-menu-bots',       // menubots.js (which bots were parked in the ⌥ menu)
   'dispatch-last-character',  // newchat.js (the character the phone New chat tab goes to)
   'dispatch-imagestudio-sort', // apps/imagestudio studio.js (the results grid's order)
+  'dispatch-imagestudio-pay',  // apps/imagestudio studio.js (which Buzz pays for a Civitai picture)
   'dispatch-rail-layout',     // railmenu.js (which rail buttons sit in Tools & more)
   'dispatch-settings-size',   // settings-resize.js (the Settings window's size on this device)
   'dispatch-settings-last',   // main.js (the Settings section this device opened last)

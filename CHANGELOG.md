@@ -10,6 +10,9 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Image Studio can make pictures with Civitai (billed in Buzz) using SDXL checkpoints (Juggernaut XL default, RealVisXL, Pony, WAI-Illustrious; any SDXL checkpoint link or AIR works). The Generate line shows Civitai's cost estimate before you submit.
 - Who may make pictures: new Settings switches choose which profile types may use the standard API generators and Civitai (Owner, Admin, User, Basic). The Owner's own access does not depend on the switches.
 - Invariant I13: the default image provider can never be a studio-only generator; `/api/health/invariants` reports it.
+- Image Studio / Civitai: a **Browse** button next to the Model box opens Civitai's popular checkpoints (top this week, top this month, highest rated, newest; SDXL, Pony and Illustrious). Pick one to fill the Model box; the list is cached for 15 minutes and Refresh fetches a fresh one. It uses Civitai's public list, so it needs no key, and it shows no cover pictures.
+- Image Studio / Civitai: a **Pay with** choice (Civitai decides, Blue Buzz, Yellow Buzz), remembered on the device, used by the estimate and by Generate; pictures made with a choice record it.
+- Image Studio / Civitai: your **Buzz balance** shows under the estimate with a Refresh button. It needs a Civitai key with the Buzz: Read scope; without it the page says so in one sentence with a link. New routes `GET /api/apps/imagestudio/civitai/balance` (at most one check every 5 seconds per profile) and `GET /api/apps/imagestudio/civitai/models`.
 
 ## [4.3.0] - 2026-11-01
 

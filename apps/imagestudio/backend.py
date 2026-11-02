@@ -67,6 +67,7 @@ import logging
 import os
 import re
 import threading
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -238,7 +239,7 @@ def _today() -> str:
 def _public_row(row: dict) -> dict:
     return {k: row.get(k) for k in (
         "id", "url", "prompt", "provider", "model", "ratio", "seed", "optimizer",
-        "reference", "batch", "created_at", "day")}
+        "reference", "batch", "created_at", "day", "currency")}
 
 
 # --------------------------------------------------------------------------- #
@@ -285,6 +286,8 @@ def _provider_rows(principal=None) -> tuple[list[dict], str]:
         }
         if preset.shape == "civitai":
             row["estimate"] = True
+            row["currencies"] = list(image_providers.CIVITAI_CURRENCIES)
+            row["browse"] = True
             row["model_names"] = dict(CIVITAI_MODEL_NAMES)
         row["supports"] = (image_providers.supports(res) if res else
                            {"reference": preset.shape == "minimax",
@@ -381,6 +384,8 @@ class GenerateIn(BaseModel):
     optimizer: bool = False
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
     reference: dict | None = None
+    # Civitai only: which Buzz pays ("blue" | "yellow"); "" = let Civitai choose.
+    currency: str = Field(default="", max_length=16)
 
 
 #: "Delete by age": how far back from NOW (the server's clock) each scope reaches.
@@ -491,6 +496,43 @@ async def _pick(body, request: Request) -> tuple[str, image_providers.Resolved, 
     return pid, res, ratio
 
 
+def _currency(body) -> str | None:
+    """The Buzz type a Civitai request asks for: blue, yellow, or None (Civitai chooses).
+    Other providers ignore it, but a value that is neither is refused for everyone."""
+    value = (body.currency or "").strip().lower()
+    if value and value not in image_providers.CIVITAI_CURRENCIES:
+        raise HTTPException(422, "Pick blue or yellow Buzz")
+    return value or None
+
+
+#: A balance check hits Civitai with the Owner's key: at most one per owner every few seconds.
+BALANCE_MIN_GAP_S = 5.0
+_balance_last: dict[str, float] = {}
+_balance_lock = threading.Lock()
+
+
+def _balance_gap_ok(owner: str | None) -> bool:
+    now = time.monotonic()
+    key = owner or ""
+    with _balance_lock:
+        last = _balance_last.get(key)
+        if last is not None and now - last < BALANCE_MIN_GAP_S:
+            return False
+        _balance_last[key] = now
+        if len(_balance_last) > 256:
+            for k in [k for k, t in _balance_last.items() if now - t > 60]:
+                del _balance_last[k]
+    return True
+
+
+def _civitai_gate(request: Request) -> None:
+    """403 unless the caller's profile type may use Civitai."""
+    from app import policy
+    preset = image_providers.PRESET_BY_ID["civitai"]
+    if not image_access.allows(policy.of(request).principal, preset.access):
+        raise HTTPException(403, NOT_ALLOWED.format(label=preset.label))
+
+
 
 # --------------------------------------------------------------------------- #
 # Routes
@@ -542,6 +584,7 @@ def build(ctx):
     async def generate(body: GenerateIn, request: Request):
         prompt = _check_prompt(body.prompt)
         pid, res, ratio = await _pick(body, request)
+        currency = _currency(body) if res.preset.shape == "civitai" else None
         caps = image_providers.supports(res)
         n = min(body.n, caps["max_n"])
         wants_ref = bool(body.reference)
@@ -559,13 +602,13 @@ def build(ctx):
                     res, spec, n=n,
                     seed=body.seed if caps["seed"] else None,
                     optimizer=bool(body.optimizer and caps["optimizer"]),
-                    reference=reference)
+                    reference=reference, currency=currency)
             except image_jobs.ImageJobError as e:
                 raise HTTPException(502, e.message) from None
             rows = await asyncio.to_thread(
                 _store, blobs, prompt, pid, res.model, ratio,
                 body.seed if caps["seed"] else None,
-                bool(body.optimizer and caps["optimizer"]), wants_ref, owner)
+                bool(body.optimizer and caps["optimizer"]), wants_ref, owner, currency)
         finally:
             _free_slot(owner)
         return {"images": [_public_row(r) for r in rows], "asked": n}
@@ -578,13 +621,46 @@ def build(ctx):
         pid, res, ratio = await _pick(body, request)
         if res.preset.shape != "civitai":
             raise HTTPException(422, "No estimate for this provider")
+        currency = _currency(body)
         n = min(body.n, image_providers.supports(res)["max_n"])
         spec = image_jobs.ImageSpec(prompt=prompt, ratio=ratio, backend="api")
         try:
-            buzz = await image_providers.estimate_civitai(res, spec, n=n)
+            buzz = await image_providers.estimate_civitai(res, spec, n=n, currency=currency)
         except image_jobs.ImageJobError as e:
             raise HTTPException(502, e.message) from None
         return {"buzz": buzz, "n": n}
+
+    @router.get("/civitai/balance", dependencies=op)
+    async def civitai_balance(request: Request):
+        """The Civitai account's Buzz by type. The button is the refresh, so nothing is
+        cached here; a per-owner minimum gap keeps a held-down button off Civitai."""
+        _civitai_gate(request)
+        res = _resolved("civitai")
+        if res is None:
+            raise HTTPException(
+                409, "That provider has no API key yet (Settings → AI & Connections → Image generation)")
+        if not _balance_gap_ok(_owner_of(request)):
+            raise HTTPException(429, "Wait a few seconds before checking the Buzz balance again")
+        try:
+            balances = await image_providers.civitai_balance(res)
+        except image_jobs.ImageJobError as e:
+            if e.code == "scope":
+                return {"balances": None, "scope_missing": True,
+                        "help_url": "https://civitai.com/user/account"}
+            raise HTTPException(502, e.message) from None
+        return {"balances": balances, "checked": datetime.now(UTC).isoformat(timespec="seconds")}
+
+    @router.get("/civitai/models", dependencies=op)
+    async def civitai_models(request: Request, sort: str = "week", fresh: bool = False):
+        """Popular Civitai checkpoints (public list, no key needed) to pick a model from."""
+        _civitai_gate(request)
+        if sort not in image_providers.CIVITAI_SORTS:
+            raise HTTPException(422, "Pick top this week, top this month, highest rated or newest")
+        try:
+            rows = await image_providers.civitai_top_models(sort, fresh=fresh)
+        except image_jobs.ImageJobError as e:
+            raise HTTPException(502, e.message) from None
+        return {"models": rows, "sort": sort}
 
     @router.post("/clear", dependencies=op)
     async def clear(body: ClearIn, request: Request):
@@ -682,7 +758,8 @@ def build(ctx):
 
 
 def _store(blobs: list[bytes], prompt: str, provider: str, model: str, ratio: str,
-           seed: int | None, optimizer: bool, reference: bool, owner: str | None) -> list[dict]:
+           seed: int | None, optimizer: bool, reference: bool, owner: str | None,
+           currency: str | None = None) -> list[dict]:
     """Write the pictures into the media store and the ledger (one row each, stamped with
     ``owner_profile_id``)."""
     from app import config
@@ -703,7 +780,7 @@ def _store(blobs: list[bytes], prompt: str, provider: str, model: str, ratio: st
             "model": model, "ratio": ratio, "seed": seed, "optimizer": optimizer,
             "reference": reference, "batch": batch,
             "created_at": now.isoformat(timespec="seconds"), "day": _today(),
-            "owner_profile_id": owner})
+            "owner_profile_id": owner, **({"currency": currency} if currency else {})})
     with _lock, _ledger().open("a", encoding="utf-8") as f:
         f.write("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
     _remember_prompt(prompt, owner)

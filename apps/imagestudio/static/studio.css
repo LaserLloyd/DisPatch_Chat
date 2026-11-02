@@ -129,3 +129,22 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
 @media (prefers-reduced-motion: reduce) {
   .st-dots span { animation: none; opacity: .8; }
 }
+
+/* Civitai: Buzz type, balance line and the model browser. */
+.st-small { padding: 4px 10px; font-size: 12.5px; }
+.st-buzz { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 8px; background: var(--bg-tertiary); font-size: 12.5px; }
+.st-buzz-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.st-buzz-text { color: var(--text-secondary); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.st-buzz-scope { margin: 0; }
+.st-buzz-links { display: flex; gap: 12px; flex-wrap: wrap; }
+.st-link { color: var(--accent); font-size: 12.5px; text-decoration: underline; }
+.st-linkbtn { background: none; border: 0; padding: 0; cursor: pointer; }
+.st-browse-btn { align-self: flex-start; padding: 5px 12px; font-size: 12.5px; }
+.st-browse-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow: auto; }
+.st-browse-row {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: start;
+  background: var(--bg-tertiary); border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 10px; cursor: pointer; font-size: 12.5px;
+}
+.st-browse-row:hover { border-color: var(--accent); }
+.st-browse-name { min-width: 0; overflow-wrap: anywhere; }
+.st-badge { flex: none; border: 1px solid var(--border-strong); border-radius: 999px; padding: 0 7px; font-size: 11px; color: var(--text-secondary); }

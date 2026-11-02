@@ -28,7 +28,7 @@ import {
   initLlmPanel, activateLlmPanel, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=16';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=19';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=20';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
@@ -36,7 +36,7 @@ import {
   setAllowed as setQuickAllowed, setUpload as setQuickUpload, getActions as quickActionList,
 } from './quick-actions.js?v=7';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=8';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=25';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=26';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
 // DisPatch Voice add-on — mounted into the shell by the loader, through the
 // SDK's frozen shell object. With none installed, Settings → Voice explains

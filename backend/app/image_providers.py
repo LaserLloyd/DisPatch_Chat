@@ -179,6 +179,11 @@ _AIR_RE = re.compile(r"urn:air:sdxl:checkpoint:civitai:\d+@\d+")
 _CIVITAI_HOSTS = frozenset({"civitai.com", "www.civitai.com",
                             "civitai.red", "www.civitai.red"})
 CIVITAI_SITE_API = "https://civitai.com/api/v1"
+#: Fixed host for the Buzz balance (tRPC); no override, so the key goes nowhere else.
+CIVITAI_TRPC_BALANCE = "https://civitai.com/api/trpc/buzz.getBuzzAccount"
+CIVITAI_SITE_URL = "https://civitai.com"
+#: Which Buzz pays for a picture. "" (not in this tuple) = let Civitai choose.
+CIVITAI_CURRENCIES = ("blue", "yellow")
 
 #: Test seams for the polling loop.
 _sleep = asyncio.sleep
@@ -327,7 +332,8 @@ def resolve(cfg: dict | None = None, *, studio: bool = False) -> Resolved:
             f"{preset.label} is used from Image Studio only")
     if preset.access == "civitai":
         # Own key, own host: never image.yaml's api_key, never a chat key, and
-        # no base_url override (the key goes to Civitai and nowhere else).
+        # no base_url override (the key goes to Civitai only: the orchestration
+        # host and, for the Buzz balance, civitai.com).
         key, source = os.environ.get(preset.key_env, "").strip(), "env"
         if not key:
             with contextlib.suppress(Exception):
@@ -588,14 +594,16 @@ def supports(res: Resolved) -> dict:
 
 async def generate_batch(res: Resolved, spec: image_jobs.ImageSpec, *, n: int = 1,
                          seed: int | None = None, optimizer: bool = False,
-                         reference: str | None = None) -> list[bytes]:
+                         reference: str | None = None,
+                         currency: str | None = None) -> list[bytes]:
     """``n`` pictures' bytes, validated, in one provider request.
 
     The same client and error mapping as :func:`generate` (which is the n=1
     case). ``seed``, ``optimizer`` and ``reference`` (a ``data:image/...``
     URL: MiniMax's ``subject_reference`` character mode) apply to the
     ``minimax`` shape only and are ignored elsewhere (``seed`` also applies to
-    ``civitai``). Raises ImageJobError.
+    ``civitai``, and so does ``currency``: "blue" or "yellow" Buzz, None = Civitai
+    chooses). Raises ImageJobError.
     """
     label = res.preset.label
     n = max(1, min(int(n), max_batch(res)))
@@ -606,7 +614,7 @@ async def generate_batch(res: Resolved, spec: image_jobs.ImageSpec, *, n: int = 
     async with _client() as client:
         try:
             if res.preset.shape == "civitai":
-                blobs = await _civitai_batch(client, res, spec, n, seed)
+                blobs = await _civitai_batch(client, res, spec, n, seed, currency)
                 items = []
             elif res.preset.shape == "minimax":
                 body: dict[str, Any] = {
@@ -726,10 +734,14 @@ def civitai_size(ratio: str) -> tuple[int, int]:
 
 
 def civitai_body(res: Resolved, spec: image_jobs.ImageSpec, n: int,
-                 seed: int | None, *, external_id: str | None) -> dict:
+                 seed: int | None, *, external_id: str | None,
+                 currency: str | None = None) -> dict:
     """The SubmitWorkflow body. ``external_id`` is Civitai's idempotency key;
     the estimate passes None (an estimate's id would make the real submit
-    return the dry run)."""
+    return the dry run). ``currency`` ("blue" | "yellow") picks which Buzz pays;
+    None leaves it to Civitai."""
+    if currency is not None and currency not in CIVITAI_CURRENCIES:
+        raise ValueError("currency must be blue or yellow")
     ratio = spec.ratio
     if not ratio and spec.width and spec.height:
         ratio = f"{spec.width}:{spec.height}"
@@ -744,6 +756,8 @@ def civitai_body(res: Resolved, spec: image_jobs.ImageSpec, n: int,
         inp["seed"] = int(seed)
     body: dict[str, Any] = {"steps": [{"$type": "imageGen", "input": inp}],
                             "allowMatureContent": True}
+    if currency:
+        body["currencies"] = [currency]
     if external_id:
         body["externalId"] = external_id
     return body
@@ -809,11 +823,12 @@ async def _civitai_post(client: httpx.AsyncClient, url: str, body: dict,
 
 async def _civitai_batch(client: httpx.AsyncClient, res: Resolved,
                          spec: image_jobs.ImageSpec, n: int,
-                         seed: int | None) -> list[bytes]:
+                         seed: int | None, currency: str | None = None) -> list[bytes]:
     label = res.preset.label
     headers = _civitai_headers(res)
     base = res.base_url
-    body = civitai_body(res, spec, n, seed, external_id="dp-" + uuid.uuid4().hex)
+    body = civitai_body(res, spec, n, seed, external_id="dp-" + uuid.uuid4().hex,
+                        currency=currency)
     started = _monotonic()
     r = await _civitai_post(
         client, f"{base}/v2/consumer/workflows?wait={CIVITAI_SUBMIT_WAIT_S}",
@@ -893,11 +908,11 @@ async def _civitai_batch(client: httpx.AsyncClient, res: Resolved,
 
 
 async def estimate_civitai(res: Resolved, spec: image_jobs.ImageSpec, *,
-                           n: int = 1) -> int:
+                           n: int = 1, currency: str | None = None) -> int:
     """Civitai's own Buzz estimate (``whatif``). Never sends ``externalId``,
     never polls, downloads or stores. Raises ImageJobError."""
     label = res.preset.label
-    body = civitai_body(res, spec, n, None, external_id=None)
+    body = civitai_body(res, spec, n, None, external_id=None, currency=currency)
     try:
         async with _client() as client:
             r = await client.post(f"{res.base_url}/v2/consumer/workflows?whatif=true",
@@ -968,6 +983,145 @@ async def civitai_model(text: str) -> str:
     if not _AIR_RE.fullmatch(air):
         raise ValueError(_CIVITAI_ASK)
     return air
+
+
+# --------------------------------------------------------------------------- #
+# Civitai: Buzz balance and the model list
+# --------------------------------------------------------------------------- #
+
+_BUZZ_TYPE_RE = re.compile(r"[a-z]{1,16}")
+
+
+def parse_balances(doc: Any) -> dict[str, int]:
+    """The ``{type: balance}`` map out of a tRPC reply. Defensive: only plain
+    lower-case type names with a real number are kept; the rest is ignored."""
+    cur: Any = doc
+    for key in ("result", "data", "json"):
+        if isinstance(cur, dict) and key in cur:
+            cur = cur[key]
+    out: dict[str, int] = {}
+    if isinstance(cur, dict):
+        for k, v in cur.items():
+            if (isinstance(k, str) and _BUZZ_TYPE_RE.fullmatch(k)
+                    and isinstance(v, (int, float)) and not isinstance(v, bool)
+                    and v == v and abs(v) < 1e15):
+                out[k] = int(v)
+    return out
+
+
+async def civitai_balance(res: Resolved) -> dict[str, int]:
+    """The account's Buzz by type (``{"yellow": 1234, "blue": 56}``). The key goes
+    to civitai.com only (fixed host) as a Bearer header. Raises ImageJobError;
+    ``code == "scope"`` means the key lacks the Buzz: Read scope."""
+    label = res.preset.label
+    try:
+        async with _client(30.0) as client:
+            r = await client.get(CIVITAI_TRPC_BALANCE, headers={
+                "Authorization": f"Bearer {res.api_key}"})
+            if r.status_code in (401, 403) and "scope" in r.text.lower():
+                raise image_jobs.ImageJobError(
+                    f"{label} key can't read the Buzz balance", code="scope")
+            if r.status_code >= 400:
+                raise _error_from_status(r, label)
+            doc = r.json()
+    except image_jobs.ImageJobError:
+        raise
+    except httpx.TimeoutException:
+        raise image_jobs.ImageJobError(f"{label} took too long to answer") from None
+    except httpx.HTTPError as e:
+        raise image_jobs.ImageJobError(
+            f"{label} could not be reached ({type(e).__name__})") from None
+    except ValueError:
+        raise image_jobs.ImageJobError(f"{label} sent a reply that is not JSON") from None
+    return parse_balances(doc)
+
+
+#: sort name -> (Civitai sort, period)
+CIVITAI_SORTS: dict[str, tuple[str, str]] = {
+    "week": ("Most Downloaded", "Week"),
+    "month": ("Most Downloaded", "Month"),
+    "rated": ("Highest Rated", "Month"),
+    "new": ("Newest", "Week"),
+}
+CIVITAI_BROWSE_BASES = ("SDXL 1.0", "Pony", "Illustrious")
+CIVITAI_BROWSE_FETCH = 40
+CIVITAI_BROWSE_MAX = 30
+CIVITAI_BROWSE_TTL_S = 15 * 60
+_browse_cache: dict[str, tuple[float, list[dict]]] = {}
+
+
+def _count(v: Any) -> int:
+    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else 0
+
+
+def _browse_rows(doc: Any) -> list[dict]:
+    items = doc.get("items") if isinstance(doc, dict) else None
+    rows: list[dict] = []
+    for it in items if isinstance(items, list) else []:
+        try:
+            if not isinstance(it, dict) or it.get("supportsGeneration") is not True:
+                continue
+            mid = it.get("id")
+            vers = it.get("modelVersions")
+            v0 = vers[0] if isinstance(vers, list) and vers else None
+            vid = v0.get("id") if isinstance(v0, dict) else None
+            name = it.get("name")
+            if (isinstance(mid, bool) or not isinstance(mid, int) or mid < 1
+                    or isinstance(vid, bool) or not isinstance(vid, int) or vid < 1
+                    or not isinstance(name, str) or not name.strip()):
+                continue
+            air = f"urn:air:sdxl:checkpoint:civitai:{mid}@{vid}"
+            if not _AIR_RE.fullmatch(air):
+                continue
+            stats = it.get("stats") if isinstance(it.get("stats"), dict) else {}
+            base = v0.get("baseModel")
+            rows.append({
+                "air": air, "name": " ".join(name.split())[:80],
+                "base": " ".join(str(base).split())[:24] if isinstance(base, str) else "",
+                "downloads": _count(stats.get("downloadCount")),
+                "likes": _count(stats.get("thumbsUpCount")),
+                "nsfw": it.get("nsfw") is True,
+                "url": f"{CIVITAI_SITE_URL}/models/{mid}"})
+        except (AttributeError, TypeError):
+            continue
+        if len(rows) >= CIVITAI_BROWSE_MAX:
+            break
+    return rows
+
+
+async def civitai_top_models(sort: str, *, fresh: bool = False) -> list[dict]:
+    """Popular SDXL-family checkpoints Civitai can generate with, from the PUBLIC
+    model list (no key is sent). Cached 15 minutes per sort; ``fresh`` skips the
+    cache. Raises ValueError for an unknown sort, ImageJobError when Civitai fails."""
+    if sort not in CIVITAI_SORTS:
+        raise ValueError("unknown sort")
+    now = _monotonic()
+    hit = _browse_cache.get(sort)
+    if hit and not fresh and now - hit[0] < CIVITAI_BROWSE_TTL_S:
+        return [dict(r) for r in hit[1]]
+    order, period = CIVITAI_SORTS[sort]
+    params: list[tuple[str, str]] = [
+        ("types", "Checkpoint"), ("sort", order), ("period", period),
+        *(("baseModels", b) for b in CIVITAI_BROWSE_BASES),
+        ("limit", str(CIVITAI_BROWSE_FETCH)), ("nsfw", "true")]
+    try:
+        async with _client(30.0) as client:
+            r = await client.get(f"{CIVITAI_SITE_API}/models", params=params)
+            if r.status_code >= 400:
+                raise _error_from_status(r, "Civitai")
+            doc = r.json()
+    except image_jobs.ImageJobError:
+        raise
+    except httpx.TimeoutException:
+        raise image_jobs.ImageJobError("Civitai took too long to answer") from None
+    except httpx.HTTPError as e:
+        raise image_jobs.ImageJobError(
+            f"Civitai could not be reached ({type(e).__name__})") from None
+    except ValueError:
+        raise image_jobs.ImageJobError("Civitai sent a reply that is not JSON") from None
+    rows = _browse_rows(doc)
+    _browse_cache[sort] = (now, rows)
+    return [dict(x) for x in rows]
 
 
 # --------------------------------------------------------------------------- #
