@@ -1478,6 +1478,8 @@
     "GET /api/agents/cli-presets",
     "GET /api/agents/schedules",
     "GET /api/apps/imagestudio/chat-images",
+    "GET /api/apps/imagestudio/civitai/balance",
+    "GET /api/apps/imagestudio/civitai/models",
     "GET /api/apps/imagestudio/images",
     "GET /api/apps/imagestudio/state",
     "GET /api/apps/imagestudio/targets",

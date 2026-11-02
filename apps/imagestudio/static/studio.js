@@ -21,7 +21,9 @@ import {
   buildRequest, cropRect, defaultCropPos, galleryItems, isMetered,
   SORTS, normalizeSort, sortRows, canStartAnother, SHORTCUT_DEBOUNCE_MS,
   DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata, DELETE_SCOPE_LABELS, estimateKey, modelLabel,
-} from './studio-logic.js?v=7';
+  CURRENCIES, normalizeCurrency, balanceLine, BROWSE_SORTS, normalizeBrowseSort, compactCount, browseLabel,
+  cleanBrowseRows, rememberModelName,
+} from './studio-logic.js?v=8';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
 export const API = '/api/apps/imagestudio';
@@ -41,11 +43,20 @@ const S = {
   estText: '',           // the estimate line (empty = none yet)
   estSeq: 0,
   sort: 'newest',        // the grid's order (SORTS), remembered per device; newest first when none saved
+  pay: '',               // Civitai: which Buzz pays ('' = Civitai decides), remembered per device
+  buzz: { state: 'idle', text: '', scope: false, helpUrl: '' },   // the Buzz balance line
+  buzzLoaded: false,     // the balance was fetched once for this page
+  browse: { open: false, sort: 'week', rows: [], state: 'idle', error: '' },
 };
 const R = {};            // DOM refs
 const SORT_LABELS = { oldest: 'sort.oldest', newest: 'sort.newest' };
 // The grid's order on this device (privacy.js APP_KEYS wipes it in privacy mode).
 const SORT_KEY = 'dispatch-imagestudio-sort';
+// Which Buzz pays for a Civitai picture on this device (privacy.js APP_KEYS wipes it too).
+const PAY_KEY = 'dispatch-imagestudio-pay';
+const PAY_LABELS = { '': 'pay.auto', blue: 'pay.blue', yellow: 'pay.yellow' };
+const TYPE_LABELS = { blue: 'buzz.type_blue', yellow: 'buzz.type_yellow' };
+const BROWSE_LABELS = { week: 'browse.sort_week', month: 'browse.sort_month', rated: 'browse.sort_rated', new: 'browse.sort_new' };
 
 function nimOn() {
   try { return localStorage.getItem('dispatch-nim') === '1'; } catch { return false; }
@@ -53,6 +64,14 @@ function nimOn() {
 
 function loadSort() {
   try { return normalizeSort(localStorage.getItem(SORT_KEY)); } catch { return 'newest'; }
+}
+
+function loadPay() {
+  try { return normalizeCurrency(localStorage.getItem(PAY_KEY)); } catch { return ''; }
+}
+
+function savePay(value) {
+  try { localStorage.setItem(PAY_KEY, value); } catch { /* private window: this tab only */ }
 }
 
 function saveSort(value) {
@@ -65,6 +84,11 @@ function shown() { return sortRows(S.images, S.sort); }
 function provider() {
   const id = R.provider ? R.provider.value : '';
   return (S.info && S.info.providers.find((p) => p.id === id)) || null;
+}
+
+function isCivitai() {
+  const p = provider();
+  return !!(p && p.shape === 'civitai');
 }
 
 function caps() {
@@ -84,6 +108,7 @@ function formState() {
   return {
     prompt: R.prompt.value, provider: R.provider.value, model: R.model.value, ratio: R.ratio.value,
     n: R.count.value, optimizer: R.optimizer.checked, seed: R.seed.value, reference: S.reference ? S.reference.ref : null,
+    currency: isCivitai() ? normalizeCurrency(R.pay.value) : '',
   };
 }
 
@@ -113,7 +138,119 @@ function refreshForm() {
   R.models.replaceChildren(...((p && p.models) || []).map((m) => el('option', names[m] ? { value: m, label: names[m] } : { value: m })));
   R.est.hidden = !(p && p.estimate) || !S.estText;
   R.est.textContent = S.estText;
+  const civ = isCivitai() && !!p.configured;
+  R.payRow.hidden = !civ;
+  R.browseBtn.hidden = !civ;
+  R.buzzRow.hidden = !civ;
+  if (!civ) closeBrowse();
+  else if (!S.buzzLoaded) loadBalance();
   scheduleEstimate();
+}
+
+// ---------------------------------------------------------------- Buzz balance
+
+function renderBuzz() {
+  const b = S.buzz;
+  R.buzzText.textContent = b.state === 'loading' ? t('buzz.loading')
+    : b.state === 'error' ? b.text
+    : b.state === 'ok' ? b.text : '';
+  R.buzzText.classList.toggle('st-error', b.state === 'error');
+  R.buzzScope.hidden = !b.scope;
+  R.buzzRefresh.disabled = b.state === 'loading';
+  R.buzzLink.hidden = !(b.scope && b.helpUrl);
+  if (b.scope && b.helpUrl) R.buzzLink.setAttribute('href', b.helpUrl);
+  R.buzzSettings.hidden = !(b.scope && S.info && S.info.can_configure);
+}
+
+/** Ask the server for the Civitai Buzz balance. The Refresh button, the first time Civitai is
+ *  picked and a successful Civitai picture are the only things that call this. */
+async function loadBalance() {
+  if (S.buzz.state === 'loading') return;
+  S.buzzLoaded = true;
+  S.buzz = { state: 'loading', text: '', scope: false, helpUrl: '' };
+  renderBuzz();
+  try {
+    const r = await api(`${API}/civitai/balance`);
+    if (r.scope_missing) {
+      S.buzz = { state: 'scope', text: '', scope: true, helpUrl: String(r.help_url || '') };
+    } else {
+      const line = balanceLine(r.balances, (type) => (TYPE_LABELS[type] ? t(TYPE_LABELS[type]) : type), document.documentElement.lang);
+      S.buzz = { state: 'ok', text: line ? t('buzz.line', { balances: line }) : t('buzz.empty'), scope: false, helpUrl: '' };
+    }
+  } catch (e) {
+    const detail = e && e.body && typeof e.body.detail === 'string' ? e.body.detail : '';
+    S.buzz = { state: 'error', text: detail || t('buzz.failed'), scope: false, helpUrl: '' };
+  }
+  renderBuzz();
+}
+
+// ---------------------------------------------------------------- model browser
+
+function closeBrowse() {
+  S.browse.open = false;
+  if (R.browsePanel) R.browsePanel.hidden = true;
+}
+
+function renderBrowse() {
+  const b = S.browse;
+  R.browsePanel.hidden = !b.open;
+  R.browseList.replaceChildren();
+  if (!b.open) return;
+  R.browseRefresh.disabled = b.state === 'loading';
+  R.browseMsg.classList.toggle('st-error', b.state === 'error');
+  R.browseMsg.textContent = b.state === 'loading' ? t('browse.loading')
+    : b.state === 'error' ? b.error
+    : b.rows.length ? '' : t('browse.empty');
+  R.browseMsg.hidden = !R.browseMsg.textContent;
+  for (const row of b.rows) {
+    const dl = row.downloads === 1 ? t('browse.downloads_one') : t('browse.downloads', { n: compactCount(row.downloads) });
+    const btn = el('button', { type: 'button', class: 'st-browse-row', title: t('browse.pick', { name: row.name }) }, [
+      el('span', { class: 'st-browse-name', text: browseLabel(row, dl) }),
+      row.nsfw ? el('span', { class: 'st-badge', text: t('browse.adult') }) : null,
+    ]);
+    btn.addEventListener('click', () => pickModel(row));
+    R.browseList.append(el('li', {}, [btn]));
+  }
+}
+
+async function loadBrowse(fresh = false) {
+  const b = S.browse;
+  const sort = b.sort;
+  b.state = 'loading'; b.error = '';
+  renderBrowse();
+  try {
+    const r = await api(`${API}/civitai/models?sort=${encodeURIComponent(sort)}${fresh ? '&fresh=true' : ''}`);
+    if (sort !== b.sort) return;                 // the person picked another list meanwhile
+    b.rows = cleanBrowseRows(r.models);
+    b.state = 'ok';
+  } catch (e) {
+    if (sort !== b.sort) return;
+    const detail = e && e.body && typeof e.body.detail === 'string' ? e.body.detail : '';
+    b.rows = []; b.state = 'error'; b.error = refused(e) ? t('locked') : (detail || t('browse.failed'));
+  }
+  renderBrowse();
+}
+
+function toggleBrowse() {
+  const b = S.browse;
+  b.open = !b.open;
+  R.browseBtn.setAttribute('aria-expanded', b.open ? 'true' : 'false');
+  if (b.open && b.state !== 'ok') loadBrowse(false);
+  else renderBrowse();
+}
+
+/** Fill the Model box with a picked checkpoint and give it its name in the list and on the tiles. */
+function pickModel(row) {
+  const p = provider();
+  if (p) {
+    p.model_names = rememberModelName(p.model_names, row);
+    p.models = [...new Set([...(p.models || []), row.air])];
+  }
+  R.model.value = row.air;
+  closeBrowse();
+  R.browseBtn.setAttribute('aria-expanded', 'false');
+  refreshForm();
+  R.model.focus();
 }
 
 // Civitai's own price for the form as it stands. Information only: it never blocks Generate.
@@ -252,6 +389,7 @@ async function openChatPicker() {
 
 function tileMeta(r) {
   const bits = [modelLabel(r, (S.info && S.info.providers) || []), r.ratio];
+  if (r.currency && PAY_LABELS[r.currency]) bits.push(t(PAY_LABELS[r.currency]));
   if (r.seed != null) bits.push(t('tile.seed', { n: r.seed }));
   if (r.reference) bits.push(t('tile.ref_used'));
   return bits.filter(Boolean).join(' · ');
@@ -612,6 +750,7 @@ async function startJob(job) {
     const r = await api(`${API}/generate`, { method: 'POST', body: job.body });
     S.pending = S.pending.filter((j) => j !== job);
     S.images = S.images.concat(r.images);
+    if (isCivitai()) loadBalance();          // the picture cost Buzz: show what is left
     await reloadState(false);
     renderGrid();
     setStatus(r.images.length < r.asked
@@ -648,6 +787,30 @@ function build(root) {
   R.provider = el('select', { id: 'st-provider' });
   R.model = el('input', { type: 'text', id: 'st-model', list: 'st-models', autocomplete: 'off', spellcheck: 'false' });
   R.models = el('datalist', { id: 'st-models' });
+  R.browseBtn = el('button', { type: 'button', class: 'st-btn st-browse-btn', id: 'st-browse', text: t('browse.button'), hidden: '', 'aria-expanded': 'false', 'aria-controls': 'st-browse-panel' });
+  R.pay = el('select', { id: 'st-pay' }, ['', ...CURRENCIES].map((v) => el('option', { value: v, text: t(PAY_LABELS[v]) })));
+  R.pay.value = S.pay;
+  R.payRow = el('div', { class: 'st-field', hidden: '' }, [el('label', { for: 'st-pay', text: t('pay.label') }), R.pay]);
+  R.buzzText = el('span', { class: 'st-buzz-text' });
+  R.buzzRefresh = el('button', { type: 'button', class: 'st-btn st-small', id: 'st-buzz-refresh', text: t('buzz.refresh') });
+  R.buzzLink = el('a', { class: 'st-link', href: 'https://civitai.com/user/account', target: '_blank', rel: 'noopener noreferrer', text: t('buzz.open_civitai'), hidden: '' });
+  R.buzzSettings = el('button', { type: 'button', class: 'st-link st-linkbtn', text: t('buzz.open_settings'), hidden: '' });
+  R.buzzSettings.addEventListener('click', () => openShellSettings('connections#images'));
+  R.buzzScope = el('p', { class: 'st-muted st-buzz-scope', text: t('buzz.scope'), hidden: '' });
+  R.buzzRow = el('div', { class: 'st-buzz', role: 'status', hidden: '' }, [
+    el('div', { class: 'st-buzz-line' }, [R.buzzText, R.buzzRefresh]),
+    R.buzzScope, el('div', { class: 'st-buzz-links' }, [R.buzzLink, R.buzzSettings]),
+  ]);
+  R.browseSort = el('select', { id: 'st-browse-sort', 'aria-label': t('browse.sort') }, BROWSE_SORTS.map((v) => el('option', { value: v, text: t(BROWSE_LABELS[v]) })));
+  R.browseRefresh = el('button', { type: 'button', class: 'st-btn st-small', text: t('browse.refresh') });
+  const browseClose = el('button', { type: 'button', class: 'st-btn st-small', text: t('common.close') });
+  R.browseMsg = el('p', { class: 'st-muted', role: 'status', hidden: '' });
+  R.browseList = el('ul', { class: 'st-browse-list' });
+  R.browsePanel = el('div', { class: 'st-picker st-browse', id: 'st-browse-panel', hidden: '' }, [
+    el('strong', { text: t('browse.title') }), el('div', { class: 'st-muted', text: t('browse.note') }),
+    el('div', { class: 'st-row' }, [R.browseSort, R.browseRefresh, browseClose]),
+    R.browseMsg, R.browseList,
+  ]);
   R.ratio = el('select', { id: 'st-ratio' });
   R.count = el('input', { type: 'number', id: 'st-count', min: '1', max: '9', value: '1', inputmode: 'numeric' });
   R.optimizer = el('input', { type: 'checkbox', id: 'st-optimizer' });
@@ -683,8 +846,10 @@ function build(root) {
   R.form = el('div', { class: 'st-form' }, [
     field(t('prompt.label'), R.prompt, R.counter), R.recentWrap,
     el('div', { class: 'st-two' }, [field(t('provider.label'), R.provider), field(t('model.label'), R.model, R.models)]),
+    R.browseBtn, R.browsePanel,
     el('div', { class: 'st-two' }, [field(t('ratio.label'), R.ratio), field(t('count.label'), R.count)]),
-    R.optimizerRow, R.seedRow, R.refBox, R.go, R.cost, R.est,
+    R.payRow,
+    R.optimizerRow, R.seedRow, R.refBox, R.go, R.cost, R.est, R.buzzRow,
   ]);
   R.sort = el('select', { id: 'st-sort', class: 'st-sort' }, SORTS.map((v) => el('option', { value: v, text: t(SORT_LABELS[v]) })));
   R.sort.value = S.sort;
@@ -720,6 +885,12 @@ function build(root) {
   R.provider.addEventListener('change', refreshForm);
   R.count.addEventListener('change', () => { R.count.value = String(clampCount(R.count.value, caps().max_n)); scheduleEstimate(); });
   R.model.addEventListener('input', scheduleEstimate);
+  R.pay.addEventListener('change', () => { S.pay = normalizeCurrency(R.pay.value); savePay(S.pay); scheduleEstimate(); });
+  R.buzzRefresh.addEventListener('click', () => loadBalance());
+  R.browseBtn.addEventListener('click', toggleBrowse);
+  R.browseSort.addEventListener('change', () => { S.browse.sort = normalizeBrowseSort(R.browseSort.value); S.browse.rows = []; loadBrowse(false); });
+  R.browseRefresh.addEventListener('click', () => loadBrowse(true));
+  browseClose.addEventListener('click', () => { closeBrowse(); R.browseBtn.setAttribute('aria-expanded', 'false'); R.browseBtn.focus(); });
   R.ratio.addEventListener('change', scheduleEstimate);
   R.go.addEventListener('click', (ev) => {
     // The second click of a double-click is not a second job (every Generate is metered).
@@ -738,6 +909,9 @@ function build(root) {
   R.refClear.addEventListener('click', () => setReference(null));
   R.dlg.addEventListener('click', (e) => { if (e.target === R.dlg) closeDialog(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !R.dlg.hidden) closeDialog(); });
+  R.browsePanel.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && S.browse.open) { closeBrowse(); R.browseBtn.setAttribute('aria-expanded', 'false'); R.browseBtn.focus(); }
+  });
 }
 
 export async function mount(root = document.getElementById('st-root')) {
@@ -745,6 +919,7 @@ export async function mount(root = document.getElementById('st-root')) {
   await ready();
   S.nim = nimOn();
   S.sort = loadSort();
+  S.pay = loadPay();
   document.title = t('title');
   root.setAttribute('aria-label', t('title'));
   document.documentElement.lang = document.documentElement.lang || 'en';

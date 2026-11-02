@@ -70,6 +70,8 @@ export function buildRequest(form, caps) {
     if (seed !== null && !Number.isNaN(seed)) body.seed = seed;
   }
   if (caps.reference && form.reference) body.reference = form.reference;
+  const currency = normalizeCurrency(form.currency);
+  if (currency) body.currency = currency;
   return body;
 }
 
@@ -119,7 +121,8 @@ export function galleryInfo(r, source = 'Image Studio', optimizerNote = 'optimiz
 export function estimateKey(form) {
   const prompt = String(form.prompt || '').trim();
   if (!prompt || !form.provider) return '';
-  return JSON.stringify([form.provider, String(form.model || '').trim(), form.ratio || '1:1', form.n, prompt]);
+  return JSON.stringify([form.provider, String(form.model || '').trim(), form.ratio || '1:1', form.n, prompt,
+    normalizeCurrency(form.currency)]);
 }
 
 /** The model name a result tile shows: the provider's friendly name for a model id when it
@@ -193,4 +196,73 @@ export function sendMetadata(r) {
   // The provider's optimizer may have drawn a rewritten prompt; the Details panel says so.
   if (r.optimizer) meta.optimizer = true;
   return meta;
+}
+
+// ---------------------------------------------------------------- Buzz type + balance
+
+/** Which Buzz pays for a Civitai picture. '' = let Civitai choose. */
+export const CURRENCIES = ['blue', 'yellow'];
+
+/** A stored or picked value -> 'blue', 'yellow' or '' (anything else). */
+export function normalizeCurrency(value) {
+  return CURRENCIES.includes(value) ? value : '';
+}
+
+/** Whole numbers with the viewer's separators: 1234 -> "1,234". Never throws. */
+export function formatCount(n, locale) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '0';
+  try { return new Intl.NumberFormat(locale || undefined).format(Math.trunc(v)); } catch { return String(Math.trunc(v)); }
+}
+
+/** The balance map -> display parts, yellow first, then blue, then any other type A-Z.
+ *  Junk entries (non-numbers, odd type names) are dropped. */
+export function balanceParts(balances) {
+  if (!balances || typeof balances !== 'object') return [];
+  const rank = (k) => (k === 'yellow' ? 0 : k === 'blue' ? 1 : 9);
+  return Object.entries(balances)
+    .filter(([k, v]) => /^[a-z]{1,16}$/.test(k) && typeof v === 'number' && Number.isFinite(v))
+    .sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]))
+    .map(([type, n]) => ({ type, n: Math.trunc(n) }));
+}
+
+/** "1,234 yellow · 56 blue". `label(type)` gives the (translated) type name; '' when there is nothing. */
+export function balanceLine(balances, label = (x) => x, locale) {
+  return balanceParts(balances).map((p) => `${formatCount(p.n, locale)} ${label(p.type)}`).join(' · ');
+}
+
+// ---------------------------------------------------------------- model browser
+
+/** The four lists the Browse panel offers (the server's sort names). */
+export const BROWSE_SORTS = ['week', 'month', 'rated', 'new'];
+
+export function normalizeBrowseSort(value) {
+  return BROWSE_SORTS.includes(value) ? value : 'week';
+}
+
+/** 286000 -> "286k", 1250000 -> "1.3M", 950 -> "950". */
+export function compactCount(n) {
+  const v = Math.max(0, Math.trunc(Number(n) || 0));
+  if (v >= 1e6) return `${(v / 1e6).toFixed(v >= 1e7 ? 0 : 1).replace(/\.0$/, '')}M`;
+  if (v >= 1e4) return `${Math.round(v / 1e3)}k`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1).replace(/\.0$/, '')}k`;
+  return String(v);
+}
+
+/** One row of the Browse list as plain text: "Name · Illustrious · 286k downloads".
+ *  `downloads` is the already-translated "{n} downloads" text. */
+export function browseLabel(row, downloads) {
+  return [row && row.name, row && row.base, downloads].filter(Boolean).join(' · ');
+}
+
+/** Keep only well-formed rows from /civitai/models (the server already checks; this keeps a
+ *  wrong reply from reaching the DOM). */
+export function cleanBrowseRows(rows) {
+  const ok = /^urn:air:sdxl:checkpoint:civitai:\d+@\d+$/;
+  return (Array.isArray(rows) ? rows : []).filter((r) => r && typeof r.name === 'string' && r.name && ok.test(String(r.air)));
+}
+
+/** The names the Model box and the tiles show for picked models: AIR -> name. */
+export function rememberModelName(names, row) {
+  return { ...(names || {}), [row.air]: row.name };
 }

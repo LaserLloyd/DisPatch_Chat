@@ -30,7 +30,7 @@ const ROWS = [
   { id: ID('b'), url: `/media/${ID('b')}.jpg`, prompt: 'second', provider: 'minimax', model: 'image-01', ratio: '16:9', seed: 5 },
 ];
 
-async function page({ nim = false, state = STATE, generate, clear, images, sort = 'oldest', extra = {} } = {}) {
+async function page({ nim = false, state = STATE, generate, clear, images, sort = 'oldest', pay = null, extra = {} } = {}) {
   const posted = [];
   const env = setupDom(PAGE, PAGE_URL, {
     'GET /apps/imagestudio/locales/en.json': () => [200, EN],
@@ -42,6 +42,7 @@ async function page({ nim = false, state = STATE, generate, clear, images, sort 
   });
   env.win.localStorage.setItem('dispatch-lang', 'en');
   if (sort !== null) env.win.localStorage.setItem('dispatch-imagestudio-sort', sort);
+  if (pay !== null) env.win.localStorage.setItem('dispatch-imagestudio-pay', pay);
   if (nim) env.win.localStorage.setItem('dispatch-nim', '1');
   Object.defineProperty(env.win, 'parent', { configurable: true, get: () => parentWin });
   const parentWin = { postMessage: (m, o) => posted.push([m, o]) };
@@ -713,6 +714,149 @@ test('civitai: the estimate line follows one debounced call per change and a fai
   fail = 'detail'; type('a fox once more'); await sleep(750); await flush();
   assert.equal(doc.querySelector('.st-estimate').textContent, 'Paste a Civitai checkpoint link or AIR');
   assert.equal(doc.getElementById('st-generate').disabled, false);
+});
+
+const ROW1 = { air: 'urn:air:sdxl:checkpoint:civitai:11@22', name: 'Cool <b>XL</b>', base: 'Illustrious', downloads: 286000, likes: 9, nsfw: true, url: 'https://civitai.com/models/11' };
+const ROW2 = { air: 'urn:air:sdxl:checkpoint:civitai:12@23', name: 'Plain Model', base: 'Pony', downloads: 1, likes: 1, nsfw: false, url: 'https://civitai.com/models/12' };
+const BAL = () => [200, { balances: { blue: 56, yellow: 1234 }, checked: '2026-11-02T10:00:00+00:00' }];
+
+test('civitai: the Pay with select and Buzz line show for Civitai only; the choice is remembered and sent', { skip: dom.skip }, async () => {
+  const env = await page({ state: CSTATE, extra: {
+    'GET /api/apps/imagestudio/civitai/balance': BAL,
+    'POST /api/apps/imagestudio/estimate': () => [200, { buzz: 14, n: 1 }],
+    'POST /api/apps/imagestudio/generate': () => [200, { images: [{ ...ROWS[0], id: ID('c'), url: `/media/${ID('c')}.png`, provider: 'civitai', currency: 'yellow' }], asked: 1 }],
+  } });
+  const { doc, win } = env;
+  const pay = doc.getElementById('st-pay');
+  assert.equal(pay.closest('.st-field').hidden, false);
+  assert.deepEqual([...pay.options].map((o) => o.textContent), ['Civitai decides', 'Blue Buzz', 'Yellow Buzz']);
+  assert.equal(doc.querySelector('.st-buzz-text').textContent, 'Buzz: 1,234 yellow · 56 blue');
+  const prompt = doc.getElementById('st-prompt');
+  prompt.value = 'a fox'; prompt.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await sleep(750); await flush();
+  const est = () => env.calls.filter((c) => c.key === 'POST /api/apps/imagestudio/estimate');
+  assert.equal(est().length, 1);
+  pay.value = 'yellow'; pay.dispatchEvent(new win.Event('change', { bubbles: true }));
+  await sleep(750); await flush();
+  assert.equal(est().length, 2, 'changing the Buzz type re-estimates');
+  assert.equal(est()[1].body.currency, 'yellow');
+  assert.equal(win.localStorage.getItem('dispatch-imagestudio-pay'), 'yellow');
+  doc.getElementById('st-generate').click();
+  await flush();
+  assert.equal(gens(env)[0].body.currency, 'yellow');
+  const balances = () => env.calls.filter((c) => c.key === 'GET /api/apps/imagestudio/civitai/balance').length;
+  assert.equal(balances(), 2, 'the balance is read again after a Civitai picture');
+  // Another provider: none of it shows.
+  doc.getElementById('st-provider').value = 'minimax';
+  doc.getElementById('st-provider').dispatchEvent(new win.Event('change', { bubbles: true }));
+  assert.equal(pay.closest('.st-field').hidden, true);
+  assert.equal(doc.getElementById('st-browse').hidden, true);
+  assert.equal(doc.querySelector('.st-buzz').hidden, true);
+});
+
+test('civitai: a saved Buzz type is selected on load; nothing about Buzz shows for a non-Civitai default', { skip: dom.skip }, async () => {
+  const env = await page({ state: CSTATE, extra: { 'GET /api/apps/imagestudio/civitai/balance': BAL } });
+  assert.equal(env.doc.getElementById('st-pay').value, '');
+  const env2 = await page({ state: CSTATE, pay: 'blue', extra: { 'GET /api/apps/imagestudio/civitai/balance': BAL } });
+  assert.equal(env2.doc.getElementById('st-pay').value, 'blue');
+  const env3 = await page();
+  assert.equal(env3.calls.filter((c) => c.key.includes('/civitai/')).length, 0, 'MiniMax never asks about Civitai');
+  assert.equal(env3.doc.querySelector('.st-buzz').hidden, true);
+});
+
+test('civitai: Refresh asks again; a key without the scope gets one plain sentence and a link', { skip: dom.skip }, async () => {
+  let scope = false;
+  const env = await page({ state: { ...CSTATE, can_configure: true }, extra: {
+    'GET /api/apps/imagestudio/civitai/balance': () => (scope ? [200, { balances: null, scope_missing: true, help_url: 'https://civitai.com/user/account' }] : BAL()),
+  } });
+  const { doc } = env;
+  const n = () => env.calls.filter((c) => c.key === 'GET /api/apps/imagestudio/civitai/balance').length;
+  assert.equal(n(), 1, 'loaded once when Civitai is the provider');
+  assert.equal(doc.querySelector('.st-buzz-scope').hidden, true);
+  scope = true;
+  doc.getElementById('st-buzz-refresh').click();
+  await flush();
+  assert.equal(n(), 2);
+  const note = doc.querySelector('.st-buzz-scope');
+  assert.equal(note.hidden, false);
+  assert.equal(note.textContent, EN['buzz.scope']);
+  const link = doc.querySelector('.st-buzz-links a');
+  assert.equal(link.hidden, false);
+  assert.equal(link.getAttribute('href'), 'https://civitai.com/user/account');
+  assert.equal(link.getAttribute('target'), '_blank');
+  assert.match(link.getAttribute('rel'), /noopener/);
+  assert.equal(doc.querySelector('.st-buzz-links button').hidden, false, 'the Owner can jump to Settings');
+  assert.equal(doc.querySelector('.st-buzz-text').textContent, '');
+});
+
+test('civitai: a balance failure shows the server sentence; a profile that cannot configure gets no Settings link', { skip: dom.skip }, async () => {
+  const env = await page({ state: CSTATE, extra: { 'GET /api/apps/imagestudio/civitai/balance': () => [429, { detail: 'Wait a few seconds before checking the Buzz balance again' }] } });
+  assert.equal(env.doc.querySelector('.st-buzz-text').textContent, 'Wait a few seconds before checking the Buzz balance again');
+  const env2 = await page({ state: CSTATE, extra: { 'GET /api/apps/imagestudio/civitai/balance': () => [200, { balances: null, scope_missing: true, help_url: 'https://civitai.com/user/account' }] } });
+  assert.equal(env2.doc.querySelector('.st-buzz-links button').hidden, true);
+});
+
+test('civitai Browse: opens a list, a row fills the Model box with the AIR and its name, Refresh bypasses the cache, text is never markup', { skip: dom.skip }, async () => {
+  const env = await page({ state: CSTATE, extra: {
+    'GET /api/apps/imagestudio/civitai/balance': BAL,
+    'POST /api/apps/imagestudio/estimate': () => [200, { buzz: 14, n: 1 }],
+    'GET /api/apps/imagestudio/civitai/models': () => [200, { models: [ROW1, ROW2, { air: 'junk', name: 'Bad' }], sort: 'week' }],
+  } });
+  const { doc, win } = env;
+  const calls = () => env.calls.filter((c) => c.key.startsWith('GET /api/apps/imagestudio/civitai/models'));
+  const btn = doc.getElementById('st-browse');
+  const panel = doc.getElementById('st-browse-panel');
+  assert.equal(btn.hidden, false);
+  assert.equal(panel.hidden, true);
+  btn.click(); await flush();
+  assert.equal(panel.hidden, false);
+  assert.equal(btn.getAttribute('aria-expanded'), 'true');
+  assert.equal(calls().length, 1);
+  const rows = [...doc.querySelectorAll('.st-browse-row')];
+  assert.equal(rows.length, 2, 'a malformed row never reaches the list');
+  assert.equal(rows[0].querySelector('.st-browse-name').textContent, 'Cool <b>XL</b> · Illustrious · 286k downloads');
+  assert.equal(rows[0].querySelector('b'), null, 'names are text, not markup');
+  assert.equal(rows[0].querySelector('.st-badge').textContent, '18+');
+  assert.equal(rows[1].querySelector('.st-badge'), null);
+  assert.equal(rows[1].querySelector('.st-browse-name').textContent, 'Plain Model · Pony · 1 download');
+  assert.equal(rows[0].tagName, 'BUTTON');
+  doc.getElementById('st-browse-sort').value = 'rated';
+  doc.getElementById('st-browse-sort').dispatchEvent(new win.Event('change', { bubbles: true }));
+  await flush();
+  assert.match(calls()[0].url, /sort=week$/);
+  assert.match(calls()[1].url, /sort=rated$/);
+  assert.equal(calls().length, 2);
+  [...doc.querySelectorAll('#st-browse-panel .st-row .st-btn')].find((b) => b.textContent === 'Refresh').click();
+  await flush();
+  assert.equal(calls().length, 3);
+  assert.match(calls()[2].url, /sort=rated&fresh=true$/);
+  doc.querySelectorAll('.st-browse-row')[0].click();
+  await flush(); await sleep(700); await flush();
+  const model = doc.getElementById('st-model');
+  assert.equal(model.value, ROW1.air);
+  assert.equal(panel.hidden, true, 'the panel closes after a pick');
+  assert.ok([...doc.querySelectorAll('#st-models option')].some((o) => o.value === ROW1.air && o.getAttribute('label') === ROW1.name));
+  const prompt = doc.getElementById('st-prompt');
+  prompt.value = 'a fox'; prompt.dispatchEvent(new win.Event('input', { bubbles: true }));
+  await sleep(750); await flush();
+  const est = env.calls.filter((c) => c.key === 'POST /api/apps/imagestudio/estimate');
+  assert.equal(est.at(-1).body.model, ROW1.air, 'the estimate follows the picked model');
+});
+
+test('civitai Browse: a failure and an empty list say so in words', { skip: dom.skip }, async () => {
+  let mode = 'fail';
+  const env = await page({ state: CSTATE, extra: {
+    'GET /api/apps/imagestudio/civitai/balance': BAL,
+    'GET /api/apps/imagestudio/civitai/models': () => (mode === 'fail' ? [502, {}] : [200, { models: [], sort: 'week' }]),
+  } });
+  const { doc } = env;
+  doc.getElementById('st-browse').click(); await flush();
+  const msg = doc.querySelector('#st-browse-panel .st-muted[role="status"]');
+  assert.equal(msg.textContent, EN['browse.failed']);
+  mode = 'empty';
+  [...doc.querySelectorAll('#st-browse-panel .st-row .st-btn')].find((b) => b.textContent === 'Refresh').click();
+  await flush();
+  assert.equal(msg.textContent, EN['browse.empty']);
 });
 
 test('blocked state shows the not-allowed text and no setup button', { skip: dom.skip }, async () => {

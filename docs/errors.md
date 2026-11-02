@@ -141,10 +141,13 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`host_owner_only`](#host_owner_only) | 403 | Only the Owner can do this, because it runs programs or reads files on the DisPatch computer. |
 | [`household_bots_invalid`](#household_bots_invalid) | 422 | household_bots must be "all" or a list of character ids. |
 | [`household_invalid`](#household_invalid) | 422 | household_bots must be a list of bot ids. |
+| [`image_balance_too_fast`](#image_balance_too_fast) | 429 | Wait a few seconds before checking the Buzz balance again |
+| [`image_currency_invalid`](#image_currency_invalid) | 422 | Pick blue or yellow Buzz |
 | [`image_dimensions_too_large`](#image_dimensions_too_large) | 400 | Image dimensions too large (max 64 megapixels) |
 | [`image_estimate_unavailable`](#image_estimate_unavailable) | 422 | No estimate for this provider |
 | [`image_generator_not_allowed`](#image_generator_not_allowed) | 403 | Your profile type can't use the image generators here. Ask the Owner. |
 | [`image_minor_sexual`](#image_minor_sexual) | 422 | That picture can't be made: images show adults only, and nothing sexual can involve anyone under 18. Rewrite the request with adult characters. |
+| [`image_models_sort_invalid`](#image_models_sort_invalid) | 422 | Pick top this week, top this month, highest rated or newest |
 | [`image_real_person_sexual`](#image_real_person_sexual) | 422 | That picture can't be made: sexual images of real, identifiable people aren't allowed. Remove the real person's name or likeness, or describe an original character instead. |
 | [`image_request_failed`](#image_request_failed) | 500 | Could not start the image request |
 | [`image_requests_disabled`](#image_requests_disabled) | 403 | Image requests aren't enabled for {} |
@@ -1310,6 +1313,22 @@ HTTP **422** - household_bots must be a list of bot ids.
 
 **Fix:** Send "all" (Users only) or a list of household bot ids; Admins use every household bot.
 
+## image_balance_too_fast
+
+<a id="image_balance_too_fast"></a>
+
+HTTP **429** - Wait a few seconds before checking the Buzz balance again
+
+**Fix:** Press Refresh again in a few seconds.
+
+## image_currency_invalid
+
+<a id="image_currency_invalid"></a>
+
+HTTP **422** - Pick blue or yellow Buzz
+
+**Fix:** Choose Blue Buzz, Yellow Buzz or let Civitai decide in Image Studio's Pay with box.
+
 ## image_dimensions_too_large
 
 <a id="image_dimensions_too_large"></a>
@@ -1341,6 +1360,14 @@ HTTP **403** - Your profile type can't use the image generators here. Ask the Ow
 HTTP **422** - That picture can't be made: images show adults only, and nothing sexual can involve anyone under 18. Rewrite the request with adult characters.
 
 **Fix:** Describe adult characters only. This rule cannot be switched off.
+
+## image_models_sort_invalid
+
+<a id="image_models_sort_invalid"></a>
+
+HTTP **422** - Pick top this week, top this month, highest rated or newest
+
+**Fix:** Choose one of the four lists in the Browse box.
 
 ## image_real_person_sexual
 

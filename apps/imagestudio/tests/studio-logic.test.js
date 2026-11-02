@@ -164,5 +164,44 @@ test('estimateKey: blank without a prompt or provider, stable for the same form,
   assert.equal(estimateKey({ ...f, prompt: '  ' }), '');
   assert.equal(estimateKey({ ...f, provider: '' }), '');
   assert.equal(estimateKey(f), estimateKey({ ...f, prompt: 'a fox' }));
-  for (const ch of [{ n: 3 }, { ratio: '16:9' }, { model: 'x' }, { prompt: 'b' }]) assert.notEqual(estimateKey({ ...f, ...ch }), estimateKey(f));
+  for (const ch of [{ n: 3 }, { ratio: '16:9' }, { model: 'x' }, { prompt: 'b' }, { currency: 'yellow' }]) assert.notEqual(estimateKey({ ...f, ...ch }), estimateKey(f));
+});
+
+test('currency: only blue or yellow reach the request, and it is part of the estimate key', async () => {
+  const { buildRequest, normalizeCurrency, estimateKey } = await import('../static/studio-logic.js');
+  const f = { prompt: 'a fox', provider: 'civitai', model: '', ratio: '1:1', n: 1 };
+  assert.equal(normalizeCurrency('blue'), 'blue');
+  assert.equal(normalizeCurrency('yellow'), 'yellow');
+  for (const bad of ['', 'green', 'Blue', null, undefined, 3]) assert.equal(normalizeCurrency(bad), '');
+  assert.equal('currency' in buildRequest(f, { max_n: 4 }), false);
+  assert.equal('currency' in buildRequest({ ...f, currency: 'green' }, { max_n: 4 }), false);
+  assert.equal(buildRequest({ ...f, currency: 'yellow' }, { max_n: 4 }).currency, 'yellow');
+  assert.notEqual(estimateKey({ ...f, currency: 'blue' }), estimateKey({ ...f, currency: 'yellow' }));
+  assert.equal(estimateKey({ ...f, currency: 'nope' }), estimateKey(f));
+});
+
+test('balance line: yellow first, then blue, thousands separators, junk dropped', async () => {
+  const { balanceLine, balanceParts, formatCount } = await import('../static/studio-logic.js');
+  assert.equal(formatCount(1234, 'en'), '1,234');
+  assert.equal(formatCount('x'), '0');
+  assert.deepEqual(balanceParts({ blue: 56, yellow: 1234, green: 7 }).map((p) => p.type), ['yellow', 'blue', 'green']);
+  assert.equal(balanceLine({ blue: 56, yellow: 1234 }, (x) => x, 'en'), '1,234 yellow · 56 blue');
+  assert.equal(balanceLine({ blue: 56.9 }, (x) => x.toUpperCase(), 'en'), '56 BLUE');
+  assert.equal(balanceLine({ yellow: 'x', Bad: 1, 'a b': 2, nan: NaN, nul: null }, (x) => x, 'en'), '');
+  assert.equal(balanceLine(null), '');
+  assert.equal(balanceLine([1, 2]), '');
+});
+
+test('browse rows: compact counts, one-line labels, malformed rows dropped', async () => {
+  const { compactCount, browseLabel, cleanBrowseRows, normalizeBrowseSort, rememberModelName, BROWSE_SORTS } = await import('../static/studio-logic.js');
+  assert.deepEqual([950, 1500, 12000, 286000, 1250000, 12000000, -4, 'x'].map(compactCount), ['950', '1.5k', '12k', '286k', '1.3M', '12M', '0', '0']);
+  assert.equal(browseLabel({ name: 'Cool XL', base: 'Illustrious' }, '286k downloads'), 'Cool XL · Illustrious · 286k downloads');
+  assert.equal(browseLabel({ name: 'Cool XL', base: '' }, '5 downloads'), 'Cool XL · 5 downloads');
+  const good = { air: 'urn:air:sdxl:checkpoint:civitai:1@2', name: 'A' };
+  assert.deepEqual(cleanBrowseRows([good, null, { air: 'urn:air:sdxl:lora:civitai:1@2', name: 'L' }, { air: good.air, name: '' }, 'x', { name: 'n' }]), [good]);
+  assert.deepEqual(cleanBrowseRows(null), []);
+  assert.deepEqual(BROWSE_SORTS, ['week', 'month', 'rated', 'new']);
+  assert.equal(normalizeBrowseSort('rated'), 'rated');
+  assert.equal(normalizeBrowseSort('zzz'), 'week');
+  assert.deepEqual(rememberModelName({ a: 'A' }, good), { a: 'A', [good.air]: 'A' });
 });

@@ -3251,6 +3251,39 @@
     "No estimate for this provider"
    ],
    "seeded": true
+  },
+  {
+   "code": "image_currency_invalid",
+   "status": 422,
+   "message": "Pick blue or yellow Buzz",
+   "fix": "Choose Blue Buzz, Yellow Buzz or let Civitai decide in Image Studio's Pay with box.",
+   "docs": "image_currency_invalid",
+   "patterns": [
+    "Pick blue or yellow Buzz"
+   ],
+   "seeded": true
+  },
+  {
+   "code": "image_balance_too_fast",
+   "status": 429,
+   "message": "Wait a few seconds before checking the Buzz balance again",
+   "fix": "Press Refresh again in a few seconds.",
+   "docs": "image_balance_too_fast",
+   "patterns": [
+    "Wait a few seconds before checking the Buzz balance again"
+   ],
+   "seeded": true
+  },
+  {
+   "code": "image_models_sort_invalid",
+   "status": 422,
+   "message": "Pick top this week, top this month, highest rated or newest",
+   "fix": "Choose one of the four lists in the Browse box.",
+   "docs": "image_models_sort_invalid",
+   "patterns": [
+    "Pick top this week, top this month, highest rated or newest"
+   ],
+   "seeded": true
   }
  ]
 }

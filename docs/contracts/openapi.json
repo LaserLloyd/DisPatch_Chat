@@ -1856,6 +1856,12 @@
       },
       "GenerateIn": {
         "properties": {
+          "currency": {
+            "default": "",
+            "maxLength": 16,
+            "title": "Currency",
+            "type": "string"
+          },
           "model": {
             "default": "",
             "title": "Model",
@@ -5343,6 +5349,72 @@
           }
         },
         "summary": "Chat Images"
+      }
+    },
+    "/api/apps/imagestudio/civitai/balance": {
+      "get": {
+        "description": "The Civitai account's Buzz by type. The button is the refresh, so nothing is\ncached here; a per-owner minimum gap keeps a held-down button off Civitai.",
+        "operationId": "civitai_balance_api_apps_imagestudio_civitai_balance_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Civitai Balance"
+      }
+    },
+    "/api/apps/imagestudio/civitai/models": {
+      "get": {
+        "description": "Popular Civitai checkpoints (public list, no key needed) to pick a model from.",
+        "operationId": "civitai_models_api_apps_imagestudio_civitai_models_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "week",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Fresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Civitai Models"
       }
     },
     "/api/apps/imagestudio/clear": {
