@@ -23,10 +23,11 @@ tokens and the 105 line icons in `icons.svg` are licensed MIT-0 (no conditions,
 no notice needed); the licence text ships beside them in `icons-LICENSE.txt`.
 DisPatch's own overlay for it is `frontend/overlays/dispatch-extra.css`.
 
-**Default avatar.** The Atlas avatar in `backend/app/default_avatars/` was
-generated with MiniMax image-01. MiniMax's terms leave rights in the output
-with the user while MiniMax keeps a service licence, and AI-generated images
-may not be copyrightable. It is distributed with DisPatch under the MIT-0
-licence; see that folder's `README.md`. The Animal Friends pictures in
-`backend/app/starter_packs/pictures/` (24 PNGs) were generated the same way,
-with MiniMax image-01, under the same terms.
+**Default avatar.** The Atlas avatar in `backend/app/default_avatars/` (the
+pixel-art sloth astronaut, November 2026) was supplied by the project
+maintainer and is distributed with DisPatch under the MIT-0 licence; see that
+folder's `README.md`. The Animal Friends pictures in
+`backend/app/starter_packs/pictures/` (24 PNGs) were generated with MiniMax
+image-01. MiniMax's terms leave rights in the output with the user while
+MiniMax keeps a service licence, and AI-generated images may not be
+copyrightable; they are distributed under the MIT-0 licence.

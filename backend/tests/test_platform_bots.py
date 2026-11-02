@@ -736,7 +736,7 @@ def test_a_fresh_install_gets_the_atlas_avatar_set(env, avatar_dir):
 def test_the_shipped_avatar_files_are_the_documented_sizes():
     from PIL import Image
     sizes = {n: Image.open(firstrun.AVATAR_SRC_DIR / n).size for n in firstrun.DEFAULT_AVATARS}
-    assert sizes == {"atlas-face.png": (512, 512), "atlas-full.png": (1096, 1536),
+    assert sizes == {"atlas-face.png": (512, 512), "atlas-full.png": (1024, 1024),
                      "atlas-thumb.png": (128, 128)}
 
 
