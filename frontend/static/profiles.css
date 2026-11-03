@@ -28,7 +28,12 @@
 .bot-make-icon { display: grid; place-items: center; }
 .bot-make-label { display: none; }
 @media (max-width: 768px) {
-  .app[data-view="bots"] .bot-group-label { grid-column: 1 / -1; text-align: start; justify-self: stretch; }
+  /* line-height is set outright: the roster inherits 0 from .bot-btn's reset and the 9px label
+     collapsed to a 3px sliver in the avatar grid (No-Image rows hid it by luck). */
+  .app[data-view="bots"] .bot-group-label {
+    grid-column: 1 / -1; text-align: start; justify-self: stretch; line-height: 1.4; font-size: 11px;
+    overflow: visible; min-height: 1.4em; margin-bottom: 0;
+  }
   /* The roster takes the room it needs and no more, so "Tools & more" follows the last bot
      instead of floating at the foot of a big empty page; a long roster still scrolls inside. */
   .app[data-view="bots"] .bot-list { flex: 0 1 auto; }
