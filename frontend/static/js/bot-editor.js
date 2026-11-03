@@ -399,10 +399,11 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
     const removeBtn = el('button', { class: 'ui-btn yo-danger', type: 'button',
       text: t('editor.picture_remove'), hidden: 'hidden', dataset: { action: 'remove-picture' } });
     const syncRemove = () => {
-      // The removal route is manage_characters (the same gate as every other
-      // roster write); a caller without it keeps Change only. No saved bot yet:
-      // there is nothing on the server to remove (Discard drops a staged one).
-      const canRemove = !!original && !!savedAvatarUrl && can('manage_characters', d);
+      // An Admin removes a household/roster bot's picture through the general route; a
+      // non-Admin owner removes its OWN bot's through /api/me/characters (same removal,
+      // same history). No saved bot yet: there is nothing on the server to remove.
+      const canRemove = !!original && !!savedAvatarUrl &&
+        (can('manage_characters', d) || can('create_characters', d));
       removeBtn.hidden = canRemove ? undefined : 'hidden';
       removeBtn.disabled = busy;
     };
@@ -414,7 +415,10 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
         { title: t('editor.picture_remove'), danger: true, okText: t('editor.picture_remove') }))) return;
       busy = true; syncRemove(); banner.hidden = true;
       try {
-        await profileReq('DELETE', `/api/bots/${encodeURIComponent(original.id)}/avatar`);
+        const remPath = byAdmin()
+          ? `/api/bots/${encodeURIComponent(original.id)}/avatar`
+          : `/api/me/characters/${encodeURIComponent(original.id)}/avatar`;
+        await profileReq('DELETE', remPath);
         savedAvatarUrl = '';
         picture = null; pictureCrop = null; genActions.hidden = true;
         if (previewUrl && previewUrl.startsWith('blob:')) URL.revokeObjectURL(previewUrl);

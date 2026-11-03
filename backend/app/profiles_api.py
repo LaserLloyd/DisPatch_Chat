@@ -9,7 +9,8 @@ Yours (the signed-in profile)
 * ``GET  /api/me/reset/preview``  -> ``{counts, token, expires_in, outcome, keeps_voices}``
 * ``POST /api/me/reset`` ``{token}`` -> what was deleted; a stale token is 409 ``reset_stale``
 * ``GET/POST /api/me/characters``, ``GET/PATCH/DELETE /api/me/characters/{bot_id}``,
-  ``POST /api/me/characters/{bot_id}/avatar``: your own bots (never anyone else's: 404)
+  ``POST /api/me/characters/{bot_id}/avatar`` (and ``DELETE`` to remove it): your own bots
+  (never anyone else's: 404)
 * ``POST /api/me/characters/{bot_id}/reset``: a copy of a household-managed bot back to the
   household's setup, with its deleted household chats posted again (4.1, app/kits.py)
 * ``GET  /api/me/export``: your chats and your bots' setup, as JSON
@@ -455,6 +456,60 @@ async def my_character_avatar(request: Request, bot_id: str, file: UploadFile = 
     audit(request, "character.avatar", bot_id)
     await _roster_changed()
     return {"ok": True, "avatar_url": bot.avatar_url}
+
+
+@router.delete("/api/me/characters/{bot_id}/avatar", dependencies=[_CREATE])
+async def my_character_avatar_remove(request: Request, bot_id: str):
+    """Remove one of your own bots' pictures: the pair (face crop + full-res original) and the
+    thumb go together, the roster drops the filename so the bot falls back to its letter/emoji
+    tile, and the previous face is snapshotted FIRST so ``/avatar/history`` still lists it and
+    Restore can bring it back. Another profile's bot is the same 404 an unknown bot gets
+    (``characters.get_personal``)."""
+    from . import avatar_snapshots, kits
+    pid = _my_id(request)
+    try:
+        bot = await asyncio.to_thread(characters.get_personal, bot_id, pid)
+    except characters.CharacterError as e:
+        raise fail(e.status, e.code, str(e)) from e
+    # Capture before unlink: a face no thread ever wore would otherwise be gone for good.
+    snap = await asyncio.to_thread(avatar_snapshots.snapshot_id, bot)
+    if snap:
+        await asyncio.to_thread(avatar_snapshots.note_owner, bot.id, snap)
+    removed = await asyncio.to_thread(_remove_own_avatar_files, bot.id, bot.avatar)
+    updated = await asyncio.to_thread(config.save_bot_avatar, bot.id, "")
+    if not updated:
+        raise fail(500, "bot_update_failed", "Failed to update bot config")
+    if getattr(updated, "template", "") or getattr(updated, "cloned_from", ""):
+        profiles_service._mark_override(updated.id, "picture")  # a kit must not put it back
+    audit(request, "character.avatar_remove", bot_id, f"files={len(removed)}")
+    await _roster_changed()
+    kits.request_sync()
+    return {"ok": True, "removed": True, "files": removed, "avatar_url": "",
+            "snapshot_id": snap}
+
+
+def _remove_own_avatar_files(bot_id: str, filename: str) -> list[str]:
+    """Delete the face/full/thumb triplet a PERSONAL bot owns; returns the names removed.
+
+    Reuses ``main._clean_stale_avatar_siblings`` with an empty ``keep`` — the same routine the
+    upload/restore paths use — so all three halves go together instead of a hand-rolled unlink.
+
+    A shared shipped default (``atlas-face.png``) is never this bot's to delete: only names
+    carrying the bot's own id prefix are candidates, and that prefix is the explicit guard.
+    """
+    from .main import _clean_stale_avatar_siblings
+    prefix = f"{bot_id}-"
+    names = {f"{bot_id}-{role}{ext}" for role in characters.AVATAR_ROLES
+             for ext in characters.AVATAR_EXTS}
+    # The configured file may be another bot's (a shared default): dropping the reference in
+    # config is enough to fall back, the file itself stays.
+    cur = (filename or "").strip()
+    if cur and not cur.startswith(prefix):
+        names = set()
+    removed = sorted(n for n in names if n.startswith(prefix)
+                     and (config.AVATAR_DIR / n).is_file())
+    _clean_stale_avatar_siblings(bot_id, set())
+    return removed
 
 
 # --------------------------------------------------------------------------- #
