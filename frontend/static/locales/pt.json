@@ -1177,6 +1177,7 @@
     "kind_app": "Aplicação",
     "kind_static": "Pasta",
     "kind_url": "Página web",
+    "speech": "Voz",
     "has_refresh": "com atualização",
     "enabled_aria": "Mostrar {name} na barra",
     "remove": "Remover {name}",
@@ -2263,7 +2264,11 @@
     "saved": "Guardado.",
     "name_long": "O nome pode ter no máximo {max} caracteres.",
     "emoji_long": "No máximo {max} caracteres.",
-    "voice_builtin": "Vozes integradas"
+    "voice_builtin": "Vozes integradas",
+    "picture_remove": "Remover imagem",
+    "picture_remove_confirm": "Remover a imagem deste bot? Ele volta ao bloco de letra e a imagem antiga fica no histórico, então dá para recuperar.",
+    "picture_removed": "Imagem removida",
+    "picture_remove_failed": "Não foi possível remover a imagem: {error}"
   },
   "aibuild": {
     "title": "Criar um bot com IA",

@@ -9,7 +9,7 @@
 
 import { t } from './i18n.js?v=5';
 import { el } from './util.js?v=23';
-import { can, profileReq, withShell, initBotEditor } from './bot-editor.js?v=5';
+import { can, profileReq, withShell, initBotEditor } from './bot-editor.js?v=6';
 
 let shell = {};
 /** Called once at boot with the shell's helpers ({ t, toast, confirm, api, state }). */

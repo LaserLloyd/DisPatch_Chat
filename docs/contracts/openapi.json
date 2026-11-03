@@ -7498,6 +7498,216 @@
       }
     },
     "/api/bots/{bot_id}/avatar": {
+      "delete": {
+        "description": "Remove a bot's picture entirely, falling back to its letter/emoji tile.\n\nA real removal, not a UI hide: the face crop, the full-res original and the\nthumb are deleted together, config.yaml drops the `avatar` filename, and the\nroster broadcast refreshes every connected device. The OLD face is captured\ninto the snapshot store FIRST, so /api/bots/{bot_id}/avatar/history still\nlists it and the Restore button can bring it back — removal stays undoable.",
+        "operationId": "delete_bot_avatar_api_bots__bot_id__avatar_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "Stable slug. Branch on THIS, never on the prose.",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "description": "The human-readable message. Unchanged from before problem documents existed."
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "Relative URI naming the problem type.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "code",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "A remote caller needs X-API-Key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "Stable slug. Branch on THIS, never on the prose.",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "description": "The human-readable message. Unchanged from before problem documents existed."
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "Relative URI naming the problem type.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "code",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The caller's profile (or API key) lacks the permission this needs."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "Stable slug. Branch on THIS, never on the prose.",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "description": "The human-readable message. Unchanged from before problem documents existed."
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "Relative URI naming the problem type.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "code",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "No such thread, bot, message or reaction."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "description": "Stable slug. Branch on THIS, never on the prose.",
+                      "type": "string"
+                    },
+                    "detail": {
+                      "description": "The human-readable message. Unchanged from before problem documents existed."
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "Relative URI naming the problem type.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "code",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The request body failed validation."
+          }
+        },
+        "summary": "Delete Bot Avatar"
+      },
       "get": {
         "operationId": "get_bot_avatar_api_bots__bot_id__avatar_get",
         "parameters": [

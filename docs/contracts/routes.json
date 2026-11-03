@@ -910,6 +910,17 @@
       }
     },
     {
+      "method": "DELETE",
+      "path": "/api/bots/{bot_id}/avatar",
+      "requirement": {
+        "machine": [
+          "machine:avatars"
+        ],
+        "owner_scoped": "character",
+        "permission": "manage_characters"
+      }
+    },
+    {
       "method": "GET",
       "path": "/api/bots/{bot_id}/avatar",
       "requirement": {

@@ -1126,6 +1126,7 @@
     "kind_app": "アプリ",
     "kind_static": "フォルダー",
     "kind_url": "ウェブページ",
+    "speech": "音声",
     "has_refresh": "更新あり",
     "enabled_aria": "{name} をバーに表示",
     "remove": "{name} を削除",
@@ -2208,7 +2209,11 @@
     "saved": "保存しました。",
     "name_long": "名前は最大 {max} 文字です。",
     "emoji_long": "最大 {max} 文字です。",
-    "voice_builtin": "内蔵の声"
+    "voice_builtin": "内蔵の声",
+    "picture_remove": "画像を削除",
+    "picture_remove_confirm": "このボットの画像を削除しますか？文字タイルに戻り、元の画像はアバター履歴に残るので戻せます。",
+    "picture_removed": "画像を削除しました",
+    "picture_remove_failed": "画像を削除できませんでした: {error}"
   },
   "aibuild": {
     "title": "AI でボットを作成",

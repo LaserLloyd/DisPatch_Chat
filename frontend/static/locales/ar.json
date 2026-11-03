@@ -1256,6 +1256,7 @@
     "kind_app": "تطبيق",
     "kind_static": "مجلد",
     "kind_url": "صفحة ويب",
+    "speech": "صوت",
     "has_refresh": "قابلة للتحديث",
     "enabled_aria": "إظهار {name} على الشريط",
     "remove": "إزالة {name}",
@@ -2353,7 +2354,11 @@
     "saved": "تم الحفظ.",
     "name_long": "يجب ألا يزيد الاسم على {max} حرفًا.",
     "emoji_long": "{max} حرفًا على الأكثر.",
-    "voice_builtin": "الأصوات المدمجة"
+    "voice_builtin": "الأصوات المدمجة",
+    "picture_remove": "إزالة الصورة",
+    "picture_remove_confirm": "إزالة صورة هذا البوت؟ سيعود إلى مربع الحرف، وتبقى الصورة القديمة في سجل الصور فيمكن استعادتها.",
+    "picture_removed": "أُزيلت الصورة",
+    "picture_remove_failed": "تعذّر إزالة الصورة: {error}"
   },
   "aibuild": {
     "title": "ابنِ بوتًا بالذكاء الاصطناعي",

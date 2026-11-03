@@ -1177,6 +1177,7 @@
     "kind_app": "Application",
     "kind_static": "Dossier",
     "kind_url": "Page web",
+    "speech": "Voix",
     "has_refresh": "avec actualisation",
     "enabled_aria": "Afficher {name} dans la barre",
     "remove": "Retirer {name}",
@@ -2263,7 +2264,11 @@
     "saved": "Enregistré.",
     "name_long": "Le nom peut comporter {max} caractères au maximum.",
     "emoji_long": "{max} caractères au maximum.",
-    "voice_builtin": "Voix intégrées"
+    "voice_builtin": "Voix intégrées",
+    "picture_remove": "Retirer l’image",
+    "picture_remove_confirm": "Retirer l’image de ce bot ? Il reprend sa tuile lettre et l’ancienne image reste dans l’historique, donc elle est récupérable.",
+    "picture_removed": "Image retirée",
+    "picture_remove_failed": "Impossible de retirer l’image : {error}"
   },
   "aibuild": {
     "title": "Créer un bot avec l’IA",

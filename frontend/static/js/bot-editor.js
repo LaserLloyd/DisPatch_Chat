@@ -4,7 +4,10 @@
 // (when more than one is allowed). Owned by WP-FE-YOU.
 //
 //   POST   /api/me/characters            create          PATCH /api/me/characters/{id}  change
-//   POST   /api/me/characters/{id}/avatar  (multipart "file")
+//   POST   /api/me/characters/{id}/avatar  (multipart "file")   -- the caller's own bot
+//   POST   /api/bots/{id}/avatar           (multipart "file")   -- anyone with manage_characters
+//   DELETE /api/bots/{id}/avatar           remove the picture (face + full + thumb); the
+//                                          old face stays in /avatar/history, restorable
 //   POST   /api/me/characters/draft      {description} -> {draft:{name,emoji,description,persona}}
 //   GET    /api/voice/profiles           the voice add-on: rows carry `household` / `mine`
 //   GET    /api/me/personas              preset personalities (create_characters)
@@ -261,7 +264,8 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
   };
   let picture = null;          // a Blob chosen but not uploaded yet
   let pictureCrop = null;      // {x, y, size}: the face square the user placed on it (fractions)
-  let previewUrl = original && original.avatar_url ? original.avatar_url : '';
+  let savedAvatarUrl = original && original.avatar_url ? original.avatar_url : '';
+  let previewUrl = savedAvatarUrl;
   let busy = false;
 
   return new Promise((resolve) => {
@@ -310,14 +314,16 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
       pictureCrop = chosen;
       setPreview((chosen && await faceBlob(blob, chosen)) || blob);
       genActions.hidden = !generated;
+      syncRemove();
       return true;
     };
     // Back to the picture the bot had before (or none): the unsaved one is dropped.
     const discardPicture = () => {
       picture = null; pictureCrop = null; genActions.hidden = true;
       if (previewUrl && previewUrl.startsWith('blob:')) URL.revokeObjectURL(previewUrl);
-      previewUrl = original && original.avatar_url ? original.avatar_url : '';
+      previewUrl = savedAvatarUrl;
       showPreview();
+      syncRemove();
     };
     const updateCounter = () => {
       const n = [...personaIn.value].length;
@@ -380,6 +386,47 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
       onclick: () => fileIn.click() });
     const pickBtn = el('button', { class: 'ui-btn', type: 'button', text: t('editor.picture_pick'),
       onclick: () => { pickGrid.hidden = !pickGrid.hidden; } });
+
+    // REMOVE the picture entirely — not "hide" it. The server deletes the face
+    // crop, the full-res original and the thumb together, drops the filename
+    // from the roster (the bot falls back to its letter/emoji tile) and keeps
+    // the old face in /avatar/history, so a Restore can bring it back.
+    //
+    // Writing a picture to a bot that is not the caller's own copy needs the
+    // general route (manage_characters) — the personal one is "your own bots"
+    // only, which is why an Admin could never set a household bot's face.
+    const byAdmin = () => !!original && can('manage_characters', d);
+    const removeBtn = el('button', { class: 'ui-btn yo-danger', type: 'button',
+      text: t('editor.picture_remove'), hidden: 'hidden', dataset: { action: 'remove-picture' } });
+    const syncRemove = () => {
+      // The removal route is manage_characters (the same gate as every other
+      // roster write); a caller without it keeps Change only. No saved bot yet:
+      // there is nothing on the server to remove (Discard drops a staged one).
+      const canRemove = !!original && !!savedAvatarUrl && can('manage_characters', d);
+      removeBtn.hidden = canRemove ? undefined : 'hidden';
+      removeBtn.disabled = busy;
+    };
+    syncRemove();
+    removeBtn.addEventListener('click', async () => {
+      if (busy || !original) return;
+      const ask = typeof d.confirm === 'function' ? d.confirm : null;
+      if (ask && !(await ask(t('editor.picture_remove_confirm'),
+        { title: t('editor.picture_remove'), danger: true, okText: t('editor.picture_remove') }))) return;
+      busy = true; syncRemove(); banner.hidden = true;
+      try {
+        await profileReq('DELETE', `/api/bots/${encodeURIComponent(original.id)}/avatar`);
+        savedAvatarUrl = '';
+        picture = null; pictureCrop = null; genActions.hidden = true;
+        if (previewUrl && previewUrl.startsWith('blob:')) URL.revokeObjectURL(previewUrl);
+        previewUrl = ''; showPreview();
+        if (d.toast) d.toast(t('editor.picture_removed'));
+      } catch (e) {
+        banner.textContent = t('editor.picture_remove_failed', { error: e.message || String(e) });
+        banner.hidden = false;
+      } finally {
+        busy = false; syncRemove();
+      }
+    });
     const genButtons = () => [genBtn, genRetryBtn, genDiscardBtn];
     const generate = async () => {
       if (busy) return;
@@ -469,8 +516,18 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
           fd.append('file', picture, picture.name || 'avatar.png');
           try {
             const q = pictureCrop ? `?${new URLSearchParams({ crop_x: pictureCrop.x, crop_y: pictureCrop.y, crop_size: pictureCrop.size })}` : '';
-            const r = await profileReq('POST', `/api/me/characters/${encodeURIComponent(saved.id)}/avatar${q}`, { form: fd });
-            if (r && r.avatar_url) saved = { ...saved, avatar_url: r.avatar_url };
+            // A bot that is not the caller's own copy (a household template, an
+            // Admin's roster bot) goes through the general route; the personal
+            // one answers 404 for it and that is how its face was "set out of
+            // band" before. Same triplet, same broadcast either way.
+            const picPath = byAdmin()
+              ? `/api/bots/${encodeURIComponent(saved.id)}/avatar${q}`
+              : `/api/me/characters/${encodeURIComponent(saved.id)}/avatar${q}`;
+            const r = await profileReq('POST', picPath, { form: fd });
+            if (r && r.avatar_url) {
+              saved = { ...saved, avatar_url: r.avatar_url };
+              savedAvatarUrl = r.avatar_url;
+            }
           } catch (e) {
             // The bot is saved; only the picture failed. Say so and keep the editor open on it.
             banner.textContent = e.message; banner.hidden = false;
@@ -498,7 +555,7 @@ export async function renderBotEditor(host, bot = null, deps = {}) {
         el('div', { class: 'yo-label', text: t('editor.picture') }),
         previewBox,
         canGenerate ? genActions : null,
-        el('div', { class: 'yo-actions' }, [uploadBtn, pickBtn, canGenerate ? genBtn : null]),
+        el('div', { class: 'yo-actions' }, [uploadBtn, pickBtn, canGenerate ? genBtn : null, removeBtn]),
         pickGrid, fileIn,
       ]),
       options.presets.length ? field(t('editor.preset'), presetSel, { id: 'yo-preset' }) : null,

@@ -28,7 +28,7 @@ import { kitSection } from './bot-kits.js?v=8';
 import { voiceHash } from './bot-ids.js?v=1';
 import {
   profileReq, can, renderBotEditor, renderAiBuild, loadEditorOptions, withShell,
-} from './bot-editor.js?v=5';
+} from './bot-editor.js?v=6';
 import { entitled, toggleProfile, toggleEveryone, giveToCalls, changeGiveTo } from './give-to.js?v=3';
 import { packDialog, packSummary } from './pack-dialog.js?v=1';
 

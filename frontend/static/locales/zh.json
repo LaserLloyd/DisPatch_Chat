@@ -1126,6 +1126,7 @@
     "kind_app": "应用",
     "kind_static": "文件夹",
     "kind_url": "网页",
+    "speech": "语音",
     "has_refresh": "可刷新",
     "enabled_aria": "在侧栏显示 {name}",
     "remove": "移除 {name}",
@@ -2208,7 +2209,11 @@
     "saved": "已保存。",
     "name_long": "名称最多 {max} 个字符。",
     "emoji_long": "最多 {max} 个字符。",
-    "voice_builtin": "内置语音"
+    "voice_builtin": "内置语音",
+    "picture_remove": "移除图片",
+    "picture_remove_confirm": "移除此机器人的图片？它将恢复为字母方块，旧图片仍保留在头像历史中，可以恢复。",
+    "picture_removed": "图片已移除",
+    "picture_remove_failed": "无法移除图片：{error}"
   },
   "aibuild": {
     "title": "用 AI 制作机器人",

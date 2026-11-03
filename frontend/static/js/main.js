@@ -88,8 +88,8 @@ import {
   openFromHash, mountToolsSettings, rememberPrev,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen, findTool, toolGlyph, registerExtTiles, isExtFeature,
-  openToolsMenu, toolsMenuOpen,
-} from './tools.js?v=22';
+  openToolsMenu, toolsMenuOpen, groupFor,
+} from './tools.js?v=23';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp, api as appApi } from './app-sdk.js?v=7';
@@ -119,7 +119,7 @@ import { createTasksUi } from './tasks.js?v=6';
 import { initMyBots, copyMenuItem } from './my-bots.js?v=10';
 import { initCharactersPage, mountCharactersPage, refreshCharactersPage, unmountCharactersPage, charactersMe, railDragAllowed, saveRailOrder } from './characters-page.js?v=8';
 import { packDialog } from './pack-dialog.js?v=1';
-import { initBotEditor } from './bot-editor.js?v=5';
+import { initBotEditor } from './bot-editor.js?v=6';
 import { initAccountReset } from './account-reset.js?v=5';
 import { initProfilePicture } from './profile-picture.js?v=6';
 import { initPeoplePerms } from './people-perms.js?v=8';
@@ -8664,7 +8664,48 @@ function openToolPane(owner, { id, title, subtitle, iconPaths, render, onClose }
   dom['ext-tool-root'].scrollTop = 0;
   dom['ext-tool-root'].replaceChildren();
   try { render(dom['ext-tool-root']); } catch (e) { console.warn('[ext] tool pane render failed', e); }
+  paintExtToolTabs(dom['ext-tool-root'].parentElement, entry);
   return () => { if (extToolOpen === entry) leaveToolPanes(); };
+}
+
+/** The TAB STRIP above an add-on's tool pane.
+ *
+ *  One add-on can own several tools (the voice add-on registers Voice cloning,
+ *  Built-in voices and Voice lab). tools.js folds those tiles into ONE rail
+ *  entry; this draws the tabs that take you between them inside the pane it
+ *  already had. Each tab opens its tool the normal way (openTool → the tile's
+ *  own opener), so every gate, permission and onClose hook stays exactly as it
+ *  was. No group → nothing drawn, which is every core builtin.
+ */
+function paintExtToolTabs(host, entry) {
+  if (!host) return;
+  const old = host.querySelector('.ext-tool-tabs');
+  const g = groupFor(entry.id);
+  if (!g || !g.tabs || g.tabs.length < 2) { if (old) old.remove(); return; }
+  const strip = old || el('div', { class: 'ext-tool-tabs', role: 'tablist' });
+  strip.setAttribute('aria-label', g.title);
+  const activeId = entry.id;
+  strip.replaceChildren(...g.tabs.map((tab) => {
+    const on = tab.id === activeId;
+    const btn = el('button', {
+      type: 'button', role: 'tab', class: 'ext-tool-tab' + (on ? ' active' : ''),
+      'aria-selected': String(on), tabindex: on ? '0' : '-1', text: tab.title,
+      dataset: { extTab: tab.id },
+    });
+    btn.addEventListener('click', () => { if (!on) openTool(tab.id, { launch: false }); });
+    return btn;
+  }));
+  // Arrow keys move between tabs (role="tab" convention): the strip is one
+  // tab stop, the selected tab.
+  strip.onkeydown = (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const tabs = g.tabs;
+    const i = Math.max(0, tabs.findIndex((x) => x.id === activeId));
+    const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+    if (next && next.id !== activeId) openTool(next.id, { launch: false });
+  };
+  if (!old) host.insertBefore(strip, dom['ext-tool-root']);
 }
 
 function extToolGlyph(entry) {
@@ -8686,6 +8727,9 @@ function closeExtToolView() {
   document.body.classList.remove('tool-full');
   dom['ext-tool-view'].classList.add('hidden');
   dom['ext-tool-root'].replaceChildren();
+  const strip = dom['ext-tool-root'].parentElement
+    && dom['ext-tool-root'].parentElement.querySelector('.ext-tool-tabs');
+  if (strip) strip.remove();
   if (entry.onClose) {
     try { entry.onClose(); } catch (e) { console.warn('[ext] tool pane onClose failed', e); }
   }

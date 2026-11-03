@@ -1152,6 +1152,7 @@
     "kind_app": "App",
     "kind_static": "Folder",
     "kind_url": "Web page",
+    "speech": "Speech",
     "has_refresh": "has refresh",
     "enabled_aria": "Show {name} on the bar",
     "remove": "Remove {name}",
@@ -2237,7 +2238,11 @@
     "saved": "Saved.",
     "name_long": "The name can be at most {max} characters.",
     "emoji_long": "At most {max} characters.",
-    "voice_builtin": "Built-in voices"
+    "voice_builtin": "Built-in voices",
+    "picture_remove": "Remove picture",
+    "picture_remove_confirm": "Remove this bot's picture? It falls back to its letter tile, and the old picture stays in the avatar history so you can put it back.",
+    "picture_removed": "Picture removed",
+    "picture_remove_failed": "Could not remove the picture: {error}"
   },
   "aibuild": {
     "title": "Build a bot with AI",

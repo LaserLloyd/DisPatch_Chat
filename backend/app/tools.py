@@ -161,7 +161,7 @@ _REFRESH_KEYS = {"argv", "cwd", "timeout_s"}
 #: Keys GET /api/tools adds that are not part of the manifest. PUT drops them so
 #: the Settings tab can send back the rows it was given.
 _OUTPUT_ONLY_KEYS = {"has_refresh", "builtin_feature", "available",
-                     "open_url", "open_remote_url"}
+                     "open_url", "open_remote_url", "owner", "owner_title"}
 
 #: Env names ending in these are never handed to a refresh process.
 _SCRUB_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PIN", "_PASSWORD", "_PASSWD")
@@ -988,11 +988,29 @@ def _builtin_row(tid: str) -> dict:
             "has_refresh": False, "builtin_feature": feat,
             "available": _builtin_available(tid),
             "open": builtin_open(tid)}
+    owner = _EXT_OWNER.get(tid)
+    if owner:
+        # Which ADD-ON registered this builtin, and what it is called. The rail
+        # folds an add-on's tools into one entry with a tab each, so it groups
+        # by owner rather than by a hardcoded list of ids — the voice add-on
+        # registers its three tools at runtime and their ids are its own.
+        d["owner"] = owner
+        d["owner_title"] = _extension_title(owner)
     if tid in BUILTIN_WINDOWABLE:
         # Operator listing only (builtins are never listed to anyone else), and the
         # same values the feature's own full-session status route returns.
         d["open_url"], d["open_remote_url"] = builtin_addresses(tid)
     return d
+
+
+def _extension_title(ext_id: str) -> str:
+    """The registered extension's display name, or its id (never a path)."""
+    with contextlib.suppress(Exception):
+        from . import extensions
+        for e in extensions.registry():
+            if e.id == ext_id:
+                return e.name or ext_id
+    return ext_id
 
 
 def _app_row(la) -> dict:

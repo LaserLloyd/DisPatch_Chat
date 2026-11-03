@@ -106,6 +106,7 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("backend/app/main.py", "_roster_frame", "load_bots"): _SCOPER,
     ("backend/app/main.py", "_complete_bot_order", "load_bots"): "order rows; the route 404s a foreign personal id and filters its reply",
     ("backend/app/main.py", "upload_bot_avatar", "load_bots"): _SCOPER,
+    ("backend/app/main.py", "delete_bot_avatar", "load_bots"): _SCOPER,
     ("backend/app/main.py", "bot_avatar_history", "all_threads"): _OWNED,
     ("backend/app/main.py", "bot_avatar_history_image", "all_threads"): _OWNED,
     ("backend/app/main.py", "restore_bot_avatar", "load_bots"): _SCOPER,

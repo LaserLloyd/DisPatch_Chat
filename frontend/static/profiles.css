@@ -113,6 +113,9 @@
 .yo-counter { text-align: right; font-size: 12px; margin-top: 4px; }
 .yo-counter.over { color: var(--error-text); }
 .yo-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* "Remove picture" (bot-editor.js): a destructive action that sits beside the
+   ordinary picture buttons, so it is spoken by colour AND by its own words. */
+.yo-actions .yo-danger { color: var(--error-text); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .yo-foot { justify-content: flex-end; margin-top: 4px; }
 .yo-preview { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; background: var(--bg-tertiary); display: block; }
 .yo-preview-box { margin-bottom: 4px; }

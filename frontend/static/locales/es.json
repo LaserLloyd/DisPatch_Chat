@@ -1177,6 +1177,7 @@
     "kind_app": "App",
     "kind_static": "Carpeta",
     "kind_url": "Página web",
+    "speech": "Voz",
     "has_refresh": "con actualización",
     "enabled_aria": "Mostrar {name} en la barra",
     "remove": "Quitar {name}",
@@ -2263,7 +2264,11 @@
     "saved": "Guardado.",
     "name_long": "El nombre puede tener como máximo {max} caracteres.",
     "emoji_long": "Como máximo {max} caracteres.",
-    "voice_builtin": "Voces integradas"
+    "voice_builtin": "Voces integradas",
+    "picture_remove": "Quitar imagen",
+    "picture_remove_confirm": "¿Quitar la imagen de este bot? Volverá a su ficha de letra y la imagen anterior queda en el historial, así que puedes recuperarla.",
+    "picture_removed": "Imagen quitada",
+    "picture_remove_failed": "No se pudo quitar la imagen: {error}"
   },
   "aibuild": {
     "title": "Crear un bot con IA",

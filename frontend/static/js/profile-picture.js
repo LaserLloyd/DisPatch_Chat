@@ -14,7 +14,7 @@
 
 import { t } from './i18n.js?v=5';
 import { el } from './util.js?v=23';
-import { profileReq } from './bot-editor.js?v=5';
+import { profileReq } from './bot-editor.js?v=6';
 import { avatarSpec, markNode } from './profiles.js?v=6';
 import { nimEnabled } from './nim.js?v=8';
 

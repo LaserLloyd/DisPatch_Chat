@@ -9709,6 +9709,7 @@ async def upload_bot_avatar(
     updated = config.save_bot_avatar(bot_id, face_name)
     if not updated:
         raise HTTPException(500, "Failed to update bot config")
+    _mark_picture_chosen(bot)          # an explicit new face outranks the template's
     data = [b.to_dict() for b in config.load_bots()]
     await manager.broadcast({"type": "bots", "bots": data})
     await _after_avatar_change(bot_id)
@@ -10047,6 +10048,96 @@ async def restore_bot_avatar(request: Request, bot_id: str, payload: dict = Body
     await _after_avatar_change(bot_id)
     return {"ok": True, "restored": sid, "avatar_url": updated.avatar_url,
             "full_restored": full_src is not None}
+
+
+def _remove_bot_avatar_files(bot_id: str, filename: str) -> list[str]:
+    """Delete the face/full/thumb triplet a bot OWNS. Returns the names removed.
+
+    An avatar is a PAIR (a square face crop for the UI, a full-resolution
+    original the lightbox opens) with a 128 px thumb beside it — removing one
+    and leaving the others on disk is exactly the half-pair bug the upload and
+    restore paths guard against (the extension probe would keep serving the old
+    full-res). Only names prefixed with the bot's id are touched: the repo's
+    shipped defaults (`atlas-face.png`) are shared by another bot and are never
+    this bot's to delete.
+    """
+    prefix = f"{bot_id}-"
+    base = config.AVATAR_DIR.resolve()
+    names = {f"{bot_id}-{role}{ext}" for role in ("face", "full", "thumb")
+             for ext in (".png", ".jpg", ".jpeg", ".webp")}
+    cur = (filename or "").strip()
+    if cur:
+        names.add(cur)
+    removed: list[str] = []
+    for name in sorted(names):
+        if not name.startswith(prefix) or "/" in name or "\\" in name:
+            continue
+        path = config.AVATAR_DIR / name
+        try:
+            if path.is_file() and base in path.resolve().parents:
+                path.unlink()
+                removed.append(name)
+        except OSError:
+            log.warning("could not remove avatar file %s", name, exc_info=True)
+    return removed
+
+
+def _mark_picture_chosen(bot: config.Bot) -> None:
+    """A person set (or removed) this bot's picture through the UI: record it as
+    an override on a COPY, so the kit pass stops re-applying the template's
+    picture on the next sync (profiles_service._apply_picture). Without this an
+    Admin's new face — or a removal — silently reverted minutes later."""
+    if not (getattr(bot, "template", "") or getattr(bot, "cloned_from", "")):
+        return
+    with contextlib.suppress(Exception):
+        from . import profiles_service
+        profiles_service._mark_override(bot.id, "picture")
+
+
+@app.delete("/api/bots/{bot_id}/avatar", responses=problem.MACHINE)
+async def delete_bot_avatar(request: Request, bot_id: str):
+    """Remove a bot's picture entirely, falling back to its letter/emoji tile.
+
+    A real removal, not a UI hide: the face crop, the full-res original and the
+    thumb are deleted together, config.yaml drops the `avatar` filename, and the
+    roster broadcast refreshes every connected device. The OLD face is captured
+    into the snapshot store FIRST, so /api/bots/{bot_id}/avatar/history still
+    lists it and the Restore button can bring it back — removal stays undoable.
+    """
+    bot = config.resolve_bot(bot_id)
+    if not bot:
+        raise HTTPException(404, "Unknown bot")
+    bot_id = bot.id  # canonical — bot_id names the avatar files on disk
+
+    # Capture before unlink: history is built from the snapshots threads pin,
+    # so a face no thread ever wore would otherwise be gone for good.
+    # Content-addressed: capturing a face already in the store writes nothing.
+    snap = await asyncio.to_thread(avatar_snapshots.snapshot_id, bot)
+    if snap:
+        # Keep it in /avatar/history even when no thread ever wore it (this is
+        # the face being taken away — it must stay restorable).
+        await asyncio.to_thread(avatar_snapshots.note_owner, bot_id, snap)
+
+    removed = await asyncio.to_thread(_remove_bot_avatar_files, bot_id, bot.avatar)
+    updated = config.save_bot_avatar(bot_id, "")
+    if not updated:
+        raise HTTPException(500, "Failed to update bot config")
+    _mark_picture_chosen(bot)          # a removal is a choice a kit must respect
+    data = [b.to_dict() for b in config.load_bots()]
+    await manager.broadcast({"type": "bots", "bots": data})
+    kits.request_sync()
+    if snap:
+        # Unused threads (no messages yet) keep wearing the face they had: they
+        # never "started", and that pin is also what keeps the removed picture
+        # in /avatar/history, where Restore can pick it back up.
+        repinned = await db.repin_unused_thread_avatars(bot_id, snap)
+        for tid in repinned:
+            thread = await db.get_thread(tid)
+            if thread:
+                await manager.broadcast({"type": "thread_update",
+                                         "thread": thread.model_dump()})
+    return {"ok": True, "removed": True, "files": removed,
+            "avatar_url": "", "snapshot_id": snap}
 
 
 

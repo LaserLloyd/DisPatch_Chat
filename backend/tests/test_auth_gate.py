@@ -417,6 +417,7 @@ AVATAR_ROUTES = [
     ("GET", "/api/bots/alpha/avatar/full"),
     ("GET", "/api/bots/main/avatar/history"),
     ("POST", "/api/bots/alpha/avatar"),
+    ("DELETE", "/api/bots/alpha/avatar"),
     ("POST", "/api/bots/alpha/avatar/restore"),
 ]
 

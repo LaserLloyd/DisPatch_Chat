@@ -661,7 +661,8 @@
       "host": false,
       "http": [
         "POST /api/bots/{bot_id}/avatar",
-        "POST /api/bots/{bot_id}/avatar/restore"
+        "POST /api/bots/{bot_id}/avatar/restore",
+        "DELETE /api/bots/{bot_id}/avatar"
       ],
       "id": "characters.avatar",
       "machine": [
@@ -669,7 +670,7 @@
       ],
       "mcp": null,
       "permission": "manage_characters",
-      "title": "Upload or restore a character's avatar",
+      "title": "Upload, restore or remove a character's avatar",
       "ui": "api.uploadAvatar",
       "ws": []
     },

@@ -1152,6 +1152,7 @@
     "kind_app": "App",
     "kind_static": "Ordner",
     "kind_url": "Webseite",
+    "speech": "Sprache",
     "has_refresh": "mit Aktualisierung",
     "enabled_aria": "{name} in der Leiste zeigen",
     "remove": "{name} entfernen",
@@ -2237,7 +2238,11 @@
     "saved": "Gespeichert.",
     "name_long": "Der Name darf höchstens {max} Zeichen lang sein.",
     "emoji_long": "Höchstens {max} Zeichen.",
-    "voice_builtin": "Integrierte Stimmen"
+    "voice_builtin": "Integrierte Stimmen",
+    "picture_remove": "Bild entfernen",
+    "picture_remove_confirm": "Das Bild dieses Bots entfernen? Er zeigt wieder seine Buchstabenkachel; das alte Bild bleibt im Verlauf und lässt sich zurückholen.",
+    "picture_removed": "Bild entfernt",
+    "picture_remove_failed": "Das Bild konnte nicht entfernt werden: {error}"
   },
   "aibuild": {
     "title": "Bot mit KI erstellen",

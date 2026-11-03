@@ -21,7 +21,9 @@ picture is at the moment a thread is created. Any bot, any install.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import threading
 from pathlib import Path
 
 from . import config
@@ -41,6 +43,13 @@ _HASH_CHARS = 16
 # unbounded, a 64MP upload re-encoded to PNG could land ~30MB in the store twice.
 MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024
 MAX_FULL_BYTES = 25 * 1024 * 1024
+
+#: How many faces a bot's own record keeps. History is a "put it back" list,
+#: not an archive: a bot that rotates daily for a year is still a short menu.
+OWNED_KEEP = 30
+#: bot id -> {snapshot id: ISO time it stopped/started being the face}
+_OWNERS_NAME = "owners.json"
+_owners_lock = threading.Lock()
 
 
 def _dir() -> Path:
@@ -346,7 +355,7 @@ def prune(keep: set[str]) -> int:
         return 0
     removed = 0
     for f in root.iterdir():
-        if f.name.startswith(".") or f.name in keep:
+        if f.name.startswith(".") or f.name in keep or f.name == _OWNERS_NAME:
             continue
         try:
             f.unlink()
@@ -354,6 +363,48 @@ def prune(keep: set[str]) -> int:
         except OSError:
             pass
     return removed
+
+
+def _owners_path() -> Path:
+    return _dir() / _OWNERS_NAME
+
+
+def _read_owners() -> dict:
+    try:
+        doc = json.loads(_owners_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def note_owner(bot_id: str, sid: str | None) -> None:
+    """Remember that ``sid`` was once this bot's face.
+
+    Threads pin a snapshot at creation, and that pin is what /avatar/history
+    reads — but a face no thread ever wore (uploaded and removed between two
+    chats, or a bot whose only thread was created earlier) would drop out of
+    the store's index and be unreachable even though its bytes are still on
+    disk. This records it per bot so "the one I removed" stays restorable.
+    Never raises: history is a convenience, the avatar change is the job.
+    """
+    if not bot_id or not sid or path_for(sid) is None:
+        return
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    with _owners_lock:
+        doc = _read_owners()
+        rows = doc.get(bot_id) if isinstance(doc.get(bot_id), dict) else {}
+        rows[sid] = now
+        if len(rows) > OWNED_KEEP:
+            for old in sorted(rows, key=lambda k: str(rows[k]))[:-OWNED_KEEP]:
+                rows.pop(old, None)
+        doc[bot_id] = rows
+        try:
+            _dir().mkdir(parents=True, exist_ok=True)
+            _atomic_write(_owners_path(),
+                          json.dumps(doc, ensure_ascii=False).encode("utf-8"))
+        except OSError:
+            log.warning("could not record an avatar owner for %s", bot_id, exc_info=True)
 
 
 def history(bot_id: str, threads: list) -> list[dict]:
@@ -386,6 +437,14 @@ def history(bot_id: str, threads: list) -> list[dict]:
             if created > e["last_seen"]:
                 e["last_seen"] = created
     out = [e for e in seen.values() if path_for(e["id"]) is not None]
+    # A face a bot wore between two chats is not pinned by any thread: the
+    # per-bot record (note_owner) keeps it in the list so a removal stays
+    # undoable. thread_count 0 says "no chat wears this one".
+    for sid, when in (_read_owners().get(bot_id) or {}).items():
+        if sid in seen or path_for(sid) is None:
+            continue
+        out.append({"id": sid, "first_seen": str(when), "last_seen": str(when),
+                    "thread_count": 0})
     out.sort(key=lambda e: e["last_seen"], reverse=True)
     return out
 

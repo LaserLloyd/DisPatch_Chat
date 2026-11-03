@@ -609,6 +609,8 @@ PROBES: tuple[Probe, ...] = (
           reveals=False, own="any", mutates=True),
     Probe("personal_bot", "POST /api/bots/{id}/avatar", "POST", "/api/bots/{bot}/avatar", files=_files_png,
           reveals=False, own="any", mutates=True, machine="read"),
+    Probe("personal_bot", "DELETE /api/bots/{id}/avatar", "DELETE", "/api/bots/{bot}/avatar",
+          reveals=False, own="any", mutates=True),
     Probe("personal_bot", "DELETE /api/characters/{id}", "DELETE", "/api/characters/{bot}", reveals=False,
           own="any", destroys=True),
     Probe("personal_bot", "DELETE /api/bots/{id}", "DELETE", "/api/bots/{bot}", reveals=False, own="any",

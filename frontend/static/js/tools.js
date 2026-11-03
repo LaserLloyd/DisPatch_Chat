@@ -151,6 +151,9 @@ export function toolIconName(tool) {
 
 /** The glyph node for a tool: a line icon, or the typed emoji as text. */
 export function toolGlyph(tool) {
+  // A folded add-on group carries its first tab's line icon (an extension's
+  // tile ids are not RAIL_ICONS names, so the lookup below would print one).
+  if (tool && Array.isArray(tool.iconPaths) && tool.iconPaths.length) return railIcon(tool.iconPaths);
   const b = tool && tool.kind === 'builtin' ? builtinOf(tool) : null;
   if (b && b.paths) return railIcon(b.paths);
   const name = toolIconName(tool);
@@ -221,6 +224,60 @@ function builtinOf(tool) {
     return BUILTIN_BY_FEATURE.get(tool.builtin_feature);
   }
   return BUILTIN_BY_ID.get(tool.id) || null;
+}
+
+// ---------- one rail entry per ADD-ON (tabs inside) ----------
+//
+// An extension may register several tools — the voice add-on registers Voice
+// cloning, Built-in voices and Voice lab — and three tiles for one feature set
+// is clutter. They become ONE rail entry ("Speech") whose pane carries a TAB
+// per tool. The grouping key is the OWNER the tiles were registered with (and
+// the server now repeats on the row), never a hardcoded list of ids: the
+// add-on registers its builtins at runtime and its ids are its own.
+//
+// A single enabled tool keeps its own tile — a tab strip with one tab is noise.
+const GROUP_PREFIX = 'group:';
+/** A voice add-on's group reads as "Speech", whatever its package is called. */
+const SPEECH_RE = /voice|speech/i;
+/** owner -> the tab id last opened, so returning to the group lands there. */
+const groupTab = new Map();
+
+function isGroupId(id) { return String(id || '').startsWith(GROUP_PREFIX); }
+
+/** The folded entry for one owner, or null when there is nothing to fold. */
+function groupMeta(id) {
+  if (!isGroupId(id) || !deps) return null;
+  const owner = String(id).slice(GROUP_PREFIX.length);
+  const members = BUILTINS.filter((b) => b.owner === owner
+    && deps.builtinOn(b.feature)
+    && (findTool(b.id) || {}).enabled !== false);
+  if (members.length < 2) return null;
+  const first = findTool(members[0].id) || {};
+  const ownerTitle = String(first.owner_title || '');
+  return {
+    id,
+    kind: 'builtin',
+    title: SPEECH_RE.test(ownerTitle + ' ' + owner) ? t('tools.speech') : (ownerTitle || owner),
+    owner,
+    iconPaths: Array.isArray(members[0].paths) ? members[0].paths : null,
+    groupOrder: BUILTINS.indexOf(members[0]),
+    tabs: members.map((b) => ({ id: b.id, title: toolTitle(findTool(b.id) || { id: b.id, kind: 'builtin' }) })),
+  };
+}
+
+/** The open group for a tab (main.js paints its tab strip), else null. */
+export function groupFor(id) {
+  if (!id) return null;
+  if (isGroupId(id)) return groupMeta(id);
+  const tool = allTools().find((x) => x.id === id);
+  const b = tool && tool.kind === 'builtin' ? builtinOf(tool) : null;
+  return b && b.owner ? groupMeta(GROUP_PREFIX + b.owner) : null;
+}
+
+/** The rail row an id belongs to: a grouped tab reports its group's row. */
+function rowIdFor(id) {
+  const g = groupFor(id);
+  return g ? g.id : id;
 }
 
 function isLoopbackHost(h) {
@@ -307,12 +364,14 @@ function allTools() {
 }
 
 export function findTool(id) {
+  if (isGroupId(id)) return groupMeta(id);
   return allTools().find((x) => x.id === id) || null;
 }
 
 /** Does `id` name a tool (so selectBot must route it here, not to a bot)? */
 export function isToolId(id) {
   if (!id) return false;
+  if (isGroupId(id)) return !!groupMeta(id);
   return BUILTIN_BY_ID.has(id) || !!(tools && tools.some((x) => x.id === id));
 }
 
@@ -348,12 +407,24 @@ export function railEntries() {
   const builtins = [];
   const apps = [];
   const others = [];
+  // Fold each add-on's tools into one entry: tile id -> its group.
+  const tileGroup = new Map();
+  for (const owner of new Set(BUILTINS.filter((b) => b.owner).map((b) => b.owner))) {
+    const g = groupMeta(GROUP_PREFIX + owner);
+    if (g) for (const tab of g.tabs) tileGroup.set(tab.id, g);
+  }
+  const seenGroups = new Set();
   for (const tool of allTools()) {
     if (tool.enabled === false) continue;
     if (tool.kind === 'builtin') {
       // Only when the pane's own probe found it on.
       const b = builtinOf(tool);
       if (!b || !deps.builtinOn(b.feature)) continue;
+      const g = tileGroup.get(tool.id) || tileGroup.get(b.id);
+      if (g) {
+        if (!seenGroups.has(g.id)) { seenGroups.add(g.id); builtins.push(g); }
+        continue;
+      }
       builtins.push(tool);
     } else if (isApp(tool)) {
       apps.push(tool);
@@ -361,7 +432,7 @@ export function railEntries() {
       others.push(tool);
     }
   }
-  const order = (x) => BUILTINS.indexOf(builtinOf(x));
+  const order = (x) => (Number.isFinite(x.groupOrder) ? x.groupOrder : BUILTINS.indexOf(builtinOf(x)));
   builtins.sort((a, b) => order(a) - order(b));
   apps.sort(byAppOrder);
   return builtins.concat(apps, others);
@@ -467,7 +538,7 @@ function groupDotClass(mode, bots) {
  *  'bots' for the phone's parked-bots tile. */
 function menuButton(entries, bots, mode) {
   const st = deps.state;
-  const active = (mode === 'tools' && (entries.some((x) => x.id === st.selectedBotId) || !!openId))
+  const active = (mode === 'tools' && (entries.some((x) => x.id === rowIdFor(st.selectedBotId)) || !!openId))
     || bots.some((b) => b.active);
   const label = groupLabel(mode);
   const btn = el('button', {
@@ -553,11 +624,13 @@ export function paintToolsGroupDot() {
 /** The dot for a builtin, for main.js to patch in place: its phone tile, or
  *  its row in the open popup. */
 export function railToolDot(id) {
+  // A grouped tab has no row of its own: its dot lives on the group's row.
+  const rowId = rowIdFor(id) || id;
   for (const hostId of ['tool-list', 'tools-menu-tools']) {
     const host = $(hostId);
     if (!host) continue;
     for (const b of host.querySelectorAll('[data-tool]')) {
-      if (b.dataset.tool === id) return b.querySelector('.bot-status-dot');
+      if (b.dataset.tool === rowId) return b.querySelector('.bot-status-dot');
     }
   }
   return null;
@@ -569,7 +642,8 @@ function menuRow(tool) {
   const st = deps.state;
   const b = tool.kind === 'builtin' ? builtinOf(tool) : null;
   const title = toolTitle(tool);
-  const active = st.selectedBotId === tool.id;
+  // A grouped tab's id selects its group's row (the row is what was clicked).
+  const active = rowIdFor(st.selectedBotId) === tool.id;
   const row = el('button', {
     class: 'tools-item' + (active ? ' active' : ''),
     type: 'button',
@@ -1073,6 +1147,15 @@ export function rememberPrev() {
  *  leaves the current view (and selection) exactly as it was. */
 export function openTool(id, { launch = true } = {}) {
   if (!deps || !id) return false;
+  // A folded add-on: open the tab it was last on (or its first one). The tab's
+  // own opener draws the pane; main.js puts the tab strip above it.
+  if (isGroupId(id)) {
+    const g = groupMeta(id);
+    if (!g || !g.tabs.length) return false;
+    const want = groupTab.get(g.owner);
+    const tab = g.tabs.find((x) => x.id === want) || g.tabs[0];
+    return openTool(tab.id, { launch });
+  }
   // `launch: false` (a #tool= restore) never opens a tab by itself: Chromium
   // counts a typed or reloaded URL as user activation, so the gesture check
   // alone would pop the page again on every reload.
@@ -1082,6 +1165,7 @@ export function openTool(id, { launch = true } = {}) {
   const b = BUILTIN_BY_ID.get(id) || (tool && tool.kind === 'builtin' ? builtinOf(tool) : null);
   if (b) {
     if (tool && tool.enabled === false) return false;
+    if (b.owner) groupTab.set(b.owner, b.id);   // remember the group's tab
     const opener = b.open ? () => b.open(b.id) : (deps.openers && deps.openers[b.feature]);
     if (typeof opener !== 'function') return false;
     // Only once the pane's own probe found the feature on (the rail's rule):
