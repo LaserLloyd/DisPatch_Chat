@@ -25,9 +25,56 @@
 }
 .bot-make-btn:hover, .bot-make-btn:focus-visible { color: var(--text-primary); border-style: solid; }
 .bot-make-btn svg { width: 22px; height: 22px; }
+.bot-make-icon { display: grid; place-items: center; }
+.bot-make-label { display: none; }
 @media (max-width: 768px) {
-  .app[data-view="bots"] .bot-group-label, .app[data-view="bots"] .bot-make-btn { grid-column: 1 / -1; justify-self: center; }
-  .app[data-view="bots"] .bot-group-label { text-align: start; justify-self: stretch; }
+  .app[data-view="bots"] .bot-group-label { grid-column: 1 / -1; text-align: start; justify-self: stretch; }
+  /* The roster takes the room it needs and no more, so "Tools & more" follows the last bot
+     instead of floating at the foot of a big empty page; a long roster still scrolls inside. */
+  .app[data-view="bots"] .bot-list { flex: 0 1 auto; }
+
+  /* "Make a bot" is the last tile of the grid: the same 84px tile as a bot, dashed, with its
+     name underneath, so it reads as one more entry rather than a stray button. */
+  .app[data-view="bots"] .bot-make-btn {
+    width: auto; height: auto; border: none; border-radius: 0; padding: 6px 0;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+  }
+  .app[data-view="bots"] .bot-make-icon {
+    width: 84px; height: 84px; border-radius: 20px; border: 1px dashed var(--border-strong);
+  }
+  .app[data-view="bots"] .bot-make-icon svg { width: 28px; height: 28px; }
+  .app[data-view="bots"] .bot-make-label {
+    display: block; font-size: 13px; font-weight: 600; line-height: 1.2; color: var(--text-secondary);
+    max-width: 96px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .app[data-view="bots"] .bot-make-btn:hover .bot-make-icon,
+  .app[data-view="bots"] .bot-make-btn:focus-visible .bot-make-icon { border-style: solid; color: var(--text-primary); }
+
+  /* No-Image Mode: with no pictures the grid becomes two columns of tidy rows, each a 52px
+     tap target with the status dot right beside the name (it used to float at a tile's corner). */
+  :root[data-nim="on"] .app[data-view="bots"] .bot-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+  }
+  :root[data-nim="on"] .app[data-view="bots"] .bot-list :is(.bot-btn, .bot-make-btn) {
+    flex-direction: row; justify-content: flex-start; align-items: center; gap: 10px;
+    min-height: 52px; padding: 0 14px; line-height: 1.2; text-align: start;
+    background: var(--bg-secondary); border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+  }
+  :root[data-nim="on"] .app[data-view="bots"] .bot-list .bot-btn.active {
+    background: var(--bg-tertiary); border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  :root[data-nim="on"] .app[data-view="bots"] .bot-list .bot-name-label {
+    flex: 0 1 auto; min-width: 0; max-width: none; font-size: 15px; text-align: start;
+  }
+  :root[data-nim="on"] .app[data-view="bots"] .bot-list .bot-btn .bot-status-dot {
+    position: static; flex: none; margin: 0; transform: none; width: 10px; height: 10px;
+    border: none; inset: auto;
+  }
+  :root[data-nim="on"] .app[data-view="bots"] .bot-list .bot-btn .bot-status-dot.unread { width: 12px; height: 12px; }
+  :root[data-nim="on"] .app[data-view="bots"] .bot-make-btn { border-style: dashed; color: var(--text-secondary); }
+  :root[data-nim="on"] .app[data-view="bots"] .bot-make-icon { width: 22px; height: 22px; border: none; border-radius: 0; }
+  :root[data-nim="on"] .app[data-view="bots"] .bot-make-icon svg { width: 20px; height: 20px; }
+  :root[data-nim="on"] .app[data-view="bots"] .bot-make-label { font-size: 15px; max-width: none; }
 }
 
 /* Sign-in tiles: the protected / shared marks under the type. */

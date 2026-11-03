@@ -889,10 +889,24 @@ function railMakeBotButton(hasMine = false) {
     type: 'button', class: 'bot-make-btn', title: t('profiles.rail_make_bot'),
     // "You haven't made any bots yet" only while that is true.
     'aria-label': hasMine ? t('profiles.rail_make_bot') : `${t('profiles.rail_mine_empty')} ${t('profiles.rail_make_bot')}`,
-  }, [railIcon(RAIL_ICONS.plus)]);
+  }, [
+    // The icon sits in its own box so the phone can draw it as a tile (or a list row) and
+    // put the words beside it; the desktop rail hides the label and keeps the bare tile.
+    el('span', { class: 'bot-make-icon' }, [railIcon(RAIL_ICONS.plus)]),
+    el('span', { class: 'bot-make-label', text: t('profiles.rail_make_bot') }),
+  ]);
   b.addEventListener('click', () => openSettingsTab(MY_BOTS_SECTION));
   return b;
 }
+
+// On a phone the "make a bot" tile is the LAST tile of the grid (of the Mine group when there
+// are two), not a lone button above it. The desktop rail keeps it at the top.
+function railPhoneLayout() {
+  try { return window.matchMedia('(max-width: 768px)').matches; } catch { return false; }
+}
+try {
+  window.matchMedia('(max-width: 768px)').addEventListener('change', () => renderSidebar());
+} catch { /* old engine */ }
 
 function renderSidebar() {
   repaintPreserving(dom['bot-list'], '.bot-btn', () => renderSidebarInner());
@@ -920,14 +934,21 @@ function renderSidebarInner() {
   // Mine first, so each label appears once.
   if (showGroups) bots = [...bots.filter(isMineBot), ...bots.filter((b) => !isMineBot(b))];
   let lastGroup = null;
+  const phoneMake = offerMake && railPhoneLayout();
+  let makeAdded = false;
+  const addMake = () => { if (!makeAdded) { list.append(railMakeBotButton(hasMine)); makeAdded = true; } };
   if (offerMake) {
-    if (showGroups) { list.append(railGroupLabel('mine'), railMakeBotButton(hasMine)); lastGroup = 'mine'; }
+    if (phoneMake) { if (showGroups) { list.append(railGroupLabel('mine')); lastGroup = 'mine'; } }
+    else if (showGroups) { list.append(railGroupLabel('mine'), railMakeBotButton(hasMine)); lastGroup = 'mine'; }
     else list.append(railMakeBotButton(hasMine));
   }
   bots.forEach((bot, idx) => {
     if (showGroups) {
       const g = isMineBot(bot) ? 'mine' : 'household';
-      if (g !== lastGroup) { list.append(railGroupLabel(g)); lastGroup = g; }
+      if (g !== lastGroup) {
+        if (phoneMake && lastGroup === 'mine') addMake();
+        list.append(railGroupLabel(g)); lastGroup = g;
+      }
     }
     const btn = el('button', {
       class: 'bot-btn' + (bot.id === state.selectedBotId ? ' active' : ''),
@@ -988,6 +1009,7 @@ function renderSidebarInner() {
 
     list.append(btn);
   });
+  if (phoneMake) addMake();
 
   // Bots parked from Settings → Bots are rows in the Tools popup (js/tools.js
   // draws it: under the tools on the desktop, a "More bots" tile on the phone).
