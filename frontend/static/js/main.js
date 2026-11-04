@@ -116,12 +116,12 @@ import { mountPeopleSettings } from './people.js?v=17';
 import { createTasksUi } from './tasks.js?v=6';
 // 4.0 chat-first profiles (Foundation scaffolding: wired once here, filled by WP-FE-YOU /
 // WP-FE-PEOPLE in their own modules).
-import { initMyBots, copyMenuItem } from './my-bots.js?v=10';
-import { initCharactersPage, mountCharactersPage, refreshCharactersPage, unmountCharactersPage, charactersMe, railDragAllowed, saveRailOrder } from './characters-page.js?v=8';
+import { initMyBots, copyMenuItem } from './my-bots.js?v=11';
+import { initCharactersPage, mountCharactersPage, refreshCharactersPage, unmountCharactersPage, charactersMe, railDragAllowed, saveRailOrder } from './characters-page.js?v=9';
 import { packDialog } from './pack-dialog.js?v=1';
 import { initBotEditor } from './bot-editor.js?v=6';
-import { initAccountReset } from './account-reset.js?v=5';
-import { initProfilePicture } from './profile-picture.js?v=6';
+import { initAccountReset } from './account-reset.js?v=6';
+import { initProfilePicture } from './profile-picture.js?v=7';
 import { initPeoplePerms } from './people-perms.js?v=8';
 import { mountAgentsSettings } from './agents.js?v=6';
 import { pushRow } from './push.js?v=4';

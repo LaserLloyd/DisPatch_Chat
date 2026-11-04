@@ -24,7 +24,7 @@ import { el, spriteIcon } from './util.js?v=23';
 import { nimEnabled } from './nim.js?v=8';
 import { avatarSpec, markNode, isMineBot } from './profiles.js?v=6';
 import { askDialog, errorText } from './people-perms.js?v=8';
-import { kitSection } from './bot-kits.js?v=8';
+import { kitSection } from './bot-kits.js?v=9';
 import { voiceHash } from './bot-ids.js?v=1';
 import {
   profileReq, can, renderBotEditor, renderAiBuild, loadEditorOptions, withShell,
