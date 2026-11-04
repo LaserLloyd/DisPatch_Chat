@@ -122,3 +122,25 @@ def test_remove_never_touches_a_shared_shipped_default(world):
     assert r.status_code == 200, r.text
     assert shared.is_file(), "a file this bot does not own was deleted"
     assert config.get_bot("keeper").avatar == ""
+
+
+def test_restore_after_remove_brings_back_the_whole_triplet(world):
+    """Restore is the undo of Remove: face, full AND the 128 px thumb come back
+    (the rail loads the thumb; without it /avatar/thumb served the full face)."""
+    from PIL import Image
+    c = world.create_owner()
+    config.upsert_bot(config.Bot(id="undo", name="Undo"))
+    config._invalidate_bots_cache()
+    assert c.post("/api/bots/undo/avatar", files={"file": ("a.png", _png(), "image/png")}).status_code == 200
+    assert c.delete("/api/bots/undo/avatar").status_code == 200
+    assert _owned_files("undo") == []
+    hist = c.get("/api/bots/undo/avatar/history").json()["avatars"]
+    assert hist, "the removed face must stay in history"
+    r = c.post("/api/bots/undo/avatar/restore", json={"snapshot_id": hist[0]["id"]})
+    assert r.status_code == 200, r.text
+    files = _owned_files("undo")
+    assert any("-face" in f for f in files) and any("-thumb" in f for f in files), files
+    thumb = next(f for f in files if "-thumb" in f)
+    with Image.open(config.AVATAR_DIR / thumb) as im:
+        assert im.size == (128, 128)
+    assert config.get_bot("undo").avatar

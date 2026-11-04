@@ -10032,6 +10032,21 @@ async def restore_bot_avatar(request: Request, bot_id: str, payload: dict = Body
         if full_src is not None:
             _atomic(config.AVATAR_DIR / full_name, full_src.read_bytes())
             keep.add(full_name)
+        # The 128 px thumb the rail and lists load: without it /avatar/thumb
+        # falls back to the full face (~15x the bytes) — and since 4.4 a Restore
+        # is the undo of Remove, which deleted the thumb with the rest.
+        thumb_name = f"{bot_id}-thumb.png"
+        with contextlib.suppress(Exception):
+            from io import BytesIO
+            from PIL import Image
+            with Image.open(BytesIO(src.read_bytes())) as im:
+                th = im.convert("RGBA" if im.mode in ("RGBA", "LA", "P") else "RGB")
+                if th.size != (128, 128):
+                    th = th.resize((128, 128), Image.LANCZOS)
+                buf = BytesIO()
+                th.save(buf, "PNG")
+            _atomic(config.AVATAR_DIR / thumb_name, buf.getvalue())
+            keep.add(thumb_name)
         # Drop every OTHER face/full variant. Restoring a .jpg snapshot used to
         # clean stale fulls only when the snapshot had no full half at all — so
         # a leftover `<bot>-full.png` outlived the restore, won the extension
@@ -10043,6 +10058,7 @@ async def restore_bot_avatar(request: Request, bot_id: str, payload: dict = Body
     updated = config.save_bot_avatar(bot_id, face_name)
     if not updated:
         raise HTTPException(500, "Failed to update bot config")
+    _mark_picture_chosen(bot)          # a restored face is a choice, like an upload
     data = [b.to_dict() for b in config.load_bots()]
     await manager.broadcast({"type": "bots", "bots": data})
     await _after_avatar_change(bot_id)
