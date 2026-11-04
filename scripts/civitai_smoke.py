@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Live Civitai smoke test (not deployed). Run in-process from the install backend:
 
-  cd ~/_ChatApp/V26-07/backend
-  PYTHONPATH=. DISPATCH_DATA_DIR=$HOME/.local/share/local-chat \
+  cd <install>/backend
+  PYTHONPATH=. DISPATCH_DATA_DIR=<data dir> \
     uv run --offline python <repo>/scripts/civitai_smoke.py whatif|field-probe|one --yes
 
 Reads the key exactly as Image Studio does (``resolve(..., studio=True)``) and never
