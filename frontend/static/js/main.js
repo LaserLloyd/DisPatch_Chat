@@ -69,7 +69,7 @@ import { setOnLocked as w5SetOnLocked, failure as w5Failure, w5 as schemaApi, er
 import {
   SECTIONS, SECTION_IDS, RESERVED_TAB_IDS, resolveSettingsTarget, buildSearchIndex, mountSettingsSearch, createRevealer,
   runSectionHooks, settingsHashRoute, charactersSectionAllowed,
-} from './settings-nav.js?v=15';
+} from './settings-nav.js?v=16';
 import { mountSettingsResize } from './settings-resize.js?v=2';
 import { mountConnections } from './connections.js?v=5';
 import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=9';
@@ -110,7 +110,7 @@ import { normalizeRole, isAdminRole, signInMode, avatarSpec, markNode, railGroup
 import {
   renderSignIn, renderSetup, setupPage, renderPasswordForm, paintChip, chipLabel, attachChipMenu, recoverPlan,
 } from './signin.js?v=9';
-import { mountPeopleSettings } from './people.js?v=17';
+import { mountPeopleSettings } from './people.js?v=18';
 // 3.0 agents: the Tasks page, Assign task / @agent, inline task cards (tasks.js, task_card.js,
 // approval_card.js) and Settings -> Agents (agents.js). The server decides who may do what.
 import { createTasksUi } from './tasks.js?v=6';
