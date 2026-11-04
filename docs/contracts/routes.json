@@ -2046,10 +2046,19 @@
       }
     },
     {
+      "method": "DELETE",
+      "path": "/api/me/characters/{bot_id}/avatar",
+      "requirement": {
+        "note": "the caller's own bot; DELETE removes its picture",
+        "owner_scoped": "character",
+        "permission": "create_characters"
+      }
+    },
+    {
       "method": "POST",
       "path": "/api/me/characters/{bot_id}/avatar",
       "requirement": {
-        "note": "the caller's own bot",
+        "note": "the caller's own bot; DELETE removes its picture",
         "owner_scoped": "character",
         "permission": "create_characters"
       }

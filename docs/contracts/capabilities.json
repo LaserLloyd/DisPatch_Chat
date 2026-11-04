@@ -1471,6 +1471,7 @@
     "DELETE /api/characters/{character_id}/kit",
     "DELETE /api/me/avatar",
     "DELETE /api/me/characters/{bot_id}",
+    "DELETE /api/me/characters/{bot_id}/avatar",
     "DELETE /api/oidc/links/{profile_id}",
     "DELETE /api/people/{profile_id}/avatar",
     "GET /",

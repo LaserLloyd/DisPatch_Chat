@@ -13800,6 +13800,42 @@
       }
     },
     "/api/me/characters/{bot_id}/avatar": {
+      "delete": {
+        "description": "Remove one of your own bots' pictures: the pair (face crop + full-res original) and the\nthumb go together, the roster drops the filename so the bot falls back to its letter/emoji\ntile, and the previous face is snapshotted FIRST so ``/avatar/history`` still lists it and\nRestore can bring it back. Another profile's bot is the same 404 an unknown bot gets\n(``characters.get_personal``).",
+        "operationId": "my_character_avatar_remove_api_me_characters__bot_id__avatar_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "title": "Bot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "My Character Avatar Remove"
+      },
       "post": {
         "description": "``crop_x``/``crop_y``/``crop_size``: the face square the user placed in the face picker,\nas fractions of the picture (top-left corner, side of the shorter edge); a centred square\nwithout them.",
         "operationId": "my_character_avatar_api_me_characters__bot_id__avatar_post",
