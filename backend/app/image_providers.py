@@ -133,7 +133,11 @@ PRESETS: tuple[ImagePreset, ...] = (
         id="xai", label="xAI Grok", shape="openai-images",
         base_url="https://api.x.ai/v1", model="grok-imagine-image",
         key_env="XAI_API_KEY", docs="https://console.x.ai/",
-        price_note="Billed per image."),
+        # xAI takes `aspect_ratio` (not `size`); its list (1:1 3:4 4:3 9:16 16:9 2:3 3:2 21:9
+        # 9:19.5 19.5:9 9:20 20:9 1:2 2:1 5:2 auto, checked 2026-11-07) holds every ratio
+        # minimax_ratio() can return, so the same snapping serves both.
+        size_mode="aspect",
+        price_note="Billed per image; Grok Imagine 2.0 costs about twice as much as Grok Imagine."),
     ImagePreset(
         id="custom", label="Custom (OpenAI-compatible)", shape="openai-images",
         editable_base_url=True, key_required=False, size_mode="openai",
@@ -637,6 +641,8 @@ async def generate_batch(res: Resolved, spec: image_jobs.ImageSpec, *, n: int = 
                 if res.preset.size_mode == "openai":
                     body["size"] = openai_size(spec.ratio, spec.width, spec.height,
                                                res.model)
+                elif res.preset.size_mode == "aspect":
+                    body["aspect_ratio"] = minimax_ratio(spec.ratio or "1:1")
                 r = await client.post(f"{res.base_url}/images/generations",
                                       json=body, headers=headers)
                 if r.status_code >= 400:

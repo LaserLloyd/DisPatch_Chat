@@ -193,3 +193,14 @@ def test_refusals_cover_hard_lines_models_and_keys(studio):
         assert r.status_code == 200, r.text
     rows = owner.get(BASE + "/images").json()["images"]
     assert rows[-1]["provider"] == "civitai" and rows[-1]["model"] == AIR
+
+
+def test_xai_row_offers_both_grok_image_models(studio):
+    """2026-11-07: xAI has two image models at different prices; the picker lists both,
+    names the dearer one, and the cheaper one stays the default."""
+    d = studio["owner"][0].get(BASE + "/state").json()
+    row = next(p for p in d["providers"] if p["id"] == "xai")
+    assert row["models"] == ["grok-imagine-image", "grok-imagine-image-2.0"]
+    assert row["model"] == "grok-imagine-image"
+    assert "2x" in row["model_names"]["grok-imagine-image-2.0"]
+    assert "twice" in row["price_note"]

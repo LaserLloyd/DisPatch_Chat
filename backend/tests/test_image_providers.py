@@ -100,7 +100,7 @@ def test_openai_shape_request_and_b64_reply(env, monkeypatch):
                            "size": "1536x1024"}
 
 
-def test_grok_preset_sends_no_size_and_follows_a_url_reply(env, monkeypatch):
+def test_grok_preset_sends_aspect_ratio_and_follows_a_url_reply(env, monkeypatch):
     def handler(request):
         if request.url.path.endswith("/images/generations"):
             return httpx.Response(200, json={"data": [{"url": "https://cdn.example/x.png"}]})
@@ -111,7 +111,9 @@ def test_grok_preset_sends_no_size_and_follows_a_url_reply(env, monkeypatch):
         image_providers.resolve(), image_jobs.ImageSpec(prompt="a fox", ratio="2:3")))
     assert data.startswith(b"\x89PNG")
     assert str(fake.requests[0].url) == "https://api.x.ai/v1/images/generations"
-    assert fake.body() == {"model": "grok-imagine-image", "prompt": "a fox", "n": 1}
+    # xAI takes aspect_ratio, never an OpenAI `size` (2026-11-07: it ignored the ratio before).
+    assert fake.body() == {"model": "grok-imagine-image", "prompt": "a fox", "n": 1,
+                           "aspect_ratio": "2:3"}
     assert str(fake.requests[1].url) == "https://cdn.example/x.png"
     # The key never travels to the download host.
     assert "authorization" not in fake.requests[1].headers
@@ -414,3 +416,18 @@ def test_an_on_box_process_may_post_a_guide_but_not_force_one(env, monkeypatch):
     assert c.post("/api/guide/seed?name=set-up-add-ons&force=true").status_code == 403
     remote = env(client_addr=("192.0.2.9", 50000))
     assert remote.post("/api/guide/seed?name=set-up-add-ons").status_code in (401, 403)
+
+
+def test_grok_aspect_ratio_snaps_to_a_listed_ratio(env, monkeypatch):
+    def handler(request):
+        if request.url.path.endswith("/images/generations"):
+            return httpx.Response(200, json={"data": [{"url": "https://cdn.example/x.png"}]})
+        return httpx.Response(200, content=_png())
+    fake = _install(monkeypatch, handler)
+    _save("xai", api_key="xai-test", model="grok-imagine-image-2.0")
+    asyncio.run(image_providers.generate(
+        image_providers.resolve(), image_jobs.ImageSpec(prompt="a fox", ratio="5:4")))
+    body = fake.body()
+    assert body["model"] == "grok-imagine-image-2.0"
+    assert body["aspect_ratio"] in image_providers.MINIMAX_RATIOS
+    assert "size" not in body

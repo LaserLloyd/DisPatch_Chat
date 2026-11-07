@@ -98,7 +98,14 @@ CIVITAI_MODEL_NAMES = {
     "urn:air:sdxl:checkpoint:civitai:257749@290640": "Pony Diffusion V6 XL",
     "urn:air:sdxl:checkpoint:civitai:827184@2883731": "WAI-illustrious-SDXL v17",
 }
-KNOWN_MODELS = {"minimax": ["image-01", "image-01-live"], "civitai": list(CIVITAI_MODEL_NAMES)}
+#: xAI's two image models (2026-11-07). 2.0 costs about twice as much per picture, so the
+#: picker names that, and the cheaper one stays the preset default.
+XAI_MODEL_NAMES = {"grok-imagine-image": "Grok Imagine",
+                   "grok-imagine-image-2.0": "Grok Imagine 2.0 (about 2x the price)"}
+KNOWN_MODELS = {"minimax": ["image-01", "image-01-live"], "civitai": list(CIVITAI_MODEL_NAMES),
+                "xai": list(XAI_MODEL_NAMES)}
+#: Display names for the model picker, per provider.
+MODEL_NAMES = {"xai": XAI_MODEL_NAMES}
 NOT_ALLOWED = ("Your profile type can't use {label}. Ask the Owner "
                "(Settings → AI & Connections → Image generation).")
 
@@ -284,6 +291,8 @@ def _provider_rows(principal=None) -> tuple[list[dict], str]:
             "model": res.model if res else preset.model,
             "models": KNOWN_MODELS.get(preset.id, []),
         }
+        if preset.id in MODEL_NAMES:
+            row["model_names"] = dict(MODEL_NAMES[preset.id])
         if preset.shape == "civitai":
             row["estimate"] = True
             row["currencies"] = list(image_providers.CIVITAI_CURRENCIES)
