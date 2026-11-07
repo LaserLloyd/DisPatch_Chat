@@ -20,7 +20,7 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
 .st-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .st-field > label { font-weight: 600; font-size: 12.5px; }
 .st-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.st-page textarea, .st-page select, .st-page input[type="text"], .st-page input[type="number"] {
+.st-page textarea, .st-page select, .st-page input[type="text"], .st-page input[type="number"], .st-page input[type="search"] {
   width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-strong);
   border-radius: var(--radius-md, 10px); padding: 8px 10px;
 }
@@ -140,6 +140,7 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
 .st-link { color: var(--accent); font-size: 12.5px; text-decoration: underline; }
 .st-linkbtn { background: none; border: 0; padding: 0; cursor: pointer; }
 .st-browse-btn { align-self: flex-start; padding: 5px 12px; font-size: 12.5px; }
+.st-browse-filter { width: 100%; box-sizing: border-box; }
 .st-browse-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow: auto; }
 .st-browse-row {
   width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: start;

@@ -262,6 +262,21 @@ export function cleanBrowseRows(rows) {
   return (Array.isArray(rows) ? rows : []).filter((r) => r && typeof r.name === 'string' && r.name && ok.test(String(r.air)));
 }
 
+/** The Browse filter's words: whitespace folded, lower-cased, at most 60 characters (the
+ *  server's limit), duplicates dropped. '' -> []. */
+export const BROWSE_QUERY_MAX = 60;
+export function browseWords(query) {
+  const q = String(query || '').split(/\s+/).filter(Boolean).join(' ').slice(0, BROWSE_QUERY_MAX).trim();
+  return [...new Set(q.toLowerCase().split(' ').filter(Boolean))];
+}
+
+/** Whether a Browse row's NAME holds every filter word (case-blind). No words: every row. */
+export function browseMatches(row, words) {
+  if (!words || !words.length) return true;
+  const name = String((row && row.name) || '').toLowerCase();
+  return words.every((w) => name.includes(w));
+}
+
 /** The names the Model box and the tiles show for picked models: AIR -> name. */
 export function rememberModelName(names, row) {
   return { ...(names || {}), [row.air]: row.name };

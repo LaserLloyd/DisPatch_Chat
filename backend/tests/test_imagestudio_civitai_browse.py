@@ -315,3 +315,55 @@ def test_a_picked_air_generates(studio):
     assert c.post(f"{BASE}/generate", json=_body(model=air)).status_code == 200
 
 
+
+
+# ---- name filter (2026-11-07) ----
+
+def test_models_filter_searches_all_time_and_keeps_only_matching_names(studio):
+    rig, c = studio["rig"], studio["owner"]
+    rig.models = lambda req: httpx.Response(200, json={"items": [
+        _item(11, 22, "Mistoon_Anime"), _item(12, 23, "Anime Mix"),     # second lacks "mistoon"
+        _item(13, 24, "MISTOON anime XL"), _item(14, 25, "Other"),
+    ]})
+    r = c.get(BASE + "/civitai/models", params={"sort": "week", "q": "  mistoon   ANIME "})
+    assert r.status_code == 200, r.text
+    assert r.json()["q"] == "mistoon ANIME"
+    assert [x["name"] for x in r.json()["models"]] == ["Mistoon_Anime", "MISTOON anime XL"]
+    q = rig.on("civitai.com", "/api/v1/models")[0].url.params
+    assert q["query"] == "mistoon ANIME" and q["period"] == "AllTime" and q["sort"] == "Most Downloaded"
+    assert q["limit"] == "100"
+    assert q["types"] == "Checkpoint" and "authorization" not in rig.on("civitai.com", "/api/v1/models")[0].headers
+
+
+def test_models_without_filter_keep_the_window_and_send_no_query(studio):
+    rig = studio["rig"]
+    studio["owner"].get(BASE + "/civitai/models?sort=month&q=%20%20")
+    q = rig.on("civitai.com", "/api/v1/models")[0].url.params
+    assert "query" not in q and q["period"] == "Month"
+
+
+def test_models_filter_is_cut_to_sixty_chars_and_cached_per_filter(studio):
+    rig, c = studio["rig"], studio["owner"]
+    long = "a" * 100
+    assert c.get(BASE + "/civitai/models", params={"sort": "week", "q": long}).json()["q"] == "a" * 60
+    assert rig.on("civitai.com", "/api/v1/models")[0].url.params["query"] == "a" * 60
+    c.get(BASE + "/civitai/models", params={"sort": "week", "q": "Anime"})
+    c.get(BASE + "/civitai/models", params={"sort": "week", "q": "anime"})   # same words: cache hit
+    assert len(rig.on("civitai.com", "/api/v1/models")) == 2
+    c.get(BASE + "/civitai/models", params={"sort": "week"})                 # unfiltered: its own entry
+    assert len(rig.on("civitai.com", "/api/v1/models")) == 3
+
+
+async def test_models_cache_is_bounded(monkeypatch):
+    image_providers._browse_cache.clear()
+    monkeypatch.setattr(image_providers, "transport", httpx.MockTransport(
+        lambda req: httpx.Response(200, json={"items": [_item(1, 2)]})))
+    for i in range(image_providers.CIVITAI_BROWSE_CACHE_MAX + 10):
+        await civitai_top_models("week", query=f"w{i}")
+    assert len(image_providers._browse_cache) == image_providers.CIVITAI_BROWSE_CACHE_MAX
+    assert ("week", "w0") not in image_providers._browse_cache
+    image_providers._browse_cache.clear()
+
+
+def test_civitai_waits_five_minutes_for_a_queued_picture():
+    assert image_providers.CIVITAI_DEADLINE_S == 300

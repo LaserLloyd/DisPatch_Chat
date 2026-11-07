@@ -205,3 +205,16 @@ test('browse rows: compact counts, one-line labels, malformed rows dropped', asy
   assert.equal(normalizeBrowseSort('zzz'), 'week');
   assert.deepEqual(rememberModelName({ a: 'A' }, good), { a: 'A', [good.air]: 'A' });
 });
+
+test('Browse filter: words are folded, lower-cased, deduplicated and capped; a row needs every word in its name', async () => {
+  const { browseWords, browseMatches, BROWSE_QUERY_MAX } = await import('../static/studio-logic.js');
+  assert.deepEqual(browseWords('  Mistoon   ANIME mistoon '), ['mistoon', 'anime']);
+  assert.deepEqual(browseWords(''), []);
+  assert.deepEqual(browseWords(null), []);
+  assert.equal(browseWords('x'.repeat(100))[0].length, BROWSE_QUERY_MAX);
+  const row = { name: 'Mistoon_Anime XL' };
+  assert.equal(browseMatches(row, []), true);
+  assert.equal(browseMatches(row, browseWords('anime mistoon')), true);
+  assert.equal(browseMatches(row, browseWords('anime pony')), false);
+  assert.equal(browseMatches({}, ['a']), false);
+});

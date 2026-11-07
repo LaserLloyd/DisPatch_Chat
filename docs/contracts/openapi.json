@@ -5370,7 +5370,7 @@
     },
     "/api/apps/imagestudio/civitai/models": {
       "get": {
-        "description": "Popular Civitai checkpoints (public list, no key needed) to pick a model from.",
+        "description": "Popular Civitai checkpoints (public list, no key needed) to pick a model from.\n``q`` keeps only models whose name holds every word of it.",
         "operationId": "civitai_models_api_apps_imagestudio_civitai_models_get",
         "parameters": [
           {
@@ -5380,6 +5380,16 @@
             "schema": {
               "default": "week",
               "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
               "type": "string"
             }
           },

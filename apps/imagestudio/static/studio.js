@@ -22,8 +22,8 @@ import {
   SORTS, normalizeSort, sortRows, canStartAnother, SHORTCUT_DEBOUNCE_MS,
   DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata, DELETE_SCOPE_LABELS, estimateKey, modelLabel,
   CURRENCIES, normalizeCurrency, balanceLine, BROWSE_SORTS, normalizeBrowseSort, compactCount, browseLabel,
-  cleanBrowseRows, rememberModelName,
-} from './studio-logic.js?v=8';
+  cleanBrowseRows, rememberModelName, browseWords, browseMatches,
+} from './studio-logic.js?v=9';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
 export const API = '/api/apps/imagestudio';
@@ -46,7 +46,7 @@ const S = {
   pay: '',               // Civitai: which Buzz pays ('' = Civitai decides), remembered per device
   buzz: { state: 'idle', text: '', scope: false, helpUrl: '' },   // the Buzz balance line
   buzzLoaded: false,     // the balance was fetched once for this page
-  browse: { open: false, sort: 'week', rows: [], state: 'idle', error: '' },
+  browse: { open: false, sort: 'week', query: '', rows: [], state: 'idle', error: '' },
 };
 const R = {};            // DOM refs
 const SORT_LABELS = { oldest: 'sort.oldest', newest: 'sort.newest' };
@@ -197,12 +197,16 @@ function renderBrowse() {
   R.browseList.replaceChildren();
   if (!b.open) return;
   R.browseRefresh.disabled = b.state === 'loading';
+  // The rows on hand are narrowed at once while typing; the server's filtered list follows.
+  const words = browseWords(b.query);
+  const rows = b.rows.filter((row) => browseMatches(row, words));
   R.browseMsg.classList.toggle('st-error', b.state === 'error');
-  R.browseMsg.textContent = b.state === 'loading' ? t('browse.loading')
-    : b.state === 'error' ? b.error
-    : b.rows.length ? '' : t('browse.empty');
+  R.browseMsg.textContent = b.state === 'error' ? b.error
+    : rows.length ? (b.state === 'loading' ? t('browse.loading') : '')
+    : b.state === 'loading' ? t('browse.loading')
+    : words.length ? t('browse.no_match', { query: words.join(' ') }) : t('browse.empty');
   R.browseMsg.hidden = !R.browseMsg.textContent;
-  for (const row of b.rows) {
+  for (const row of rows) {
     const dl = row.downloads === 1 ? t('browse.downloads_one') : t('browse.downloads', { n: compactCount(row.downloads) });
     const btn = el('button', { type: 'button', class: 'st-browse-row', title: t('browse.pick', { name: row.name }) }, [
       el('span', { class: 'st-browse-name', text: browseLabel(row, dl) }),
@@ -216,15 +220,18 @@ function renderBrowse() {
 async function loadBrowse(fresh = false) {
   const b = S.browse;
   const sort = b.sort;
+  const query = browseWords(b.query).join(' ');
+  const current = () => sort === b.sort && query === browseWords(b.query).join(' ');
   b.state = 'loading'; b.error = '';
   renderBrowse();
   try {
-    const r = await api(`${API}/civitai/models?sort=${encodeURIComponent(sort)}${fresh ? '&fresh=true' : ''}`);
-    if (sort !== b.sort) return;                 // the person picked another list meanwhile
+    const q = query ? `&q=${encodeURIComponent(query)}` : '';
+    const r = await api(`${API}/civitai/models?sort=${encodeURIComponent(sort)}${q}${fresh ? '&fresh=true' : ''}`);
+    if (!current()) return;                      // the person picked another list or typed on meanwhile
     b.rows = cleanBrowseRows(r.models);
     b.state = 'ok';
   } catch (e) {
-    if (sort !== b.sort) return;
+    if (!current()) return;
     const detail = e && e.body && typeof e.body.detail === 'string' ? e.body.detail : '';
     b.rows = []; b.state = 'error'; b.error = refused(e) ? t('locked') : (detail || t('browse.failed'));
   }
@@ -802,6 +809,7 @@ function build(root) {
     R.buzzScope, el('div', { class: 'st-buzz-links' }, [R.buzzLink, R.buzzSettings]),
   ]);
   R.browseSort = el('select', { id: 'st-browse-sort', 'aria-label': t('browse.sort') }, BROWSE_SORTS.map((v) => el('option', { value: v, text: t(BROWSE_LABELS[v]) })));
+  R.browseFilter = el('input', { type: 'search', id: 'st-browse-filter', class: 'st-browse-filter', maxlength: '60', autocomplete: 'off', spellcheck: 'false', placeholder: t('browse.filter_hint'), 'aria-label': t('browse.filter') });
   R.browseRefresh = el('button', { type: 'button', class: 'st-btn st-small', text: t('browse.refresh') });
   const browseClose = el('button', { type: 'button', class: 'st-btn st-small', text: t('common.close') });
   R.browseMsg = el('p', { class: 'st-muted', role: 'status', hidden: '' });
@@ -809,7 +817,7 @@ function build(root) {
   R.browsePanel = el('div', { class: 'st-picker st-browse', id: 'st-browse-panel', hidden: '' }, [
     el('strong', { text: t('browse.title') }), el('div', { class: 'st-muted', text: t('browse.note') }),
     el('div', { class: 'st-row' }, [R.browseSort, R.browseRefresh, browseClose]),
-    R.browseMsg, R.browseList,
+    R.browseFilter, R.browseMsg, R.browseList,
   ]);
   R.ratio = el('select', { id: 'st-ratio' });
   R.count = el('input', { type: 'number', id: 'st-count', min: '1', max: '9', value: '1', inputmode: 'numeric' });
@@ -890,6 +898,15 @@ function build(root) {
   R.browseBtn.addEventListener('click', toggleBrowse);
   R.browseSort.addEventListener('change', () => { S.browse.sort = normalizeBrowseSort(R.browseSort.value); S.browse.rows = []; loadBrowse(false); });
   R.browseRefresh.addEventListener('click', () => loadBrowse(true));
+  let browseTimer = 0;
+  R.browseFilter.addEventListener('input', () => {
+    const before = browseWords(S.browse.query).join(' ');
+    S.browse.query = R.browseFilter.value;
+    renderBrowse();                              // narrow what is on hand at once
+    clearTimeout(browseTimer);
+    if (browseWords(S.browse.query).join(' ') === before) return;
+    browseTimer = setTimeout(() => loadBrowse(false), 450);   // then ask Civitai for the rest
+  });
   browseClose.addEventListener('click', () => { closeBrowse(); R.browseBtn.setAttribute('aria-expanded', 'false'); R.browseBtn.focus(); });
   R.ratio.addEventListener('change', scheduleEstimate);
   R.go.addEventListener('click', (ev) => {

@@ -160,7 +160,7 @@ CIVITAI_KEY_REF = "setting.connections.image_civitai_key"
 # Civitai wire constants (see _civitai_batch).
 CIVITAI_SUBMIT_WAIT_S = 55
 CIVITAI_POLL_WAIT_S = 30
-CIVITAI_DEADLINE_S = 170
+CIVITAI_DEADLINE_S = 300      # a less common checkpoint can wait minutes in Civitai's queue
 CIVITAI_MIN_POLL_GAP_S = 2.0
 CIVITAI_CANCEL_TIMEOUT_S = 10.0
 CIVITAI_MAX_N = 4
@@ -1045,16 +1045,34 @@ CIVITAI_SORTS: dict[str, tuple[str, str]] = {
 }
 CIVITAI_BROWSE_BASES = ("SDXL 1.0", "Pony", "Illustrious")
 CIVITAI_BROWSE_FETCH = 40
+#: A name filter asks for more: Civitai's search also matches tags, so many hits lack the words in their name.
+CIVITAI_BROWSE_FETCH_FILTERED = 100
 CIVITAI_BROWSE_MAX = 30
 CIVITAI_BROWSE_TTL_S = 15 * 60
-_browse_cache: dict[str, tuple[float, list[dict]]] = {}
+#: The Browse panel's name filter: at most this many characters are sent to Civitai.
+CIVITAI_BROWSE_QUERY_MAX = 60
+#: How many (sort, filter) lists the browse cache keeps; the oldest goes first.
+CIVITAI_BROWSE_CACHE_MAX = 64
+_browse_cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
 
 
 def _count(v: Any) -> int:
     return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else 0
 
 
-def _browse_rows(doc: Any) -> list[dict]:
+def browse_query(text: Any) -> str:
+    """The Browse filter as sent: whitespace folded, at most CIVITAI_BROWSE_QUERY_MAX chars."""
+    return " ".join(str(text or "").split())[:CIVITAI_BROWSE_QUERY_MAX].strip()
+
+
+def _name_has_all(name: str, words: tuple[str, ...]) -> bool:
+    low = name.casefold()
+    return all(w in low for w in words)
+
+
+def _browse_rows(doc: Any, words: tuple[str, ...] = ()) -> list[dict]:
+    """``words``: when given, keep only models whose NAME holds every word (case-blind).
+    Civitai's own search also matches tags and creators; the person asked for the name."""
     items = doc.get("items") if isinstance(doc, dict) else None
     rows: list[dict] = []
     for it in items if isinstance(items, list) else []:
@@ -1073,6 +1091,8 @@ def _browse_rows(doc: Any) -> list[dict]:
             air = f"urn:air:sdxl:checkpoint:civitai:{mid}@{vid}"
             if not _AIR_RE.fullmatch(air):
                 continue
+            if words and not _name_has_all(name, words):
+                continue
             stats = it.get("stats") if isinstance(it.get("stats"), dict) else {}
             base = v0.get("baseModel")
             rows.append({
@@ -1089,21 +1109,33 @@ def _browse_rows(doc: Any) -> list[dict]:
     return rows
 
 
-async def civitai_top_models(sort: str, *, fresh: bool = False) -> list[dict]:
+async def civitai_top_models(sort: str, *, query: str = "",
+                             fresh: bool = False) -> list[dict]:
     """Popular SDXL-family checkpoints Civitai can generate with, from the PUBLIC
-    model list (no key is sent). Cached 15 minutes per sort; ``fresh`` skips the
-    cache. Raises ValueError for an unknown sort, ImageJobError when Civitai fails."""
+    model list (no key is sent). ``query`` narrows it to models whose name holds
+    every word; a filtered list searches all time (Civitai's week/month window
+    leaves almost nothing once a name is given) in the same sort order. Cached
+    15 minutes per (sort, filter); ``fresh`` skips the cache. Raises ValueError
+    for an unknown sort, ImageJobError when Civitai fails."""
     if sort not in CIVITAI_SORTS:
         raise ValueError("unknown sort")
+    q = browse_query(query)
+    words = tuple(dict.fromkeys(q.casefold().split()))
+    key = (sort, " ".join(words))
     now = _monotonic()
-    hit = _browse_cache.get(sort)
+    hit = _browse_cache.get(key)
     if hit and not fresh and now - hit[0] < CIVITAI_BROWSE_TTL_S:
         return [dict(r) for r in hit[1]]
     order, period = CIVITAI_SORTS[sort]
+    if q:
+        period = "AllTime"
     params: list[tuple[str, str]] = [
         ("types", "Checkpoint"), ("sort", order), ("period", period),
         *(("baseModels", b) for b in CIVITAI_BROWSE_BASES),
-        ("limit", str(CIVITAI_BROWSE_FETCH)), ("nsfw", "true")]
+        ("limit", str(CIVITAI_BROWSE_FETCH_FILTERED if q else CIVITAI_BROWSE_FETCH)),
+        ("nsfw", "true")]
+    if q:
+        params.append(("query", q))
     try:
         async with _client(30.0) as client:
             r = await client.get(f"{CIVITAI_SITE_API}/models", params=params)
@@ -1119,8 +1151,11 @@ async def civitai_top_models(sort: str, *, fresh: bool = False) -> list[dict]:
             f"Civitai could not be reached ({type(e).__name__})") from None
     except ValueError:
         raise image_jobs.ImageJobError("Civitai sent a reply that is not JSON") from None
-    rows = _browse_rows(doc)
-    _browse_cache[sort] = (now, rows)
+    rows = _browse_rows(doc, words)
+    _browse_cache.pop(key, None)
+    _browse_cache[key] = (now, rows)
+    while len(_browse_cache) > CIVITAI_BROWSE_CACHE_MAX:
+        _browse_cache.pop(next(iter(_browse_cache)))
     return [dict(x) for x in rows]
 
 

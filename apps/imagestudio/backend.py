@@ -651,16 +651,18 @@ def build(ctx):
         return {"balances": balances, "checked": datetime.now(UTC).isoformat(timespec="seconds")}
 
     @router.get("/civitai/models", dependencies=op)
-    async def civitai_models(request: Request, sort: str = "week", fresh: bool = False):
-        """Popular Civitai checkpoints (public list, no key needed) to pick a model from."""
+    async def civitai_models(request: Request, sort: str = "week", q: str = "",
+                             fresh: bool = False):
+        """Popular Civitai checkpoints (public list, no key needed) to pick a model from.
+        ``q`` keeps only models whose name holds every word of it."""
         _civitai_gate(request)
         if sort not in image_providers.CIVITAI_SORTS:
             raise HTTPException(422, "Pick top this week, top this month, highest rated or newest")
         try:
-            rows = await image_providers.civitai_top_models(sort, fresh=fresh)
+            rows = await image_providers.civitai_top_models(sort, query=q, fresh=fresh)
         except image_jobs.ImageJobError as e:
             raise HTTPException(502, e.message) from None
-        return {"models": rows, "sort": sort}
+        return {"models": rows, "sort": sort, "q": image_providers.browse_query(q)}
 
     @router.post("/clear", dependencies=op)
     async def clear(body: ClearIn, request: Request):
