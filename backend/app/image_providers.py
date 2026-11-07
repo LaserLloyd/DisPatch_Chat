@@ -80,6 +80,8 @@ CONNECT_TIMEOUT_S = 10.0
 RESULT_TTL_S = 900.0
 #: MiniMax documents a 1500-character prompt cap.
 MINIMAX_PROMPT_MAX = 1500
+#: Per-shape prompt caps; any other shape takes image_jobs.MAX_API_PROMPT_CHARS.
+PROMPT_MAX_BY_SHAPE = {"minimax": MINIMAX_PROMPT_MAX}
 
 #: Provider ids that are not presets.
 AUTO, NONE, CLAWFORGE = "", "none", "clawforge"
@@ -492,10 +494,23 @@ def minimax_ratio(ratio: str) -> str:
                key=lambda r: abs(int(r.split(":")[0]) / int(r.split(":")[1]) - want))
 
 
+def prompt_max(shape: str) -> int:
+    """The longest prompt a provider of ``shape`` takes."""
+    return PROMPT_MAX_BY_SHAPE.get(shape, image_jobs.MAX_API_PROMPT_CHARS)
+
+
 def _error_from_status(r: httpx.Response, label: str) -> image_jobs.ImageJobError:
     msg = ""
     with contextlib.suppress(Exception):
         body = r.json()
+        code = body.get("code") if isinstance(body, dict) else None
+        if isinstance(code, str) and "moderat" in code.lower():
+            # xAI: {"code": "imagine:content-moderated", ...} -- its own filter
+            # refused the finished picture. The attempt is billed all the same.
+            return image_jobs.ImageJobError(
+                f"{label}'s own content moderation refused this picture "
+                "(the provider still bills the attempt). Rewording rarely helps; "
+                "a provider without that filter, such as Civitai, may make it.")
         err = body.get("error") if isinstance(body, dict) else None
         if isinstance(err, dict):
             msg = str(err.get("message") or "")

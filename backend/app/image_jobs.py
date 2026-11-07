@@ -1153,6 +1153,11 @@ RATE_LIMIT = 3
 RATE_WINDOW_S = 60.0
 
 MAX_PROMPT_CHARS = 2000
+#: The cap for a spec bound for an API provider (backend "api"): cloud image
+#: models read long prose prompts (xAI, OpenAI). Each provider may be stricter
+#: (image_providers.prompt_max: MiniMax documents 1500). The chat marker path
+#: still clamps to MAX_PROMPT_CHARS before it builds a spec.
+MAX_API_PROMPT_CHARS = 4000
 MAX_CAPTION_CHARS = 200
 
 _RATIO_RE = re.compile(r"^\d{1,2}:\d{1,2}$")
@@ -1191,8 +1196,9 @@ class ImageSpec:
         self.prompt = (self.prompt or "").strip()
         if not self.prompt:
             raise ValueError("prompt is required")
-        if len(self.prompt) > MAX_PROMPT_CHARS:
-            raise ValueError(f"prompt is longer than {MAX_PROMPT_CHARS} characters")
+        cap = MAX_API_PROMPT_CHARS if self.backend == "api" else MAX_PROMPT_CHARS
+        if len(self.prompt) > cap:
+            raise ValueError(f"prompt is longer than {cap} characters")
         # The two hard lines (adult-only; no sexual imagery of real people).
         # Here, so the inline marker, the REST route, a spec re-read off a
         # queued row and the Image Studio all share one rule. Raises

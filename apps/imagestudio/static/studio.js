@@ -117,7 +117,7 @@ function formState() {
 function refreshForm() {
   const p = provider();
   const c = caps();
-  const st = promptStatus(R.prompt.value, S.info ? S.info.prompt_max : PROMPT_MAX);
+  const st = promptStatus(R.prompt.value, (p && p.prompt_max) || (S.info ? S.info.prompt_max : PROMPT_MAX));
   R.counter.textContent = t('prompt.counter', { n: st.n, max: st.max });
   R.counter.classList.toggle('st-over', st.over);
   R.count.max = String(c.max_n);

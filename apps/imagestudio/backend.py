@@ -84,7 +84,7 @@ APP_ID = "imagestudio"
 CTX = None
 router = APIRouter()
 
-PROMPT_MAX = image_providers.MINIMAX_PROMPT_MAX
+PROMPT_MAX = image_jobs.MAX_API_PROMPT_CHARS   # the longest any provider takes
 RECENT_MAX = 50
 REFERENCE_MAX_BYTES = 10 * 1024 * 1024
 MODEL_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}\Z")
@@ -290,6 +290,7 @@ def _provider_rows(principal=None) -> tuple[list[dict], str]:
             "configured": res is not None, "price_note": preset.price_note,
             "model": res.model if res else preset.model,
             "models": KNOWN_MODELS.get(preset.id, []),
+            "prompt_max": image_providers.prompt_max(preset.shape),
         }
         if preset.id in MODEL_NAMES:
             row["model_names"] = dict(MODEL_NAMES[preset.id])
@@ -452,6 +453,14 @@ def _rewrite_ledger(rows: list[dict]) -> None:
     os.replace(tmp, _ledger())
 
 
+def _check_length(prompt: str, res: image_providers.Resolved) -> None:
+    """422 when ``prompt`` is longer than the chosen provider takes."""
+    limit = image_providers.prompt_max(res.preset.shape)
+    if len(prompt) > limit:
+        raise HTTPException(
+            422, f"The prompt is {len(prompt)} characters; {res.preset.label} takes {limit}")
+
+
 def _check_prompt(raw: str) -> str:
     """The trimmed prompt, or an HTTPException: empty / too long / a hard-line refusal.
     Runs before any provider or key lookup so a refusal never reaches a metered API
@@ -593,6 +602,7 @@ def build(ctx):
     async def generate(body: GenerateIn, request: Request):
         prompt = _check_prompt(body.prompt)
         pid, res, ratio = await _pick(body, request)
+        _check_length(prompt, res)
         currency = _currency(body) if res.preset.shape == "civitai" else None
         caps = image_providers.supports(res)
         n = min(body.n, caps["max_n"])
@@ -628,6 +638,7 @@ def build(ctx):
         ledger row, no file; the same guard and access checks as /generate."""
         prompt = _check_prompt(body.prompt)
         pid, res, ratio = await _pick(body, request)
+        _check_length(prompt, res)
         if res.preset.shape != "civitai":
             raise HTTPException(422, "No estimate for this provider")
         currency = _currency(body)

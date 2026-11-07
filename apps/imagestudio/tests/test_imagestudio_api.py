@@ -117,7 +117,10 @@ def test_state_lists_providers_and_defaults_to_the_configured_one(env, provider)
     assert by["minimax"]["supports"]["max_n"] == 9
     assert by["openai"]["configured"] is False
     assert by["openai"]["supports"]["reference"] is False
-    assert s["prompt_max"] == 1500 and s["today_count"] == 0 and s["prompts"] == []
+    assert s["prompt_max"] == 4000 and s["today_count"] == 0 and s["prompts"] == []
+    # Each provider carries its own cap: MiniMax documents 1500, the rest take 4000.
+    assert by["minimax"]["prompt_max"] == 1500
+    assert by["xai"]["prompt_max"] == 4000 and by["openai"]["prompt_max"] == 4000
     assert "1:1" in s["ratios"]
 
 
@@ -211,6 +214,41 @@ def test_prompt_and_count_are_validated(env, provider):
         r = _gen(c, ratio=ratio)
         assert r.status_code == 422, (ratio, r.status_code, r.text)
     assert provider.requests == []
+
+
+def test_a_long_prompt_reaches_grok_but_not_minimax(env, monkeypatch):
+    # 2026-11-07: a 2,267-character prompt was refused for Grok by MiniMax's
+    # 1500 cap (Studio) and ImageSpec's 2000 cap; xAI itself accepts it.
+    image_providers.save_config({"provider": "xai", "api_key": KEY})
+    fake = Fake(lambda r: httpx.Response(200, json={"data": [{"b64_json": _b64(_png())}]}))
+    monkeypatch.setattr(image_providers, "transport", httpx.MockTransport(fake))
+    c = _unlocked(env)
+    long = ("a lighthouse on a cliff at dusk, waves, gulls, warm windows. " * 60)[:2300]
+    r = _gen(c, prompt=long, provider="xai")
+    assert r.status_code == 200, r.text
+    assert len(fake.body()["prompt"]) == len(long.strip())
+    assert _gen(c, prompt="x" * 4001, provider="xai").status_code == 422
+    image_providers.save_config({"provider": "minimax", "api_key": KEY})
+    r = _gen(c, prompt=long, provider="minimax")
+    assert r.status_code == 422 and "takes 1500" in r.json()["detail"]
+    assert len(fake.requests) == 1
+    monkeypatch.setattr(image_providers, "transport", None)
+
+
+def test_xai_content_moderation_is_named_plainly(env, monkeypatch):
+    image_providers.save_config({"provider": "xai", "api_key": KEY})
+    fake = Fake(lambda r: httpx.Response(400, json={
+        "code": "imagine:content-moderated",
+        "error": "Generated image rejected by content moderation.",
+        "usage": {"cost_in_usd_ticks": 200000000}}))
+    monkeypatch.setattr(image_providers, "transport", httpx.MockTransport(fake))
+    c = _unlocked(env)
+    r = _gen(c, provider="xai")
+    assert r.status_code == 502
+    detail = r.json()["detail"]
+    assert "content moderation refused" in detail and "bills" in detail
+    assert c.get(BASE + "/images").json()["images"] == []
+    monkeypatch.setattr(image_providers, "transport", None)
 
 
 def test_a_provider_error_becomes_a_readable_502_and_stores_nothing(env, provider):
