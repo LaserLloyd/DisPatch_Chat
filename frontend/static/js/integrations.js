@@ -172,8 +172,10 @@ export function imageModelsNote(entry, fmt = (iso) => new Date(iso).toLocaleStri
     try { when = fmt(entry.checked_at); } catch { when = entry.checked_at; }
     if (!when || when === 'Invalid Date') when = entry.checked_at;
   }
+  // A docs-only list carries the date the docs were read (static), never "checked not yet".
+  const docsDate = entry.checked || when;
   const head = entry.source === 'documented'
-    ? t('integrations.img_models_docs', { when: when || t('integrations.img_models_never') })
+    ? (docsDate ? t('integrations.img_models_docs', { when: docsDate }) : t('integrations.img_models_docs_nodate'))
     : t('integrations.img_models_list', { when: when || t('integrations.img_models_never') });
   return entry.note ? `${head} ${entry.note}` : head;
 }
@@ -270,7 +272,7 @@ export async function mountImageSection(host, deps = {}) {
     refreshModels.disabled = true;
     refreshModels.textContent = t('integrations.img_models_refreshing');
     try {
-      await send('POST', '/api/connections/models/refresh', {});
+      await send('POST', '/api/connections/models/refresh?scope=image', {});
       const fresh = await json('/api/llm/image');
       state = { ...state, catalog: fresh.catalog || state.catalog };
       paint(true);

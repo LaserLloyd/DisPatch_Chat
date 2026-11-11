@@ -23,7 +23,7 @@ import {
   DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata, DELETE_SCOPE_LABELS, estimateKey, modelLabel,
   CURRENCIES, normalizeCurrency, balanceLine, BROWSE_SORTS, normalizeBrowseSort, compactCount, browseLabel,
   cleanBrowseRows, rememberModelName, browseWords, browseMatches,
-  activeModel, modelCaps, modelPromptMax, modelsNote, refreshSummary,
+  activeModel, isH3Model, modelCaps, modelPromptMax, modelsNote, refreshSummary,
 } from './studio-logic.js?v=10';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
@@ -128,6 +128,7 @@ function refreshModelBits() {
   R.count.max = String(c.max_n);
   if (Number(R.count.value) > c.max_n) R.count.value = String(c.max_n);
   R.optimizerRow.hidden = !c.optimizer;
+  R.h3Hint.hidden = !isH3Model(p, currentModel());
   R.seedRow.hidden = !c.seed;
   R.refBox.hidden = !c.reference;
   R.go.disabled = !canGenerate({ prompt: R.prompt.value, busy: false, provider: p && p.configured ? p.id : '' });
@@ -156,7 +157,7 @@ async function refreshModels() {
     setStatus(t(sum.key, sum.vars), sum.error);
     toast(t(sum.key, sum.vars));
   } catch (e) {
-    setStatus(t('models.refresh_failed', { name: '', error: e.message }), true);
+    setStatus(t('models.refresh_error', { error: e.message }), true);
   } finally {
     S.refreshing = false;
     refreshForm();
@@ -883,6 +884,7 @@ function build(root) {
   ]);
   R.go = el('button', { type: 'button', class: 'st-btn st-primary st-go', id: 'st-generate', text: t('generate') });
   R.cost = el('p', { class: 'st-cost', hidden: '' });
+  R.h3Hint = el('p', { class: 'st-muted st-h3hint', hidden: '', text: t('models.h3_hint') });
   R.est = el('p', { class: 'st-cost st-estimate', role: 'status', hidden: '' });
   R.status = el('p', { class: 'st-status', role: 'status', 'aria-live': 'polite' });
   R.today = el('span', { class: 'st-today' });
@@ -902,7 +904,7 @@ function build(root) {
     R.browseBtn, R.browsePanel,
     el('div', { class: 'st-two' }, [field(t('ratio.label'), R.ratio), field(t('count.label'), R.count)]),
     R.payRow,
-    R.optimizerRow, R.seedRow, R.refBox, R.go, R.cost, R.est, R.buzzRow,
+    R.optimizerRow, R.seedRow, R.refBox, R.go, R.h3Hint, R.cost, R.est, R.buzzRow,
   ]);
   R.sort = el('select', { id: 'st-sort', class: 'st-sort' }, SORTS.map((v) => el('option', { value: v, text: t(SORT_LABELS[v]) })));
   R.sort.value = S.sort;

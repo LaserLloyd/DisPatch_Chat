@@ -884,6 +884,30 @@ test('the refresh button shows only with can_refresh_models; the note names the 
   assert.equal(yes.doc.getElementById('st-model-refresh').hidden, false);
 });
 
+test('an H3 model shows the slow-and-billed hint near Generate; image-01 does not', { skip: dom.skip }, async () => {
+  const { doc, win } = await page({ state: { ...STATE, providers: H3_PROVIDERS } });
+  const hint = doc.querySelector('.st-h3hint');
+  assert.equal(hint.hidden, true);
+  const m = doc.getElementById('st-model');
+  m.value = 'MiniMax-H3-Image';
+  m.dispatchEvent(new win.Event('input', { bubbles: true }));
+  assert.equal(hint.hidden, false);
+  assert.match(hint.textContent, /few minutes.*never repeated automatically.*billed/);
+  m.value = 'image-01';
+  m.dispatchEvent(new win.Event('input', { bubbles: true }));
+  assert.equal(hint.hidden, true);
+});
+
+test('a failed refresh request says so without an empty provider name', { skip: dom.skip }, async () => {
+  const env = await page({
+    state: { ...STATE, providers: H3_PROVIDERS, can_refresh_models: true },
+    extra: { 'POST /api/apps/imagestudio/models/refresh': () => [500, { detail: 'boom' }] },
+  });
+  env.doc.getElementById('st-model-refresh').click();
+  await flush(); await flush();
+  assert.match(env.doc.querySelector('.st-status').textContent, /^Couldn't refresh the model lists:/);
+});
+
 test('picking an H3 model lifts the prompt limit and hides seed and reference', { skip: dom.skip }, async () => {
   const { doc, win } = await page({ state: { ...STATE, providers: H3_PROVIDERS } });
   assert.equal(doc.querySelector('.st-counter').textContent, '0 / 1,500');

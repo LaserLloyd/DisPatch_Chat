@@ -149,7 +149,7 @@ test('image form: model datalist follows the provider, shows its source, Refresh
   const get = (can) => () => [200, { config: { provider: 'minimax' }, presets, catalog, can_refresh_models: can, clawforge: false, enabled: true, flag_off: false, status: {} }];
   const { mod } = await setup({
     'GET /api/llm/image': get(true),
-    'POST /api/connections/models/refresh': () => { refreshed += 1; return [200, { connections: {}, image: {} }]; },
+    'POST /api/connections/models/refresh?scope=image': () => { refreshed += 1; return [200, { connections: {}, image: {} }]; },
   });
   const host = document.createElement('div');
   document.body.append(host);
@@ -177,10 +177,19 @@ test('image form: model datalist follows the provider, shows its source, Refresh
   assert.equal(host2.querySelector('#img-models-refresh').hidden, true);
 });
 
+test('imageModelsNote uses the static docs date and never reads "checked not yet"', { skip: dom.skip }, async () => {
+  const { mod } = await setup();
+  const docs = { models: ['a'], source: 'documented', checked: '2026-11-11', checked_at: null, note: '' };
+  assert.equal(mod.imageModelsNote(docs), "Models from the provider's docs, checked 2026-11-11.");
+  assert.equal(mod.imageModelsNote({ ...docs, checked: '' }), "Models from the provider's docs.");
+  assert.doesNotMatch(mod.imageModelsNote({ ...docs, checked: '' }), /not yet/);
+  assert.match(mod.imageModelsNote({ ...docs, source: 'mixed', checked_at: '2026-11-12T01:00:00+00:00' }), /from the provider's list, updated/);
+});
+
 test('every new model-refresh key exists in all 8 locales', () => {
   for (const l of ['en', 'ja', 'zh', 'de', 'es', 'fr', 'pt', 'ar']) {
     const d = JSON.parse(readFileSync(join(STATIC, 'locales', `${l}.json`), 'utf8'));
     for (const k of ['refresh_all', 'refresh_one', 'refresh_one_aria', 'refreshing', 'refreshed_all', 'models_list', 'models_docs', 'models_never', 'models_error']) assert.ok(d.cxn[k], `${l} cxn.${k}`);
-    for (const k of ['img_models_refresh', 'img_models_refreshing', 'img_models_done', 'img_models_list', 'img_models_docs', 'img_models_never']) assert.ok(d.integrations[k], `${l} integrations.${k}`);
+    for (const k of ['img_models_refresh', 'img_models_refreshing', 'img_models_done', 'img_models_list', 'img_models_docs', 'img_models_docs_nodate', 'img_models_never']) assert.ok(d.integrations[k], `${l} integrations.${k}`);
   }
 });

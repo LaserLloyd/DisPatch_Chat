@@ -159,5 +159,9 @@
   "models.note_endpoint_nodate": "D'après la liste de modèles de {label}.",
   "models.refreshed": "Mis à jour : {n} modèles pour {name}",
   "models.refresh_failed": "Impossible d'actualiser {name} : {error}",
+  "models.note_docs_generic": "Issu de la documentation de {label} (vérifié le {date}).",
+  "models.note_mixed": "Issu de la liste de modèles de {label}, mise à jour le {date}, plus des modèles de sa documentation.",
+  "models.refresh_error": "Impossible d'actualiser les listes de modèles : {error}",
+  "models.h3_hint": "Les images H3 peuvent prendre quelques minutes. Une requête n'est jamais répétée automatiquement et chaque clic sur Générer est facturé.",
   "models.refresh_docs_only": "Rien de nouveau : ces fournisseurs ne listent pas leurs modèles d'image via une API."
 }

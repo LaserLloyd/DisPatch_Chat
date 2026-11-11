@@ -1282,6 +1282,7 @@
     "img_models_done": "模型列表已更新。",
     "img_models_list": "模型来自服务商的列表，{when} 更新。",
     "img_models_docs": "模型来自服务商的文档，{when} 核对。",
+    "img_models_docs_nodate": "模型来自服务商文档。",
     "img_models_never": "尚未"
   },
   "lightbox": {

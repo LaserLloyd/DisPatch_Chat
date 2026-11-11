@@ -1308,6 +1308,7 @@
     "img_models_done": "Modelllisten aktualisiert.",
     "img_models_list": "Modelle aus der Liste des Anbieters, aktualisiert {when}.",
     "img_models_docs": "Modelle aus der Dokumentation des Anbieters, geprüft {when}.",
+    "img_models_docs_nodate": "Modelle aus der Dokumentation des Anbieters.",
     "img_models_never": "noch nie"
   },
   "lightbox": {

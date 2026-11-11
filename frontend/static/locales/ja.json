@@ -1282,6 +1282,7 @@
     "img_models_done": "モデル一覧を更新しました。",
     "img_models_list": "プロバイダーの一覧より（{when} 更新）。",
     "img_models_docs": "プロバイダーのドキュメントより（{when} 確認）。",
+    "img_models_docs_nodate": "プロバイダのドキュメントにあるモデルです。",
     "img_models_never": "未確認"
   },
   "lightbox": {

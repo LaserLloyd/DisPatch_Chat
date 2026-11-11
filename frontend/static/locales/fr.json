@@ -1333,6 +1333,7 @@
     "img_models_done": "Listes de modèles mises à jour.",
     "img_models_list": "Modèles issus de la liste du fournisseur, mis à jour {when}.",
     "img_models_docs": "Modèles issus de la documentation du fournisseur, vérifiés {when}.",
+    "img_models_docs_nodate": "Modèles issus de la documentation du fournisseur.",
     "img_models_never": "pas encore"
   },
   "lightbox": {

@@ -219,10 +219,10 @@ test('Browse filter: words are folded, lower-cased, deduplicated and capped; a r
   assert.equal(browseMatches({}, ['a']), false);
 });
 
-import { activeModel, modelCaps, modelPromptMax, modelsNote, refreshSummary } from '../static/studio-logic.js';
+import { activeModel, isH3Model, modelCaps, modelPromptMax, modelsNote, refreshSummary } from '../static/studio-logic.js';
 
 const MM = {
-  id: 'minimax', label: 'MiniMax', model: 'image-01', prompt_max: 1500,
+  id: 'minimax', label: 'MiniMax', shape: 'minimax', model: 'image-01', prompt_max: 1500,
   supports: { reference: true, optimizer: true, seed: true, max_n: 9 },
   supports_by_model: {
     'image-01': { reference: true, optimizer: true, seed: true, max_n: 9 },
@@ -252,6 +252,21 @@ test('the note under the model field says where the list came from', () => {
     { key: 'models.note_docs', vars: { label: 'MiniMax', date: '2026-11-11' } });
   assert.equal(modelsNote({ ...MM, models_source: 'endpoint', models_checked_at: null }).key, 'models.note_endpoint_nodate');
   assert.equal(modelsNote({ ...MM, models_source: '' }), null);
+  // the static docs date wins over the time the key was last checked
+  assert.deepEqual(modelsNote({ ...MM, models_source: 'documented', models_checked: '2026-11-11', models_checked_at: '2026-11-12T05:00:00+00:00' }).vars.date, '2026-11-11');
+  // only MiniMax says "doesn't list its image models"; the rest get a neutral docs line
+  const xai = { id: 'xai', label: 'xAI', models_source: 'documented', models_checked: '2026-11-11' };
+  assert.deepEqual(modelsNote(xai), { key: 'models.note_docs_generic', vars: { label: 'xAI', date: '2026-11-11' } });
+  assert.equal(modelsNote({ ...xai, models_checked: '' }), null);
+  // documented ids merged into a live list
+  assert.equal(modelsNote({ ...xai, models_source: 'mixed', models_checked_at: '2026-11-12T01:00:00+00:00' }).key, 'models.note_mixed');
+});
+
+test('an H3 model is recognised for the billing hint', () => {
+  assert.equal(isH3Model(MM, 'MiniMax-H3-Image-Highspeed'), true);
+  assert.equal(isH3Model(MM, 'image-01'), false);
+  assert.equal(isH3Model({ id: 'openai', shape: 'openai-images' }, 'MiniMax-H3-Image'), false);
+  assert.equal(isH3Model(null, 'MiniMax-H3-Image'), false);
 });
 
 test('a refresh is summed up in one plain sentence', () => {
@@ -260,4 +275,6 @@ test('a refresh is summed up in one plain sentence', () => {
     { key: 'models.refreshed', vars: { n: 4, name: 'xAI Grok' }, error: false });
   assert.equal(refreshSummary({ results: { xai: { source: 'documented', count: 2, error: 'HTTP 500' } } }, provs).error, true);
   assert.equal(refreshSummary({ results: { minimax: { source: 'documented', count: 4, error: null } } }, provs).key, 'models.refresh_docs_only');
+  // a MiniMax-only setup: no red message
+  assert.equal(refreshSummary({ results: { minimax: { source: 'documented', count: 4, error: null } } }, provs).error, false);
 });

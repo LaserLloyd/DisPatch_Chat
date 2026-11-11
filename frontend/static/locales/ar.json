@@ -1412,6 +1412,7 @@
     "img_models_done": "تم تحديث قوائم النماذج.",
     "img_models_list": "نماذج من قائمة المزوّد، حُدِّثت {when}.",
     "img_models_docs": "نماذج من وثائق المزوّد، روجعت {when}.",
+    "img_models_docs_nodate": "نماذج من وثائق المزوّد.",
     "img_models_never": "بعد"
   },
   "lightbox": {

@@ -304,15 +304,29 @@ export function modelPromptMax(provider, model, fallback = PROMPT_MAX) {
   return by[model] || provider.prompt_max || fallback;
 }
 
+/** True for a MiniMax H3 model: slow (up to 10 minutes) and billed even when the call is dropped. */
+export function isH3Model(provider, model) {
+  return !!provider && provider.shape === 'minimax' && /^MiniMax-H3-Image/.test(String(model || ''));
+}
+
 /** The small line under the model field: {key, vars} for t(), or null. */
 export function modelsNote(provider) {
   if (!provider) return null;
   const date = String(provider.models_checked_at || '').slice(0, 10);
+  const label = provider.label;
   if (provider.models_source === 'endpoint') {
-    return { key: date ? 'models.note_endpoint' : 'models.note_endpoint_nodate', vars: { label: provider.label, date } };
+    return { key: date ? 'models.note_endpoint' : 'models.note_endpoint_nodate', vars: { label, date } };
+  }
+  if (provider.models_source === 'mixed') {
+    return { key: date ? 'models.note_mixed' : 'models.note_endpoint_nodate', vars: { label, date } };
   }
   if (provider.models_source === 'documented') {
-    return { key: date ? 'models.note_docs' : 'models.note_docs_nodate', vars: { label: provider.label, date } };
+    // The date the docs were read is static; the time a key was last checked is not what this says.
+    const docs = String(provider.models_checked || '').slice(0, 10) || date;
+    if (provider.id === 'minimax') {
+      return { key: docs ? 'models.note_docs' : 'models.note_docs_nodate', vars: { label, date: docs } };
+    }
+    return docs ? { key: 'models.note_docs_generic', vars: { label, date: docs } } : null;
   }
   return null;
 }
