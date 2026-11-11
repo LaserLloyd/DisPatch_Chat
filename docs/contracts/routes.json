@@ -1212,6 +1212,20 @@
       }
     },
     {
+      "method": "GET",
+      "path": "/api/connections/models",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/connections/models/refresh",
+      "requirement": {
+        "permission": "manage_connections"
+      }
+    },
+    {
       "method": "POST",
       "path": "/api/connections/test",
       "requirement": {
@@ -1244,6 +1258,14 @@
     {
       "method": "PATCH",
       "path": "/api/connections/{connection_id}",
+      "requirement": {
+        "owner_scoped": "none: household configuration (manage_connections)",
+        "permission": "manage_connections"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/connections/{connection_id}/models/refresh",
       "requirement": {
         "owner_scoped": "none: household configuration (manage_connections)",
         "permission": "manage_connections"

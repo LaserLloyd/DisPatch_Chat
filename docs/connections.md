@@ -46,6 +46,17 @@ blank, the saved key is used - but only for the same type and address, so a Test
 key to another. With `use_connection` and no address it tests the connection's own address (4.3; it used the type's
 default address before).
 
+## Available models
+
+"Refresh available models" re-reads each server's model list and stores it in `<data>/model-catalog.json`
+(no keys). A chat connection goes through the same Test as above, so its `models` list (used by the character
+model pickers) is updated too. Image providers are listed separately: OpenAI and Custom read `GET {base}/models`,
+xAI reads `GET {base}/image-generation-models` (falling back to `/models`). MiniMax and Civitai have no endpoint
+that lists image models, so DisPatch shows a documented list marked "from the docs" with the date it was checked.
+A provider that can't be read also falls back to that list and says why. Requests go only to the connection's (or
+image provider's) own address, time out after 15 s, are capped at 2 MB and 500 ids, and follow no redirects; a
+target is refreshed at most once per 20 s. Only people with `manage_connections` may refresh.
+
 ## StudioForge
 
 StudioForge is recognised by `GET /api/version` answering `{"product": "StudioForge", ...}`. A StudioForge
@@ -146,5 +157,8 @@ All `manage_connections`. Errors carry a catalogued `error.code` (`docs/errors.m
 | `GET` / `PATCH` / `DELETE /api/connections/{id}` | one connection; `PATCH` takes the same fields plus `clear_key` |
 | `POST /api/connections/{id}/test` | Test a saved connection and record the result and model list |
 | `POST /api/connections/test` | Test an unsaved form |
+| `GET /api/connections/models` | the stored model catalog |
+| `POST /api/connections/models/refresh` | refresh every connection and image provider |
+| `POST /api/connections/{id}/models/refresh` | refresh one connection: `{connection, catalog}` |
 | `POST /api/connections/discover` | `{hosts?: [...], lan?: bool}` |
 | `POST /api/connections/adopt` | give every inline provider block a connection now |

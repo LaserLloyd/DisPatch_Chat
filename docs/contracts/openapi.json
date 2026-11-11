@@ -1880,7 +1880,7 @@
             "type": "boolean"
           },
           "prompt": {
-            "maxLength": 1900,
+            "maxLength": 4400,
             "minLength": 1,
             "title": "Prompt",
             "type": "string"
@@ -9494,6 +9494,39 @@
         "summary": "Discover"
       }
     },
+    "/api/connections/models": {
+      "get": {
+        "description": "The stored model catalog (connections + image providers). No keys, no URLs.",
+        "operationId": "models_catalog_api_connections_models_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Models Catalog"
+      }
+    },
+    "/api/connections/models/refresh": {
+      "post": {
+        "operationId": "refresh_all_models_api_connections_models_refresh_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Refresh All Models"
+      }
+    },
     "/api/connections/test": {
       "post": {
         "operationId": "test_unsaved_api_connections_test_post",
@@ -9661,6 +9694,43 @@
           }
         },
         "summary": "Patch Connection"
+      }
+    },
+    "/api/connections/{connection_id}/models/refresh": {
+      "post": {
+        "operationId": "refresh_models_api_connections__connection_id__models_refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Models"
       }
     },
     "/api/connections/{connection_id}/test": {

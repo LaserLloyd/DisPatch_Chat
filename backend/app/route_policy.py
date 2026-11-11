@@ -284,6 +284,8 @@ for _path, _m in (
     ("/api/connections/adopt", "POST"),
     ("/api/connections/{connection_id}", ("GET", "PATCH", "DELETE")),
     ("/api/connections/{connection_id}/test", "POST"),
+    ("/api/connections/models", "GET"), ("/api/connections/models/refresh", "POST"),
+    ("/api/connections/{connection_id}/models/refresh", "POST"),
 ):
     _r(_m, _path, _R(P.MANAGE_CONNECTIONS))
 _r("GET", "/api/characters", _R(P.USE_CHAT, scoped=True, machine=[M.BOTS_READ],
@@ -529,6 +531,7 @@ OWNER_SCOPED: dict[str, str] = {
     "/api/users/{profile_id}/export": "none: account metadata only (no chats), manage_users; the own-data export is /api/me/export (WP-PROF)",
     "/api/connections/{connection_id}": "none: household configuration (manage_connections)",
     "/api/connections/{connection_id}/test": "none: household configuration (manage_connections)",
+    "/api/connections/{connection_id}/models/refresh": "none: household configuration (manage_connections)",
     "/api/backups/{backup_id}": "none: host control (admin_system); a backup holds every profile's chats, stated in docs/security.md",
     "/api/backups/{backup_id}/verify": "none: host control (admin_system)",
     "/api/backups/{backup_id}/restore": "none: host control (admin_system)",

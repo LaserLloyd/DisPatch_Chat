@@ -8,6 +8,9 @@
 * ``DELETE /api/connections/{id}``         remove it (refused while a character uses it)
 * ``POST   /api/connections/test``         Test a form that is not saved yet
 * ``POST   /api/connections/{id}/test``    Test a saved connection; records the model list
+* ``GET    /api/connections/models``       the stored model catalog (chat connections + image providers)
+* ``POST   /api/connections/models/refresh``  re-list every connection and image provider
+* ``POST   /api/connections/{id}/models/refresh``  re-list one connection's models
 * ``POST   /api/connections/discover``     find StudioForge / LM Studio / Ollama / OpenAI-style servers
 * ``POST   /api/connections/adopt``        give every character's inline provider a connection now
                                            (the same step the 3.0 migration runs at start-up)
@@ -29,7 +32,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import characters, config, connections, policy
+from . import characters, config, connections, model_catalog, policy
 from .api_common import audit, fail
 from .contracts.permissions import Permission
 
@@ -151,6 +154,19 @@ async def adopt(request: Request):
     return {"linked": plan.linked, "created": plan.created, "notes": plan.actions}
 
 
+@router.get("/api/connections/models", dependencies=[_MANAGE])
+async def models_catalog():
+    """The stored model catalog (connections + image providers). No keys, no URLs."""
+    return await asyncio.to_thread(model_catalog.catalog)
+
+
+@router.post("/api/connections/models/refresh", dependencies=[_MANAGE])
+async def refresh_all_models(request: Request):
+    res = await model_catalog.refresh_all(concurrency=4)
+    audit(request, "connection.models_refresh", "", f"{len(res['connections'])} connections")
+    return res
+
+
 @router.get("/api/connections/{connection_id}", dependencies=[_MANAGE])
 async def get_connection(connection_id: str):
     c = await asyncio.to_thread(connections.get, connection_id)
@@ -235,3 +251,15 @@ async def test_saved(connection_id: str):
     fresh = await asyncio.to_thread(connections.get, connection_id)
     res["connection"] = await asyncio.to_thread(_public, fresh) if fresh else None
     return res
+
+
+@router.post("/api/connections/{connection_id}/models/refresh", dependencies=[_MANAGE])
+async def refresh_models(request: Request, connection_id: str):
+    c = await asyncio.to_thread(connections.get, connection_id)
+    if c is None:
+        raise fail(404, "connection_not_found", "Unknown connection")
+    entry = await model_catalog.refresh_connection(c)
+    fresh = await asyncio.to_thread(connections.get, connection_id)
+    audit(request, "connection.models_refresh", connection_id)
+    return {"connection": await asyncio.to_thread(_public, fresh) if fresh else None,
+            "catalog": entry}
