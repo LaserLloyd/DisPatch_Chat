@@ -24,6 +24,14 @@ WIRE SHAPES
                    prompt, aspect_ratio, response_format: "base64", n: 1}`` →
                    ``data.image_base64[0]`` (or ``data.image_urls[0]``), with
                    ``base_resp.status_code`` 0 on success.
+``minimax`` + H3  ``POST {base}/images/generations`` (models
+                   ``MiniMax-H3-Image[-Highspeed]``) ``{model, prompt, n,
+                   aspect_ratio, area: "2K", response_format: "b64_json",
+                   output_format: "jpeg", disable_prompt_enhanced}`` →
+                   ``data[]`` of ``{b64_json | url | error}``; no seed, no
+                   reference picture; the server may take up to 600 s, so the
+                   request is never retried. Errors are OpenAI-style
+                   ``{error: {message: "... (code)"}}``.
 ``civitai``        ASYNC. ``POST {base}/v2/consumer/workflows?wait=55`` with
                    one ``imageGen`` step, then ``GET .../workflows/{id}?wait=30``
                    until a terminal status; the pictures are signed blob URLs in
@@ -82,6 +90,11 @@ RESULT_TTL_S = 900.0
 MINIMAX_PROMPT_MAX = 1500
 #: Per-shape prompt caps; any other shape takes image_jobs.MAX_API_PROMPT_CHARS.
 PROMPT_MAX_BY_SHAPE = {"minimax": MINIMAX_PROMPT_MAX}
+#: MiniMax's H3 image models (same wire, different endpoint and limits).
+H3_PREFIX = "MiniMax-H3-Image"
+#: H3 holds the request open up to 600 s and is not idempotent: no retry.
+H3_TIMEOUT_S = 600.0
+H3_MAX_N = 10
 
 #: Provider ids that are not presets.
 AUTO, NONE, CLAWFORGE = "", "none", "clawforge"
@@ -125,7 +138,8 @@ PRESETS: tuple[ImagePreset, ...] = (
         id="minimax", label="MiniMax", shape="minimax",
         base_url="https://api.minimax.io/v1", model="image-01",
         key_env="MINIMAX_API_KEY", docs="https://platform.minimax.io/",
-        price_note="Billed per image, or from a Token Plan's image quota."),
+        price_note=("image-01 about $0.0035 a picture; MiniMax H3 Image about $0.02 "
+                    "(2K), Highspeed about twice that. Or from a Token Plan's image quota.")),
     ImagePreset(
         id="openai", label="OpenAI", shape="openai-images",
         base_url="https://api.openai.com/v1", model="gpt-image-1",
@@ -494,8 +508,28 @@ def minimax_ratio(ratio: str) -> str:
                key=lambda r: abs(int(r.split(":")[0]) / int(r.split(":")[1]) - want))
 
 
-def prompt_max(shape: str) -> int:
-    """The longest prompt a provider of ``shape`` takes."""
+def is_h3(model: str) -> bool:
+    return str(model or "").startswith(H3_PREFIX)
+
+
+def h3_ratio(ratio: str) -> str:
+    """H3 takes any X:Y (1..300 each) between 1:3 and 3:1; anything else
+    snaps to the nearest documented ratio (all of which are inside)."""
+    try:
+        a, b = (int(x) for x in str(ratio).split(":", 1))
+    except ValueError:
+        return "1:1"
+    if a < 1 or b < 1:
+        return "1:1"
+    if a <= 300 and b <= 300 and b <= 3 * a and a <= 3 * b:
+        return f"{a}:{b}"
+    return minimax_ratio(ratio)
+
+
+def prompt_max(shape: str, model: str = "") -> int:
+    """The longest prompt a provider of ``shape`` (and ``model``) takes."""
+    if shape == "minimax" and is_h3(model):
+        return image_jobs.MAX_API_PROMPT_CHARS
     return PROMPT_MAX_BY_SHAPE.get(shape, image_jobs.MAX_API_PROMPT_CHARS)
 
 
@@ -599,6 +633,8 @@ MAX_BATCH = {"minimax": 9, "openai-images": 4, "civitai": CIVITAI_MAX_N}
 
 
 def max_batch(res: Resolved) -> int:
+    if res.preset.shape == "minimax" and is_h3(res.model):
+        return H3_MAX_N
     if res.preset.shape == "openai-images" and res.model.startswith("dall-e-3"):
         return 1
     return MAX_BATCH.get(res.preset.shape, 1)
@@ -607,6 +643,9 @@ def max_batch(res: Resolved) -> int:
 def supports(res: Resolved) -> dict:
     """What a provider can do beyond a prompt, for UIs that hide the rest."""
     mm = res.preset.shape == "minimax"
+    if mm and is_h3(res.model):
+        return {"reference": False, "optimizer": True, "seed": False,
+                "max_n": H3_MAX_N}
     return {"reference": mm, "optimizer": mm,
             "seed": mm or res.preset.shape == "civitai", "max_n": max_batch(res)}
 
@@ -630,9 +669,23 @@ async def generate_batch(res: Resolved, spec: image_jobs.ImageSpec, *, n: int = 
     if res.api_key:
         headers["Authorization"] = f"Bearer {res.api_key}"
     blobs: list[bytes] = []
-    async with _client() as client:
+    h3 = res.preset.shape == "minimax" and is_h3(res.model)
+    async with _client(H3_TIMEOUT_S if h3 else GENERATE_TIMEOUT_S) as client:
         try:
-            if res.preset.shape == "civitai":
+            if h3:
+                body = {
+                    "model": res.model,
+                    "prompt": spec.prompt[:image_jobs.MAX_API_PROMPT_CHARS],
+                    "n": n, "aspect_ratio": h3_ratio(spec.ratio or "1:1"),
+                    "area": "2K", "response_format": "b64_json",
+                    "output_format": "jpeg",
+                    "disable_prompt_enhanced": not optimizer}
+                r = await client.post(f"{res.base_url}/images/generations",
+                                      json=body, headers=headers)
+                if r.status_code >= 400:
+                    raise _h3_error(r, label)
+                items = _h3_items(r.json(), label)
+            elif res.preset.shape == "civitai":
                 blobs = await _civitai_batch(client, res, spec, n, seed, currency)
                 items = []
             elif res.preset.shape == "minimax":
@@ -709,6 +762,66 @@ _MINIMAX_CODES = {
     2013: "MiniMax rejected the request parameters",
     2049: "MiniMax rejected the API key",
 }
+
+
+_H3_CODES = {
+    1002: "MiniMax is rate-limiting this key",
+    1008: "the MiniMax account balance or credit is too low",
+    2053: "the MiniMax account balance or credit is too low",
+    2067: "the MiniMax account balance or credit is too low",
+    1026: "MiniMax refused the prompt (sensitive content)",
+    1027: "MiniMax refused the picture it made (sensitive content)",
+    2013: "MiniMax rejected the request parameters",
+    2056: "the MiniMax plan's usage window is spent (try again later)",
+    2068: "your MiniMax plan doesn't include this model",
+}
+_CODE_TAIL = re.compile(r"\((\d{3,5})\)\s*$")
+
+
+def _h3_code_error(code: int, msg: str) -> image_jobs.ImageJobError | None:
+    why = _H3_CODES.get(code)
+    if not why:
+        return None
+    if code == 2013 and msg:
+        why += f": {_CODE_TAIL.sub('', msg).strip()}"
+    return image_jobs.ImageJobError(why)
+
+
+def _h3_error(r: httpx.Response, label: str) -> image_jobs.ImageJobError:
+    msg = ""
+    with contextlib.suppress(Exception):
+        err = r.json().get("error")
+        msg = str(err.get("message") if isinstance(err, dict) else err or "")
+    m = _CODE_TAIL.search(msg)
+    if m:
+        mapped = _h3_code_error(int(m.group(1)), msg)
+        if mapped:
+            return mapped
+    return _error_from_status(r, label)
+
+
+def _h3_items(payload: Any, label: str) -> list[bytes | str]:
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    out: list[bytes | str] = []
+    reason: image_jobs.ImageJobError | None = None
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        if row.get("b64_json"):
+            out.append(_b64(str(row["b64_json"])))
+        elif row.get("url"):
+            out.append(str(row["url"]))
+        elif isinstance(row.get("error"), dict) and reason is None:
+            e = row["error"]
+            with contextlib.suppress(ValueError, TypeError):
+                reason = _h3_code_error(int(e.get("code")), str(e.get("message") or ""))
+            if reason is None:
+                reason = image_jobs.ImageJobError(
+                    f"{label} could not make the picture"
+                    + (f": {e.get('message')}" if e.get("message") else ""))
+    if not out:
+        raise reason or image_jobs.ImageJobError(f"{label} returned no picture")
+    return out
 
 
 def _minimax_items(payload: Any, label: str) -> list[bytes | str]:

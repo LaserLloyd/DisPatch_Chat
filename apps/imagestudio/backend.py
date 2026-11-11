@@ -455,7 +455,7 @@ def _rewrite_ledger(rows: list[dict]) -> None:
 
 def _check_length(prompt: str, res: image_providers.Resolved) -> None:
     """422 when ``prompt`` is longer than the chosen provider takes."""
-    limit = image_providers.prompt_max(res.preset.shape)
+    limit = image_providers.prompt_max(res.preset.shape, res.model)
     if len(prompt) > limit:
         raise HTTPException(
             422, f"The prompt is {len(prompt)} characters; {res.preset.label} takes {limit}")
