@@ -98,6 +98,7 @@ from . import (
     llm_api,
     localview,
     mailforge_bridge,
+    model_catalog,
     migrate,
     oidc,
     oidc_api,
@@ -8867,8 +8868,11 @@ async def llm_test(request: Request, payload: dict = Body(...)):
 # --------------------------------------------------------------------------- #
 
 
-def _image_provider_state() -> dict:
-    return {"config": image_providers.public_config(),
+def _image_provider_state(request: Request | None = None) -> dict:
+    can_refresh = bool(request is not None and policy.of(request).can("manage_connections"))
+    return {"catalog": {p.id: model_catalog.image_models(p.id) for p in image_providers.DEFAULT_PRESETS},
+            "can_refresh_models": can_refresh,
+            "config": image_providers.public_config(),
             "presets": [p.public() for p in image_providers.DEFAULT_PRESETS],
             "clawforge": _clawforge_configured(),
             "enabled": _image_jobs_configured(),
@@ -8877,8 +8881,8 @@ def _image_provider_state() -> dict:
 
 
 @app.get("/api/llm/image", dependencies=[Depends(_require_operator)])
-async def llm_image_get():
-    return _image_provider_state()
+async def llm_image_get(request: Request):
+    return _image_provider_state(request)
 
 
 def _image_key_rules_refusal(request: Request, payload: dict, cfg: dict) -> JSONResponse | None:
@@ -8910,7 +8914,7 @@ async def llm_image_put(request: Request, payload: dict = Body(...)):
         raise HTTPException(400, e.message) from e
     await asyncio.to_thread(image_providers.save_config, cfg)
     log.info("image provider set to %r", cfg["provider"] or "automatic")
-    return _image_provider_state()
+    return _image_provider_state(request)
 
 
 @app.post("/api/llm/image/test", dependencies=[Depends(_require_operator)])

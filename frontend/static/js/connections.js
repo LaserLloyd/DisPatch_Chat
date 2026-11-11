@@ -9,7 +9,7 @@
 // The server does the real work (address checks, the SSRF guard, the Test); this file only turns its
 // answers into plain sentences and decides what to offer. Pure helpers are exported for the tests.
 
-import { w5 as realApi, errorText } from './w5-api.js?v=3';
+import { w5 as realApi, errorText } from './w5-api.js?v=4';
 import { api as coreApi } from './api.js?v=37';
 import { t } from './i18n.js?v=5';
 import { el, spriteIcon } from './util.js?v=23';
@@ -38,6 +38,22 @@ export function describeTest(r) {
     case 'no_model_list': return ['warn', t('cxn.warn_no_list'), r.fix || r.message || ''];
     default: return ['bad', t('cxn.bad_other'), r.message || r.fix || ''];
   }
+}
+
+/** "Models: N · updated <time> · from the provider's list" for one card, or the plain-words error.
+ *  `entry` is the catalog row (source / checked_at / error) when the server sent one. */
+export function modelsLine(c, entry, fmt = (iso) => new Date(iso).toLocaleString()) {
+  const n = (c && c.models && c.models.length) || 0;
+  const e = entry || {};
+  const when = e.checked_at || (c && c.models_checked_at) || '';
+  let head;
+  if (!when) head = t('cxn.models_never', { count: n });
+  else {
+    let shown = when;
+    try { const s = fmt(when); if (s && s !== 'Invalid Date') shown = s; } catch { /* keep the raw stamp */ }
+    head = t(e.source === 'documented' ? 'cxn.models_docs' : 'cxn.models_list', { count: n, when: shown });
+  }
+  return e.error ? `${head} · ${t('cxn.models_error', { error: e.error })}` : head;
 }
 
 /** The stored last_test of a connection, in the same shape. The stored test keeps no model
@@ -147,7 +163,7 @@ export async function mountConnections(pane, deps = {}) {
   const toast = deps.toast || (() => {});
   const ask = deps.confirm || (async () => true);
   pane.textContent = '';
-  const state = { types: [], list: [], editing: null, mode: null };
+  const state = { types: [], list: [], editing: null, mode: null, catalog: {} };
   const top = el('div', { class: 'cxn-top' }, [
     el('h3', { class: 'dev-group-title', text: t('cxn.title') }),
     el('p', { class: 'dev-group-hint', text: t('cxn.hint') }),
@@ -156,7 +172,9 @@ export async function mountConnections(pane, deps = {}) {
   const findBtn = el('button', { type: 'button', class: 'btn-secondary', text: t('cxn.find') });
   const lanBox = el('input', { type: 'checkbox', id: 'cxn-lan', class: 'ui-checkbox' });
   const adoptBtn = el('button', { type: 'button', class: 'btn-secondary', text: t('cxn.adopt'), title: t('cxn.adopt_title') });
-  const bar = el('div', { class: 'cxn-bar' }, [addBtn, findBtn, el('label', { class: 'bkp-check', for: 'cxn-lan' }, [lanBox, ' ', t('cxn.lan')]), adoptBtn]);
+  const refreshAllBtn = el('button', { type: 'button', class: 'btn-secondary', id: 'cxn-refresh-all', text: t('cxn.refresh_all'), title: t('cxn.refresh_all_title') });
+  const refreshNote = el('span', { class: 'people-field-hint cxn-refresh-note', role: 'status', 'aria-live': 'polite' });
+  const bar = el('div', { class: 'cxn-bar' }, [addBtn, findBtn, refreshAllBtn, el('label', { class: 'bkp-check', for: 'cxn-lan' }, [lanBox, ' ', t('cxn.lan')]), adoptBtn, refreshNote]);
   const found = el('div', { class: 'cxn-found dev-group-body', hidden: '' });
   const formHost = el('div', { class: 'cxn-formhost' });
   const listHost = el('div', { class: 'cxn-list dev-group-body' });
@@ -170,6 +188,10 @@ export async function mountConnections(pane, deps = {}) {
     } catch (e) {
       listHost.textContent = errorText(e);
       return;
+    }
+    // One call for every card's source / checked-at / error; a miss just leaves the plain line.
+    if (typeof api.modelsCatalog === 'function') {
+      try { const m = await api.modelsCatalog(); state.catalog = (m && m.connections) || {}; } catch { state.catalog = {}; }
     }
     paintList();
   }
@@ -187,6 +209,20 @@ export async function mountConnections(pane, deps = {}) {
     const [kind, head, detail] = describeStored(c);
     const test = el('button', { type: 'button', class: 'btn-secondary', text: t('cxn.test'), 'aria-label': t('cxn.test_aria', { name: c.name }) });
     const edit = el('button', { type: 'button', class: 'btn-secondary', text: t('cxn.edit'), 'aria-label': t('cxn.edit_aria', { name: c.name }) });
+    const refresh = el('button', { type: 'button', class: 'btn-secondary', text: t('cxn.refresh_one'), 'aria-label': t('cxn.refresh_one_aria', { name: c.name }) });
+    const modelsEl = el('span', { class: 'dev-row-hint cxn-models-line', text: modelsLine(c, state.catalog[c.id]) });
+    refresh.addEventListener('click', async () => {
+      refresh.disabled = true;
+      refresh.textContent = t('cxn.refreshing');
+      try {
+        const r = await api.refreshModels(c.id);
+        Object.assign(c, r.connection || {});
+        state.catalog[c.id] = r.catalog || {};
+        modelsEl.textContent = modelsLine(c, state.catalog[c.id]);
+        deps.onChanged && deps.onChanged();
+      } catch (e) { modelsEl.textContent = t('cxn.models_error', { error: errorText(e) }); }
+      finally { refresh.disabled = false; refresh.textContent = t('cxn.refresh_one'); }
+    });
     const del = el('button', { type: 'button', class: 'btn-secondary danger-text', text: t('cxn.delete'), 'aria-label': t('cxn.delete_aria', { name: c.name }) });
     const res = resultBox();
     test.addEventListener('click', async () => {
@@ -214,9 +250,10 @@ export async function mountConnections(pane, deps = {}) {
         el('span', { class: 'dev-row-hint cxn-url', text: c.base_url }),
         el('span', { class: `dev-row-hint cxn-status cxn-${kind}`, text: detail ? `${head} · ${detail}` : head }),
         el('span', { class: 'dev-row-hint', text: `${c.credential.has_key ? t('cxn.key_saved') : (c.credential.kind === 'env' ? t('cxn.key_env', { name: c.credential.env }) : t('cxn.no_key'))} · ${users}` }),
+        modelsEl,
         res,
       ]),
-      test, edit, del,
+      test, refresh, edit, del,
     ]);
   }
 
@@ -364,6 +401,20 @@ export async function mountConnections(pane, deps = {}) {
       }
     } catch (e) { found.textContent = errorText(e); }
     finally { findBtn.disabled = false; }
+  });
+  refreshAllBtn.addEventListener('click', async () => {
+    refreshAllBtn.disabled = true;
+    refreshAllBtn.textContent = t('cxn.refreshing');
+    refreshNote.textContent = '';
+    try {
+      const r = await api.refreshAllModels();
+      const n = Object.keys((r && r.connections) || {}).length;
+      refreshNote.textContent = t('cxn.refreshed_all', { count: n });
+      toast(t('cxn.refreshed_all', { count: n }));
+      deps.onChanged && deps.onChanged();
+      await load();
+    } catch (e) { refreshNote.textContent = errorText(e); toast(errorText(e), true); }
+    finally { refreshAllBtn.disabled = false; refreshAllBtn.textContent = t('cxn.refresh_all'); }
   });
   adoptBtn.addEventListener('click', async () => {
     try {

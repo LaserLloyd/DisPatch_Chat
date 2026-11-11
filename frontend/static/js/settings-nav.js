@@ -15,7 +15,7 @@
 import { el } from './util.js?v=23';
 import { renderAccountReset } from './account-reset.js?v=6';
 import { renderProfilePicture } from './profile-picture.js?v=7';
-import { renderPeoplePerms } from './people-perms.js?v=8';
+import { renderPeoplePerms } from './people-perms.js?v=9';
 
 /** The sections, in nav order. `group`: you (this person / device), bots (Characters),
  *  household

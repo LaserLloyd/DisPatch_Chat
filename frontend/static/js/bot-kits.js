@@ -13,7 +13,7 @@
 import { t } from './i18n.js?v=5';
 import { el } from './util.js?v=23';
 import { profileReq } from './bot-editor.js?v=6';
-import { askDialog } from './people-perms.js?v=8';
+import { askDialog } from './people-perms.js?v=9';
 
 const base = (id) => `/api/characters/${encodeURIComponent(id)}/kit`;
 

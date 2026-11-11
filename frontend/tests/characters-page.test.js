@@ -796,3 +796,27 @@ test('Fable 11d: an Admin without a copy of a household bot gets "Get my copy" i
   rowEl(h2, 'atlas').querySelector('.cp-menu-btn').click();
   assert.equal([...h2.querySelectorAll('.cp-menu [data-item]')].filter((b) => b.dataset.item === 'get_copy').length, 0);
 });
+
+test('bot editor: the model box suggests the chosen connection\'s models and follows a connection change', { skip: dom.skip }, async () => {
+  const { host } = await mount(manage(), {
+    'GET /api/characters/atlas': () => [200, { name: 'Atlas', emoji: '🌍', description: '', backend: { kind: 'direct', connection: 'c1', model: 'm' }, personality: { text: '' } }],
+    'GET /api/connections': () => [200, { connections: [{ id: 'c1', name: 'Rig', models: ['alpha', 'beta'] }, { id: 'c2', name: 'Cloud', models: ['gamma'] }, { id: 'c3', name: 'Bare' }] }],
+    'GET /api/characters/atlas/kit': () => [404, { detail: 'x' }],
+  });
+  host.querySelector('[data-tab="household"]').click();
+  await settle();
+  rowEl(host, 'atlas').querySelector('.cp-details-btn').click();
+  await settle();
+  const body = rowEl(host, 'atlas');
+  const input = body.querySelector('input[id$="-model"]');
+  const list = body.querySelector(`datalist#${input.getAttribute('list')}`);
+  assert.ok(list, 'the model input points at a datalist');
+  assert.deepEqual([...list.querySelectorAll('option')].map((o) => o.value), ['alpha', 'beta']);
+  const sel = body.querySelector('select[id$="-conn"]');
+  sel.value = 'c2';
+  sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  assert.deepEqual([...list.querySelectorAll('option')].map((o) => o.value), ['gamma']);
+  sel.value = 'c3';
+  sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  assert.equal(list.querySelectorAll('option').length, 0, 'a connection with no list offers nothing, free text still works');
+});

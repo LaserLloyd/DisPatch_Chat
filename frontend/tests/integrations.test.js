@@ -137,3 +137,50 @@ test('the checklist survives the AI tab re-mounting after a connect', { skip: do
   assert.equal(host.querySelectorAll('.qs-row').length, 2);
   assert.match(host.querySelector('#qs-result').textContent, /Atlas is ready/);
 });
+
+test('image form: model datalist follows the provider, shows its source, Refresh only for managers', { skip: dom.skip }, async () => {
+  const presets = [{ id: 'minimax', label: 'MiniMax', model: 'image-01', base_url: 'https://api.minimax.io/v1' },
+    { id: 'xai', label: 'xAI', model: 'grok-imagine-image', base_url: 'https://api.x.ai/v1' }];
+  const catalog = {
+    minimax: { models: ['MiniMax-H3-Image', 'image-01'], names: { 'MiniMax-H3-Image': 'MiniMax H3 Image (newest)' }, source: 'documented', checked_at: '2026-11-11', note: 'No image list from the API.' },
+    xai: { models: ['grok-imagine-image'], names: {}, source: 'endpoint', checked_at: '2026-11-11T01:00:00+00:00', note: '' },
+  };
+  let refreshed = 0;
+  const get = (can) => () => [200, { config: { provider: 'minimax' }, presets, catalog, can_refresh_models: can, clawforge: false, enabled: true, flag_off: false, status: {} }];
+  const { mod } = await setup({
+    'GET /api/llm/image': get(true),
+    'POST /api/connections/models/refresh': () => { refreshed += 1; return [200, { connections: {}, image: {} }]; },
+  });
+  const host = document.createElement('div');
+  document.body.append(host);
+  await mod.mountImageSection(host, {});
+  const opts = () => [...host.querySelectorAll('#img-model-list option')].map((o) => o.value);
+  assert.deepEqual(opts(), ['MiniMax-H3-Image', 'image-01']);
+  assert.equal(host.querySelector('#img-model').getAttribute('list'), 'img-model-list');
+  assert.match(host.querySelector('#img-model-note').textContent, /from the provider's docs, checked .*No image list/);
+  const sel = host.querySelector('#img-provider');
+  sel.value = 'xai';
+  sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  assert.deepEqual(opts(), ['grok-imagine-image']);
+  assert.match(host.querySelector('#img-model-note').textContent, /from the provider's list, updated/);
+  const btn = host.querySelector('#img-models-refresh');
+  assert.equal(btn.hidden, false);
+  btn.click();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(refreshed, 1);
+  assert.match(host.querySelector('#img-result').textContent, /Model lists updated/);
+  // a viewer who cannot manage connections never sees the button
+  const { mod: mod2 } = await setup({ 'GET /api/llm/image': get(false) });
+  const host2 = document.createElement('div');
+  document.body.append(host2);
+  await mod2.mountImageSection(host2, {});
+  assert.equal(host2.querySelector('#img-models-refresh').hidden, true);
+});
+
+test('every new model-refresh key exists in all 8 locales', () => {
+  for (const l of ['en', 'ja', 'zh', 'de', 'es', 'fr', 'pt', 'ar']) {
+    const d = JSON.parse(readFileSync(join(STATIC, 'locales', `${l}.json`), 'utf8'));
+    for (const k of ['refresh_all', 'refresh_one', 'refresh_one_aria', 'refreshing', 'refreshed_all', 'models_list', 'models_docs', 'models_never', 'models_error']) assert.ok(d.cxn[k], `${l} cxn.${k}`);
+    for (const k of ['img_models_refresh', 'img_models_refreshing', 'img_models_done', 'img_models_list', 'img_models_docs', 'img_models_never']) assert.ok(d.integrations[k], `${l} integrations.${k}`);
+  }
+});

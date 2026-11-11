@@ -692,3 +692,61 @@ test('schema rows: a default connection whose connection was deleted shows as mi
   assert.equal(sel.selectedOptions[0].textContent, EN.schema.missing_connection.replace('{id}', 'gone-1'));
   assert.deepEqual([...sel.options].map((o) => o.value), ['', 'c1', 'gone-1']);
 });
+
+test('Connections: Refresh available models (all) and per-card Refresh models with the source line', { skip: dom.skip }, async () => {
+  const win = await boot();
+  const C = await fresh('connections.js');
+  const base = { type: 'openai', type_label: 'OpenAI', base_url: 'https://api.openai.com/v1', credential: { kind: 'stored', has_key: true },
+    capabilities: ['chat'], default_model: '', last_test: {}, in_use_by: [] };
+  let list = [{ ...base, id: 'a', name: 'Alpha', models: ['m1'], models_checked_at: '2026-11-11T01:00:00+00:00' },
+    { ...base, id: 'b', name: 'Beta', models: [] }];
+  const seen = [];
+  const api = {
+    connections: async () => ({ connections: list, types: CONN_TYPES, default: '' }),
+    modelsCatalog: async () => ({ version: 1, connections: {
+      a: { models: [{ id: 'm1', kind: 'chat' }], source: 'endpoint', checked_at: '2026-11-11T01:00:00+00:00', error: null },
+      b: { models: [], source: 'endpoint', checked_at: null, error: 'The key was not accepted' } }, image: {} }),
+    refreshModels: async (id) => { seen.push(['one', id]);
+      return { connection: { ...list[1], models: ['x', 'y', 'z'], models_checked_at: '2026-11-11T02:00:00+00:00' },
+        catalog: { models: [], source: 'documented', checked_at: '2026-11-11T02:00:00+00:00', error: null } }; },
+    refreshAllModels: async () => { seen.push(['all']); list = list.map((c) => ({ ...c, models: ['n1', 'n2'] }));
+      return { connections: { a: {}, b: {} }, image: {} }; },
+  };
+  const toasts = [];
+  const pane = win.document.getElementById('spane-connections');
+  await C.mountConnections(pane, { api, toast: (m) => toasts.push(m) });
+  const lineA = pane.querySelector('[data-connection="a"] .cxn-models-line').textContent;
+  assert.match(lineA, /^Models: 1 · updated .+ · from the provider's list$/);
+  assert.match(pane.querySelector('[data-connection="b"] .cxn-models-line').textContent, /Models: 0 · not refreshed yet · Could not refresh: The key was not accepted/);
+  // per-card
+  const refreshB = [...pane.querySelector('[data-connection="b"]').querySelectorAll('button')].find((b) => b.textContent === EN.cxn.refresh_one);
+  assert.ok(refreshB);
+  refreshB.click();
+  await tick(); await tick();
+  assert.deepEqual(seen[0], ['one', 'b']);
+  assert.match(pane.querySelector('[data-connection="b"] .cxn-models-line').textContent, /Models: 3 · updated .+ · from the docs/);
+  // all
+  const all = pane.querySelector('#cxn-refresh-all');
+  assert.equal(all.textContent, 'Refresh available models');
+  all.click();
+  assert.equal(all.disabled, true, 'busy while it runs');
+  await tick(); await tick(); await tick();
+  assert.deepEqual(seen[1], ['all']);
+  assert.equal(all.disabled, false);
+  assert.match(pane.querySelector('.cxn-refresh-note').textContent, /Model lists updated for 2 connections/);
+  assert.match(pane.querySelector('[data-connection="a"] .cxn-models-line').textContent, /Models: 2/);
+  // a catalog-less api (older mock) still draws the card
+  await C.mountConnections(pane, { api: { ...api, modelsCatalog: undefined }, toast() {} });
+  assert.ok(pane.querySelector('[data-connection="a"] .cxn-models-line'));
+});
+
+test('w5 model refresh calls hit the catalog routes', { skip: dom.skip }, async () => {
+  const win = await boot();
+  routes = { 'GET /api/connections/models': () => [200, { version: 1, connections: {}, image: {} }],
+    'POST /api/connections/a%2Fb/models/refresh': () => [200, {}], 'POST /api/connections/models/refresh': () => [200, {}] };
+  const { w5 } = await fresh('w5-api.js');
+  await w5.modelsCatalog(); await w5.refreshModels('a/b'); await w5.refreshAllModels();
+  assert.deepEqual(calls.map((c) => c.key).filter((k) => !k.includes('locales')),
+    ['GET /api/connections/models', 'POST /api/connections/a%2Fb/models/refresh', 'POST /api/connections/models/refresh']);
+  void win;
+});

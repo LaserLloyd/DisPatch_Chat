@@ -163,6 +163,21 @@ export function imageStatusText(state) {
   return state.clawforge ? t('integrations.img_status_server') : t('integrations.img_status_off');
 }
 
+/** The one-line source of a provider's model list: from its own list (with the time) or from the docs,
+ *  plus the server's own note when it has one. '' when there is nothing to say. */
+export function imageModelsNote(entry, fmt = (iso) => new Date(iso).toLocaleString()) {
+  if (!entry || !Array.isArray(entry.models) || !entry.models.length) return '';
+  let when = '';
+  if (entry.checked_at) {
+    try { when = fmt(entry.checked_at); } catch { when = entry.checked_at; }
+    if (!when || when === 'Invalid Date') when = entry.checked_at;
+  }
+  const head = entry.source === 'documented'
+    ? t('integrations.img_models_docs', { when: when || t('integrations.img_models_never') })
+    : t('integrations.img_models_list', { when: when || t('integrations.img_models_never') });
+  return entry.note ? `${head} ${entry.note}` : head;
+}
+
 export async function mountImageSection(host, deps = {}) {
   if (!host) return;
   let state;
@@ -177,7 +192,11 @@ export async function mountImageSection(host, deps = {}) {
   for (const p of presets) opts.push([p.id, p.label]);
   for (const [v, label] of opts) sel.append(el('option', { value: v, text: label }));
   const base = el('input', { type: 'url', id: 'img-base-url', autocomplete: 'off', spellcheck: 'false', inputmode: 'url' });
-  const model = el('input', { type: 'text', id: 'img-model', autocomplete: 'off', spellcheck: 'false' });
+  const model = el('input', { type: 'text', id: 'img-model', autocomplete: 'off', spellcheck: 'false', list: 'img-model-list' });
+  const modelList = el('datalist', { id: 'img-model-list' });
+  const modelNote = note('', 'img-model-note');
+  const refreshModels = el('button', { type: 'button', class: 'btn-secondary', id: 'img-models-refresh',
+    text: t('integrations.img_models_refresh'), hidden: '' });
   const key = el('input', { type: 'password', id: 'img-key', autocomplete: 'off', spellcheck: 'false' });
   const keyEnv = el('input', { type: 'text', id: 'img-key-env', autocomplete: 'off', spellcheck: 'false' });
   const docs = el('a', { class: 'llm-docs', target: '_blank', rel: 'noopener noreferrer', text: t('llm.docs_link'), title: t('llm.docs_link'), 'aria-label': t('llm.docs_link') });
@@ -189,7 +208,8 @@ export async function mountImageSection(host, deps = {}) {
   const preview = el('img', { class: 'img-preview', id: 'img-preview', alt: t('integrations.img_preview_alt'), hidden: '' });
   const apiFields = el('div', { class: 'img-api-fields', id: 'img-api-fields' }, [
     field(t('llm.base_url'), base),
-    field(t('llm.model'), model),
+    field(t('llm.model'), model, el('span', {}, [modelNote, refreshModels])),
+    modelList,
     field(t('llm.api_key'), key, note(t('integrations.img_key_hint'))),
     field(t('llm.key_env_label'), keyEnv),
     el('div', {}, [docs, price]),
@@ -216,6 +236,15 @@ export async function mountImageSection(host, deps = {}) {
       docs.hidden = !p.docs;
       if (p.docs) docs.href = p.docs;
       price.textContent = p.price_note || '';
+      const cat = (state.catalog || {})[p.id] || {};
+      const names = cat.names || {};
+      modelList.replaceChildren(...(cat.models || []).slice(0, 500).map((m) => {
+        const o = el('option', { value: m });
+        if (names[m]) o.label = names[m];
+        return o;
+      }));
+      modelNote.textContent = imageModelsNote(cat);
+      refreshModels.hidden = !state.can_refresh_models;
     }
     status.textContent = imageStatusText(state);
   };
@@ -237,6 +266,24 @@ export async function mountImageSection(host, deps = {}) {
     };
   };
 
+  refreshModels.addEventListener('click', async () => {
+    refreshModels.disabled = true;
+    refreshModels.textContent = t('integrations.img_models_refreshing');
+    try {
+      await send('POST', '/api/connections/models/refresh', {});
+      const fresh = await json('/api/llm/image');
+      state = { ...state, catalog: fresh.catalog || state.catalog };
+      paint(true);
+      result.textContent = t('integrations.img_models_done');
+      result.className = 'llm-result good';
+    } catch (e) {
+      result.textContent = errText(e);
+      result.className = 'llm-result bad';
+    } finally {
+      refreshModels.disabled = false;
+      refreshModels.textContent = t('integrations.img_models_refresh');
+    }
+  });
   test.addEventListener('click', async () => {
     test.disabled = true;
     preview.hidden = true;

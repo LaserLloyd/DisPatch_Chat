@@ -1327,7 +1327,13 @@
     "st_unknown": "Desconocido",
     "repo_link": "Repositorio",
     "howto_link": "Cómo configurarlo",
-    "toggle_below": "Su interruptor está más arriba, en Complementos o en Aplicaciones y herramientas."
+    "toggle_below": "Su interruptor está más arriba, en Complementos o en Aplicaciones y herramientas.",
+    "img_models_refresh": "Actualizar modelos disponibles",
+    "img_models_refreshing": "Actualizando…",
+    "img_models_done": "Listas de modelos actualizadas.",
+    "img_models_list": "Modelos de la lista del proveedor, actualizado {when}.",
+    "img_models_docs": "Modelos de la documentación del proveedor, revisado {when}.",
+    "img_models_never": "todavía no"
   },
   "lightbox": {
     "previous": "Imagen anterior (más antigua)",
@@ -1982,7 +1988,17 @@
     "personal_bots": "bots personales: {count}",
     "agents_hint": "Programas de agente, sus límites y secretos",
     "owner_only_env": "Solo el Owner puede usar una clave guardada en el ordenador de DisPatch.",
-    "owner_only_move": "Solo el Owner puede apuntar a una dirección nueva una conexión con una clave guardada. Para hacerlo tú, escribe una clave nueva o quita también la clave."
+    "owner_only_move": "Solo el Owner puede apuntar a una dirección nueva una conexión con una clave guardada. Para hacerlo tú, escribe una clave nueva o quita también la clave.",
+    "refresh_all": "Actualizar modelos disponibles",
+    "refresh_all_title": "Preguntar a cada conexión y servicio de imágenes qué modelos ofrecen ahora",
+    "refresh_one": "Actualizar modelos",
+    "refresh_one_aria": "Actualizar la lista de modelos de {name}",
+    "refreshing": "Actualizando…",
+    "refreshed_all": "Listas de modelos actualizadas para {count} conexiones.",
+    "models_list": "Modelos: {count} · actualizado {when} · de la lista del proveedor",
+    "models_docs": "Modelos: {count} · actualizado {when} · de la documentación",
+    "models_never": "Modelos: {count} · aún sin actualizar",
+    "models_error": "No se pudo actualizar: {error}"
   },
   "chars": {
     "details": "Detalles",
