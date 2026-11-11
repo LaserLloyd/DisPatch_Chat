@@ -1302,7 +1302,13 @@
     "st_unknown": "Unknown",
     "repo_link": "Repository",
     "howto_link": "How to set it up",
-    "toggle_below": "Its on/off switch is under Add-ons or Apps & tools, above."
+    "toggle_below": "Its on/off switch is under Add-ons or Apps & tools, above.",
+    "img_models_refresh": "Refresh available models",
+    "img_models_refreshing": "Refreshing…",
+    "img_models_done": "Model lists updated.",
+    "img_models_list": "Models from the provider's list, updated {when}.",
+    "img_models_docs": "Models from the provider's docs, checked {when}.",
+    "img_models_never": "not yet"
   },
   "lightbox": {
     "previous": "Previous (older) image",
@@ -1957,7 +1963,17 @@
     "personal_bots": "personal bots: {count}",
     "agents_hint": "Agent programs, their limits and secrets",
     "owner_only_env": "Only the Owner can use a key stored on the DisPatch computer.",
-    "owner_only_move": "Only the Owner can point a connection with a saved key at a new address. To do it yourself, type a new key or remove the key too."
+    "owner_only_move": "Only the Owner can point a connection with a saved key at a new address. To do it yourself, type a new key or remove the key too.",
+    "refresh_all": "Refresh available models",
+    "refresh_all_title": "Ask every connection and image service what models they offer now",
+    "refresh_one": "Refresh models",
+    "refresh_one_aria": "Refresh the model list for {name}",
+    "refreshing": "Refreshing…",
+    "refreshed_all": "Model lists updated for {count} connections.",
+    "models_list": "Models: {count} · updated {when} · from the provider's list",
+    "models_docs": "Models: {count} · updated {when} · from the docs",
+    "models_never": "Models: {count} · not refreshed yet",
+    "models_error": "Could not refresh: {error}"
   },
   "chars": {
     "details": "Details",

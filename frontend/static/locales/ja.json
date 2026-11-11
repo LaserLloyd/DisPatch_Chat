@@ -1276,7 +1276,13 @@
     "st_unknown": "不明",
     "repo_link": "リポジトリ",
     "howto_link": "設定方法",
-    "toggle_below": "オン/オフのスイッチは、上の「アドオン」または「アプリとツール」にあります。"
+    "toggle_below": "オン/オフのスイッチは、上の「アドオン」または「アプリとツール」にあります。",
+    "img_models_refresh": "利用可能なモデルを更新",
+    "img_models_refreshing": "更新中…",
+    "img_models_done": "モデル一覧を更新しました。",
+    "img_models_list": "プロバイダーの一覧より（{when} 更新）。",
+    "img_models_docs": "プロバイダーのドキュメントより（{when} 確認）。",
+    "img_models_never": "未確認"
   },
   "lightbox": {
     "previous": "前の(古い)画像",
@@ -1930,7 +1936,17 @@
     "personal_bots": "個人のボット {count}",
     "agents_hint": "エージェントプログラム、その上限とシークレット",
     "owner_only_env": "DisPatch のコンピューターに保存したキーを使えるのは Owner だけです。",
-    "owner_only_move": "キーを保存した接続を新しいアドレスに向けられるのは Owner だけです。自分で行うには、新しいキーを入力するか、キーも削除してください。"
+    "owner_only_move": "キーを保存した接続を新しいアドレスに向けられるのは Owner だけです。自分で行うには、新しいキーを入力するか、キーも削除してください。",
+    "refresh_all": "利用可能なモデルを更新",
+    "refresh_all_title": "すべての接続と画像サービスに、いま使えるモデルを問い合わせます",
+    "refresh_one": "モデルを更新",
+    "refresh_one_aria": "{name} のモデル一覧を更新",
+    "refreshing": "更新中…",
+    "refreshed_all": "{count} 件の接続のモデル一覧を更新しました。",
+    "models_list": "モデル: {count} 件 · {when} 更新 · プロバイダーの一覧より",
+    "models_docs": "モデル: {count} 件 · {when} 更新 · ドキュメントより",
+    "models_never": "モデル: {count} 件 · まだ更新していません",
+    "models_error": "更新できませんでした: {error}"
   },
   "chars": {
     "details": "詳細",

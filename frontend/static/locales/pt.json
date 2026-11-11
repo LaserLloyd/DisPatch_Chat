@@ -1327,7 +1327,13 @@
     "st_unknown": "Desconhecido",
     "repo_link": "Repositório",
     "howto_link": "Como configurar",
-    "toggle_below": "O interruptor fica mais acima, em Complementos ou em Aplicações e ferramentas."
+    "toggle_below": "O interruptor fica mais acima, em Complementos ou em Aplicações e ferramentas.",
+    "img_models_refresh": "Atualizar modelos disponíveis",
+    "img_models_refreshing": "Atualizando…",
+    "img_models_done": "Listas de modelos atualizadas.",
+    "img_models_list": "Modelos da lista do provedor, atualizado {when}.",
+    "img_models_docs": "Modelos da documentação do provedor, verificado {when}.",
+    "img_models_never": "ainda não"
   },
   "lightbox": {
     "previous": "Imagem anterior (mais antiga)",
@@ -1982,7 +1988,17 @@
     "personal_bots": "bots pessoais: {count}",
     "agents_hint": "Programas de agente, os seus limites e segredos",
     "owner_only_env": "Só o Owner pode usar uma chave guardada no computador do DisPatch.",
-    "owner_only_move": "Só o Owner pode apontar para um novo endereço uma ligação com uma chave guardada. Para o fazeres tu, escreve uma chave nova ou remove também a chave."
+    "owner_only_move": "Só o Owner pode apontar para um novo endereço uma ligação com uma chave guardada. Para o fazeres tu, escreve uma chave nova ou remove também a chave.",
+    "refresh_all": "Atualizar modelos disponíveis",
+    "refresh_all_title": "Perguntar a cada conexão e serviço de imagens quais modelos oferecem agora",
+    "refresh_one": "Atualizar modelos",
+    "refresh_one_aria": "Atualizar a lista de modelos de {name}",
+    "refreshing": "Atualizando…",
+    "refreshed_all": "Listas de modelos atualizadas para {count} conexões.",
+    "models_list": "Modelos: {count} · atualizado {when} · da lista do provedor",
+    "models_docs": "Modelos: {count} · atualizado {when} · da documentação",
+    "models_never": "Modelos: {count} · ainda não atualizado",
+    "models_error": "Não foi possível atualizar: {error}"
   },
   "chars": {
     "details": "Detalhes",

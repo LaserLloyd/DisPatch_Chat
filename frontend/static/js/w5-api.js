@@ -113,6 +113,9 @@ export const w5 = {
   testConnectionForm: (o) => post('/api/connections/test', o),
   discoverConnections: (o) => post('/api/connections/discover', o || {}),
   adoptConnections: () => post('/api/connections/adopt'),
+  modelsCatalog: () => j('/api/connections/models'),
+  refreshModels: (id) => post(`/api/connections/${enc(id)}/models/refresh`),
+  refreshAllModels: () => post('/api/connections/models/refresh'),
 
   // ---- characters and starter packs
   characters: () => j('/api/characters'),

@@ -1302,7 +1302,13 @@
     "st_unknown": "Unbekannt",
     "repo_link": "Repository",
     "howto_link": "So richtest du es ein",
-    "toggle_below": "Der Ein/Aus-Schalter steht oben unter Add-ons oder Apps & Werkzeuge."
+    "toggle_below": "Der Ein/Aus-Schalter steht oben unter Add-ons oder Apps & Werkzeuge.",
+    "img_models_refresh": "Verfügbare Modelle aktualisieren",
+    "img_models_refreshing": "Wird aktualisiert…",
+    "img_models_done": "Modelllisten aktualisiert.",
+    "img_models_list": "Modelle aus der Liste des Anbieters, aktualisiert {when}.",
+    "img_models_docs": "Modelle aus der Dokumentation des Anbieters, geprüft {when}.",
+    "img_models_never": "noch nie"
   },
   "lightbox": {
     "previous": "Vorheriges (älteres) Bild",
@@ -1957,7 +1963,17 @@
     "personal_bots": "persönliche Bots: {count}",
     "agents_hint": "Agentenprogramme, ihre Limits und Geheimnisse",
     "owner_only_env": "Nur der Owner kann einen auf dem DisPatch-Rechner gespeicherten Schlüssel nutzen.",
-    "owner_only_move": "Nur der Owner kann eine Verbindung mit gespeichertem Schlüssel auf eine neue Adresse umstellen. Um es selbst zu tun, gib einen neuen Schlüssel ein oder entferne den Schlüssel ebenfalls."
+    "owner_only_move": "Nur der Owner kann eine Verbindung mit gespeichertem Schlüssel auf eine neue Adresse umstellen. Um es selbst zu tun, gib einen neuen Schlüssel ein oder entferne den Schlüssel ebenfalls.",
+    "refresh_all": "Verfügbare Modelle aktualisieren",
+    "refresh_all_title": "Jede Verbindung und jeden Bilddienst fragen, welche Modelle sie jetzt anbieten",
+    "refresh_one": "Modelle aktualisieren",
+    "refresh_one_aria": "Modellliste für {name} aktualisieren",
+    "refreshing": "Wird aktualisiert…",
+    "refreshed_all": "Modelllisten für {count} Verbindungen aktualisiert.",
+    "models_list": "Modelle: {count} · aktualisiert {when} · aus der Liste des Anbieters",
+    "models_docs": "Modelle: {count} · aktualisiert {when} · aus der Dokumentation",
+    "models_never": "Modelle: {count} · noch nicht aktualisiert",
+    "models_error": "Aktualisieren nicht möglich: {error}"
   },
   "chars": {
     "details": "Details",

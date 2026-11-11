@@ -23,8 +23,8 @@ import { t } from './i18n.js?v=5';
 import { el, spriteIcon } from './util.js?v=23';
 import { nimEnabled } from './nim.js?v=8';
 import { avatarSpec, markNode, isMineBot } from './profiles.js?v=6';
-import { askDialog, errorText } from './people-perms.js?v=8';
-import { kitSection } from './bot-kits.js?v=9';
+import { askDialog, errorText } from './people-perms.js?v=9';
+import { kitSection } from './bot-kits.js?v=10';
 import { voiceHash } from './bot-ids.js?v=1';
 import {
   profileReq, can, renderBotEditor, renderAiBuild, loadEditorOptions, withShell,
@@ -793,7 +793,17 @@ export function mountCharactersPage(host, opts = {}) {
         ...opts.map((o) => el('option', { value: o.id, text: o.name }))]);
       f.connection.value = cur;
       f.model = el('input', { type: 'text', class: 'ui-input', id: `${uid}-model`, autocomplete: 'off', spellcheck: 'false', value: (orig.backend && orig.backend.model) || '', ...(locked ? { disabled: 'disabled' } : {}) });
-      brain.push(field(t('chars.connection'), f.connection), field(t('chars.model'), f.model));
+      // The model box suggests what the chosen connection offers (its last model list); free text still works.
+      const modelList = el('datalist', { id: `${uid}-models` });
+      f.model.setAttribute('list', modelList.id);
+      const fillModels = () => {
+        const c = conns.find((x) => x.id === f.connection.value);
+        modelList.replaceChildren(...((c && Array.isArray(c.models)) ? c.models : []).slice(0, 500)
+          .map((m) => el('option', { value: m })));
+      };
+      fillModels();
+      f.connection.addEventListener('change', fillModels);
+      brain.push(field(t('chars.connection'), f.connection), field(t('chars.model'), f.model), modelList);
     }
     f.persona = el('textarea', { class: 'ui-input cp-persona', id: `${uid}-persona`, rows: '5', maxlength: '4000', ...(ro ? { disabled: 'disabled' } : {}) });
     f.persona.value = (orig.personality && orig.personality.text) || '';

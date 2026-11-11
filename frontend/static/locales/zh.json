@@ -1276,7 +1276,13 @@
     "st_unknown": "未知",
     "repo_link": "代码仓库",
     "howto_link": "设置方法",
-    "toggle_below": "它的开关在上方的“附加组件”或“应用和工具”中。"
+    "toggle_below": "它的开关在上方的“附加组件”或“应用和工具”中。",
+    "img_models_refresh": "刷新可用模型",
+    "img_models_refreshing": "正在刷新…",
+    "img_models_done": "模型列表已更新。",
+    "img_models_list": "模型来自服务商的列表，{when} 更新。",
+    "img_models_docs": "模型来自服务商的文档，{when} 核对。",
+    "img_models_never": "尚未"
   },
   "lightbox": {
     "previous": "上一张(较早)图片",
@@ -1930,7 +1936,17 @@
     "personal_bots": "个人机器人：{count}",
     "agents_hint": "智能体程序及其限制和密钥",
     "owner_only_env": "只有 Owner 可以使用保存在 DisPatch 电脑上的密钥。",
-    "owner_only_move": "只有 Owner 可以把已保存密钥的连接指向新地址。要自己操作，请输入新密钥，或同时移除密钥。"
+    "owner_only_move": "只有 Owner 可以把已保存密钥的连接指向新地址。要自己操作，请输入新密钥，或同时移除密钥。",
+    "refresh_all": "刷新可用模型",
+    "refresh_all_title": "向每个连接和图像服务询问它们现在提供的模型",
+    "refresh_one": "刷新模型",
+    "refresh_one_aria": "刷新 {name} 的模型列表",
+    "refreshing": "正在刷新…",
+    "refreshed_all": "已更新 {count} 个连接的模型列表。",
+    "models_list": "模型：{count} 个 · {when} 更新 · 来自服务商的列表",
+    "models_docs": "模型：{count} 个 · {when} 更新 · 来自文档",
+    "models_never": "模型：{count} 个 · 尚未刷新",
+    "models_error": "无法刷新：{error}"
   },
   "chars": {
     "details": "详情",

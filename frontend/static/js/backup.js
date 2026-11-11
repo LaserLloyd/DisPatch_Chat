@@ -15,7 +15,7 @@
 // from the page. A restore that cannot put a key back lists it (`re_enter`). Pre-restore copies
 // are their own kind and, like pre-migration copies, cannot be deleted from here.
 
-import { w5 as realApi, saveBlob, errorText } from './w5-api.js?v=3';
+import { w5 as realApi, saveBlob, errorText } from './w5-api.js?v=4';
 import { t, fileSize, fullTimestamp } from './i18n.js?v=5';
 import { el } from './util.js?v=23';
 

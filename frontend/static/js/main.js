@@ -27,7 +27,7 @@ import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from '
 import {
   initLlmPanel, activateLlmPanel, repaintLlmPanel,
   firstRunCard,
-} from './llm.js?v=16';
+} from './llm.js?v=17';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=20';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
@@ -59,22 +59,22 @@ import { renderOidcCard, linkButtonFor as oidcLinkButtonFor, defaultRequest as o
 import { installExpiredImages } from './media-expired.js?v=1';
 import { activeLayout, applyLayout, moveItem, saveLayout, wireRailDrag, openArrangeDialog } from './railmenu.js?v=5';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=23';
-import { mountPluginsSettings } from './plugins.js?v=24';
+import { mountPluginsSettings } from './plugins.js?v=25';
 import { addBotRow } from './bots-edit.js?v=8';
 // 3.0 (W5): connections, the schema-driven settings page, character details + starter packs, the
 // first-run wizard. Their REST calls live in w5-api.js (api.js is imported at one ?v= by too many
 // modules to extend without a cascade).
-import { setOnLocked as w5SetOnLocked, failure as w5Failure, w5 as schemaApi, errorText as w5ErrorText } from './w5-api.js?v=3';
+import { setOnLocked as w5SetOnLocked, failure as w5Failure, w5 as schemaApi, errorText as w5ErrorText } from './w5-api.js?v=4';
 // 3.2: the Settings sections, the old tab ids that lead to them, and the settings search.
 import {
   SECTIONS, SECTION_IDS, RESERVED_TAB_IDS, resolveSettingsTarget, buildSearchIndex, mountSettingsSearch, createRevealer,
   runSectionHooks, settingsHashRoute, charactersSectionAllowed,
-} from './settings-nav.js?v=16';
+} from './settings-nav.js?v=17';
 import { mountSettingsResize } from './settings-resize.js?v=2';
-import { mountConnections } from './connections.js?v=5';
-import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=9';
-import { mountBackups } from './backup.js?v=5';
-import { maybeStartWizard } from './wizard.js?v=7';
+import { mountConnections } from './connections.js?v=6';
+import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=10';
+import { mountBackups } from './backup.js?v=6';
+import { maybeStartWizard } from './wizard.js?v=8';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -110,19 +110,19 @@ import { normalizeRole, isAdminRole, signInMode, avatarSpec, markNode, railGroup
 import {
   renderSignIn, renderSetup, setupPage, renderPasswordForm, paintChip, chipLabel, attachChipMenu, recoverPlan,
 } from './signin.js?v=9';
-import { mountPeopleSettings } from './people.js?v=18';
+import { mountPeopleSettings } from './people.js?v=19';
 // 3.0 agents: the Tasks page, Assign task / @agent, inline task cards (tasks.js, task_card.js,
 // approval_card.js) and Settings -> Agents (agents.js). The server decides who may do what.
 import { createTasksUi } from './tasks.js?v=6';
 // 4.0 chat-first profiles (Foundation scaffolding: wired once here, filled by WP-FE-YOU /
 // WP-FE-PEOPLE in their own modules).
 import { initMyBots, copyMenuItem } from './my-bots.js?v=11';
-import { initCharactersPage, mountCharactersPage, refreshCharactersPage, unmountCharactersPage, charactersMe, railDragAllowed, saveRailOrder } from './characters-page.js?v=9';
+import { initCharactersPage, mountCharactersPage, refreshCharactersPage, unmountCharactersPage, charactersMe, railDragAllowed, saveRailOrder } from './characters-page.js?v=10';
 import { packDialog } from './pack-dialog.js?v=1';
 import { initBotEditor } from './bot-editor.js?v=6';
 import { initAccountReset } from './account-reset.js?v=6';
 import { initProfilePicture } from './profile-picture.js?v=7';
-import { initPeoplePerms } from './people-perms.js?v=8';
+import { initPeoplePerms } from './people-perms.js?v=9';
 import { mountAgentsSettings } from './agents.js?v=6';
 import { pushRow } from './push.js?v=4';
 import { imageJobMessageEl } from './imagejobs.js?v=8';

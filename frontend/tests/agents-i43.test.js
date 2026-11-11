@@ -301,7 +301,7 @@ test('Connections: a second Admin cannot name a server variable as a key; the Ow
     assert.equal(env.value, owner ? 'OPENAI_API_KEY' : '', 'a second Admin is not handed a variable name');
     if (!owner) assert.match(form.querySelector('.cxn-adv').textContent, /Only the Owner can use a key stored on the DisPatch computer\./);
     // editing a connection that holds a key: moving it is the Owner's call
-    pane.querySelector('[data-connection="c1"] button:nth-of-type(2)').click();
+    [...pane.querySelectorAll('[data-connection="c1"] button')].find((b) => b.textContent === EN.cxn.edit).click();
     const note = pane.querySelector('.cxn-form .cxn-owner-only:not(.cxn-adv *)');
     const moveNote = [...pane.querySelectorAll('.cxn-form .cxn-owner-only')].find((n) => /point a connection with a saved key/.test(n.textContent));
     assert.equal(!!moveNote && !moveNote.hidden, !owner);

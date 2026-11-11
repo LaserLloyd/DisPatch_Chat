@@ -25,7 +25,7 @@
 // which is also how the tests drive it without main.js.
 
 import { api as realApi } from './api.js?v=37';
-import { w5 as realW5 } from './w5-api.js?v=3';
+import { w5 as realW5 } from './w5-api.js?v=4';
 import { t, has, relTime, fullTimestamp } from './i18n.js?v=5';
 import { el } from './util.js?v=23';
 import { nimEnabled } from './nim.js?v=8';
@@ -36,7 +36,7 @@ import { ACTIVITY_COLUMNS, activityRows, activityTotals, avatarSpec, markNode } 
 import {
   askDialog, countsTally, permTables, permissionsPanel, householdPanel, giveToPanel, backendsPanel,
   profileCalls, errorText,
-} from './people-perms.js?v=8';
+} from './people-perms.js?v=9';
 
 let seq = 0;          // a newer mount supersedes a slower, older one
 let uid = 0;
