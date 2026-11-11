@@ -627,13 +627,36 @@ def classify_cli_failure(message: str, code: str = "") -> str:
     return "refused"
 
 
+#: The failure kind a rig LEASE produces. It is deliberately its own kind:
+#: a lease is somebody ELSE's booking of the cards for hours, not a defect of
+#: the pool that wanted to mint -- the pool is fine and the next cycle
+#: retries on its own. The pool writers therefore record it as a SKIP
+#: (``last_skip``), never as the sticky ``last_error`` key that
+#: fleet.yaml's cron.artifacts forbid (see reactions.pool_refill).
+KIND_LEASED = "leased"
+
+#: ``last_error``/skip text prefix for a lease. One source of truth so a
+#: lease error left behind by an older build can be recognised (and cleared)
+#: instead of being mistaken for a genuine pool fault.
+LEASE_ERROR_PREFIX = "rig-leased"
+
+
+def is_lease_error(current: str) -> bool:
+    """True when a recorded pool error is just a rig lease.
+
+    A lease is transient and external: the cards are booked until the lease
+    expires, the pool is not broken, and the next cycle retries by itself.
+    """
+    return str(current or "").startswith(LEASE_ERROR_PREFIX)
+
+
 #: Backend verdicts that get their own failure kind. Everything else is a
 #: genuine VRAM shortage. This lives here, once, because the same three-way
 #: branch was written out at both refill sites and BOTH of them only handled
 #: "down" -- so every lease block on 2026-09-03 was filed as `vram-short` on a
 #: rig with 23 GB free, in /api/health and in each pool's last_error.
 _BACKEND_KINDS = {"down": (KIND_BACKEND_DOWN, "rig-backend-down"),
-                  "leased": ("leased", "rig-leased")}
+                  "leased": (KIND_LEASED, LEASE_ERROR_PREFIX)}
 
 
 def refill_block_labels(guard: dict) -> tuple[str, str]:
