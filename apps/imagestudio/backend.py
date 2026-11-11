@@ -303,7 +303,9 @@ def _provider_rows(principal=None) -> tuple[list[dict], str]:
         current = res.model if res else preset.model
         models: list[str] = []
         for m in [*cat.get("models", []), *KNOWN_MODELS.get(preset.id, []), current]:
-            if m and m not in models:
+            # An id Generate would refuse (too long, odd characters) is not offered. Civitai's
+            # urn:air ids are validated by their own route.
+            if m and m not in models and (preset.shape == "civitai" or MODEL_RE.match(m)):
                 models.append(m)
         names = dict(cat.get("names", {}))
         names.update(MODEL_NAMES.get(preset.id, {}))
@@ -634,14 +636,14 @@ def build(ctx):
             async with sem:
                 try:
                     return await model_catalog.refresh_image(pid)
-                except Exception:   # noqa: BLE001 - the catalog never raises; belt and braces
+                except Exception:   # the catalog never raises; belt and braces
                     log.exception("image model refresh failed for %s", pid)
                     return {"models": [], "source": "documented", "error": "refresh failed"}
 
         entries = await asyncio.gather(*(one(i) for i in ids))
         results = {i: {"source": e.get("source", ""), "count": len(e.get("models") or []),
                        "error": e.get("error"), "cached": bool(e.get("cached"))}
-                   for i, e in zip(ids, entries)}
+                   for i, e in zip(ids, entries, strict=True)}
         providers, default = _provider_rows(principal)
         return {"providers": providers, "default": default, "results": results}
 

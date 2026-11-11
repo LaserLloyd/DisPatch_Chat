@@ -892,10 +892,22 @@ test('an H3 model shows the slow-and-billed hint near Generate; image-01 does no
   m.value = 'MiniMax-H3-Image';
   m.dispatchEvent(new win.Event('input', { bubbles: true }));
   assert.equal(hint.hidden, false);
-  assert.match(hint.textContent, /few minutes.*never repeated automatically.*billed/);
+  assert.match(hint.textContent, /^MiniMax H3 pictures can take a few minutes.*never repeated automatically.*billed/);
   m.value = 'image-01';
   m.dispatchEvent(new win.Event('input', { bubbles: true }));
   assert.equal(hint.hidden, true);
+});
+
+test('a refresh inside the cooldown says so instead of "Updated"', { skip: dom.skip }, async () => {
+  const env = await page({
+    state: { ...STATE, providers: H3_PROVIDERS, can_refresh_models: true },
+    extra: { 'POST /api/apps/imagestudio/models/refresh': () => [200, {
+      providers: H3_PROVIDERS, default: 'minimax', results: { minimax: { source: 'documented', count: 4, error: null, cached: true } } }] },
+  });
+  env.doc.getElementById('st-model-refresh').click();
+  await flush(); await flush();
+  assert.match(env.doc.querySelector('.st-status').textContent, /Just refreshed/);
+  assert.doesNotMatch(env.doc.querySelector('.st-status').textContent, /Updated/);
 });
 
 test('a failed refresh request says so without an empty provider name', { skip: dom.skip }, async () => {
@@ -906,6 +918,7 @@ test('a failed refresh request says so without an empty provider name', { skip: 
   env.doc.getElementById('st-model-refresh').click();
   await flush(); await flush();
   assert.match(env.doc.querySelector('.st-status').textContent, /^Couldn't refresh the model lists:/);
+  assert.equal(env.doc.getElementById('st-model-refresh').disabled, false, 'the button is usable again');
 });
 
 test('picking an H3 model lifts the prompt limit and hides seed and reference', { skip: dom.skip }, async () => {

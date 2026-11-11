@@ -42,6 +42,22 @@ export function describeTest(r) {
 
 /** "Models: N · updated <time> · from the provider's list" for one card, or the plain-words error.
  *  `entry` is the catalog row (source / checked_at / error) when the server sent one. */
+/** One sentence for the header "Refresh available models" result. Only an entry with no error that was
+ *  not served from the cooldown counts as refreshed; a result where nothing was refreshed never says so. */
+export function refreshAllSummary(r) {
+  const conns = Object.values((r && r.connections) || {}).filter(Boolean);
+  const imgs = Object.values((r && r.image) || {}).filter(Boolean);
+  const ok = (e) => !e.error && !e.cached;
+  const n = conns.filter(ok).length;
+  if (n) return { key: 'cxn.refreshed_all', vars: { count: n }, error: false };
+  const bad = conns.find((e) => e.error && !e.cached);
+  if (bad) return { key: 'cxn.models_error', vars: { error: String(bad.error) }, error: true };
+  const ni = imgs.filter(ok).length;
+  if (!conns.length && ni) return { key: 'integrations.img_models_done', vars: { count: ni }, error: false };
+  if (conns.some((e) => e.cached) || imgs.some((e) => e.cached)) return { key: 'cxn.refresh_cached', vars: {}, error: false };
+  return { key: 'cxn.refresh_nothing', vars: {}, error: false };
+}
+
 export function modelsLine(c, entry, fmt = (iso) => new Date(iso).toLocaleString()) {
   const n = (c && c.models && c.models.length) || 0;
   const e = entry || {};
@@ -218,7 +234,8 @@ export async function mountConnections(pane, deps = {}) {
         const r = await api.refreshModels(c.id);
         Object.assign(c, r.connection || {});
         state.catalog[c.id] = r.catalog || {};
-        modelsEl.textContent = modelsLine(c, state.catalog[c.id]);
+        modelsEl.textContent = modelsLine(c, state.catalog[c.id])
+          + (state.catalog[c.id].cached ? ` · ${t('cxn.refresh_cached')}` : '');
         deps.onChanged && deps.onChanged();
       } catch (e) { modelsEl.textContent = t('cxn.models_error', { error: errorText(e) }); }
       finally { refresh.disabled = false; refresh.textContent = t('cxn.refresh_one'); }
@@ -408,9 +425,9 @@ export async function mountConnections(pane, deps = {}) {
     refreshNote.textContent = '';
     try {
       const r = await api.refreshAllModels();
-      const n = Object.keys((r && r.connections) || {}).length;
-      refreshNote.textContent = t('cxn.refreshed_all', { count: n });
-      toast(t('cxn.refreshed_all', { count: n }));
+      const sum = refreshAllSummary(r);
+      refreshNote.textContent = t(sum.key, sum.vars);
+      toast(t(sum.key, sum.vars), sum.error);
       deps.onChanged && deps.onChanged();
       await load();
     } catch (e) { refreshNote.textContent = errorText(e); toast(errorText(e), true); }

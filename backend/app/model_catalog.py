@@ -20,7 +20,7 @@ import os
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -67,7 +67,7 @@ DOCUMENTED_IMAGE_MODELS: dict[str, dict[str, Any]] = {
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def classify(model_id: str) -> str:
@@ -141,6 +141,12 @@ def catalog() -> dict:
         return _read()
 
 
+def _release(key: str) -> None:
+    """A failed refresh must not start the cooldown: the next press may retry at once."""
+    with _lock:
+        _last.pop(key, None)
+
+
 def _claim(key: str) -> bool:
     """Check-and-set the cooldown under the lock: True = this caller may refresh now."""
     with _lock:
@@ -166,7 +172,7 @@ async def refresh_connection(conn: connections.Connection) -> dict:
     try:
         # A refresh re-lists models; it never picks a default model for the connection.
         res = await connections.test_and_record(conn, fill_default=False)
-    except Exception as e:                                    # noqa: BLE001 - never raises
+    except Exception as e:                                    # never raises
         res = {"ok": False, "models": [], "message": f"{type(e).__name__}"}
     if res.get("ok") and res.get("models"):
         ids = _clean_ids(res["models"])
@@ -176,6 +182,8 @@ async def refresh_connection(conn: connections.Connection) -> dict:
         msg = str(res.get("message") or res.get("problem") or "the server did not list models")
         entry = {**prev, "error": msg[:300]}
         entry["checked_at"] = prev.get("checked_at")
+    if entry.get("error"):
+        _release(key)
     await asyncio.to_thread(_store, "connections", conn.id, entry)
     return entry
 
@@ -247,6 +255,8 @@ async def refresh_image(preset_id: str) -> dict:
     if not _claim(key):
         return {**(catalog()["image"].get(preset_id) or _documented_entry(preset_id)), "cached": True}
     entry = await _refresh_image(preset_id)
+    if entry.get("error"):
+        _release(key)
     await asyncio.to_thread(_store, "image", preset_id, entry)
     return entry
 
@@ -300,15 +310,10 @@ def image_models(preset_id: str, cat: dict | None = None) -> dict:
     stored = (cat if cat is not None else catalog())["image"].get(preset_id) or {}
     doc = DOCUMENTED_IMAGE_MODELS.get(preset_id) or {}
     ids = [m["id"] for m in stored.get("models", []) if isinstance(m, dict) and m.get("id")]
-    live = set(ids)
-    merged = False
-    for i in doc.get("models", []):
-        if i not in ids:
-            ids.append(i)
-            merged = merged or bool(live)
     source = stored.get("source") or ("documented" if doc else "endpoint")
-    if source == "endpoint" and merged:
-        source = "mixed"
+    if not ids:                       # a live list is authoritative; the docs fill in only when it is empty
+        ids = list(doc.get("models", []))
+        source = "documented" if doc else source
     note = stored.get("note") or (doc.get("note", "") if source == "documented" else "")
     return {"models": ids, "names": dict(doc.get("names", {})), "source": source,
             "checked_at": stored.get("checked_at"), "checked": doc.get("checked", ""),
@@ -327,5 +332,5 @@ async def refresh_all(concurrency: int = 4, *, scope: str = "all") -> dict:
     presets = list(image_providers.PRESET_BY_ID)
     cres = await asyncio.gather(*(run(refresh_connection(c)) for c in conns))
     ires = await asyncio.gather(*(run(refresh_image(p)) for p in presets))
-    return {"connections": {c.id: e for c, e in zip(conns, cres)},
-            "image": dict(zip(presets, ires))}
+    return {"connections": {c.id: e for c, e in zip(conns, cres, strict=True)},
+            "image": dict(zip(presets, ires, strict=True))}

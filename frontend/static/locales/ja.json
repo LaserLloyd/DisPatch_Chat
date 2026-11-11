@@ -1279,7 +1279,10 @@
     "toggle_below": "オン/オフのスイッチは、上の「アドオン」または「アプリとツール」にあります。",
     "img_models_refresh": "利用可能なモデルを更新",
     "img_models_refreshing": "更新中…",
-    "img_models_done": "モデル一覧を更新しました。",
+    "img_models_done": {
+      "other": "{count} 件の画像サービスのモデル一覧を更新しました。"
+    },
+    "img_models_cached": "さきほど更新したばかりです。数秒後にもう一度お試しください。",
     "img_models_list": "プロバイダーの一覧より（{when} 更新）。",
     "img_models_docs": "プロバイダーのドキュメントより（{when} 確認）。",
     "img_models_docs_nodate": "プロバイダのドキュメントにあるモデルです。",
@@ -1943,7 +1946,11 @@
     "refresh_one": "モデルを更新",
     "refresh_one_aria": "{name} のモデル一覧を更新",
     "refreshing": "更新中…",
-    "refreshed_all": "{count} 件の接続のモデル一覧を更新しました。",
+    "refreshed_all": {
+      "other": "{count} 件の接続のモデル一覧を更新しました。"
+    },
+    "refresh_cached": "さきほど更新したばかりです。数秒後にもう一度お試しください。",
+    "refresh_nothing": "更新できるものがまだありません。先に接続または画像サービスのキーを追加してください。",
     "models_list": "モデル: {count} 件 · {when} 更新 · プロバイダーの一覧より",
     "models_docs": "モデル: {count} 件 · {when} 更新 · ドキュメントより",
     "models_never": "モデル: {count} 件 · まだ更新していません",

@@ -157,10 +157,12 @@
   "models.note_endpoint": "Aus der Modellliste von {label}, aktualisiert am {date}.",
   "models.note_endpoint_nodate": "Aus der Modellliste von {label}.",
   "models.refreshed": "Aktualisiert: {n} Modelle für {name}",
+  "models.refreshed_one": "Aktualisiert: {n} Modell für {name}",
+  "models.refresh_cached": "Gerade erst aktualisiert – versuchen Sie es in einigen Sekunden erneut.",
   "models.refresh_failed": "{name} konnte nicht aktualisiert werden: {error}",
   "models.note_docs_generic": "Aus der Dokumentation von {label} (geprüft am {date}).",
   "models.note_mixed": "Aus der Modellliste von {label}, Stand {date}, plus Modelle aus der Dokumentation.",
   "models.refresh_error": "Die Modelllisten konnten nicht aktualisiert werden: {error}",
-  "models.h3_hint": "H3-Bilder können einige Minuten dauern. Eine Anfrage wird nie automatisch wiederholt, und jedes Drücken von Erzeugen wird berechnet.",
+  "models.h3_hint": "MiniMax-H3-Bilder können einige Minuten dauern. Eine Anfrage wird nie automatisch wiederholt, und jedes Drücken von Erzeugen wird berechnet.",
   "models.refresh_docs_only": "Nichts Neues: Diese Anbieter listen Bildmodelle nicht über eine API auf."
 }

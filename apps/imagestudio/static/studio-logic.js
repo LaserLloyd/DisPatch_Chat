@@ -294,7 +294,13 @@ export function modelCaps(provider, model) {
   const none = { reference: false, optimizer: false, seed: false, max_n: 1 };
   if (!provider) return none;
   const by = provider.supports_by_model || {};
-  return by[model] || provider.supports || none;
+  if (by[model]) return by[model];
+  // A typed id the server has never listed but that is plainly an H3 model gets H3's caps.
+  if (isH3Model(provider, model)) {
+    const known = Object.keys(by).find((m) => isH3Model(provider, m));
+    return known ? by[known] : { reference: false, optimizer: true, seed: false, max_n: 10 };
+  }
+  return provider.supports || none;
 }
 
 /** The longest prompt ``model`` takes on ``provider``. */
@@ -331,18 +337,33 @@ export function modelsNote(provider) {
   return null;
 }
 
-/** One plain sentence about a refresh: {key, vars, error}. */
+/** One plain sentence about a refresh: {key, vars, error}. Never says "updated" when nothing was:
+ *  only entries without an error and not served from the cooldown count. */
 export function refreshSummary(result, providers = []) {
   const res = (result && result.results) || {};
   const label = (id) => ((providers.find((p) => p.id === id) || {}).label) || id;
-  const failed = Object.entries(res).filter(([, r]) => r && r.error);
-  const live = Object.entries(res).filter(([, r]) => r && !r.error && r.source === 'endpoint');
-  if (failed.length && !live.length) {
-    return { key: 'models.refresh_failed', vars: { name: label(failed[0][0]), error: String(failed[0][1].error) }, error: true };
-  }
+  const entries = Object.entries(res).filter(([, r]) => r);
+  const failed = entries.filter(([, r]) => r.error && !r.cached);
+  const fresh = entries.filter(([, r]) => !r.error && !r.cached);
+  const live = fresh.filter(([, r]) => r.source === 'endpoint');
   if (live.length) {
     const [id, r] = live[0];
-    return { key: 'models.refreshed', vars: { n: r.count, name: label(id) }, error: false };
+    return { key: r.count === 1 ? 'models.refreshed_one' : 'models.refreshed', vars: { n: r.count, name: label(id) }, error: false };
   }
+  if (failed.length) {
+    return { key: 'models.refresh_failed', vars: { name: label(failed[0][0]), error: String(failed[0][1].error) }, error: true };
+  }
+  if (fresh.length) return { key: 'models.refresh_docs_only', vars: {}, error: false };
+  if (entries.length) return { key: 'models.refresh_cached', vars: {}, error: false };
   return { key: 'models.refresh_docs_only', vars: {}, error: false };
+}
+
+/** After a refresh, keep the Civitai checkpoints picked in Browse (the server's list is only the defaults). */
+export function keepBrowsePicks(oldProviders, freshProviders) {
+  return (freshProviders || []).map((p) => {
+    if (p.shape !== 'civitai') return p;
+    const old = (oldProviders || []).find((o) => o.id === p.id);
+    const extra = ((old && old.models) || []).filter((m) => !(p.models || []).includes(m));
+    return extra.length ? { ...p, models: [...(p.models || []), ...extra] } : p;
+  });
 }

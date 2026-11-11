@@ -1330,7 +1330,12 @@
     "toggle_below": "Su interruptor está más arriba, en Complementos o en Aplicaciones y herramientas.",
     "img_models_refresh": "Actualizar modelos disponibles",
     "img_models_refreshing": "Actualizando…",
-    "img_models_done": "Listas de modelos actualizadas.",
+    "img_models_done": {
+      "one": "Lista de modelos actualizada para {count} servicio de imágenes.",
+      "many": "Listas de modelos actualizadas para {count} servicios de imágenes.",
+      "other": "Listas de modelos actualizadas para {count} servicios de imágenes."
+    },
+    "img_models_cached": "Se acaba de actualizar; inténtalo de nuevo en unos segundos.",
     "img_models_list": "Modelos de la lista del proveedor, actualizado {when}.",
     "img_models_docs": "Modelos de la documentación del proveedor, revisado {when}.",
     "img_models_docs_nodate": "Modelos de la documentación del proveedor.",
@@ -1995,7 +2000,13 @@
     "refresh_one": "Actualizar modelos",
     "refresh_one_aria": "Actualizar la lista de modelos de {name}",
     "refreshing": "Actualizando…",
-    "refreshed_all": "Listas de modelos actualizadas para {count} conexiones.",
+    "refreshed_all": {
+      "one": "Listas de modelos actualizadas para {count} conexión.",
+      "many": "Listas de modelos actualizadas para {count} conexiones.",
+      "other": "Listas de modelos actualizadas para {count} conexiones."
+    },
+    "refresh_cached": "Se acaba de actualizar; inténtalo de nuevo en unos segundos.",
+    "refresh_nothing": "Aún no hay nada que actualizar. Añade primero una conexión o la clave de un servicio de imágenes.",
     "models_list": "Modelos: {count} · actualizado {when} · de la lista del proveedor",
     "models_docs": "Modelos: {count} · actualizado {when} · de la documentación",
     "models_never": "Modelos: {count} · aún sin actualizar",

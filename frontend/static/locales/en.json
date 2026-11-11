@@ -1305,7 +1305,11 @@
     "toggle_below": "Its on/off switch is under Add-ons or Apps & tools, above.",
     "img_models_refresh": "Refresh available models",
     "img_models_refreshing": "Refreshing…",
-    "img_models_done": "Model lists updated.",
+    "img_models_done": {
+      "one": "Model list updated for {count} image provider.",
+      "other": "Model lists updated for {count} image providers."
+    },
+    "img_models_cached": "Just refreshed - try again in a few seconds.",
     "img_models_list": "Models from the provider's list, updated {when}.",
     "img_models_docs": "Models from the provider's docs, checked {when}.",
     "img_models_docs_nodate": "Models from the provider's docs.",
@@ -1970,7 +1974,12 @@
     "refresh_one": "Refresh models",
     "refresh_one_aria": "Refresh the model list for {name}",
     "refreshing": "Refreshing…",
-    "refreshed_all": "Model lists updated for {count} connections.",
+    "refreshed_all": {
+      "one": "Model lists updated for {count} connection.",
+      "other": "Model lists updated for {count} connections."
+    },
+    "refresh_cached": "Just refreshed - try again in a few seconds.",
+    "refresh_nothing": "Nothing to refresh yet. Add a connection or an image provider key first.",
     "models_list": "Models: {count} · updated {when} · from the provider's list",
     "models_docs": "Models: {count} · updated {when} · from the docs",
     "models_never": "Models: {count} · not refreshed yet",

@@ -1330,7 +1330,12 @@
     "toggle_below": "Son interrupteur se trouve plus haut, sous Modules complémentaires ou Applications et outils.",
     "img_models_refresh": "Actualiser les modèles disponibles",
     "img_models_refreshing": "Actualisation…",
-    "img_models_done": "Listes de modèles mises à jour.",
+    "img_models_done": {
+      "one": "Liste de modèles actualisée pour {count} service d'images.",
+      "many": "Listes de modèles actualisées pour {count} services d'images.",
+      "other": "Listes de modèles actualisées pour {count} services d'images."
+    },
+    "img_models_cached": "Vient d'être actualisé ; réessayez dans quelques secondes.",
     "img_models_list": "Modèles issus de la liste du fournisseur, mis à jour {when}.",
     "img_models_docs": "Modèles issus de la documentation du fournisseur, vérifiés {when}.",
     "img_models_docs_nodate": "Modèles issus de la documentation du fournisseur.",
@@ -1995,7 +2000,13 @@
     "refresh_one": "Actualiser les modèles",
     "refresh_one_aria": "Actualiser la liste de modèles de {name}",
     "refreshing": "Actualisation…",
-    "refreshed_all": "Listes de modèles mises à jour pour {count} connexions.",
+    "refreshed_all": {
+      "one": "Listes de modèles actualisées pour {count} connexion.",
+      "many": "Listes de modèles actualisées pour {count} connexions.",
+      "other": "Listes de modèles actualisées pour {count} connexions."
+    },
+    "refresh_cached": "Vient d'être actualisé ; réessayez dans quelques secondes.",
+    "refresh_nothing": "Rien à actualiser pour l'instant. Ajoutez d'abord une connexion ou la clé d'un service d'images.",
     "models_list": "Modèles : {count} · mis à jour {when} · d'après la liste du fournisseur",
     "models_docs": "Modèles : {count} · mis à jour {when} · d'après la documentation",
     "models_never": "Modèles : {count} · pas encore actualisé",

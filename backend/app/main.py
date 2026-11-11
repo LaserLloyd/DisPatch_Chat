@@ -98,8 +98,8 @@ from . import (
     llm_api,
     localview,
     mailforge_bridge,
-    model_catalog,
     migrate,
+    model_catalog,
     oidc,
     oidc_api,
     openclaw,
@@ -4223,18 +4223,31 @@ def _image_job_expired(job: dict) -> bool:
     return (now - started).total_seconds() > _image_job_deadline_s(job)
 
 
+#: job id -> deadline, decided the first time a job is looked at (no config re-read per sweep pass).
+_image_job_deadlines: dict[str, float] = {}
+
+
 def _image_job_deadline_s(job: dict) -> float:
     """How long a job may run. MiniMax H3 holds one request open up to its own 600 s and bills even
-    a hung-up call, so an API job on an H3 model outlasts that request instead of cancelling it."""
+    a hung-up call, so an API job on an H3 model outlasts that request instead of cancelling it.
+    Decided once per job (cached by id), so a sweep never re-reads the image config."""
+    jid = str(job.get("id") or "")
+    if jid in _image_job_deadlines:
+        return _image_job_deadlines[jid]
+    deadline = float(image_jobs.DEADLINE_S)
     try:
         spec = image_jobs.ImageSpec.from_json(job["spec"])
         if spec.backend == "api":
             res = image_providers.resolve()
             if res.preset.shape == "minimax" and image_providers.is_h3(res.model):
-                return image_providers.H3_TIMEOUT_S + 120
-    except Exception:       # noqa: BLE001 - a bad row or config keeps the normal deadline
+                deadline = image_providers.H3_TIMEOUT_S + 120
+    except Exception:       # a bad row or config keeps the normal deadline
         pass
-    return image_jobs.DEADLINE_S
+    if jid:
+        if len(_image_job_deadlines) > 512:
+            _image_job_deadlines.clear()
+        _image_job_deadlines[jid] = deadline
+    return deadline
 
 
 #: Progress keys the WORKER writes, not the rig: the waiting wording and its
@@ -10057,6 +10070,7 @@ async def restore_bot_avatar(request: Request, bot_id: str, payload: dict = Body
         thumb_name = f"{bot_id}-thumb.png"
         with contextlib.suppress(Exception):
             from io import BytesIO
+
             from PIL import Image
             with Image.open(BytesIO(src.read_bytes())) as im:
                 th = im.convert("RGBA" if im.mode in ("RGBA", "LA", "P") else "RGB")

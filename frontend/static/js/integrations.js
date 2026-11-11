@@ -165,6 +165,15 @@ export function imageStatusText(state) {
 
 /** The one-line source of a provider's model list: from its own list (with the time) or from the docs,
  *  plus the server's own note when it has one. '' when there is nothing to say. */
+export function imageRefreshSummary(r, selected) {
+  const img = (r && r.image) || {};
+  const ok = Object.values(img).filter((e) => e && !e.error && !e.cached);
+  if (ok.length) return { key: 'integrations.img_models_done', vars: { count: ok.length }, error: false };
+  const sel = img[selected];
+  if (sel && sel.error && !sel.cached) return { text: String(sel.error), error: true };
+  return { key: 'integrations.img_models_cached', vars: {}, error: false, plain: true };
+}
+
 export function imageModelsNote(entry, fmt = (iso) => new Date(iso).toLocaleString()) {
   if (!entry || !Array.isArray(entry.models) || !entry.models.length) return '';
   let when = '';
@@ -272,12 +281,13 @@ export async function mountImageSection(host, deps = {}) {
     refreshModels.disabled = true;
     refreshModels.textContent = t('integrations.img_models_refreshing');
     try {
-      await send('POST', '/api/connections/models/refresh?scope=image', {});
+      const r = await send('POST', '/api/connections/models/refresh?scope=image', {});
       const fresh = await json('/api/llm/image');
       state = { ...state, catalog: fresh.catalog || state.catalog };
       paint(true);
-      result.textContent = t('integrations.img_models_done');
-      result.className = 'llm-result good';
+      const sum = imageRefreshSummary(r, sel.value);
+      result.textContent = sum.text || t(sum.key, sum.vars);
+      result.className = sum.error ? 'llm-result bad' : sum.plain ? 'llm-result' : 'llm-result good';
     } catch (e) {
       result.textContent = errText(e);
       result.className = 'llm-result bad';

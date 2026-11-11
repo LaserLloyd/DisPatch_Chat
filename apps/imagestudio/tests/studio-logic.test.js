@@ -219,7 +219,7 @@ test('Browse filter: words are folded, lower-cased, deduplicated and capped; a r
   assert.equal(browseMatches({}, ['a']), false);
 });
 
-import { activeModel, isH3Model, modelCaps, modelPromptMax, modelsNote, refreshSummary } from '../static/studio-logic.js';
+import { activeModel, isH3Model, keepBrowsePicks, modelCaps, modelPromptMax, modelsNote, refreshSummary } from '../static/studio-logic.js';
 
 const MM = {
   id: 'minimax', label: 'MiniMax', shape: 'minimax', model: 'image-01', prompt_max: 1500,
@@ -245,6 +245,10 @@ test('caps and prompt limit follow the selected model, falling back to the provi
   assert.equal(modelPromptMax(MM, 'image-01'), 1500);
   assert.equal(modelPromptMax(MM, 'unknown'), 1500);
   assert.equal(modelCaps(null, 'x').max_n, 1);
+  // a typed H3 id the list has never seen still gets H3's caps, not the current model's
+  const typed = modelCaps(MM, 'MiniMax-H3-Image-Next');
+  assert.deepEqual([typed.reference, typed.seed, typed.max_n], [false, false, 10]);
+  assert.equal(modelCaps({ ...MM, supports_by_model: {} }, 'MiniMax-H3-Image-Next').max_n, 10);
 });
 
 test('the note under the model field says where the list came from', () => {
@@ -275,6 +279,20 @@ test('a refresh is summed up in one plain sentence', () => {
     { key: 'models.refreshed', vars: { n: 4, name: 'xAI Grok' }, error: false });
   assert.equal(refreshSummary({ results: { xai: { source: 'documented', count: 2, error: 'HTTP 500' } } }, provs).error, true);
   assert.equal(refreshSummary({ results: { minimax: { source: 'documented', count: 4, error: null } } }, provs).key, 'models.refresh_docs_only');
+  // singular, cached and failed results never read as "Updated: N models"
+  assert.equal(refreshSummary({ results: { xai: { source: 'endpoint', count: 1 } } }, provs).key, 'models.refreshed_one');
+  const cached = refreshSummary({ results: { xai: { source: 'endpoint', count: 4, cached: true }, minimax: { source: 'documented', count: 4, cached: true } } }, provs);
+  assert.deepEqual([cached.key, cached.error], ['models.refresh_cached', false]);
+  const bad = refreshSummary({ results: { xai: { source: 'documented', count: 2, error: 'The key was not accepted' }, minimax: { source: 'documented', count: 4, error: null } } }, provs);
+  assert.deepEqual([bad.key, bad.error, bad.vars.error], ['models.refresh_failed', true, 'The key was not accepted']);
   // a MiniMax-only setup: no red message
   assert.equal(refreshSummary({ results: { minimax: { source: 'documented', count: 4, error: null } } }, provs).error, false);
+});
+
+test('a refresh keeps the checkpoints picked in Browse', () => {
+  const old = [{ id: 'civitai', shape: 'civitai', models: ['urn:a', 'urn:picked'] }, { id: 'xai', shape: 'openai-images', models: ['gone'] }];
+  const fresh = [{ id: 'civitai', shape: 'civitai', models: ['urn:a', 'urn:new'] }, { id: 'xai', shape: 'openai-images', models: ['grok'] }];
+  const out = keepBrowsePicks(old, fresh);
+  assert.deepEqual(out.find((p) => p.id === 'civitai').models, ['urn:a', 'urn:new', 'urn:picked']);
+  assert.deepEqual(out.find((p) => p.id === 'xai').models, ['grok']);
 });

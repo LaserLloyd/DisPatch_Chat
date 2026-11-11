@@ -156,10 +156,12 @@
   "models.note_endpoint": "来自{label}的模型列表,更新于 {date}。",
   "models.note_endpoint_nodate": "来自{label}的模型列表。",
   "models.refreshed": "已更新:{name}共 {n} 个模型",
+  "models.refreshed_one": "已更新:{name}共 {n} 个模型",
+  "models.refresh_cached": "刚刚已刷新,请几秒后再试。",
   "models.refresh_failed": "无法刷新{name}:{error}",
   "models.note_docs_generic": "来自 {label} 的文档(核对于 {date})。",
   "models.note_mixed": "来自 {label} 的模型列表({date}更新),另加文档中的模型。",
   "models.refresh_error": "无法刷新模型列表:{error}",
-  "models.h3_hint": "H3 图片可能需要几分钟。请求不会自动重试,每次点击生成都会计费。",
+  "models.h3_hint": "MiniMax H3 图片可能需要几分钟。请求不会自动重试,每次点击生成都会计费。",
   "models.refresh_docs_only": "没有新内容:这些服务商不通过 API 列出图像模型。"
 }

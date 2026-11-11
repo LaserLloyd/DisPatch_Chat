@@ -23,8 +23,8 @@ import {
   DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata, DELETE_SCOPE_LABELS, estimateKey, modelLabel,
   CURRENCIES, normalizeCurrency, balanceLine, BROWSE_SORTS, normalizeBrowseSort, compactCount, browseLabel,
   cleanBrowseRows, rememberModelName, browseWords, browseMatches,
-  activeModel, isH3Model, modelCaps, modelPromptMax, modelsNote, refreshSummary,
-} from './studio-logic.js?v=10';
+  activeModel, isH3Model, keepBrowsePicks, modelCaps, modelPromptMax, modelsNote, refreshSummary,
+} from './studio-logic.js?v=11';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
 export const API = '/api/apps/imagestudio';
@@ -149,7 +149,7 @@ async function refreshModels() {
   const chosen = { provider: R.provider.value, model: R.model.value };
   try {
     const r = await api(`${API}/models/refresh`, { method: 'POST' });
-    S.info = { ...S.info, providers: r.providers, default: r.default };
+    S.info = { ...S.info, providers: keepBrowsePicks(S.info.providers, r.providers), default: r.default };
     renderProviders();
     if (S.info.providers.some((p) => p.id === chosen.provider)) R.provider.value = chosen.provider;
     R.model.value = chosen.model;

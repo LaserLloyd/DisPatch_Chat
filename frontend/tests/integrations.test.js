@@ -146,10 +146,11 @@ test('image form: model datalist follows the provider, shows its source, Refresh
     xai: { models: ['grok-imagine-image'], names: {}, source: 'endpoint', checked_at: '2026-11-11T01:00:00+00:00', note: '' },
   };
   let refreshed = 0;
+  let nextBody = { connections: {}, image: { minimax: { source: 'documented', error: null } } };
   const get = (can) => () => [200, { config: { provider: 'minimax' }, presets, catalog, can_refresh_models: can, clawforge: false, enabled: true, flag_off: false, status: {} }];
   const { mod } = await setup({
     'GET /api/llm/image': get(true),
-    'POST /api/connections/models/refresh?scope=image': () => { refreshed += 1; return [200, { connections: {}, image: {} }]; },
+    'POST /api/connections/models/refresh?scope=image': () => { refreshed += 1; return [200, nextBody]; },
   });
   const host = document.createElement('div');
   document.body.append(host);
@@ -168,7 +169,20 @@ test('image form: model datalist follows the provider, shows its source, Refresh
   btn.click();
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(refreshed, 1);
-  assert.match(host.querySelector('#img-result').textContent, /Model lists updated/);
+  assert.match(host.querySelector('#img-result').textContent, /^Model list updated for 1 image provider\.$/);
+  assert.match(host.querySelector('#img-result').className, /good/);
+  // inside the cooldown: not green, and not "updated"
+  nextBody = { connections: {}, image: { minimax: { source: 'documented', error: null, cached: true } } };
+  btn.click();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.match(host.querySelector('#img-result').textContent, /Just refreshed/);
+  assert.doesNotMatch(host.querySelector('#img-result').className, /good|bad/);
+  // a failed provider shows its own error in red
+  nextBody = { connections: {}, image: { minimax: { source: 'documented', error: 'The key was not accepted' }, xai: { source: 'documented', error: 'needs a key' } } };
+  btn.click();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(host.querySelector('#img-result').textContent, 'needs a key');   // the selected provider's own error
+  assert.match(host.querySelector('#img-result').className, /bad/);
   // a viewer who cannot manage connections never sees the button
   const { mod: mod2 } = await setup({ 'GET /api/llm/image': get(false) });
   const host2 = document.createElement('div');
@@ -189,7 +203,7 @@ test('imageModelsNote uses the static docs date and never reads "checked not yet
 test('every new model-refresh key exists in all 8 locales', () => {
   for (const l of ['en', 'ja', 'zh', 'de', 'es', 'fr', 'pt', 'ar']) {
     const d = JSON.parse(readFileSync(join(STATIC, 'locales', `${l}.json`), 'utf8'));
-    for (const k of ['refresh_all', 'refresh_one', 'refresh_one_aria', 'refreshing', 'refreshed_all', 'models_list', 'models_docs', 'models_never', 'models_error']) assert.ok(d.cxn[k], `${l} cxn.${k}`);
-    for (const k of ['img_models_refresh', 'img_models_refreshing', 'img_models_done', 'img_models_list', 'img_models_docs', 'img_models_docs_nodate', 'img_models_never']) assert.ok(d.integrations[k], `${l} integrations.${k}`);
+    for (const k of ['refresh_all', 'refresh_one', 'refresh_one_aria', 'refreshing', 'refreshed_all', 'refresh_cached', 'refresh_nothing', 'models_list', 'models_docs', 'models_never', 'models_error']) assert.ok(d.cxn[k], `${l} cxn.${k}`);
+    for (const k of ['img_models_refresh', 'img_models_refreshing', 'img_models_done', 'img_models_cached', 'img_models_list', 'img_models_docs', 'img_models_docs_nodate', 'img_models_never']) assert.ok(d.integrations[k], `${l} integrations.${k}`);
   }
 });

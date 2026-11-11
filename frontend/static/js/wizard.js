@@ -16,7 +16,7 @@
 import { w5 as realApi, errorText } from './w5-api.js?v=4';
 import { t } from './i18n.js?v=5';
 import { el, spriteIcon } from './util.js?v=23';
-import { describeTest } from './connections.js?v=6';
+import { describeTest } from './connections.js?v=7';
 
 export const STEPS = ['owner', 'connection', 'voice', 'family', 'network', 'done'];
 export const OPTIONAL = new Set(['voice', 'family']);

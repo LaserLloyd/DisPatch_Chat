@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 from app import config, connections, image_jobs, image_providers, llm_api, main, model_catalog
-from tests.test_model_catalog import KEY, _mock_chat, _transport, clients, run  # noqa: F401
+from tests.test_model_catalog import KEY, _mock_chat, _transport, clients, run
 
 
 @pytest.fixture(autouse=True)
@@ -54,7 +54,7 @@ def test_m3_bulk_refresh_does_not_fill_default_model(monkeypatch):
     assert not connections.get(c.id).default_model
 
 
-def test_m3_image_scope_touches_no_chat_connection(clients, monkeypatch):  # noqa: F811
+def test_m3_image_scope_touches_no_chat_connection(clients, monkeypatch):
     owner, member = clients
     seen_chat = _mock_chat(monkeypatch)
     _transport(monkeypatch, lambda r: httpx.Response(200, json={"data": []}))
@@ -68,21 +68,20 @@ def test_m3_image_scope_touches_no_chat_connection(clients, monkeypatch):  # noq
     assert member.post("/api/connections/models/refresh?scope=image").status_code == 403
 
 
-def test_l1_l2_note_and_source(monkeypatch):
+def test_l1_l8_note_and_source(monkeypatch):
     monkeypatch.setenv("XAI_API_KEY", KEY)
     _transport(monkeypatch, lambda r: httpx.Response(200, json={"models": [{"id": "grok-imagine-image"}]}))
     run(model_catalog.refresh_image("xai"))
     im = model_catalog.image_models("xai")
-    assert "grok-imagine-image-2.0" in im["models"]          # documented id merged
-    assert im["source"] == "mixed" and im["note"] == ""      # not the docs-only sentence
-    assert im["checked"] == "2026-11-11"
-    # a custom list has no documented ids: stays endpoint
-    image_providers.save_config({"provider": "custom", "base_url": "https://pics.example.org/v1",
-                                 "model": "m", "api_key": KEY})
-    _transport(monkeypatch, lambda r: httpx.Response(200, json={"data": [{"id": "a"}]}))
-    run(model_catalog.refresh_image("custom"))
-    assert model_catalog.image_models("custom")["source"] == "endpoint"
-    # minimax stays documented with its note
+    # a live list is authoritative: documented ids are NOT merged into it
+    assert im["models"] == ["grok-imagine-image"]
+    assert im["source"] == "endpoint" and im["note"] == "" and im["checked"] == "2026-11-11"
+    # an empty live list falls back to the documented one
+    monkeypatch.setattr(model_catalog, "_last", {})
+    _transport(monkeypatch, lambda r: httpx.Response(200, json={"models": []}))
+    run(model_catalog.refresh_image("xai"))
+    im = model_catalog.image_models("xai")
+    assert im["source"] == "documented" and "grok-imagine-image-2.0" in im["models"]
     mm = model_catalog.image_models("minimax")
     assert mm["source"] == "documented" and "no image models" in mm["note"]
 
@@ -125,7 +124,6 @@ def test_l8_a_stale_tmp_file_does_not_keep_loose_permissions():
 
 
 def test_provider_rows_read_the_catalog_file_once(monkeypatch):
-    import importlib.util  # noqa: F401
     reads = []
     real = model_catalog._read
     monkeypatch.setattr(model_catalog, "_read", lambda: reads.append(1) or real())
@@ -137,11 +135,16 @@ def test_provider_rows_read_the_catalog_file_once(monkeypatch):
 
 # ---- M4 -------------------------------------------------------------------- #
 
+import itertools  # noqa: E402
+
+_ids = itertools.count()
+
+
 def _job(model_cfg, age_s):
     image_providers.save_config(model_cfg)
     spec = image_jobs.ImageSpec(prompt="a lighthouse", backend="api")
     created = (datetime.now() - timedelta(seconds=age_s)).isoformat()
-    return {"id": "j1", "spec": spec.to_json(), "created_at": created}
+    return {"id": f"j-{next(_ids)}", "spec": spec.to_json(), "created_at": created}
 
 
 def test_m4_h3_api_job_outlives_its_request():
@@ -179,3 +182,80 @@ def test_m4_cancelled_h3_request_is_logged_without_key_or_prompt(monkeypatch, ca
     text = caplog.text
     assert "MiniMax-H3-Image" in text and "minimax" in text.lower()
     assert KEY not in text and "secret prompt" not in text
+
+
+# ---- M-B: a failed refresh does not start the cooldown ----------------------- #
+
+def test_mb_failed_image_refresh_can_be_retried_at_once(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", KEY)
+    state = {"ok": False}
+    seen = _transport(monkeypatch, lambda r: httpx.Response(
+        200, json={"data": [{"id": "gpt-image-1"}]}) if state["ok"] else httpx.Response(401))
+    a = run(model_catalog.refresh_image("openai"))
+    assert a["error"]
+    state["ok"] = True
+    b = run(model_catalog.refresh_image("openai"))
+    assert len(seen) == 2 and not b.get("cached") and b["error"] is None and b["source"] == "endpoint"
+
+
+def test_mb_failed_connection_refresh_can_be_retried_at_once(monkeypatch):
+    state = {"ok": False}
+    seen = []
+
+    def handler(req):
+        seen.append(req)
+        return httpx.Response(200, json={"data": [{"id": "m1"}]}) if state["ok"] else httpx.Response(401)
+
+    monkeypatch.setattr(llm_api, "http_client", lambda read_timeout=llm_api.READ_TIMEOUT_S: httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), timeout=read_timeout, follow_redirects=False))
+    c = connections.create(type="openai", api_key=KEY)
+    a = run(model_catalog.refresh_connection(c))
+    assert a["error"]
+    state["ok"] = True
+    n = len(seen)
+    b = run(model_catalog.refresh_connection(c))
+    assert len(seen) > n and not b.get("cached") and b["error"] is None
+
+
+# ---- L-1: the H3 deadline is decided once per job ---------------------------- #
+
+def test_l1_deadline_resolves_once_per_job(monkeypatch):
+    h3 = {"provider": "minimax", "api_key": KEY, "model": "MiniMax-H3-Image"}
+    job = _job(h3, 30)
+    calls = []
+    real = image_providers.resolve
+    monkeypatch.setattr(image_providers, "resolve", lambda *a, **k: calls.append(1) or real(*a, **k))
+    for _ in range(5):
+        assert main._image_job_deadline_s(job) == image_providers.H3_TIMEOUT_S + 120
+    assert len(calls) == 1
+
+
+# ---- L-2: the bulk audit row names its scope --------------------------------- #
+
+def test_l2_bulk_audit_names_the_scope(clients, monkeypatch):
+    from app import connections_api
+    owner, _ = clients
+    _transport(monkeypatch, lambda r: httpx.Response(200, json={"data": []}))
+    rows = []
+    monkeypatch.setattr(connections_api, "audit", lambda req, kind, target, detail="": rows.append((kind, detail)))
+    assert owner.post("/api/connections/models/refresh?scope=image").status_code == 200
+    assert owner.post("/api/connections/models/refresh").status_code == 200
+    assert "scope=image" in rows[0][1] and "scope=all" in rows[1][1]
+
+
+# ---- L-9: a machine key cannot refresh --------------------------------------- #
+
+def test_l9_machine_key_is_refused_on_both_refresh_routes(world, monkeypatch):
+    from app import auth
+    seen = _transport(monkeypatch, lambda r: httpx.Response(200, json={"data": []}))
+    world.create_owner(world.client())
+    cfg = auth.load()
+    cfg.api_token = "machine-token-0123456789"      # scrub-ok: test token
+    cfg.machine_loopback_trust = False
+    auth._write(cfg)
+    auth._bust_cache()
+    machine = world.client(world.LOOPBACK, origin=False)
+    machine.headers.update({"X-API-Key": "machine-token-0123456789"})   # scrub-ok: test token
+    for path in ("/api/connections/models/refresh", "/api/apps/imagestudio/models/refresh"):
+        assert machine.post(path).status_code in (401, 403), path
+    assert seen == []

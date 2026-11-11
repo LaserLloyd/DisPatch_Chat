@@ -71,7 +71,7 @@ import {
   runSectionHooks, settingsHashRoute, charactersSectionAllowed,
 } from './settings-nav.js?v=17';
 import { mountSettingsResize } from './settings-resize.js?v=2';
-import { mountConnections } from './connections.js?v=6';
+import { mountConnections } from './connections.js?v=7';
 import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=10';
 import { mountBackups } from './backup.js?v=6';
 import { maybeStartWizard } from './wizard.js?v=8';

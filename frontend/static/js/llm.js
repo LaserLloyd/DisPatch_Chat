@@ -15,7 +15,7 @@
 
 import { el, railIcon, RAIL_ICONS } from './util.js?v=23';
 import { t } from './i18n.js?v=5';
-import { mountQuickSetup, mountImageSection } from './integrations.js?v=6';
+import { mountQuickSetup, mountImageSection } from './integrations.js?v=7';
 
 let ctx = {
   toast: () => {},

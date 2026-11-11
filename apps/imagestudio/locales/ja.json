@@ -156,10 +156,12 @@
   "models.note_endpoint": "{label}のモデル一覧より(更新日 {date})。",
   "models.note_endpoint_nodate": "{label}のモデル一覧より。",
   "models.refreshed": "更新しました:{name}のモデル {n} 件",
+  "models.refreshed_one": "更新しました:{name}のモデル {n} 件",
+  "models.refresh_cached": "さきほど更新したばかりです。数秒後にもう一度お試しください。",
   "models.refresh_failed": "{name}を更新できませんでした:{error}",
   "models.note_docs_generic": "{label}のドキュメントより(確認日 {date})。",
   "models.note_mixed": "{label}のモデル一覧({date}更新)に、ドキュメントのモデルを加えています。",
   "models.refresh_error": "モデル一覧を更新できませんでした: {error}",
-  "models.h3_hint": "H3の画像は数分かかることがあります。リクエストが自動で再送されることはなく、生成を押すたびに課金されます。",
+  "models.h3_hint": "MiniMax H3の画像は数分かかることがあります。リクエストが自動で再送されることはなく、生成を押すたびに課金されます。",
   "models.refresh_docs_only": "新しい情報はありません。これらのプロバイダはAPIで画像モデルを一覧できません。"
 }

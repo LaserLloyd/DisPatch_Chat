@@ -735,6 +735,27 @@ test('Connections: Refresh available models (all) and per-card Refresh models wi
   assert.equal(all.disabled, false);
   assert.match(pane.querySelector('.cxn-refresh-note').textContent, /Model lists updated for 2 connections/);
   assert.match(pane.querySelector('[data-connection="a"] .cxn-models-line').textContent, /Models: 2/);
+  // all inside the cooldown / all failed / nothing to refresh: never "updated"
+  const note = () => pane.querySelector('.cxn-refresh-note').textContent;
+  const press = async (body) => {
+    await C.mountConnections(pane, { api: { ...api, refreshAllModels: async () => body }, toast: (m) => toasts.push(m) });
+    pane.querySelector('#cxn-refresh-all').click();
+    await tick(); await tick(); await tick();
+  };
+  await press({ connections: { a: { cached: true }, b: { cached: true } }, image: {} });
+  assert.match(note(), /Just refreshed/);
+  await press({ connections: { a: { error: 'The key was not accepted' }, b: { cached: true } }, image: {} });
+  assert.equal(note(), 'Could not refresh: The key was not accepted');
+  await press({ connections: { a: {} }, image: {} });
+  assert.equal(note(), 'Model lists updated for 1 connection.');
+  await press({ connections: {}, image: {} });
+  assert.match(note(), /Nothing to refresh yet/);
+  // per-card refresh served from the cooldown says so on the card
+  const one = { ...api, refreshModels: async () => ({ connection: { ...list[0] }, catalog: { models: [], cached: true, source: 'endpoint', checked_at: null } }) };
+  await C.mountConnections(pane, { api: one, toast() {} });
+  [...pane.querySelector('[data-connection="a"]').querySelectorAll('button')].find((b) => b.textContent === EN.cxn.refresh_one).click();
+  await tick(); await tick();
+  assert.match(pane.querySelector('[data-connection="a"] .cxn-models-line').textContent, /Just refreshed/);
   // a catalog-less api (older mock) still draws the card
   await C.mountConnections(pane, { api: { ...api, modelsCatalog: undefined }, toast() {} });
   assert.ok(pane.querySelector('[data-connection="a"] .cxn-models-line'));

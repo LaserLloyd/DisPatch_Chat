@@ -1305,7 +1305,11 @@
     "toggle_below": "Der Ein/Aus-Schalter steht oben unter Add-ons oder Apps & Werkzeuge.",
     "img_models_refresh": "Verfügbare Modelle aktualisieren",
     "img_models_refreshing": "Wird aktualisiert…",
-    "img_models_done": "Modelllisten aktualisiert.",
+    "img_models_done": {
+      "one": "Modellliste für {count} Bilddienst aktualisiert.",
+      "other": "Modelllisten für {count} Bilddienste aktualisiert."
+    },
+    "img_models_cached": "Gerade erst aktualisiert – versuchen Sie es in einigen Sekunden erneut.",
     "img_models_list": "Modelle aus der Liste des Anbieters, aktualisiert {when}.",
     "img_models_docs": "Modelle aus der Dokumentation des Anbieters, geprüft {when}.",
     "img_models_docs_nodate": "Modelle aus der Dokumentation des Anbieters.",
@@ -1970,7 +1974,12 @@
     "refresh_one": "Modelle aktualisieren",
     "refresh_one_aria": "Modellliste für {name} aktualisieren",
     "refreshing": "Wird aktualisiert…",
-    "refreshed_all": "Modelllisten für {count} Verbindungen aktualisiert.",
+    "refreshed_all": {
+      "one": "Modelllisten für {count} Verbindung aktualisiert.",
+      "other": "Modelllisten für {count} Verbindungen aktualisiert."
+    },
+    "refresh_cached": "Gerade erst aktualisiert – versuchen Sie es in einigen Sekunden erneut.",
+    "refresh_nothing": "Noch nichts zu aktualisieren. Fügen Sie zuerst eine Verbindung oder einen Bilddienst-Schlüssel hinzu.",
     "models_list": "Modelle: {count} · aktualisiert {when} · aus der Liste des Anbieters",
     "models_docs": "Modelle: {count} · aktualisiert {when} · aus der Dokumentation",
     "models_never": "Modelle: {count} · noch nicht aktualisiert",

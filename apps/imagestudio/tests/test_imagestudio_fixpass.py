@@ -10,7 +10,7 @@ import pytest
 
 from app import config, image_jobs, image_providers, model_catalog, settings_store
 from tests.test_image_jobs import _png, _unlocked
-from tests.test_image_jobs import env as env  # noqa: F401
+from tests.test_image_jobs import env as env
 
 BASE = "/api/apps/imagestudio"
 KEY = "sk-test-FIXPASS-SECRET-0123456789"   # scrub-ok: test fixture
@@ -49,7 +49,7 @@ class H3Fake:
 
 
 @pytest.fixture
-def fake(monkeypatch, env):  # noqa: F811
+def fake(monkeypatch, env):
     monkeypatch.setattr(model_catalog, "_last", {})
     for n in ("OPENAI_API_KEY", "XAI_API_KEY", "CIVITAI_API_KEY"):
         monkeypatch.delenv(n, raising=False)
@@ -62,7 +62,7 @@ def fake(monkeypatch, env):  # noqa: F811
 
 # ---- H1 -------------------------------------------------------------------- #
 
-def test_h3_takes_ten_pictures_and_image01_is_clamped_to_nine(env, fake):  # noqa: F811
+def test_h3_takes_ten_pictures_and_image01_is_clamped_to_nine(env, fake):
     c = _unlocked(env)
     r = _gen(c, model="MiniMax-H3-Image", n=10)
     assert r.status_code == 200, r.text
@@ -75,7 +75,7 @@ def test_h3_takes_ten_pictures_and_image01_is_clamped_to_nine(env, fake):  # noq
 
 # ---- L9 -------------------------------------------------------------------- #
 
-def test_h3_accepts_a_3000_char_prompt_and_image01_refuses_it(env, fake):  # noqa: F811
+def test_h3_accepts_a_3000_char_prompt_and_image01_refuses_it(env, fake):
     c = _unlocked(env)
     long = ("a lighthouse on a cliff at dusk, waves, gulls, warm windows. " * 60)[:3000]
     assert _gen(c, model="MiniMax-H3-Image", prompt=long).status_code == 200
@@ -84,7 +84,7 @@ def test_h3_accepts_a_3000_char_prompt_and_image01_refuses_it(env, fake):  # noq
     assert r.status_code == 422 and "takes 1500" in r.json()["detail"]
 
 
-def test_rows_carry_h3_first_in_exact_order(env, fake):  # noqa: F811
+def test_rows_carry_h3_first_in_exact_order(env, fake):
     c = _unlocked(env)
     mm = next(p for p in c.get(BASE + "/state").json()["providers"] if p["id"] == "minimax")
     assert mm["models"][:4] == ["MiniMax-H3-Image", "MiniMax-H3-Image-Highspeed",
@@ -92,7 +92,7 @@ def test_rows_carry_h3_first_in_exact_order(env, fake):  # noqa: F811
     assert mm["models_checked"] == "2026-11-11"
 
 
-def test_chat_pic_marker_path_reaches_h3_endpoint(env, monkeypatch):  # noqa: F811
+def test_chat_pic_marker_path_reaches_h3_endpoint(env, monkeypatch):
     import asyncio
     image_providers.save_config({"provider": "minimax", "api_key": KEY, "model": "MiniMax-H3-Image"})
     f = H3Fake()
@@ -190,3 +190,18 @@ def test_a_borrowed_chat_key_goes_only_to_the_same_origin(world, monkeypatch):
         image_providers.save_config({"provider": "custom", "base_url": url, "model": "pic-1"})
         __import__("asyncio").run(model_catalog.refresh_image("custom"))
         assert all("authorization" not in r.headers for r in seen), url
+
+
+# ---- L-6: a listed id Generate would refuse is not offered -------------------- #
+
+def test_l6_ids_generate_would_refuse_are_not_in_the_datalist(env, monkeypatch):
+    monkeypatch.setattr(model_catalog, "_last", {})
+    image_providers.save_config({"provider": "minimax", "api_key": KEY})
+    long_id = "m" * 120
+    model_catalog._store("image", "custom", {
+        "models": [{"id": "ok-model", "kind": "image"}, {"id": long_id, "kind": "image"},
+                   {"id": "a@b", "kind": "image"}],
+        "source": "endpoint", "checked_at": "2026-11-11T00:00:00+00:00", "error": None, "note": ""})
+    c = _unlocked(env)
+    row = next(p for p in c.get(BASE + "/state").json()["providers"] if p["id"] == "custom")
+    assert "ok-model" in row["models"] and long_id not in row["models"] and "a@b" not in row["models"]

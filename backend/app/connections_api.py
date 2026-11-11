@@ -164,7 +164,8 @@ async def models_catalog():
 async def refresh_all_models(request: Request, scope: str = Query("all", pattern="^(all|image)$")):
     """``?scope=image`` re-lists only the image providers (no chat connection is called or changed)."""
     res = await model_catalog.refresh_all(concurrency=4, scope=scope)
-    audit(request, "connection.models_refresh", "", f"{len(res['connections'])} connections")
+    audit(request, "connection.models_refresh", "",
+          f"scope={scope}: {len(res['connections'])} connections, {len(res['image'])} image providers")
     return res
 
 

@@ -1279,7 +1279,10 @@
     "toggle_below": "它的开关在上方的“附加组件”或“应用和工具”中。",
     "img_models_refresh": "刷新可用模型",
     "img_models_refreshing": "正在刷新…",
-    "img_models_done": "模型列表已更新。",
+    "img_models_done": {
+      "other": "已更新 {count} 个图像服务的模型列表。"
+    },
+    "img_models_cached": "刚刚已刷新,请几秒后再试。",
     "img_models_list": "模型来自服务商的列表，{when} 更新。",
     "img_models_docs": "模型来自服务商的文档，{when} 核对。",
     "img_models_docs_nodate": "模型来自服务商文档。",
@@ -1943,7 +1946,11 @@
     "refresh_one": "刷新模型",
     "refresh_one_aria": "刷新 {name} 的模型列表",
     "refreshing": "正在刷新…",
-    "refreshed_all": "已更新 {count} 个连接的模型列表。",
+    "refreshed_all": {
+      "other": "已更新 {count} 个连接的模型列表。"
+    },
+    "refresh_cached": "刚刚已刷新,请几秒后再试。",
+    "refresh_nothing": "暂时没有可刷新的内容。请先添加连接或图像服务密钥。",
     "models_list": "模型：{count} 个 · {when} 更新 · 来自服务商的列表",
     "models_docs": "模型：{count} 个 · {when} 更新 · 来自文档",
     "models_never": "模型：{count} 个 · 尚未刷新",

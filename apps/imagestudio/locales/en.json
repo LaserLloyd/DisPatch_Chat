@@ -157,10 +157,12 @@
   "models.note_endpoint": "From {label}'s model list, updated {date}.",
   "models.note_endpoint_nodate": "From {label}'s model list.",
   "models.refreshed": "Updated: {n} models for {name}",
+  "models.refreshed_one": "Updated: {n} model for {name}",
+  "models.refresh_cached": "Just refreshed - try again in a few seconds.",
   "models.refresh_failed": "Couldn't refresh {name}: {error}",
   "models.note_docs_generic": "From {label}'s docs (checked {date}).",
   "models.note_mixed": "From {label}'s model list, updated {date}, plus models from its docs.",
   "models.refresh_error": "Couldn't refresh the model lists: {error}",
-  "models.h3_hint": "H3 pictures can take a few minutes. A request is never repeated automatically, and each press of Generate is billed.",
+  "models.h3_hint": "MiniMax H3 pictures can take a few minutes. A request is never repeated automatically, and each press of Generate is billed.",
   "models.refresh_docs_only": "Nothing new: these providers don't list their image models through an API."
 }
