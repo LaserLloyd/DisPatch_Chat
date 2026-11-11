@@ -431,3 +431,168 @@ def test_grok_aspect_ratio_snaps_to_a_listed_ratio(env, monkeypatch):
     assert body["model"] == "grok-imagine-image-2.0"
     assert body["aspect_ratio"] in image_providers.MINIMAX_RATIOS
     assert "size" not in body
+
+
+# --------------------------------------------------------------------------- #
+# MiniMax H3 (POST /images/generations) and the pinned image-01 body
+# --------------------------------------------------------------------------- #
+
+H3 = "MiniMax-H3-Image"
+
+
+def _h3_res(model=H3):
+    _save("minimax", api_key="mm", model=model)
+    return image_providers.resolve()
+
+
+def _h3_run(res, **kw):
+    spec = kw.pop("spec", None) or image_jobs.ImageSpec(prompt="a cat", ratio="16:9")
+    return asyncio.run(image_providers.generate_batch(res, spec, **kw))
+
+
+def _h3_err(status, message, etype="server_error"):
+    return httpx.Response(status, json={
+        "type": "error", "error": {"type": etype, "message": message}})
+
+
+def test_is_h3():
+    assert image_providers.is_h3("MiniMax-H3-Image")
+    assert image_providers.is_h3("MiniMax-H3-Image-Highspeed")
+    assert not image_providers.is_h3("image-01") and not image_providers.is_h3("")
+
+
+def test_h3_body_and_endpoint(env, monkeypatch):
+    fake = _install(monkeypatch, lambda r: httpx.Response(
+        200, json={"data": [{"b64_json": _b64png()}, {"b64_json": _b64png()}]}))
+    out = _h3_run(_h3_res(), n=2, seed=7, reference="data:image/png;base64,AAAA",
+                  optimizer=False)
+    assert len(out) == 2
+    assert str(fake.requests[0].url) == "https://api.minimax.io/v1/images/generations"
+    b = fake.body()
+    assert b == {"model": H3, "prompt": "a cat", "n": 2, "aspect_ratio": "16:9",
+                 "area": "2K", "response_format": "b64_json",
+                 "output_format": "jpeg", "disable_prompt_enhanced": True}
+    for k in ("seed", "size", "subject_reference", "prompt_optimizer"):
+        assert k not in b
+
+
+def test_h3_optimizer_follows_flag(env, monkeypatch):
+    fake = _install(monkeypatch, lambda r: httpx.Response(
+        200, json={"data": [{"b64_json": _b64png()}]}))
+    _h3_run(_h3_res(), optimizer=True)
+    assert fake.body()["disable_prompt_enhanced"] is False
+
+
+def test_h3_url_items_are_downloaded(env, monkeypatch):
+    def handler(r):
+        if r.url.host == "cdn.example.com":
+            return httpx.Response(200, content=_png())
+        return httpx.Response(200, json={"data": [{"url": "https://cdn.example.com/a.jpg"}]})
+    fake = _install(monkeypatch, handler)
+    out = _h3_run(_h3_res())
+    assert out[0].startswith(b"\x89PNG")
+    assert "authorization" not in fake.requests[1].headers
+
+
+def test_h3_partial_failure_keeps_the_good_one(env, monkeypatch):
+    _install(monkeypatch, lambda r: httpx.Response(200, json={"data": [
+        {"b64_json": _b64png()},
+        {"error": {"code": "1027", "message": "output image failed content safety check"}}]}))
+    assert len(_h3_run(_h3_res(), n=2)) == 1
+
+
+def test_h3_all_items_failed_names_the_reason(env, monkeypatch):
+    _install(monkeypatch, lambda r: httpx.Response(200, json={"data": [
+        {"error": {"code": "1027", "message": "x"}}]}))
+    with pytest.raises(image_jobs.ImageJobError) as e:
+        _h3_run(_h3_res())
+    assert "sensitive" in e.value.message
+
+
+@pytest.mark.parametrize("status,msg,needle", [
+    (422, "all images failed the content safety check (1027)", "sensitive"),
+    (422, "prompt failed the content safety check (1026)", "sensitive"),
+    (402, "insufficient balance (1008)", "balance"),
+    (402, "insufficient balance (2053)", "balance"),
+    (402, "plan quota used up (2067)", "balance"),
+    (402, "plan tier does not support this model (2068)", "plan doesn't include"),
+    (429, "usage window exceeded (2056)", "usage window"),
+    (429, "slow down (1002)", "rate"),
+    (400, "bad area (2013)", "rejected the request parameters"),
+    (404, "no such thing", "answered: no such thing"),
+])
+def test_h3_http_errors(env, monkeypatch, status, msg, needle):
+    _install(monkeypatch, lambda r: _h3_err(status, msg))
+    with pytest.raises(image_jobs.ImageJobError) as e:
+        _h3_run(_h3_res())
+    assert needle in e.value.message
+    assert "HTTP" not in e.value.message
+
+
+def test_h3_uses_long_timeout_and_never_retries(env, monkeypatch):
+    seen = []
+    real = image_providers._client
+
+    def spy(timeout=image_providers.GENERATE_TIMEOUT_S):
+        seen.append(timeout)
+        return real(timeout)
+    monkeypatch.setattr(image_providers, "_client", spy)
+    fake = _install(monkeypatch, lambda r: _h3_err(500, "internal error (1000)"))
+    with pytest.raises(image_jobs.ImageJobError):
+        _h3_run(_h3_res())
+    assert seen == [600.0] and len(fake.requests) == 1
+    seen.clear()
+    _install(monkeypatch, _minimax_ok)
+    _h3_run(_h3_res("image-01"))
+    assert seen == [image_providers.GENERATE_TIMEOUT_S]
+
+
+def test_image01_body_is_pinned(env, monkeypatch):
+    fake = _install(monkeypatch, _minimax_ok)
+    _h3_run(_h3_res("image-01"), n=3, seed=5, optimizer=True,
+            spec=image_jobs.ImageSpec(prompt="p", ratio="5:4"))
+    assert str(fake.requests[0].url) == "https://api.minimax.io/v1/image_generation"
+    assert fake.body() == {"model": "image-01", "prompt": "p", "aspect_ratio": "4:3",
+                           "response_format": "base64", "n": 3,
+                           "prompt_optimizer": True, "seed": 5}
+
+
+@pytest.mark.parametrize("ratio,want", [
+    ("16:9", "16:9"), ("2:1", "2:1"), ("1:3", "1:3"), ("3:1", "3:1"),
+    ("300:299", "300:299"), ("1:4", "2:3"), ("4:1", "21:9"), ("5:4", "5:4"),
+    ("", "1:1"), ("junk", "1:1"), ("0:5", "1:1")])
+def test_h3_ratio(ratio, want):
+    got = image_providers.h3_ratio(ratio)
+    if want == "2:3":      # out of bounds: snapped to the nearest documented ratio
+        assert got in image_providers.MINIMAX_RATIOS
+    elif want == "21:9":
+        assert got in image_providers.MINIMAX_RATIOS
+    else:
+        assert got == want
+
+
+def test_h3_capabilities_and_prompt_max(env):
+    res = _h3_res()
+    assert image_providers.max_batch(res) == 10
+    assert image_providers.supports(res) == {
+        "reference": False, "optimizer": True, "seed": False, "max_n": 10}
+    r1 = _h3_res("image-01")
+    assert image_providers.max_batch(r1) == 9
+    assert image_providers.supports(r1) == {
+        "reference": True, "optimizer": True, "seed": True, "max_n": 9}
+    assert image_providers.prompt_max("minimax") == 1500
+    assert image_providers.prompt_max("minimax", "image-01") == 1500
+    assert image_providers.prompt_max("minimax", H3) == image_jobs.MAX_API_PROMPT_CHARS
+    assert image_providers.prompt_max("openai-images") == image_jobs.MAX_API_PROMPT_CHARS
+
+
+def test_h3_prompt_not_cut_at_1500(env, monkeypatch):
+    fake = _install(monkeypatch, lambda r: httpx.Response(
+        200, json={"data": [{"b64_json": _b64png()}]}))
+    _h3_run(_h3_res(), spec=image_jobs.ImageSpec(prompt="p" * 3000, backend="api"))
+    assert len(fake.body()["prompt"]) == 3000
+
+
+def test_h3_accepts_a_megabyte_jpeg():
+    jpeg = b"\xff\xd8\xff\xe0" + b"\0" * (3 * 1024 * 1024)
+    assert image_jobs.validate_image(jpeg) == (True, "")
