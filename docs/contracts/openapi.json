@@ -1869,7 +1869,7 @@
           },
           "n": {
             "default": 1,
-            "maximum": 9.0,
+            "maximum": 10.0,
             "minimum": 1.0,
             "title": "N",
             "type": "integer"
@@ -9530,7 +9530,21 @@
     },
     "/api/connections/models/refresh": {
       "post": {
+        "description": "``?scope=image`` re-lists only the image providers (no chat connection is called or changed).",
         "operationId": "refresh_all_models_api_connections_models_refresh_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "pattern": "^(all|image)$",
+              "title": "Scope",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -9539,6 +9553,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Refresh All Models"

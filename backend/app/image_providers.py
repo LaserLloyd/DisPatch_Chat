@@ -719,6 +719,12 @@ async def generate_batch(res: Resolved, spec: image_jobs.ImageSpec, *, n: int = 
             for item in items:
                 blobs.append(await _download(client, item) if isinstance(item, str)
                              else item)
+        except asyncio.CancelledError:
+            if h3:    # H3 is billed even when the caller hangs up: leave enough to reconcile a charge
+                log.warning("MiniMax H3 image request cancelled before an answer "
+                            "(provider=%s model=%s n=%d); it may still be charged",
+                            res.preset.id, res.model, n)
+            raise
         except image_jobs.ImageJobError:
             raise
         except httpx.TimeoutException:

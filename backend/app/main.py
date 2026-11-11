@@ -4220,7 +4220,21 @@ def _image_job_expired(job: dict) -> bool:
     # may be naive. Comparing the two raises, and an exception here would
     # abandon the sweep — so normalise instead of assuming.
     now = datetime.now(UTC) if started.tzinfo else datetime.now()
-    return (now - started).total_seconds() > image_jobs.DEADLINE_S
+    return (now - started).total_seconds() > _image_job_deadline_s(job)
+
+
+def _image_job_deadline_s(job: dict) -> float:
+    """How long a job may run. MiniMax H3 holds one request open up to its own 600 s and bills even
+    a hung-up call, so an API job on an H3 model outlasts that request instead of cancelling it."""
+    try:
+        spec = image_jobs.ImageSpec.from_json(job["spec"])
+        if spec.backend == "api":
+            res = image_providers.resolve()
+            if res.preset.shape == "minimax" and image_providers.is_h3(res.model):
+                return image_providers.H3_TIMEOUT_S + 120
+    except Exception:       # noqa: BLE001 - a bad row or config keeps the normal deadline
+        pass
+    return image_jobs.DEADLINE_S
 
 
 #: Progress keys the WORKER writes, not the rig: the waiting wording and its
@@ -4396,7 +4410,7 @@ async def _advance_image_job(job: dict) -> None:
             # request wants. The local ending does not wait on the answer.
             await _cancel_on_rig(job, "deadline")
             await _fail_image_job(
-                job, f"timed out after {image_jobs.DEADLINE_S // 60} minutes")
+                job, f"timed out after {int(_image_job_deadline_s(job)) // 60} minutes")
             return
         await _advance_image_job_locked(job)
     finally:
@@ -8870,7 +8884,8 @@ async def llm_test(request: Request, payload: dict = Body(...)):
 
 def _image_provider_state(request: Request | None = None) -> dict:
     can_refresh = bool(request is not None and policy.of(request).can("manage_connections"))
-    return {"catalog": {p.id: model_catalog.image_models(p.id) for p in image_providers.DEFAULT_PRESETS},
+    cat = model_catalog.catalog()
+    return {"catalog": {p.id: model_catalog.image_models(p.id, cat) for p in image_providers.DEFAULT_PRESETS},
             "can_refresh_models": can_refresh,
             "config": image_providers.public_config(),
             "presets": [p.public() for p in image_providers.DEFAULT_PRESETS],

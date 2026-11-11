@@ -128,6 +128,8 @@ def _store(section: str, key: str, entry: dict) -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with contextlib.suppress(OSError):
+            os.fchmod(fd, 0o600)            # a stale tmp keeps its old mode otherwise
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(doc, f, indent=1, sort_keys=True)
         os.replace(tmp, p)
@@ -139,9 +141,15 @@ def catalog() -> dict:
         return _read()
 
 
-def _cooling(key: str) -> bool:
-    t = _last.get(key)
-    return t is not None and time.monotonic() - t < COOLDOWN_S
+def _claim(key: str) -> bool:
+    """Check-and-set the cooldown under the lock: True = this caller may refresh now."""
+    with _lock:
+        now = time.monotonic()
+        t = _last.get(key)
+        if t is not None and now - t < COOLDOWN_S:
+            return False
+        _last[key] = now
+        return True
 
 
 # --------------------------------------------------------------------------- #
@@ -152,23 +160,23 @@ def _cooling(key: str) -> bool:
 async def refresh_connection(conn: connections.Connection) -> dict:
     """Re-list a saved connection's models. Never raises."""
     key = f"conn:{conn.id}"
-    if _cooling(key):
-        stored = (_read()["connections"].get(conn.id)) or _entry()
+    if not _claim(key):
+        stored = (catalog()["connections"].get(conn.id)) or _entry()
         return {**stored, "cached": True}
-    _last[key] = time.monotonic()
     try:
-        res = await connections.test_and_record(conn)
+        # A refresh re-lists models; it never picks a default model for the connection.
+        res = await connections.test_and_record(conn, fill_default=False)
     except Exception as e:                                    # noqa: BLE001 - never raises
         res = {"ok": False, "models": [], "message": f"{type(e).__name__}"}
     if res.get("ok") and res.get("models"):
         ids = _clean_ids(res["models"])
         entry = _entry([(i, classify(i)) for i in ids], "endpoint", _now())
     else:
-        prev = _read()["connections"].get(conn.id) or _entry()
+        prev = catalog()["connections"].get(conn.id) or _entry()
         msg = str(res.get("message") or res.get("problem") or "the server did not list models")
         entry = {**prev, "error": msg[:300]}
         entry["checked_at"] = prev.get("checked_at")
-    _store("connections", conn.id, entry)
+    await asyncio.to_thread(_store, "connections", conn.id, entry)
     return entry
 
 
@@ -187,7 +195,11 @@ def _cfg_for(preset_id: str) -> dict:
 
 
 async def _get_json(url: str, key: str) -> tuple[int, Any]:
-    """GET with bounds: 15 s, 2 MB, no redirects. -> (status, parsed json or None)."""
+    """GET with bounds: 15 s in total, 2 MB, no redirects. -> (status, parsed json or None)."""
+    return await asyncio.wait_for(_get_json_inner(url, key), TIMEOUT_S)
+
+
+async def _get_json_inner(url: str, key: str) -> tuple[int, Any]:
     headers = {"Accept": "application/json"}
     if key:
         headers["Authorization"] = f"Bearer {key}"
@@ -232,11 +244,10 @@ async def refresh_image(preset_id: str) -> dict:
     if preset_id not in image_providers.PRESET_BY_ID:
         return _entry(error="unknown image provider", source="documented")
     key = f"image:{preset_id}"
-    if _cooling(key):
-        return {**(_read()["image"].get(preset_id) or _documented_entry(preset_id)), "cached": True}
-    _last[key] = time.monotonic()
+    if not _claim(key):
+        return {**(catalog()["image"].get(preset_id) or _documented_entry(preset_id)), "cached": True}
     entry = await _refresh_image(preset_id)
-    _store("image", preset_id, entry)
+    await asyncio.to_thread(_store, "image", preset_id, entry)
     return entry
 
 
@@ -248,6 +259,10 @@ async def _refresh_image(preset_id: str) -> dict:
     except image_jobs.ImageJobError as e:
         return _documented_entry(preset_id, error=str(e)[:300])
     base = res.base_url.rstrip("/")
+    try:                                   # same target policy as a chat connection's Test
+        await asyncio.to_thread(connections.check_target, base)
+    except connections.ConnectionError_ as e:
+        return _documented_entry(preset_id, error=str(e)[:300])
     try:
         if preset_id == "minimax":
             status, _doc = await _get_json(f"{base}/models", res.api_key)
@@ -270,7 +285,7 @@ async def _refresh_image(preset_id: str) -> dict:
             ids = _ids_from(doc)
             if preset_id == "openai":
                 ids = [i for i in ids if classify(i) == "image"]
-    except (httpx.HTTPError, ValueError) as e:
+    except (httpx.HTTPError, ValueError, TimeoutError) as e:
         return _documented_entry(preset_id, error=f"{type(e).__name__}: {str(e)[:120]}")
     if not ids and preset_id != "custom":
         return _documented_entry(preset_id, error="the provider listed no image models",
@@ -279,28 +294,36 @@ async def _refresh_image(preset_id: str) -> dict:
                   "endpoint", _now())
 
 
-def image_models(preset_id: str) -> dict:
-    """What an image provider offers: the stored entry plus the documented list. Pure read."""
-    stored = _read()["image"].get(preset_id) or {}
+def image_models(preset_id: str, cat: dict | None = None) -> dict:
+    """What an image provider offers: the stored entry plus the documented list. Pure read.
+    ``cat`` = an already-read catalog (``catalog()``), so a caller listing many presets reads the file once."""
+    stored = (cat if cat is not None else catalog())["image"].get(preset_id) or {}
     doc = DOCUMENTED_IMAGE_MODELS.get(preset_id) or {}
     ids = [m["id"] for m in stored.get("models", []) if isinstance(m, dict) and m.get("id")]
+    live = set(ids)
+    merged = False
     for i in doc.get("models", []):
         if i not in ids:
             ids.append(i)
-    return {"models": ids, "names": dict(doc.get("names", {})),
-            "source": stored.get("source") or ("documented" if doc else "endpoint"),
-            "checked_at": stored.get("checked_at"),
-            "note": stored.get("note") or doc.get("note", "")}
+            merged = merged or bool(live)
+    source = stored.get("source") or ("documented" if doc else "endpoint")
+    if source == "endpoint" and merged:
+        source = "mixed"
+    note = stored.get("note") or (doc.get("note", "") if source == "documented" else "")
+    return {"models": ids, "names": dict(doc.get("names", {})), "source": source,
+            "checked_at": stored.get("checked_at"), "checked": doc.get("checked", ""),
+            "note": note}
 
 
-async def refresh_all(concurrency: int = 4) -> dict:
+async def refresh_all(concurrency: int = 4, *, scope: str = "all") -> dict:
+    """Refresh every connection and image preset, or (``scope="image"``) only the image presets."""
     sem = asyncio.Semaphore(concurrency)
 
     async def run(coro):
         async with sem:
             return await coro
 
-    conns = await asyncio.to_thread(connections.list_all)
+    conns = [] if scope == "image" else await asyncio.to_thread(connections.list_all)
     presets = list(image_providers.PRESET_BY_ID)
     cres = await asyncio.gather(*(run(refresh_connection(c)) for c in conns))
     ires = await asyncio.gather(*(run(refresh_image(p)) for p in presets))

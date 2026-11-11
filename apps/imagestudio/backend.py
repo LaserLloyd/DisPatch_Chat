@@ -294,11 +294,12 @@ def _supports_for(preset, res, model: str) -> dict:
 def _provider_rows(principal=None) -> tuple[list[dict], str]:
     """The providers ``principal`` may use (the access matrix), and the default among them."""
     rows: list[dict] = []
+    stored_cat = model_catalog.catalog()                  # one file read for every row
     for preset in image_providers.PRESETS:
         if principal is not None and not image_access.allows(principal, preset.access):
             continue
         res = _resolved(preset.id)
-        cat = model_catalog.image_models(preset.id)
+        cat = model_catalog.image_models(preset.id, stored_cat)
         current = res.model if res else preset.model
         models: list[str] = []
         for m in [*cat.get("models", []), *KNOWN_MODELS.get(preset.id, []), current]:
@@ -316,6 +317,7 @@ def _provider_rows(principal=None) -> tuple[list[dict], str]:
             "models_source": cat.get("source", ""),
             "models_checked_at": cat.get("checked_at"),
             "models_note": cat.get("note", ""),
+            "models_checked": cat.get("checked", ""),
             "prompt_max": image_providers.prompt_max(preset.shape, current),
             "prompt_max_by_model": {m: image_providers.prompt_max(preset.shape, m) for m in models},
             "supports_by_model": {m: _supports_for(preset, res, m) for m in models},
@@ -411,7 +413,7 @@ class GenerateIn(BaseModel):
     provider: str = ""
     model: str = ""
     ratio: str = Field(default="1:1", max_length=8)
-    n: int = Field(default=1, ge=1, le=9)
+    n: int = Field(default=1, ge=1, le=image_providers.H3_MAX_N)
     optimizer: bool = False
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
     reference: dict | None = None
@@ -623,8 +625,9 @@ def build(ctx):
         if not policy.of(request).can("manage_connections"):
             raise HTTPException(403, "Only a profile that manages connections can refresh the model lists")
         principal = policy.of(request).principal
+        # Only providers that are set up: an unconfigured one is not a failure of the refresh.
         ids = [p.id for p in image_providers.PRESETS
-               if image_access.allows(principal, p.access)]
+               if image_access.allows(principal, p.access) and _resolved(p.id) is not None]
         sem = asyncio.Semaphore(2)
 
         async def one(pid: str) -> dict:

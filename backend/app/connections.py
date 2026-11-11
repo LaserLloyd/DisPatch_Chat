@@ -1013,14 +1013,14 @@ def _unreachable_hint(ct: ConnType, url: str, detail: str) -> str:
     return " ".join(h for h in hints if h)
 
 
-async def test_and_record(c: Connection) -> dict:
+async def test_and_record(c: Connection, *, fill_default: bool = True) -> dict:
     res = await run_test(c)
     c = get(c.id) or c
     c.last_test = {k: res[k] for k in ("ok", "reachable", "auth_ok", "models_listed", "latency_ms",
                                        "problem", "message") if k in res} | {"at": _now()}
     if res.get("ok") and res.get("models"):
         c.models, c.models_checked_at = res["models"], _now()
-        if not c.default_model:
+        if fill_default and not c.default_model:
             c.default_model = res["models"][0]
     _save(c)
     return res

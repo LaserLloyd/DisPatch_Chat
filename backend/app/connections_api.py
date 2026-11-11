@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import characters, config, connections, model_catalog, policy
@@ -161,8 +161,9 @@ async def models_catalog():
 
 
 @router.post("/api/connections/models/refresh", dependencies=[_MANAGE])
-async def refresh_all_models(request: Request):
-    res = await model_catalog.refresh_all(concurrency=4)
+async def refresh_all_models(request: Request, scope: str = Query("all", pattern="^(all|image)$")):
+    """``?scope=image`` re-lists only the image providers (no chat connection is called or changed)."""
+    res = await model_catalog.refresh_all(concurrency=4, scope=scope)
     audit(request, "connection.models_refresh", "", f"{len(res['connections'])} connections")
     return res
 

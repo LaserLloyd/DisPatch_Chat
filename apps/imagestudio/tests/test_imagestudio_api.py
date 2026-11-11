@@ -204,7 +204,7 @@ def test_prompt_and_count_are_validated(env, provider):
     c = _unlocked(env)
     assert _gen(c, prompt="x" * 1501).status_code == 422
     assert _gen(c, prompt="   ").status_code == 422
-    assert _gen(c, n=10).status_code == 422
+    assert _gen(c, n=11).status_code == 422
     assert _gen(c, n=0).status_code == 422
     assert _gen(c, seed=-1).status_code == 422
     assert _gen(c, model="bad model name!").status_code == 422
