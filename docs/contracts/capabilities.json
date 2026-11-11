@@ -1573,6 +1573,7 @@
     "POST /api/apps/imagestudio/clear",
     "POST /api/apps/imagestudio/estimate",
     "POST /api/apps/imagestudio/generate",
+    "POST /api/apps/imagestudio/models/refresh",
     "POST /api/apps/jobboard",
     "POST /api/apps/jobboard/find",
     "POST /api/apps/jobboard/profile/recompute",

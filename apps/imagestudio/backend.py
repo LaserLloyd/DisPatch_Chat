@@ -61,6 +61,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import dataclasses
 import io
 import json
 import logging
@@ -76,7 +77,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app import image_access, image_guard, image_jobs, image_providers
+from app import image_access, image_guard, image_jobs, image_providers, model_catalog
 
 log = logging.getLogger("local-chat.app.imagestudio")
 
@@ -102,7 +103,7 @@ CIVITAI_MODEL_NAMES = {
 #: picker names that, and the cheaper one stays the preset default.
 XAI_MODEL_NAMES = {"grok-imagine-image": "Grok Imagine",
                    "grok-imagine-image-2.0": "Grok Imagine 2.0 (about 2x the price)"}
-KNOWN_MODELS = {"minimax": ["image-01", "image-01-live"], "civitai": list(CIVITAI_MODEL_NAMES),
+KNOWN_MODELS = {"minimax": ["MiniMax-H3-Image", "MiniMax-H3-Image-Highspeed", "image-01", "image-01-live"], "civitai": list(CIVITAI_MODEL_NAMES),
                 "xai": list(XAI_MODEL_NAMES)}
 #: Display names for the model picker, per provider.
 MODEL_NAMES = {"xai": XAI_MODEL_NAMES}
@@ -278,6 +279,18 @@ def _resolved(preset_id: str, model: str = "") -> image_providers.Resolved | Non
         return None
 
 
+def _supports_for(preset, res, model: str) -> dict:
+    """What ``model`` can do on ``preset``, without any network call."""
+    if res is not None:
+        return image_providers.supports(dataclasses.replace(res, model=model))
+    mm = preset.shape == "minimax"
+    h3 = mm and image_providers.is_h3(model)
+    return {"reference": mm and not h3, "optimizer": mm,
+            "seed": (mm and not h3) or preset.shape == "civitai",
+            "max_n": (image_providers.H3_MAX_N if h3
+                      else image_providers.MAX_BATCH.get(preset.shape, 1))}
+
+
 def _provider_rows(principal=None) -> tuple[list[dict], str]:
     """The providers ``principal`` may use (the access matrix), and the default among them."""
     rows: list[dict] = []
@@ -285,25 +298,33 @@ def _provider_rows(principal=None) -> tuple[list[dict], str]:
         if principal is not None and not image_access.allows(principal, preset.access):
             continue
         res = _resolved(preset.id)
+        cat = model_catalog.image_models(preset.id)
+        current = res.model if res else preset.model
+        models: list[str] = []
+        for m in [*cat.get("models", []), *KNOWN_MODELS.get(preset.id, []), current]:
+            if m and m not in models:
+                models.append(m)
+        names = dict(cat.get("names", {}))
+        names.update(MODEL_NAMES.get(preset.id, {}))
+        if preset.shape == "civitai":
+            names.update(CIVITAI_MODEL_NAMES)
         row: dict[str, Any] = {
             "id": preset.id, "label": preset.label, "shape": preset.shape,
             "configured": res is not None, "price_note": preset.price_note,
-            "model": res.model if res else preset.model,
-            "models": KNOWN_MODELS.get(preset.id, []),
-            "prompt_max": image_providers.prompt_max(preset.shape),
+            "model": current, "models": models,
+            "model_names": names,
+            "models_source": cat.get("source", ""),
+            "models_checked_at": cat.get("checked_at"),
+            "models_note": cat.get("note", ""),
+            "prompt_max": image_providers.prompt_max(preset.shape, current),
+            "prompt_max_by_model": {m: image_providers.prompt_max(preset.shape, m) for m in models},
+            "supports_by_model": {m: _supports_for(preset, res, m) for m in models},
         }
-        if preset.id in MODEL_NAMES:
-            row["model_names"] = dict(MODEL_NAMES[preset.id])
         if preset.shape == "civitai":
             row["estimate"] = True
             row["currencies"] = list(image_providers.CIVITAI_CURRENCIES)
             row["browse"] = True
-            row["model_names"] = dict(CIVITAI_MODEL_NAMES)
-        row["supports"] = (image_providers.supports(res) if res else
-                           {"reference": preset.shape == "minimax",
-                            "optimizer": preset.shape == "minimax",
-                            "seed": preset.shape in ("minimax", "civitai"),
-                            "max_n": image_providers.MAX_BATCH.get(preset.shape, 1)})
+        row["supports"] = _supports_for(preset, res, current)
         rows.append(row)
     stored = image_providers.provider_id(image_providers.load_config())
     default = stored if any(r["id"] == stored and r["configured"] for r in rows) else ""
@@ -591,7 +612,35 @@ def build(ctx):
             # "Send to chat" posts through /api/inject (manage_agents): offered only to a
             # profile that may (anyone else would only ever meet a 403).
             "can_send": policy.of(request).can("manage_agents"),
+            # "Refresh available models" re-lists provider models: a connection-manager action.
+            "can_refresh_models": policy.of(request).can("manage_connections"),
         }
+
+    @router.post("/models/refresh", dependencies=op)
+    async def models_refresh(request: Request):
+        """Re-list the models of the image providers the caller may use."""
+        from app import policy
+        if not policy.of(request).can("manage_connections"):
+            raise HTTPException(403, "Only a profile that manages connections can refresh the model lists")
+        principal = policy.of(request).principal
+        ids = [p.id for p in image_providers.PRESETS
+               if image_access.allows(principal, p.access)]
+        sem = asyncio.Semaphore(2)
+
+        async def one(pid: str) -> dict:
+            async with sem:
+                try:
+                    return await model_catalog.refresh_image(pid)
+                except Exception:   # noqa: BLE001 - the catalog never raises; belt and braces
+                    log.exception("image model refresh failed for %s", pid)
+                    return {"models": [], "source": "documented", "error": "refresh failed"}
+
+        entries = await asyncio.gather(*(one(i) for i in ids))
+        results = {i: {"source": e.get("source", ""), "count": len(e.get("models") or []),
+                       "error": e.get("error"), "cached": bool(e.get("cached"))}
+                   for i, e in zip(ids, entries)}
+        providers, default = _provider_rows(principal)
+        return {"providers": providers, "default": default, "results": results}
 
     @router.get("/images", dependencies=op)
     async def images(request: Request, limit: int = Query(60, ge=1, le=200)):

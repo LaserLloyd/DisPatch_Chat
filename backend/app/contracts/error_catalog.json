@@ -3284,6 +3284,28 @@
     "Pick top this week, top this month, highest rated or newest"
    ],
    "seeded": true
+  },
+  {
+   "code": "imagestudio_prompt_too_long_for_model",
+   "status": 422,
+   "message": "The prompt is too long for the chosen image model",
+   "fix": "Shorten the prompt, or pick a model that takes longer ones.",
+   "docs": "imagestudio_prompt_too_long_for_model",
+   "patterns": [
+    "The prompt is {} characters; {} takes {}"
+   ],
+   "seeded": true
+  },
+  {
+   "code": "imagestudio_cannot_refresh_models",
+   "status": 403,
+   "message": "Your profile cannot refresh the model lists",
+   "fix": "Ask an Admin; refreshing needs the manage_connections permission.",
+   "docs": "imagestudio_cannot_refresh_models",
+   "patterns": [
+    "Only a profile that manages connections can refresh the model lists"
+   ],
+   "seeded": true
   }
  ]
 }

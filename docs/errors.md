@@ -155,6 +155,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`image_undecodable`](#image_undecodable) | 400 | Could not decode image |
 | [`imagestudio_a_generation_is_already_running`](#imagestudio_a_generation_is_already_running) | 409 | A generation is already running |
 | [`imagestudio_cannot_delete_pictures`](#imagestudio_cannot_delete_pictures) | 403 | Your profile cannot delete pictures |
+| [`imagestudio_cannot_refresh_models`](#imagestudio_cannot_refresh_models) | 403 | Your profile cannot refresh the model lists |
 | [`imagestudio_clear_pick_one`](#imagestudio_clear_pick_one) | 422 | Give either a picture id with its order, or a time range |
 | [`imagestudio_generation_running_clear`](#imagestudio_generation_running_clear) | 409 | A generation is running; try again when it is done |
 | [`imagestudio_no_image_provider_has_an_api`](#imagestudio_no_image_provider_has_an_api) | 409 | No image provider has an API key yet (Settings → AI & Connections → Image generation) |
@@ -162,6 +163,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`imagestudio_picture_already_gone`](#imagestudio_picture_already_gone) | 404 | That picture is already gone |
 | [`imagestudio_picture_needs_order`](#imagestudio_picture_needs_order) | 422 | A picture id needs the page's order |
 | [`imagestudio_pictures_changed`](#imagestudio_pictures_changed) | 409 | The pictures changed since you confirmed; count again |
+| [`imagestudio_prompt_too_long_for_model`](#imagestudio_prompt_too_long_for_model) | 422 | The prompt is too long for the chosen image model |
 | [`imagestudio_that_chat_image_is_not_in`](#imagestudio_that_chat_image_is_not_in) | 404 | That chat image is not in the media store |
 | [`imagestudio_that_model_name_is_not_valid`](#imagestudio_that_model_name_is_not_valid) | 422 | That model name is not valid |
 | [`imagestudio_that_provider_has_no_api_key`](#imagestudio_that_provider_has_no_api_key) | 409 | That provider has no API key yet (Settings → AI & Connections → Image generation) |
@@ -1425,6 +1427,14 @@ HTTP **403** - Your profile cannot delete pictures
 
 **Fix:** Ask an Admin; deleting needs the manage_history permission.
 
+## imagestudio_cannot_refresh_models
+
+<a id="imagestudio_cannot_refresh_models"></a>
+
+HTTP **403** - Your profile cannot refresh the model lists
+
+**Fix:** Ask an Admin; refreshing needs the manage_connections permission.
+
 ## imagestudio_clear_pick_one
 
 <a id="imagestudio_clear_pick_one"></a>
@@ -1480,6 +1490,14 @@ HTTP **422** - A picture id needs the page's order
 HTTP **409** - The pictures changed since you confirmed; count again
 
 **Fix:** Something was added or removed since the count; press Clear from here down again to see the new count.
+
+## imagestudio_prompt_too_long_for_model
+
+<a id="imagestudio_prompt_too_long_for_model"></a>
+
+HTTP **422** - The prompt is too long for the chosen image model
+
+**Fix:** Shorten the prompt, or pick a model that takes longer ones.
 
 ## imagestudio_that_chat_image_is_not_in
 

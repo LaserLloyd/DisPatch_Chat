@@ -1377,6 +1377,16 @@
       "status": 403
     },
     {
+      "code": "imagestudio_cannot_refresh_models",
+      "docs": "imagestudio_cannot_refresh_models",
+      "fix": "Ask an Admin; refreshing needs the manage_connections permission.",
+      "message": "Your profile cannot refresh the model lists",
+      "patterns": [
+        "Only a profile that manages connections can refresh the model lists"
+      ],
+      "status": 403
+    },
+    {
       "code": "imagestudio_clear_pick_one",
       "docs": "imagestudio_clear_pick_one",
       "fix": "Send a picture id with its order, or a time range, not both and not neither.",
@@ -1445,6 +1455,16 @@
         "The pictures changed since you confirmed; count again"
       ],
       "status": 409
+    },
+    {
+      "code": "imagestudio_prompt_too_long_for_model",
+      "docs": "imagestudio_prompt_too_long_for_model",
+      "fix": "Shorten the prompt, or pick a model that takes longer ones.",
+      "message": "The prompt is too long for the chosen image model",
+      "patterns": [
+        "The prompt is {} characters; {} takes {}"
+      ],
+      "status": 422
     },
     {
       "code": "imagestudio_that_chat_image_is_not_in",

@@ -5576,6 +5576,23 @@
         "summary": "Images"
       }
     },
+    "/api/apps/imagestudio/models/refresh": {
+      "post": {
+        "description": "Re-list the models of the image providers the caller may use.",
+        "operationId": "models_refresh_api_apps_imagestudio_models_refresh_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Models Refresh"
+      }
+    },
     "/api/apps/imagestudio/state": {
       "get": {
         "operationId": "state_api_apps_imagestudio_state_get",
