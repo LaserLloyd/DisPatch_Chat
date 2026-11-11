@@ -149,5 +149,14 @@
   "browse.downloads": "{n} Downloads",
   "browse.downloads_one": "1 Download",
   "browse.pick": "{name} verwenden",
-  "browse.adult": "18+"
+  "browse.adult": "18+",
+  "models.refresh": "Verfügbare Modelle aktualisieren",
+  "models.refreshing": "Wird aktualisiert…",
+  "models.note_docs": "Aus der Dokumentation von {label} (geprüft am {date}). {label} listet Bildmodelle nicht über die API auf.",
+  "models.note_docs_nodate": "Aus der Dokumentation von {label}. {label} listet Bildmodelle nicht über die API auf.",
+  "models.note_endpoint": "Aus der Modellliste von {label}, aktualisiert am {date}.",
+  "models.note_endpoint_nodate": "Aus der Modellliste von {label}.",
+  "models.refreshed": "Aktualisiert: {n} Modelle für {name}",
+  "models.refresh_failed": "{name} konnte nicht aktualisiert werden: {error}",
+  "models.refresh_docs_only": "Nichts Neues: Diese Anbieter listen Bildmodelle nicht über eine API auf."
 }

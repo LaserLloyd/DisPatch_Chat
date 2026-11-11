@@ -153,5 +153,14 @@
   "browse.downloads": "{n} تنزيل",
   "browse.downloads_one": "تنزيل واحد",
   "browse.pick": "استخدام {name}",
-  "browse.adult": "+18"
+  "browse.adult": "+18",
+  "models.refresh": "تحديث النماذج المتاحة",
+  "models.refreshing": "جارٍ التحديث…",
+  "models.note_docs": "من وثائق {label} (تم التحقق في {date}). لا يعرض {label} نماذج الصور عبر واجهته البرمجية.",
+  "models.note_docs_nodate": "من وثائق {label}. لا يعرض {label} نماذج الصور عبر واجهته البرمجية.",
+  "models.note_endpoint": "من قائمة نماذج {label}، حُدّثت في {date}.",
+  "models.note_endpoint_nodate": "من قائمة نماذج {label}.",
+  "models.refreshed": "تم التحديث: {n} نماذج لـ {name}",
+  "models.refresh_failed": "تعذّر تحديث {name}: {error}",
+  "models.refresh_docs_only": "لا جديد: لا يعرض هؤلاء المزوّدون نماذج الصور عبر واجهة برمجية."
 }

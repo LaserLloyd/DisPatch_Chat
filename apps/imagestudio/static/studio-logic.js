@@ -281,3 +281,54 @@ export function browseMatches(row, words) {
 export function rememberModelName(names, row) {
   return { ...(names || {}), [row.air]: row.name };
 }
+
+/** The model the form will send: the typed one, else the provider's default. */
+export function activeModel(provider, typed = '') {
+  const m = String(typed || '').trim();
+  return m || (provider && provider.model) || '';
+}
+
+/** What ``model`` can do on ``provider``: the per-model row when the server sent one,
+ *  else the provider-wide ``supports`` (a typed id the server has never heard of). */
+export function modelCaps(provider, model) {
+  const none = { reference: false, optimizer: false, seed: false, max_n: 1 };
+  if (!provider) return none;
+  const by = provider.supports_by_model || {};
+  return by[model] || provider.supports || none;
+}
+
+/** The longest prompt ``model`` takes on ``provider``. */
+export function modelPromptMax(provider, model, fallback = PROMPT_MAX) {
+  if (!provider) return fallback;
+  const by = provider.prompt_max_by_model || {};
+  return by[model] || provider.prompt_max || fallback;
+}
+
+/** The small line under the model field: {key, vars} for t(), or null. */
+export function modelsNote(provider) {
+  if (!provider) return null;
+  const date = String(provider.models_checked_at || '').slice(0, 10);
+  if (provider.models_source === 'endpoint') {
+    return { key: date ? 'models.note_endpoint' : 'models.note_endpoint_nodate', vars: { label: provider.label, date } };
+  }
+  if (provider.models_source === 'documented') {
+    return { key: date ? 'models.note_docs' : 'models.note_docs_nodate', vars: { label: provider.label, date } };
+  }
+  return null;
+}
+
+/** One plain sentence about a refresh: {key, vars, error}. */
+export function refreshSummary(result, providers = []) {
+  const res = (result && result.results) || {};
+  const label = (id) => ((providers.find((p) => p.id === id) || {}).label) || id;
+  const failed = Object.entries(res).filter(([, r]) => r && r.error);
+  const live = Object.entries(res).filter(([, r]) => r && !r.error && r.source === 'endpoint');
+  if (failed.length && !live.length) {
+    return { key: 'models.refresh_failed', vars: { name: label(failed[0][0]), error: String(failed[0][1].error) }, error: true };
+  }
+  if (live.length) {
+    const [id, r] = live[0];
+    return { key: 'models.refreshed', vars: { n: r.count, name: label(id) }, error: false };
+  }
+  return { key: 'models.refresh_docs_only', vars: {}, error: false };
+}

@@ -149,5 +149,14 @@
   "browse.downloads": "{n} downloads",
   "browse.downloads_one": "1 download",
   "browse.pick": "Use {name}",
-  "browse.adult": "18+"
+  "browse.adult": "18+",
+  "models.refresh": "Refresh available models",
+  "models.refreshing": "Refreshing…",
+  "models.note_docs": "From {label}'s docs (checked {date}). {label} doesn't list its image models through its API.",
+  "models.note_docs_nodate": "From {label}'s docs. {label} doesn't list its image models through its API.",
+  "models.note_endpoint": "From {label}'s model list, updated {date}.",
+  "models.note_endpoint_nodate": "From {label}'s model list.",
+  "models.refreshed": "Updated: {n} models for {name}",
+  "models.refresh_failed": "Couldn't refresh {name}: {error}",
+  "models.refresh_docs_only": "Nothing new: these providers don't list their image models through an API."
 }

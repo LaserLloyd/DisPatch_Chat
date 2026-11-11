@@ -866,3 +866,50 @@ test('blocked state shows the not-allowed text and no setup button', { skip: dom
   assert.match(none.textContent, /can't use the image generators/);
   assert.equal(none.querySelector('button').hidden, true);
 });
+
+const H3_PROVIDERS = PROVIDERS.map((p) => (p.id !== 'minimax' ? p : {
+  ...p, models: ['MiniMax-H3-Image', 'image-01'], models_source: 'documented', models_checked_at: '2026-11-11T05:00:00+00:00', label: 'MiniMax',
+  prompt_max_by_model: { 'image-01': 1500, 'MiniMax-H3-Image': 4000 },
+  supports_by_model: {
+    'image-01': { reference: true, optimizer: true, seed: true, max_n: 9 },
+    'MiniMax-H3-Image': { reference: false, optimizer: true, seed: false, max_n: 10 },
+  },
+}));
+
+test('the refresh button shows only with can_refresh_models; the note names the source', { skip: dom.skip }, async () => {
+  const no = await page({ state: { ...STATE, providers: H3_PROVIDERS } });
+  assert.equal(no.doc.getElementById('st-model-refresh').hidden, true);
+  assert.match(no.doc.querySelector('.st-modelnote').textContent, /From MiniMax's docs \(checked 2026-11-11\)/);
+  const yes = await page({ state: { ...STATE, providers: H3_PROVIDERS, can_refresh_models: true } });
+  assert.equal(yes.doc.getElementById('st-model-refresh').hidden, false);
+});
+
+test('picking an H3 model lifts the prompt limit and hides seed and reference', { skip: dom.skip }, async () => {
+  const { doc, win } = await page({ state: { ...STATE, providers: H3_PROVIDERS } });
+  assert.equal(doc.querySelector('.st-counter').textContent, '0 / 1,500');
+  const m = doc.getElementById('st-model');
+  m.value = 'MiniMax-H3-Image';
+  m.dispatchEvent(new win.Event('input', { bubbles: true }));
+  assert.equal(doc.querySelector('.st-counter').textContent, '0 / 4,000');
+  assert.equal(doc.getElementById('st-seed').closest('.st-field').hidden, true);
+  assert.equal(doc.getElementById('st-count').max, '10');
+});
+
+test('Refresh swaps in the new provider rows, keeps the selection and says what changed', { skip: dom.skip }, async () => {
+  const fresh = H3_PROVIDERS.map((p) => (p.id === 'minimax' ? { ...p, models: ['MiniMax-H3-Image', 'image-01', 'image-01-live'] } : p));
+  const env = await page({
+    state: { ...STATE, providers: H3_PROVIDERS, can_refresh_models: true },
+    extra: { 'POST /api/apps/imagestudio/models/refresh': () => [200, {
+      providers: fresh, default: 'minimax', results: { minimax: { source: 'endpoint', count: 3, error: null, cached: false } } }] },
+  });
+  const { doc } = env;
+  doc.getElementById('st-model').value = 'MiniMax-H3-Image';
+  doc.getElementById('st-model-refresh').click();
+  await flush(); await flush();
+  assert.equal(env.calls.filter((c) => c.key === 'POST /api/apps/imagestudio/models/refresh').length, 1);
+  assert.equal(doc.getElementById('st-model').value, 'MiniMax-H3-Image');
+  assert.equal(doc.getElementById('st-provider').value, 'minimax');
+  assert.equal(doc.querySelectorAll('#st-models option').length, 3);
+  assert.match(doc.querySelector('.st-status').textContent, /Updated: 3 models for MiniMax/);
+  assert.equal(doc.getElementById('st-model-refresh').disabled, false);
+});

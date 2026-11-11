@@ -150,5 +150,14 @@
   "browse.downloads": "{n} downloads",
   "browse.downloads_one": "1 download",
   "browse.pick": "Usar {name}",
-  "browse.adult": "18+"
+  "browse.adult": "18+",
+  "models.refresh": "Atualizar modelos disponíveis",
+  "models.refreshing": "Atualizando…",
+  "models.note_docs": "Da documentação de {label} (verificada em {date}). {label} não lista seus modelos de imagem pela API.",
+  "models.note_docs_nodate": "Da documentação de {label}. {label} não lista seus modelos de imagem pela API.",
+  "models.note_endpoint": "Da lista de modelos de {label}, atualizada em {date}.",
+  "models.note_endpoint_nodate": "Da lista de modelos de {label}.",
+  "models.refreshed": "Atualizado: {n} modelos para {name}",
+  "models.refresh_failed": "Não foi possível atualizar {name}: {error}",
+  "models.refresh_docs_only": "Nada de novo: esses provedores não listam seus modelos de imagem por API."
 }

@@ -23,7 +23,8 @@ import {
   DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata, DELETE_SCOPE_LABELS, estimateKey, modelLabel,
   CURRENCIES, normalizeCurrency, balanceLine, BROWSE_SORTS, normalizeBrowseSort, compactCount, browseLabel,
   cleanBrowseRows, rememberModelName, browseWords, browseMatches,
-} from './studio-logic.js?v=9';
+  activeModel, modelCaps, modelPromptMax, modelsNote, refreshSummary,
+} from './studio-logic.js?v=10';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
 export const API = '/api/apps/imagestudio';
@@ -31,6 +32,7 @@ export const API = '/api/apps/imagestudio';
 const S = {
   info: null,            // GET /state
   images: [],            // GET /images, oldest -> newest
+  refreshing: false,     // POST /models/refresh in flight
   busy: false,           // any generation in flight (aria only: Generate is never blocked)
   pending: [],           // this page's jobs: {key, body, state: 'running'|'failed', error}
   jobSeq: 0,
@@ -91,9 +93,12 @@ function isCivitai() {
   return !!(p && p.shape === 'civitai');
 }
 
+function currentModel() {
+  return activeModel(provider(), R.model ? R.model.value : '');
+}
+
 function caps() {
-  const p = provider();
-  return (p && p.supports) || { reference: false, optimizer: false, seed: false, max_n: 1 };
+  return modelCaps(provider(), currentModel());
 }
 
 function setStatus(text, isError = false) {
@@ -114,10 +119,10 @@ function formState() {
 
 // ---------------------------------------------------------------- form
 
-function refreshForm() {
+function refreshModelBits() {
   const p = provider();
   const c = caps();
-  const st = promptStatus(R.prompt.value, (p && p.prompt_max) || (S.info ? S.info.prompt_max : PROMPT_MAX));
+  const st = promptStatus(R.prompt.value, modelPromptMax(p, currentModel(), S.info ? S.info.prompt_max : PROMPT_MAX));
   R.counter.textContent = t('prompt.counter', { n: st.n, max: st.max });
   R.counter.classList.toggle('st-over', st.over);
   R.count.max = String(c.max_n);
@@ -125,6 +130,42 @@ function refreshForm() {
   R.optimizerRow.hidden = !c.optimizer;
   R.seedRow.hidden = !c.seed;
   R.refBox.hidden = !c.reference;
+  R.go.disabled = !canGenerate({ prompt: R.prompt.value, busy: false, provider: p && p.configured ? p.id : '' });
+}
+
+function renderModelNote() {
+  const n = modelsNote(provider());
+  R.modelNote.hidden = !n;
+  R.modelNote.textContent = n ? t(n.key, n.vars) : '';
+  R.modelRefresh.hidden = !(S.info && S.info.can_refresh_models);
+  R.modelRefresh.disabled = S.refreshing;
+  R.modelRefresh.textContent = t(S.refreshing ? 'models.refreshing' : 'models.refresh');
+}
+
+async function refreshModels() {
+  if (S.refreshing) return;
+  S.refreshing = true; renderModelNote();
+  const chosen = { provider: R.provider.value, model: R.model.value };
+  try {
+    const r = await api(`${API}/models/refresh`, { method: 'POST' });
+    S.info = { ...S.info, providers: r.providers, default: r.default };
+    renderProviders();
+    if (S.info.providers.some((p) => p.id === chosen.provider)) R.provider.value = chosen.provider;
+    R.model.value = chosen.model;
+    const sum = refreshSummary(r, r.providers);
+    setStatus(t(sum.key, sum.vars), sum.error);
+    toast(t(sum.key, sum.vars));
+  } catch (e) {
+    setStatus(t('models.refresh_failed', { name: '', error: e.message }), true);
+  } finally {
+    S.refreshing = false;
+    refreshForm();
+  }
+}
+
+function refreshForm() {
+  const p = provider();
+  refreshModelBits();
   S.busy = running() > 0;
   // Running jobs never disable Generate: more may start (the cap is checked on press).
   R.go.disabled = !canGenerate({ prompt: R.prompt.value, busy: false, provider: p && p.configured ? p.id : '' });
@@ -136,6 +177,7 @@ function refreshForm() {
   const names = (p && p.model_names) || {};
   R.model.placeholder = p && p.shape === 'civitai' ? t('model.civitai_placeholder') : (p ? p.model : '');
   R.models.replaceChildren(...((p && p.models) || []).map((m) => el('option', names[m] ? { value: m, label: names[m] } : { value: m })));
+  renderModelNote();
   R.est.hidden = !(p && p.estimate) || !S.estText;
   R.est.textContent = S.estText;
   const civ = isCivitai() && !!p.configured;
@@ -794,6 +836,8 @@ function build(root) {
   R.provider = el('select', { id: 'st-provider' });
   R.model = el('input', { type: 'text', id: 'st-model', list: 'st-models', autocomplete: 'off', spellcheck: 'false' });
   R.models = el('datalist', { id: 'st-models' });
+  R.modelNote = el('p', { class: 'st-muted st-modelnote', hidden: '' });
+  R.modelRefresh = el('button', { type: 'button', class: 'st-btn st-browse-btn', id: 'st-model-refresh', text: t('models.refresh'), hidden: '' });
   R.browseBtn = el('button', { type: 'button', class: 'st-btn st-browse-btn', id: 'st-browse', text: t('browse.button'), hidden: '', 'aria-expanded': 'false', 'aria-controls': 'st-browse-panel' });
   R.pay = el('select', { id: 'st-pay' }, ['', ...CURRENCIES].map((v) => el('option', { value: v, text: t(PAY_LABELS[v]) })));
   R.pay.value = S.pay;
@@ -854,6 +898,7 @@ function build(root) {
   R.form = el('div', { class: 'st-form' }, [
     field(t('prompt.label'), R.prompt, R.counter), R.recentWrap,
     el('div', { class: 'st-two' }, [field(t('provider.label'), R.provider), field(t('model.label'), R.model, R.models)]),
+    R.modelRefresh, R.modelNote,
     R.browseBtn, R.browsePanel,
     el('div', { class: 'st-two' }, [field(t('ratio.label'), R.ratio), field(t('count.label'), R.count)]),
     R.payRow,
@@ -892,7 +937,8 @@ function build(root) {
   });
   R.provider.addEventListener('change', refreshForm);
   R.count.addEventListener('change', () => { R.count.value = String(clampCount(R.count.value, caps().max_n)); scheduleEstimate(); });
-  R.model.addEventListener('input', scheduleEstimate);
+  R.model.addEventListener('input', () => { refreshModelBits(); scheduleEstimate(); });
+  R.modelRefresh.addEventListener('click', refreshModels);
   R.pay.addEventListener('change', () => { S.pay = normalizeCurrency(R.pay.value); savePay(S.pay); scheduleEstimate(); });
   R.buzzRefresh.addEventListener('click', () => loadBalance());
   R.browseBtn.addEventListener('click', toggleBrowse);

@@ -148,5 +148,14 @@
   "browse.downloads": "{n} ダウンロード",
   "browse.downloads_one": "1 ダウンロード",
   "browse.pick": "{name} を使う",
-  "browse.adult": "18+"
+  "browse.adult": "18+",
+  "models.refresh": "利用可能なモデルを更新",
+  "models.refreshing": "更新中…",
+  "models.note_docs": "{label}のドキュメントより(確認日 {date})。{label}はAPIで画像モデルの一覧を提供していません。",
+  "models.note_docs_nodate": "{label}のドキュメントより。{label}はAPIで画像モデルの一覧を提供していません。",
+  "models.note_endpoint": "{label}のモデル一覧より(更新日 {date})。",
+  "models.note_endpoint_nodate": "{label}のモデル一覧より。",
+  "models.refreshed": "更新しました:{name}のモデル {n} 件",
+  "models.refresh_failed": "{name}を更新できませんでした:{error}",
+  "models.refresh_docs_only": "新しい情報はありません。これらのプロバイダはAPIで画像モデルを一覧できません。"
 }

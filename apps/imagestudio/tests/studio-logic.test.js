@@ -218,3 +218,46 @@ test('Browse filter: words are folded, lower-cased, deduplicated and capped; a r
   assert.equal(browseMatches(row, browseWords('anime pony')), false);
   assert.equal(browseMatches({}, ['a']), false);
 });
+
+import { activeModel, modelCaps, modelPromptMax, modelsNote, refreshSummary } from '../static/studio-logic.js';
+
+const MM = {
+  id: 'minimax', label: 'MiniMax', model: 'image-01', prompt_max: 1500,
+  supports: { reference: true, optimizer: true, seed: true, max_n: 9 },
+  supports_by_model: {
+    'image-01': { reference: true, optimizer: true, seed: true, max_n: 9 },
+    'MiniMax-H3-Image': { reference: false, optimizer: true, seed: false, max_n: 10 },
+  },
+  prompt_max_by_model: { 'image-01': 1500, 'MiniMax-H3-Image': 4000 },
+};
+
+test('the model in use is the typed one, else the provider default', () => {
+  assert.equal(activeModel(MM, ''), 'image-01');
+  assert.equal(activeModel(MM, '  MiniMax-H3-Image '), 'MiniMax-H3-Image');
+});
+
+test('caps and prompt limit follow the selected model, falling back to the provider row', () => {
+  assert.equal(modelCaps(MM, 'MiniMax-H3-Image').seed, false);
+  assert.equal(modelCaps(MM, 'MiniMax-H3-Image').max_n, 10);
+  assert.equal(modelCaps(MM, 'image-01').reference, true);
+  assert.equal(modelCaps(MM, 'typed-unknown').max_n, 9);
+  assert.equal(modelPromptMax(MM, 'MiniMax-H3-Image'), 4000);
+  assert.equal(modelPromptMax(MM, 'image-01'), 1500);
+  assert.equal(modelPromptMax(MM, 'unknown'), 1500);
+  assert.equal(modelCaps(null, 'x').max_n, 1);
+});
+
+test('the note under the model field says where the list came from', () => {
+  assert.deepEqual(modelsNote({ ...MM, models_source: 'documented', models_checked_at: '2026-11-11T05:00:00+00:00' }),
+    { key: 'models.note_docs', vars: { label: 'MiniMax', date: '2026-11-11' } });
+  assert.equal(modelsNote({ ...MM, models_source: 'endpoint', models_checked_at: null }).key, 'models.note_endpoint_nodate');
+  assert.equal(modelsNote({ ...MM, models_source: '' }), null);
+});
+
+test('a refresh is summed up in one plain sentence', () => {
+  const provs = [{ id: 'xai', label: 'xAI Grok' }];
+  assert.deepEqual(refreshSummary({ results: { xai: { source: 'endpoint', count: 4 } } }, provs),
+    { key: 'models.refreshed', vars: { n: 4, name: 'xAI Grok' }, error: false });
+  assert.equal(refreshSummary({ results: { xai: { source: 'documented', count: 2, error: 'HTTP 500' } } }, provs).error, true);
+  assert.equal(refreshSummary({ results: { minimax: { source: 'documented', count: 4, error: null } } }, provs).key, 'models.refresh_docs_only');
+});

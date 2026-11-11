@@ -148,5 +148,14 @@
   "browse.downloads": "{n} 次下载",
   "browse.downloads_one": "1 次下载",
   "browse.pick": "使用 {name}",
-  "browse.adult": "18+"
+  "browse.adult": "18+",
+  "models.refresh": "刷新可用模型",
+  "models.refreshing": "正在刷新…",
+  "models.note_docs": "来自{label}的文档(检查于 {date})。{label}不通过 API 列出图像模型。",
+  "models.note_docs_nodate": "来自{label}的文档。{label}不通过 API 列出图像模型。",
+  "models.note_endpoint": "来自{label}的模型列表,更新于 {date}。",
+  "models.note_endpoint_nodate": "来自{label}的模型列表。",
+  "models.refreshed": "已更新:{name}共 {n} 个模型",
+  "models.refresh_failed": "无法刷新{name}:{error}",
+  "models.refresh_docs_only": "没有新内容:这些服务商不通过 API 列出图像模型。"
 }
