@@ -196,7 +196,7 @@ def _image_cli_status() -> dict | None:
     return _run_json([bin_, "--status"])
 
 
-#: A the image server MCP client of this module's own, so the pool guard can ask
+#: An image-server MCP client of this module's own, so the pool guard can ask
 #: `can_render` without reaching into main.py's `_image_server()` singleton
 #: (which would be a circular import — main imports this module). It is a
 #: second client, but NOT a second gate: readiness() below is the SAME
@@ -225,8 +225,8 @@ def _rig_readiness_client_get() -> image_jobs.ImageServer | None:
 def rig_readiness() -> image_jobs.RigReadiness | None:
     """``can_render`` / ``can_render_reason`` off the rig's own ``comfy_status``.
 
-    None when no the image server endpoint is configured (fail open — same as every
-    other probe in this module when its CLI/URL is unset). ``the image server.
+    None when no image server endpoint is configured (fail open — same as every
+    other probe in this module when its CLI/URL is unset). ``ImageServer.
     readiness()`` itself never raises: an unreachable rig leaves the previous
     answer standing, or an "unknown" one, both of which read as
     ``can_render: True``.

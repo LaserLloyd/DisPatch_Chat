@@ -695,7 +695,7 @@ class ImageServer:
     def _note_schema_version(self, tool: str, payload: dict) -> None:
         """Record the rig's ``schema_version``, and say so when it moves.
 
-        the image server stamps it on ``status()``, ``list_jobs``, ``get_job``
+        The image server stamps it on ``status()``, ``list_jobs``, ``get_job``
         and every generation result, and bumps it ONLY when a field moves, is
         removed or changes type — adding one does not. So a bump is exactly the
         event that breaks a parser in this file, and the whole value of the

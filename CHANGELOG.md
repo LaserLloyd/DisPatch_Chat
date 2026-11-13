@@ -7,6 +7,7 @@ this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Image server settings renamed: set `DISPATCH_IMAGE_SERVER_URL` / `DISPATCH_IMAGE_SERVER_FILES_URL` (Settings keys `connections.image_server_url` / `_files_url`); the image provider id is `server`, and `GET /api/llm/image` reports `image_server`. An older install that set the previous variable or saved the address in Settings must set it again; a boot warning names the variable when bots want pictures and no server is set. Completion callbacks read the `X-Image-Gateway-Token` header, plus any names in `DISPATCH_IMAGE_CALLBACK_HEADERS`. `scripts/dispatch-avatar-rotate` needs `DISPATCH_IMAGE_CLI` (no built-in default).
 - Image Studio can make pictures with Civitai (billed in Buzz) using SDXL checkpoints (Juggernaut XL default, RealVisXL, Pony, WAI-Illustrious; any SDXL checkpoint link or AIR works). The Generate line shows Civitai's cost estimate before you submit.
 - Who may make pictures: new Settings switches choose which profile types may use the standard API generators and Civitai (Owner, Admin, User, Basic). The Owner's own access does not depend on the switches.
 - Invariant I13: the default image provider can never be a studio-only generator; `/api/health/invariants` reports it.
