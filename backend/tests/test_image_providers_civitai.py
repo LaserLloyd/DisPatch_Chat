@@ -333,7 +333,7 @@ async def test_model_resolution():
 def test_fences(monkeypatch):
     assert ip.api_selected({"provider": "civitai"}) is False
     assert ip.api_selected({"provider": "minimax"}) is True
-    assert ip.choose_backend("", clawforge=False, cfg={"provider": "civitai"}) == ""
+    assert ip.choose_backend("", server=False, cfg={"provider": "civitai"}) == ""
     with pytest.raises(ValueError, match="Image Studio only"):
         ip.merge_submission({"provider": "civitai"}, {})
     with pytest.raises(image_jobs.ImageJobError, match="Image Studio only"):

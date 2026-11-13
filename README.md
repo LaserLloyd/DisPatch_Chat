@@ -99,7 +99,7 @@ alternatives, and a feature-by-feature matrix of what needs what.
 | [OpenClaw](https://github.com/openclaw/openclaw) | agent bots with tools, files and long jobs | `openclaw` on PATH or its gateway |
 | [DisPatch_Voice](https://github.com/LaserLloyd/DisPatch_Voice) | hands-free voice chat | an add-on package |
 | [MailForge](https://github.com/LaserLloyd/MailForge) | an Emails tab for a local email assistant that never sends on its own | runs beside DisPatch |
-| An MCP image server (ComfyUI-style) | pictures and pools from your own GPU | `DISPATCH_CLAWFORGE_URL` |
+| An MCP image server (ComfyUI-style) | pictures and pools from your own GPU | `DISPATCH_IMAGE_SERVER_URL` |
 | Offline Wikipedia ([InfoForge](https://github.com/LaserLloyd/InfoForge)) | cited answers from a local Wikipedia copy; the online `wikipedia` lookup works today | `advisor.lookup` |
 
 ## Install

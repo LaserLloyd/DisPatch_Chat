@@ -131,7 +131,7 @@ def _host_restarts_backend(status: dict | None) -> bool:
     """True when the image host stops its renderer when idle and starts it
     again on the next request.
 
-    ClawForge unloads ComfyUI after ``idle_unload.minutes`` of quiet. On an
+    the image server unloads ComfyUI after ``idle_unload.minutes`` of quiet. On an
     hourly picture cadence that leaves ``comfy.running`` false for most of
     every hour while the rig is perfectly able to render -- it simply spends a
     cold start doing it. Treating that as an outage is what skipped 70 refill
@@ -196,8 +196,8 @@ def _image_cli_status() -> dict | None:
     return _run_json([bin_, "--status"])
 
 
-#: A ClawForge MCP client of this module's own, so the pool guard can ask
-#: `can_render` without reaching into main.py's `_clawforge()` singleton
+#: A the image server MCP client of this module's own, so the pool guard can ask
+#: `can_render` without reaching into main.py's `_image_server()` singleton
 #: (which would be a circular import — main imports this module). It is a
 #: second client, but NOT a second gate: readiness() below is the SAME
 #: `RigReadiness` code the job-submission path uses (image_jobs.py:707-749),
@@ -205,18 +205,18 @@ def _image_cli_status() -> dict | None:
 #: here — the alternative, re-deriving can_render from comfy.running/
 #: last_error/idle_unload the way this module used to, is exactly the
 #: duplication that let the two gates drift apart.
-_rig_readiness_client: image_jobs.ClawForge | None = None
+_rig_readiness_client: image_jobs.ImageServer | None = None
 
 
-def _rig_readiness_client_get() -> image_jobs.ClawForge | None:
+def _rig_readiness_client_get() -> image_jobs.ImageServer | None:
     global _rig_readiness_client
-    url = config.SETTINGS.clawforge_url
+    url = config.SETTINGS.image_server_url
     if not url:
         return None
     c = _rig_readiness_client
     if c is None or c.url != url:
-        c = image_jobs.ClawForge(url,
-                                 files_url=config.SETTINGS.clawforge_files_url,
+        c = image_jobs.ImageServer(url,
+                                 files_url=config.SETTINGS.image_server_files_url,
                                  client_name="dispatch-pool-guard")
         _rig_readiness_client = c
     return c
@@ -225,8 +225,8 @@ def _rig_readiness_client_get() -> image_jobs.ClawForge | None:
 def rig_readiness() -> image_jobs.RigReadiness | None:
     """``can_render`` / ``can_render_reason`` off the rig's own ``comfy_status``.
 
-    None when no ClawForge endpoint is configured (fail open — same as every
-    other probe in this module when its CLI/URL is unset). ``ClawForge.
+    None when no the image server endpoint is configured (fail open — same as every
+    other probe in this module when its CLI/URL is unset). ``the image server.
     readiness()`` itself never raises: an unreachable rig leaves the previous
     answer standing, or an "unknown" one, both of which read as
     ``can_render: True``.
@@ -267,8 +267,8 @@ def lease_url() -> str | None:
 #: else — `render`, `agent`, `other` — is ordinary, short-lived contention
 #: for a card, and per the contract must NOT trigger the same block: in
 #: practice the single live lease on this rig for most of a day is
-#: ClawForge's own near-permanent idle hold on its own ComfyUI card
-#: (`holder=clawforge2 kind=render state=idle`, re-asked every 60s), and
+#: the image server's own near-permanent idle hold on its own ComfyUI card
+#: (`holder=render-tenant kind=render state=idle`, re-asked every 60s), and
 #: standing the pool down against that for 3600s at a time (2026-09-10,
 #: `pool_refill_failures_24h` = 20 `leased` refusals in a day) was this
 #: function reading ANY foreign live lease as a benchmark. Branch on `kind`
@@ -282,7 +282,7 @@ def rig_lease_holder() -> str | None:
 
     Branching on `kind` makes the old self-holder exclusion unnecessary and
     it is gone: a `render`/`agent`/`other` lease is never a stand-down
-    whether it is ours (ClawForge's own idle hold) or somebody else's, so
+    whether it is ours (the image server's own idle hold) or somebody else's, so
     there is nothing left here that needs to ask who "we" are — the second
     probe (`image_self_lease_holder` -> `_image_cli_status`) that exclusion
     depended on could itself fail closed and misread our own lease as
@@ -312,7 +312,7 @@ def rig_lease_holder() -> str | None:
 
 
 #: Lease states that mean the holder has finished. `holder` stays populated
-#: after release (ClawForge reports state "none", detail "released"), so the
+#: after release (the image server reports state "none", detail "released"), so the
 #: name alone cannot say whether the cards are actually booked. Anything NOT
 #: listed here -- including a lease book with no `state` field at all -- is
 #: treated as live, so an unfamiliar shape still fails safe.
@@ -368,7 +368,7 @@ def image_self_lease_holder(status: dict | None = None) -> str:
     """The holder id the image host uses when IT leases the rig.
 
     Read from the host's own lease view rather than hard-coded, so a rename on
-    the rig (clawforge2 -> clawforge3) cannot quietly reintroduce the deadlock.
+    the rig (render-v2 -> render-v3) cannot quietly reintroduce the deadlock.
     """
     if status is None:
         status = _image_cli_status()
@@ -509,7 +509,7 @@ def free_vram_before_mint(min_free_gb: float | None = None, *,
     cli_status = _image_cli_status()
     backend = image_backend_state(cli_status)
     # Gate on `can_render` ONLY (rig contract §12.6). Never `comfy.running` —
-    # ClawForge unloads ComfyUI's models when idle and starts it on the next
+    # the image server unloads ComfyUI's models when idle and starts it on the next
     # job, so `running: false` is routinely a rig that renders fine. Never an
     # `idle_unload`-derived `auto_start` guess either: both of those read an
     # idle-but-startable backend as "down" and stood this gate down wrongly,

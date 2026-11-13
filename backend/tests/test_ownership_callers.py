@@ -29,6 +29,7 @@ _OWNED = "passes principal= / owner_ids= (the caller's own chats only)"
 ALLOWED: dict[tuple[str, str, str], str] = {
     ("apps/imagestudio/backend.py", "chat_images", "all_threads"): _OWNED,
     ("apps/imagestudio/backend.py", "targets", "all_threads"): _OWNED,
+    ("backend/app/main.py", "_warn_image_server_unset", "load_bots"): "boot log line: counts bots with image_jobs on and logs up to five ids; nothing is served to a caller",
     ("apps/imagestudio/backend.py", "targets", "load_bots"): _FILTER,
     ("backend/app/bot_builder_api.py", "provider_chain", "load_bots"):
         "household bots' provider entries only (never personal); nothing about any bot is returned",

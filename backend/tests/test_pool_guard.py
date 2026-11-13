@@ -530,7 +530,7 @@ def test_a_trailing_newline_does_not_pass_an_id_as_a_path_component():
 # --------------------------------------------------------------------------- #
 # Idle-unload is not an outage (2026-09-03)
 #
-# ClawForge stops ComfyUI after `idle_unload.minutes` of quiet and starts it
+# the image server stops ComfyUI after `idle_unload.minutes` of quiet and starts it
 # again on the next render. On an hourly picture cadence that means
 # `comfy.running` is false for most of every hour, and the pools -- which look
 # every 300 s -- spent 2026-09-03 reading a normal idle state as a dead
@@ -606,7 +606,7 @@ def test_a_rig_that_says_the_backend_cannot_be_started_blocks(monkeypatch):
 
 def test_no_configured_rig_client_fails_open_on_the_can_render_gate(
         monkeypatch):
-    """No `DISPATCH_CLAWFORGE_URL` → `rig_readiness()` is None → the gate
+    """No `DISPATCH_IMAGE_SERVER_URL` → `rig_readiness()` is None → the gate
 
     does not fire at all (the headroom check downstream still can).
     """
@@ -622,8 +622,8 @@ def test_no_configured_rig_client_fails_open_on_the_can_render_gate(
 # Only a `benchmark` lease is a stand-down (rig contract §12.5, G24 2026-09-10)
 #
 # `kind` is the ONLY signal. A `render`/`agent` lease is ordinary contention
-# for a card — most commonly ClawForge's own near-permanent idle hold on its
-# own ComfyUI card (`holder=clawforge2 kind=render state=idle`, re-asked
+# for a card — most commonly the image server's own near-permanent idle hold on its
+# own ComfyUI card (`holder=render-tenant kind=render state=idle`, re-asked
 # every 60s) — and must never earn the same block a real benchmark does.
 # This also retires the old self-holder exclusion (2026-09-03): a `render`
 # lease is never a stand-down whether it is ours or somebody else's, so
@@ -636,11 +636,11 @@ def _leases(*entries):
 
 
 def test_a_render_lease_is_never_a_blocker_even_when_it_is_our_own(monkeypatch):
-    """THE 2026-09-10 regression: 20 `leased` refusals/day against ClawForge's
+    """THE 2026-09-10 regression: 20 `leased` refusals/day against the image server's
     own permanent idle hold on its ComfyUI card."""
     monkeypatch.setattr(pool_guard, "lease_url", lambda: "http://rig/api/leases")
     monkeypatch.setattr(pool_guard, "_fetch_leases",
-                        lambda url: _leases({"holder": "clawforge2",
+                        lambda url: _leases({"holder": "render-tenant",
                                              "kind": "render",
                                              "state": "idle"}))
     assert pool_guard.rig_lease_holder() is None
@@ -716,8 +716,8 @@ def test_a_lease_with_no_kind_at_all_does_not_block(monkeypatch):
 def test_self_holder_is_read_from_the_image_hosts_own_lease_view():
     """`image_self_lease_holder()` itself still works — it is just no longer
     called by `rig_lease_holder()`, which reads `kind` instead."""
-    status = {"comfy": {"lease": {"holder": "clawforge2", "state": "none"}}}
-    assert pool_guard.image_self_lease_holder(status) == "clawforge2"
+    status = {"comfy": {"lease": {"holder": "render-tenant", "state": "none"}}}
+    assert pool_guard.image_self_lease_holder(status) == "render-tenant"
 
 
 # --------------------------------------------------------------------------- #

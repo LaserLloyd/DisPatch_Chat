@@ -97,10 +97,10 @@ test('the checklist marks each capability', { skip: dom.skip }, async () => {
 test('image status line says where pictures come from', { skip: dom.skip }, async () => {
   const { mod } = await setup();
   const presets = [{ id: 'minimax', label: 'MiniMax', model: 'image-01' }];
-  assert.match(mod.imageStatusText({ presets, clawforge: false,
+  assert.match(mod.imageStatusText({ presets, image_server: false,
     config: { provider: 'minimax', key_source: 'shared' } }), /MiniMax \(image-01\).*shared/);
-  assert.match(mod.imageStatusText({ presets, clawforge: true, config: { provider: '' } }), /image server/);
-  assert.match(mod.imageStatusText({ presets, clawforge: false, config: { provider: '' } }), /off/);
+  assert.match(mod.imageStatusText({ presets, image_server: true, config: { provider: '' } }), /image server/);
+  assert.match(mod.imageStatusText({ presets, image_server: false, config: { provider: '' } }), /off/);
 });
 
 test('one-key setup posts the key once and paints the checklist', { skip: dom.skip }, async () => {
@@ -147,7 +147,7 @@ test('image form: model datalist follows the provider, shows its source, Refresh
   };
   let refreshed = 0;
   let nextBody = { connections: {}, image: { minimax: { source: 'documented', error: null } } };
-  const get = (can) => () => [200, { config: { provider: 'minimax' }, presets, catalog, can_refresh_models: can, clawforge: false, enabled: true, flag_off: false, status: {} }];
+  const get = (can) => () => [200, { config: { provider: 'minimax' }, presets, catalog, can_refresh_models: can, image_server: false, enabled: true, flag_off: false, status: {} }];
   const { mod } = await setup({
     'GET /api/llm/image': get(true),
     'POST /api/connections/models/refresh?scope=image': () => { refreshed += 1; return [200, nextBody]; },

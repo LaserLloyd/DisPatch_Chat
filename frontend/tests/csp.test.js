@@ -66,7 +66,7 @@ test('script-src hashes match the inline scripts byte for byte', () => {
 test('style-src carries no hashes and the app writes no inline <style>', () => {
   // The one hash style-src ever held belonged to the ComfyUI holding page, a
   // popup opened as about:blank that INHERITED this policy. Local ComfyUI is
-  // gone from this box (ClawForge is the only image path), so the popup, its
+  // gone from this box (the image server is the only image path), so the popup, its
   // <style> and the hash all went with it. A hash that matches nothing is a
   // hole pointing at markup that no longer exists — keep style-src bare.
   const styles = [...MAIN.matchAll(/<style>([\s\S]*?)<\/style>/g)];

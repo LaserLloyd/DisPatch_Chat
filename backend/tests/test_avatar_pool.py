@@ -645,7 +645,7 @@ def test_cli_back_clears_a_cli_error_even_with_work_to_do(pool_env, monkeypatch)
     monkeypatch.setattr(avatar_pool, "generate_pair", lambda bot_id: None)
     st = avatar_pool.load_state("main")
     st.config.target = 3
-    st.last_error = "image-cli-missing (/nope/clawforge)"
+    st.last_error = "image-cli-missing (/nope/image-cli)"
     avatar_pool.save_state(st, "main")
     _seed_pair("main", "one")                # deficit of 2 — real work queued
 

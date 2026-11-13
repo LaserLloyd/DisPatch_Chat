@@ -1,4 +1,4 @@
-"""The ClawForge client itself: one MCP session reused, re-initialised only
+"""The the image server client itself: one MCP session reused, re-initialised only
 when the rig forgets it, and a breaker that makes a down rig cheap.
 
 The transport is `httpx.MockTransport`, so the request sequence the client
@@ -64,7 +64,7 @@ def rig():
 
 
 def _forge(rig, **kw):
-    return image_jobs.ClawForge("http://rig.invalid/mcp",
+    return image_jobs.ImageServer("http://rig.invalid/mcp",
                                 transport=httpx.MockTransport(rig.handler), **kw)
 
 
@@ -148,7 +148,7 @@ def test_the_rig_cannot_name_a_file_outside_its_files_area(rig):
 
 
 # --------------------------------------------------------------------------- #
-# `can_render`, and the payload contract (ClawForge2 2.2.1, 2026-09-04)
+# `can_render`, and the payload contract (the image server, 2026-09-04)
 #
 # The shapes below are trimmed copies of what the live rig answered while this
 # was written, not inventions: `comfy.running: false` with `can_render: true`
@@ -162,7 +162,7 @@ LIVE_STATUS = {
     "comfy": {"running": False, "backend_origin": "none",
               "backoff": {"circuit_open": False, "retry_in_s": 0.0}},
     "reachable": True,
-    "leases": {"ours": {"held": True, "holder": "clawforge2"}, "foreign": [],
+    "leases": {"ours": {"held": True, "holder": "render-tenant"}, "foreign": [],
                "source": "studioforge", "error": None},
     "can_render": True,
     "can_render_reason": "backend_reachable",
@@ -188,7 +188,7 @@ LEASED_STATUS = {
 
 def _answering(payload):
     """A forge whose every tool call returns `payload`, counting the calls."""
-    forge = image_jobs.ClawForge("http://rig.invalid/mcp")
+    forge = image_jobs.ImageServer("http://rig.invalid/mcp")
     calls: list[str] = []
 
     async def fake_call(tool, args, **kw):
@@ -199,7 +199,7 @@ def _answering(payload):
 
 
 def test_an_idle_unloaded_rig_can_still_render():
-    """The whole reason `can_render` replaced `comfy.running`: ClawForge frees
+    """The whole reason `can_render` replaced `comfy.running`: the image server frees
     ComfyUI's models when idle and starts the backend on the next job, so
     `running: false` is routinely a rig that renders fine."""
     forge, calls = _answering(LIVE_STATUS)
@@ -221,7 +221,7 @@ def test_a_foreign_benchmark_lease_is_read_off_the_status_block():
 def test_the_readiness_probe_does_not_ask_for_the_job_history():
     """`recent_jobs` is opt-in since 2.2.1 and was ~73% of the response. This
     call asks a three-field question and must not drag it back."""
-    forge = image_jobs.ClawForge("http://rig.invalid/mcp")
+    forge = image_jobs.ImageServer("http://rig.invalid/mcp")
     seen: list[dict] = []
 
     async def fake_call(tool, args, **kw):
@@ -257,7 +257,7 @@ def test_an_unreadable_answer_fails_open(payload):
 
 
 def test_a_probe_that_cannot_be_made_leaves_the_previous_answer_standing():
-    forge = image_jobs.ClawForge("http://rig.invalid/mcp")
+    forge = image_jobs.ImageServer("http://rig.invalid/mcp")
 
     async def go():
         forge._readiness = image_jobs.RigReadiness(
@@ -319,7 +319,7 @@ def test_a_failed_job_reports_the_rigs_code_for_it(payload, expected):
 # JSON-RPC ids — the fix for a live wedge, 2026-09-04
 #
 # The sweep advances up to _IMAGE_JOB_CONCURRENCY jobs at once over ONE MCP
-# session. Every tools/call used to be sent as `"id": 2`, and ClawForge2
+# session. Every tools/call used to be sent as `"id": 2`, and the image server
 # matches an answer to a request by id, so concurrent calls collided: one
 # coroutine got another's answer and one connection was closed unread. In
 # DisPatch that was a PERMANENT hang — the sweep never returned, /api/health
@@ -376,7 +376,7 @@ def test_an_answer_with_the_wrong_id_is_refused_not_used(rig):
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": 999999,
                                          "result": res})
 
-    forge = image_jobs.ClawForge("http://rig/mcp",
+    forge = image_jobs.ImageServer("http://rig/mcp",
                                  transport=httpx.MockTransport(handler))
     with pytest.raises(image_jobs.ImageJobError) as e:
         asyncio.run(forge.poll("ours"))
@@ -397,6 +397,6 @@ def test_a_missing_id_is_tolerated(rig):
             {"state": "running"})}]}
         return httpx.Response(200, json={"jsonrpc": "2.0", "result": res})
 
-    forge = image_jobs.ClawForge("http://rig/mcp",
+    forge = image_jobs.ImageServer("http://rig/mcp",
                                  transport=httpx.MockTransport(handler))
     assert asyncio.run(forge.poll("ours")).state == "running"

@@ -34,7 +34,7 @@ async function setup({ quickOpen } = {}) {
   const routes = {
     'GET /static/locales/en.json': () => [200, EN],
     'GET /api/llm/quicksetup': () => [200, { plans: [{ id: 'minimax', label: 'MiniMax', chat_model: 'MiniMax-M3', images: true, embeddings: false, docs: '' }] }],
-    'GET /api/llm/image': () => [200, { presets: [], config: { provider: '' }, clawforge: false }],
+    'GET /api/llm/image': () => [200, { presets: [], config: { provider: '' }, image_server: false }],
   };
   globalThis.fetch = async (u, opts = {}) => {
     const key = `${(opts.method || 'GET').toUpperCase()} ${u}`;

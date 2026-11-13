@@ -3,7 +3,7 @@
 Regression cover for the 2026-08-24 outage: a deploy replaced a hardcoded image
 CLI default with an env-only ``DISPATCH_IMAGE_CLI`` and nothing on the host set
 it. Both pools then generated 0 forever **in total silence**, while the only
-operator-facing message said "ClawForge is unreachable" — pointing every
+operator-facing message said "the image server is unreachable" — pointing every
 investigation at a rig that was perfectly healthy.
 
 So these tests pin three separate promises:

@@ -81,7 +81,7 @@ def env(tmp_path, monkeypatch):
     # The feature is configured, and "main" (the non-safe bot in the shared
     # roster) is the one bot allowed to use it.
     monkeypatch.setattr(main, "SETTINGS", replace(
-        config.SETTINGS, clawforge_url=ENDPOINT, clawforge_files_url="",
+        config.SETTINGS, image_server_url=ENDPOINT, image_server_files_url="",
         image_jobs_enabled=True))
     config.ensure_dirs()
     bots = config.load_bots()          # materialises config.yaml
@@ -201,7 +201,7 @@ class FakeForge:
 
 
 def _use(monkeypatch, forge):
-    monkeypatch.setattr(main, "_clawforge", lambda: forge)
+    monkeypatch.setattr(main, "_image_server", lambda: forge)
     return forge
 
 
@@ -261,7 +261,7 @@ def test_the_route_is_503_when_no_image_server_is_configured(env, monkeypatch):
     c = env()
     tid = _thread(c)
     monkeypatch.setattr(main, "SETTINGS", replace(
-        main.SETTINGS, clawforge_url=""))
+        main.SETTINGS, image_server_url=""))
     r = _fire(c, tid)
     assert r.status_code == 503
 
@@ -562,9 +562,9 @@ def test_auto_mode_follows_whether_a_server_is_configured():
 
 
 def test_the_files_url_is_derived_from_the_mcp_endpoint():
-    forge = image_jobs.ClawForge("http://rig.invalid:8700/mcp")
+    forge = image_jobs.ImageServer("http://rig.invalid:8700/mcp")
     assert forge.files_url == "http://rig.invalid:8700/files/"
-    explicit = image_jobs.ClawForge("http://rig.invalid:8700/mcp",
+    explicit = image_jobs.ImageServer("http://rig.invalid:8700/mcp",
                                     files_url="http://elsewhere/f/")
     assert explicit.files_url == "http://elsewhere/f/"
 
@@ -589,7 +589,7 @@ def test_a_tool_error_surfaces_the_rigs_own_sentence():
     """The rig's refusal text is the most useful string in the whole feature —
     it says WHY. Flattening it to "no image returned" is what made the
     predecessor pipeline undebuggable."""
-    forge = image_jobs.ClawForge(ENDPOINT)
+    forge = image_jobs.ImageServer(ENDPOINT)
     res = {"isError": True,
            "content": [{"type": "text",
                         "text": "[insufficient_vram] Not enough free VRAM"}]}
@@ -745,7 +745,7 @@ def test_markers_are_stripped_when_no_image_server_is_configured(env,
     c = env()
     tid = _thread(c)
     monkeypatch.setattr(main, "SETTINGS", replace(main.SETTINGS,
-                                                  clawforge_url=""))
+                                                  image_server_url=""))
     _say(c, tid, "sure [[pic:a teapot]]")
 
     rows = _messages(c, tid)
@@ -908,8 +908,8 @@ async def _token_of(job_id: str) -> str:
     return row["callback_token"]
 
 
-def _callback(c, job_id, token, body=None):
-    headers = {} if token is None else {"X-ClawForge-Token": token}
+def _callback(c, job_id, token, body=None, header="X-Image-Gateway-Token"):
+    headers = {} if token is None else {header: token}
     return c.post(f"/api/image-jobs/{job_id}/callback",
                   json=body if body is not None else {"state": "done"},
                   headers=headers)
@@ -1014,6 +1014,49 @@ def test_a_callback_with_a_wrong_or_missing_token_is_refused(env, monkeypatch):
     assert forge.calls == [], "a refused callback must not reach the rig"
 
 
+LEGACY_HEADER = "X-Legacy-Render-Token"
+
+
+def test_a_header_named_in_the_env_is_accepted_too(env, monkeypatch):
+    c = env()
+    _armed(monkeypatch)
+    monkeypatch.setattr(main, "SETTINGS", replace(
+        main.SETTINGS, image_callback_headers=(LEGACY_HEADER.lower(),)))
+    tid = _thread(c)
+    jid = _fire(c, tid).json()["job_id"]
+    _use(monkeypatch, FakeForge(poll=image_jobs.PollResult(
+        state="done", done=True, files_rel="out/a.png")))
+    r = _callback(c, jid, asyncio.run(_token_of(jid)), header=LEGACY_HEADER)
+    assert r.status_code == 200, r.text
+    assert _callback(c, jid, "wrong", header=LEGACY_HEADER).status_code == 403
+
+
+def test_an_unlisted_header_is_ignored(env, monkeypatch):
+    c = env()
+    _armed(monkeypatch)
+    monkeypatch.setattr(main, "SETTINGS", replace(
+        main.SETTINGS, image_callback_headers=()))
+    tid = _thread(c)
+    jid = _fire(c, tid).json()["job_id"]
+    token = asyncio.run(_token_of(jid))
+    assert _callback(c, jid, token, header=LEGACY_HEADER).status_code == 403
+    assert _callback(c, jid, "wrong").status_code == 403
+
+
+def test_the_callback_headers_env_is_parsed(tmp_path):
+    import os
+    import subprocess
+    import sys
+    env = {**os.environ, "DISPATCH_IMAGE_CALLBACK_HEADERS": " X-A-Token , ,x-b ",
+           "DISPATCH_DATA_DIR": str(tmp_path)}
+    out = subprocess.run(
+        [sys.executable, "-c",
+         "from app import config; print(config.SETTINGS.image_callback_headers)"],
+        cwd=Path(__file__).resolve().parents[1], env=env, capture_output=True,
+        text=True, timeout=120)
+    assert out.stdout.strip().endswith("('x-a-token', 'x-b')"), out.stderr[-400:]
+
+
 def test_an_unknown_job_is_404(env, monkeypatch):
     c = env()
     _armed(monkeypatch)
@@ -1031,7 +1074,7 @@ def test_a_browser_shaped_callback_is_refused(env, monkeypatch):
 
     locked = env()
     r = locked.post(f"/api/image-jobs/{jid}/callback", json={},
-                    headers={**BROWSER, "X-ClawForge-Token": token})
+                    headers={**BROWSER, "X-Image-Gateway-Token": token})
     assert r.status_code == 403
 
 
@@ -1351,7 +1394,7 @@ def test_the_band_survives_the_stored_spec():
 
 def test_the_band_reaches_the_rig_arguments():
     """The spec is only worth validating if it lands in the tool call."""
-    forge = image_jobs.ClawForge(ENDPOINT)
+    forge = image_jobs.ImageServer(ENDPOINT)
     seen: dict = {}
 
     async def fake_tool_json(tool, args, **kw):
@@ -1400,7 +1443,7 @@ def _refusal(code: str) -> dict:
 def test_the_structured_code_decides_retry_not_the_prose(code, retryable):
     """The text carries the SDK's own "Error executing tool …: " prefix in
     front of the [code], which is why matching it never worked."""
-    forge = image_jobs.ClawForge(ENDPOINT)
+    forge = image_jobs.ImageServer(ENDPOINT)
     res = _refusal(code) if code else {"isError": True,
                                        "content": [{"type": "text", "text": "boom"}]}
 
@@ -1576,7 +1619,7 @@ def test_a_callback_and_the_sweep_cannot_advance_one_job_twice(env, monkeypatch)
 
 
 # --------------------------------------------------------------------------- #
-# A rig somebody else has booked (ClawForge2 2.2.1, 2026-09-04)
+# A rig somebody else has booked (the image server, 2026-09-04)
 #
 # `[gpu_leased]` is not a shortage and not a fault: the GPUs are promised to
 # another holder. The distinction that matters to a reader is the lease KIND —
@@ -1599,7 +1642,7 @@ def _leased(kind: str, holder: str = "bench-runner",
                "lease": {"holder": f"{holder}-judge", "holder_family": holder,
                          "kind": kind, "expires_at": 1788500360.9,
                          "retry_after_s": retry_after_s}}}}
-    forge = image_jobs.ClawForge(ENDPOINT)
+    forge = image_jobs.ImageServer(ENDPOINT)
 
     async def drive():
         async def fake_call(*a, **k):
@@ -1662,7 +1705,7 @@ def test_a_render_lease_waits_and_says_who_has_the_rig(env, monkeypatch):
 
 
 def _wrong_shape(needs: int = 2, have: int = 1) -> image_jobs.ImageJobError:
-    """`[multi_gpu_required]` as ClawForge2 raises it (B27, 2026-09-10), built
+    """`[multi_gpu_required]` as the image server raises it (B27, 2026-09-10), built
     through the real parser so the payload shape is what is under test."""
     res = {"isError": True,
            "content": [{"type": "text", "text":
@@ -1674,7 +1717,7 @@ def _wrong_shape(needs: int = 2, have: int = 1) -> image_jobs.ImageJobError:
            "structuredContent": {"error": {
                "code": "multi_gpu_required", "tool": "generate_image",
                "message": "[multi_gpu_required] …"}}}
-    forge = image_jobs.ClawForge(ENDPOINT)
+    forge = image_jobs.ImageServer(ENDPOINT)
 
     async def drive():
         async def fake_call(*a, **k):
@@ -1907,14 +1950,14 @@ def test_a_picture_finishing_into_a_deleted_thread_is_discarded_not_logged(
 
 
 def test_a_rig_that_forgot_the_job_says_so_in_english(env, monkeypatch):
-    """ClawForge2 only remembers job ids for the life of its own process, and
+    """the image server only remembers job ids for the life of its own process, and
     it gets restarted. What the family used to get was the rig's developer
     sentence about which tools mint job ids, clipped mid-word."""
     c = env()
     tid = _thread(c)
     fired = _fire(c, tid).json()
 
-    forge = image_jobs.ClawForge(ENDPOINT)
+    forge = image_jobs.ImageServer(ENDPOINT)
 
     async def fake_call(tool, args, **kw):
         if tool == "get_job":
@@ -1928,7 +1971,7 @@ def test_a_rig_that_forgot_the_job_says_so_in_english(env, monkeypatch):
                              "text": json.dumps({"job_id": "rig-1"})}]}
     forge.call = fake_call
     forge.readiness = lambda **kw: _ready()
-    monkeypatch.setattr(main, "_clawforge", lambda: forge)
+    monkeypatch.setattr(main, "_image_server", lambda: forge)
 
     async def drive():
         await main._image_job_sweep()
@@ -2629,3 +2672,53 @@ def test_jobs_the_rig_already_accepted_are_always_advanced(env, monkeypatch):
     assert forge.calls.count("poll") == main.MAX_OPEN_RENDERS, (
         "every render the rig accepted must still be polled")
     assert forge.calls.count("enqueue") == 0, "the rig is full; hold new work"
+
+
+# --------------------------------------------------------------------------- #
+# Boot warning + legacy stored values
+# --------------------------------------------------------------------------- #
+
+
+def _warn_setup(monkeypatch, *, url="", flag="auto", bots_with_jobs=True):
+    from types import SimpleNamespace
+
+    from app import image_providers
+    monkeypatch.setattr(main, "SETTINGS", replace(
+        main.SETTINGS, image_server_url=url, image_jobs_flag=flag))
+    monkeypatch.setattr(image_providers, "api_selected", lambda cfg=None: False)
+    monkeypatch.setattr(config, "load_bots", lambda: [
+        SimpleNamespace(id="pic", image_jobs=bots_with_jobs)])
+
+
+def test_boot_warns_when_bots_want_pictures_but_no_server_is_set(monkeypatch, caplog):
+    _warn_setup(monkeypatch)
+    with caplog.at_level("WARNING"):
+        main._warn_image_server_unset()
+    assert any("DISPATCH_IMAGE_SERVER_URL" in r.getMessage() for r in caplog.records)
+
+
+def test_boot_is_quiet_when_configured_off_or_no_bot_asks(monkeypatch, caplog):
+    for kw in ({"url": "http://rig.invalid/mcp"}, {"flag": "off"},
+               {"bots_with_jobs": False}):
+        caplog.clear()
+        _warn_setup(monkeypatch, **kw)
+        with caplog.at_level("WARNING"):
+            main._warn_image_server_unset()
+        assert not [r for r in caplog.records
+                    if "DISPATCH_IMAGE_SERVER_URL" in r.getMessage()], kw
+
+
+def test_a_stored_unknown_backend_reads_as_automatic_but_new_specs_stay_strict():
+    spec = image_jobs.ImageSpec.from_json(
+        json.dumps({"prompt": "a cat", "backend": "legacy-render"}))
+    assert spec.backend == ""
+    with pytest.raises(ValueError, match="backend must be server or api"):
+        image_jobs.ImageSpec(prompt="a cat", backend="legacy-render")
+    assert image_jobs.ImageSpec(prompt="a cat", backend="server").backend == "server"
+
+
+def test_a_stored_unknown_provider_reads_as_automatic(env, tmp_path, monkeypatch):
+    from app import image_providers
+    env()
+    image_providers.config_path().write_text("provider: legacy-render\n", encoding="utf-8")
+    assert image_providers.load_config()["provider"] == ""

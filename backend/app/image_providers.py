@@ -44,7 +44,7 @@ WIRE SHAPES
 CONFIGURATION
 -------------
 ``<data>/image.yaml`` (0600): ``provider`` (``""`` automatic = the MCP image
-server if one is configured, ``none``, ``clawforge``, or a preset id),
+server if one is configured, ``none``, ``server``, or a preset id),
 ``base_url``, ``model``, ``api_key`` and/or ``api_key_env``. The key is never
 returned by any route. With no key of its own, a preset borrows the key of a
 chat connection to the SAME host, so a MiniMax chat key also draws pictures.
@@ -97,7 +97,7 @@ H3_TIMEOUT_S = 600.0
 H3_MAX_N = 10
 
 #: Provider ids that are not presets.
-AUTO, NONE, CLAWFORGE = "", "none", "clawforge"
+AUTO, NONE, SERVER = "", "none", "server"
 
 #: Test seam: an httpx transport used instead of the network.
 transport: Any = None
@@ -237,6 +237,13 @@ def load_config() -> dict:
         return {}
     out = {k: str(doc.get(k) or "").strip()
            for k in ("provider", "base_url", "model", "api_key", "api_key_env")}
+    pid = out["provider"].lower()
+    if pid and pid not in PRESET_BY_ID and pid not in (AUTO, NONE, SERVER):
+        # A value written by another install or an older release: read it as
+        # automatic rather than failing the panel. Saving stays strict.
+        log.warning("%s names an unknown image provider; treating it as "
+                    "automatic", CONFIG_NAME)
+        out["provider"] = AUTO
     return out
 
 
@@ -267,9 +274,9 @@ def api_selected(cfg: dict | None = None) -> bool:
     return provider_id(cfg) in _DEFAULT_IDS
 
 
-def choose_backend(workflow: str, *, clawforge: bool,
+def choose_backend(workflow: str, *, server: bool,
                    cfg: dict | None = None) -> str:
-    """Which backend a NEW job uses: "clawforge", "api", or "" (none).
+    """Which backend a NEW job uses: "server", "api", or "" (none).
 
     A bot naming a workflow keeps the MCP image server whenever one is
     configured. Everything else follows the default provider; automatic (no
@@ -277,10 +284,10 @@ def choose_backend(workflow: str, *, clawforge: bool,
     """
     pid = provider_id(cfg)
     if pid in _DEFAULT_IDS:
-        return CLAWFORGE if (workflow and clawforge) else "api"
+        return SERVER if (workflow and server) else "api"
     if pid == NONE:
-        return CLAWFORGE if (workflow and clawforge) else ""
-    return CLAWFORGE if clawforge else ""
+        return SERVER if (workflow and server) else ""
+    return SERVER if server else ""
 
 
 # --------------------------------------------------------------------------- #
@@ -409,7 +416,7 @@ def merge_submission(payload: dict, stored: dict | None = None) -> dict:
     if PRESET_BY_ID.get(pid) is not None and PRESET_BY_ID[pid].studio_only:
         raise ValueError("Civitai is used from Image Studio only; it cannot be "
                          "the default picture maker")
-    if pid not in _DEFAULT_IDS and pid not in (AUTO, NONE, CLAWFORGE):
+    if pid not in _DEFAULT_IDS and pid not in (AUTO, NONE, SERVER):
         raise ValueError(f"unknown image provider {pid!r}")
     same = provider_id(stored) == pid
     cfg = {"provider": pid,

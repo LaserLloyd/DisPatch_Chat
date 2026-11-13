@@ -83,7 +83,7 @@ press **Test** (one picture, shown inline, not stored), then **Save**. The setti
 lives in `<data>/image.yaml` (mode 0600):
 
 ```yaml
-provider: minimax          # "" automatic | none | clawforge | minimax | openai | xai | custom
+provider: minimax          # "" automatic | none | server | minimax | openai | xai | custom
 base_url: ""               # empty = the preset's
 model: ""                  # empty = the preset's
 api_key: ""                # or:
@@ -110,10 +110,9 @@ Rules worth knowing:
 
 ## MCP image server
 
-A self-hosted ComfyUI-style server that speaks MCP over streamable HTTP, such as
-a private ClawForge server if you have one. DisPatch calls `generate_image`
+A self-hosted ComfyUI-style server that speaks MCP over streamable HTTP. DisPatch calls `generate_image`
 (with `wait: false`), `get_job`, `cancel_job` and `comfy_status`, and fetches the
-file from the server's `/files/`. Set `DISPATCH_CLAWFORGE_URL` to the MCP endpoint
+file from the server's `/files/`. Set `DISPATCH_IMAGE_SERVER_URL` to the MCP endpoint
 and restart; details in [configuration.md](configuration.md#agent-image-jobs).
 
 Reaction pools and avatar pools refill through an image command-line tool instead

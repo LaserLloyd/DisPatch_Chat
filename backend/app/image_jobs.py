@@ -58,12 +58,12 @@ where the HTTP error mapping and the image guard already live.
 
 CONFIGURATION
 -------------
-``DISPATCH_CLAWFORGE_URL`` is the MCP endpoint (e.g.
+``DISPATCH_IMAGE_SERVER_URL`` is the MCP endpoint (e.g.
 ``http://192.0.2.5:8700/mcp``). There is deliberately **no default**: the
 address of somebody's GPU box is site configuration, not something to ship in
 a public repository, and "auto" mode keys off exactly this — the feature is on
 when an operator has pointed it at a server and off otherwise.
-``DISPATCH_CLAWFORGE_FILES_URL`` defaults to ``/files/`` on the same origin.
+``DISPATCH_IMAGE_SERVER_FILES_URL`` defaults to ``/files/`` on the same origin.
 ``DISPATCH_CALLBACK_BASE`` is DisPatch's own origin as the rig sees it; set, it
 arms a completion callback per job, which only makes terminal transitions
 arrive sooner. Unset (the default) the worker is pure polling and behaves
@@ -175,7 +175,7 @@ class ImageJobError(Exception):
 
 
 #: A submit refused because the card is inside somebody else's GPU lease
-#: (ClawForge2 2.2.1, 2026-09-04). Not a failure of ours and not a shortage:
+#: (the image server, 2026-09-04). Not a failure of ours and not a shortage:
 #: the rig is BOOKED, and the honest answer to a human is "come back later".
 GPU_LEASED = "gpu_leased"
 #: Our own client tag has too many renders in flight. A refusal, not a hold —
@@ -186,7 +186,7 @@ CLIENT_QUOTA = "client_quota"
 #: a stall is usually a wedged sampler, not a graph that cannot run.
 STALLED = "stalled"
 #: The workflow's graph splits its work across more GPUs than the rig's ComfyUI
-#: was started with (ClawForge2 B27, 2026-09-10). It READS like
+#: was started with (the image server, 2026-09-10). It READS like
 #: ``insufficient_vram``/``insufficient_compute_cap`` and is their opposite:
 #: those two mean the workflow is too big for the card, and the reflex they
 #: train — pick something lighter — is the wrong move here, where the workflow
@@ -271,13 +271,13 @@ def _sse_json(body: str) -> dict:
     return {}
 
 
-#: The rig's closed vocabulary for "why not" (ClawForge2 2.2.1). Kept here so
+#: The rig's closed vocabulary for "why not" (the image server). Kept here so
 #: an unlisted reason is visibly new rather than quietly mistaken for one of
 #: ours — `unknown` is OURS, for a probe that could not be made at all.
 CAN_RENDER_REASONS = frozenset({
     "backend_reachable",        # ComfyUI answered and the card is ours to use
     "startable",                # not running, but the next job starts it
-    "unmanaged_backend_down",   # nothing answering and ClawForge may not start it
+    "unmanaged_backend_down",   # nothing answering and the image server may not start it
     "comfyui_path_invalid",
     "circuit_open",             # crash-loop breaker tripped on the rig
     "backoff",                  # cooling down after an early exit
@@ -305,7 +305,7 @@ class RigReadiness:
     """``can_render`` and why, off the rig's own ``comfy_status``.
 
     This replaces reading ``comfy.running``, which was never the question:
-    ClawForge unloads ComfyUI's models when idle and starts the backend on the
+    The image server unloads ComfyUI's models when idle and starts the backend on the
     next job, so `running: false` is routinely a rig that renders fine (the
     live rig said exactly that while this was written — `running: false`,
     `can_render: true`). The rig now answers the real question itself, and the
@@ -364,7 +364,7 @@ class RigReadiness:
 
 
 @dataclass
-class ClawForge:
+class ImageServer:
     """A minimal MCP client for one image server.
 
     One MCP session, reused across calls. The server we talk to still speaks
@@ -444,7 +444,7 @@ class ClawForge:
         """A fresh JSON-RPC id. Never a constant, and never reused.
 
         This is not hygiene, it is the fix for a wedge measured live against
-        ClawForge2 2.2.1 on 2026-09-04. Every ``tools/call`` used to be sent as
+        the image server on 2026-09-04. Every ``tools/call`` used to be sent as
         ``"id": 2``, and the sweep sends up to three at once over ONE MCP
         session. The rig matches an answer to a request BY ID, so identical
         ids collide: with three concurrent calls, one coroutine received
@@ -695,7 +695,7 @@ class ClawForge:
     def _note_schema_version(self, tool: str, payload: dict) -> None:
         """Record the rig's ``schema_version``, and say so when it moves.
 
-        ClawForge2 2.2.1 stamps it on ``status()``, ``list_jobs``, ``get_job``
+        the image server stamps it on ``status()``, ``list_jobs``, ``get_job``
         and every generation result, and bumps it ONLY when a field moves, is
         removed or changes type — adding one does not. So a bump is exactly the
         event that breaks a parser in this file, and the whole value of the
@@ -818,7 +818,7 @@ class ClawForge:
             #
             # The discriminator is the id: the refusal quotes back the very id
             # we asked about. That is a fact, not a wording match. (The code is
-            # `tool_error` on ClawForge2 2.2.1, not the documented
+            # `tool_error` on the image server, not the documented
             # `job_not_found` — probed live 2026-09-04, reported to the rig.)
             if e.code in ("job_not_found", "tool_error") and job_id in str(e):
                 raise ImageJobError(
@@ -1183,7 +1183,7 @@ class ImageSpec:
     #: sitting in a thread with somebody looking at it; the pool refills, which
     #: nobody is waiting on, go through the image CLI and pass 3 there.
     priority: int = 1
-    #: Which backend renders it: "" / "clawforge" = the MCP image server,
+    #: Which backend renders it: "" / "server" = the MCP image server,
     #: "api" = the default API provider (app/image_providers.py). Decided once,
     #: when the job is created, and stored with it: a row written before this
     #: field existed reads back as "" and stays on the MCP server.
@@ -1191,8 +1191,8 @@ class ImageSpec:
 
     def __post_init__(self) -> None:
         self.backend = (self.backend or "").strip().lower()
-        if self.backend not in ("", "clawforge", "api"):
-            raise ValueError("backend must be clawforge or api")
+        if self.backend not in ("", "server", "api"):
+            raise ValueError("backend must be server or api")
         self.prompt = (self.prompt or "").strip()
         if not self.prompt:
             raise ValueError("prompt is required")
@@ -1250,6 +1250,13 @@ class ImageSpec:
     @classmethod
     def from_json(cls, blob: str) -> ImageSpec:
         d = json.loads(blob or "{}")
+        backend = str(d.get("backend") or "").strip().lower()
+        if backend not in ("", "server", "api"):
+            # A row stored by another install or an older release: it stays on
+            # the MCP image server (the automatic route) instead of failing.
+            log.warning("stored image job has an unknown backend; "
+                        "treating it as automatic")
+            backend = ""
         return cls(prompt=d.get("prompt", ""), workflow=d.get("workflow", ""),
                    ratio=d.get("ratio", ""), width=d.get("width"),
                    height=d.get("height"), negative=d.get("negative", ""),
@@ -1258,7 +1265,7 @@ class ImageSpec:
                    # which is what it was submitted as in every practical
                    # sense: it was a chat request with somebody waiting.
                    priority=d.get("priority", 1),
-                   backend=d.get("backend", ""))
+                   backend=backend)
 
 
 @dataclass

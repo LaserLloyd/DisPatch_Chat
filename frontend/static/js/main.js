@@ -27,7 +27,7 @@ import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from '
 import {
   initLlmPanel, activateLlmPanel, repaintLlmPanel,
   firstRunCard,
-} from './llm.js?v=17';
+} from './llm.js?v=18';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=20';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
@@ -59,7 +59,7 @@ import { renderOidcCard, linkButtonFor as oidcLinkButtonFor, defaultRequest as o
 import { installExpiredImages } from './media-expired.js?v=1';
 import { activeLayout, applyLayout, moveItem, saveLayout, wireRailDrag, openArrangeDialog } from './railmenu.js?v=5';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=23';
-import { mountPluginsSettings } from './plugins.js?v=25';
+import { mountPluginsSettings } from './plugins.js?v=26';
 import { addBotRow } from './bots-edit.js?v=8';
 // 3.0 (W5): connections, the schema-driven settings page, character details + starter packs, the
 // first-run wizard. Their REST calls live in w5-api.js (api.js is imported at one ?v= by too many

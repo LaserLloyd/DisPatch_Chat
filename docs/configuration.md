@@ -320,9 +320,9 @@ here even on loopback. See [security.md](security.md).
 ### Agent image jobs
 
 ```
-DISPATCH_CLAWFORGE_URL=         # the image server's MCP endpoint, e.g.
+DISPATCH_IMAGE_SERVER_URL=         # the image server's MCP endpoint, e.g.
                                 #   http://192.0.2.5:8700/mcp
-DISPATCH_CLAWFORGE_FILES_URL=   # optional; defaults to /files/ on the same host
+DISPATCH_IMAGE_SERVER_FILES_URL=   # optional; defaults to /files/ on the same host
 DISPATCH_CALLBACK_BASE=         # optional; DisPatch's own origin AS THE RIG
                                 #   SEES IT, e.g. http://192.0.2.37:8765
 DISPATCH_IMAGE_JOBS=auto        # auto (default) | 1 | 0
@@ -333,7 +333,7 @@ render: `POST /api/image-jobs` returns immediately, a placeholder message
 appears in the thread, and DisPatch rewrites that message into the picture (or
 into a visible failure line) when the render lands. There is deliberately **no
 default endpoint** — the address of a GPU box is site configuration — and
-`auto` therefore means "on iff `DISPATCH_CLAWFORGE_URL` is set" — or, since
+`auto` therefore means "on iff `DISPATCH_IMAGE_SERVER_URL` is set" — or, since
 2.3.7, iff an image API provider is chosen in Settings → AI & Connections → Image
 generation (`<data>/image.yaml`; see [integrations.md](integrations.md#image-api)).
 `0` switches both off.
@@ -379,8 +379,7 @@ this as `image_rig`: `{"reachable": true|false|null, "unreachable_for_s": …,
 
 The expected server speaks MCP over streamable HTTP and offers
 `generate_image` (with `wait: false`), `get_job`, `cancel_job` and a
-`/files/<path>` route;
-[ClawForge](https://github.com/) is the reference implementation. Nothing else
+`/files/<path>` route. Nothing else
 is assumed: DisPatch validates the returned bytes are a real image over 10 KB
 before any of it reaches a chat window.
 

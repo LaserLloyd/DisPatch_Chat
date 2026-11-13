@@ -545,7 +545,7 @@ def _fresh_ws_manager():
 
 
 #: The fixed ports of the owner's live services (StudioForge gateway / panel / MCP, SpeechForge,
-#: ClawChat, ClawForge, DisPatch itself). A test must never reach one: a wizard or connection
+#: ClawChat, the image server, DisPatch itself). A test must never reach one: a wizard or connection
 #: discovery that is not stubbed would probe the real gateway on 1234.
 LIVE_SERVICE_PORTS = frozenset({1234, 1235, 1236, 7865, 8080, 8288, 8700, 8765})
 

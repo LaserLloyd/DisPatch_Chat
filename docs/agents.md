@@ -508,7 +508,7 @@ Rules worth knowing:
   and No-Image Mode omits the row entirely — the
   job pipeline adds no exceptions to any of that.
 
-Host configuration for this is `DISPATCH_CLAWFORGE_URL` (the image server's
+Host configuration for this is `DISPATCH_IMAGE_SERVER_URL` (the image server's
 MCP endpoint), `DISPATCH_IMAGE_JOBS` (`auto`/`1`/`0`; `auto` means on iff that
 URL is set) and the optional `DISPATCH_CALLBACK_BASE`, which only makes a
 finished render appear sooner. See [configuration.md](configuration.md).

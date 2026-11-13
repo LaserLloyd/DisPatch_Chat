@@ -1532,14 +1532,14 @@
       "choices": [],
       "choices_from": "",
       "default": "",
-      "description": "An MCP image server (ClawForge or compatible) for picture jobs, e.g. http://host:8700/mcp.",
-      "env": "DISPATCH_CLAWFORGE_URL",
+      "description": "An MCP image server for picture jobs, e.g. http://host:8700/mcp.",
+      "env": "DISPATCH_IMAGE_SERVER_URL",
       "env_names": [
-        "DISPATCH_CLAWFORGE_URL",
-        "LOCAL_CHAT_CLAWFORGE_URL"
+        "DISPATCH_IMAGE_SERVER_URL",
+        "LOCAL_CHAT_IMAGE_SERVER_URL"
       ],
       "group": "connections",
-      "key": "connections.clawforge_url",
+      "key": "connections.image_server_url",
       "label": "Image server (MCP) address",
       "legacy_prefix_alias": true,
       "level": "advanced",
@@ -1563,13 +1563,13 @@
       "choices_from": "",
       "default": "",
       "description": "Where finished pictures are fetched from. Empty uses /files/ beside the MCP address.",
-      "env": "DISPATCH_CLAWFORGE_FILES_URL",
+      "env": "DISPATCH_IMAGE_SERVER_FILES_URL",
       "env_names": [
-        "DISPATCH_CLAWFORGE_FILES_URL",
-        "LOCAL_CHAT_CLAWFORGE_FILES_URL"
+        "DISPATCH_IMAGE_SERVER_FILES_URL",
+        "LOCAL_CHAT_IMAGE_SERVER_FILES_URL"
       ],
       "group": "connections",
-      "key": "connections.clawforge_files_url",
+      "key": "connections.image_server_files_url",
       "label": "Image server file address",
       "legacy_prefix_alias": true,
       "level": "advanced",

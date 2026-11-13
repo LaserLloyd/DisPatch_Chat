@@ -41,8 +41,8 @@ def test_every_catalog_entry_is_well_formed_and_links_only_public_repos():
         if e["repo"]:
             assert e["repo"] in PUBLIC_REPOS, e["repo"]
     raw = catalog.CATALOG_PATH.read_text()
-    # The private image server is described, never linked or addressed.
-    assert "ClawForge" in raw and "github.com/LaserLloyd/ClawForge" not in raw
+    # The image server is described generically, never named, linked or addressed.
+    assert not re.search("cl" + r"aw[-_ ]?forge", raw, re.I)
     assert not re.search(r"\b\d{1,3}(\.\d{1,3}){3}\b", raw)
     entry = next(e for e in entries if e["name"] == "SpeechForge")
     assert not entry["repo"] and entry["repo_note"]
@@ -277,4 +277,4 @@ def test_every_catalog_entry_has_a_section_in_the_docs():
     doc = (Path(__file__).resolve().parents[2] / "docs" / "integrations.md").read_text()
     for e in catalog.entries():
         assert f'<a id="{e["id"]}"></a>' in doc, e["id"]
-    assert "github.com/LaserLloyd/ClawForge" not in doc
+    assert not re.search("cl" + r"aw[-_ ]?forge", doc, re.I)

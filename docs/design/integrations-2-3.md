@@ -35,7 +35,7 @@ works. Several features look present and simply never do anything.
 
 ## 3. Contracts
 
-- `GET /api/llm/image` → `{config: {provider, base_url, model, api_key_env, has_key, key_source}, presets: [...], clawforge: bool, status: {...}}`.
+- `GET /api/llm/image` → `{config: {provider, base_url, model, api_key_env, has_key, key_source}, presets: [...], image_server: bool, status: {...}}`.
 - `PUT /api/llm/image` `{provider, base_url?, model?, api_key?, api_key_env?}` → same shape. `provider: ""` = automatic (the MCP server if configured), `"none"` = off.
 - `POST /api/llm/image/test` same body as PUT (unsaved values allowed) → `{ok, error?, mime, bytes, width?, height?, preview}` where `preview` is a `/media/` URL of the test picture.
 - `GET /api/plugins/catalog` → `{entries: [{id, name, summary, repo?, connects, status, detail, docs, toggle?}]}`.

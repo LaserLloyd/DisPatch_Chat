@@ -33,7 +33,7 @@ from tests.test_image_providers import Fake, _drive, _minimax_ok, _save
 def env(_jobs_env, monkeypatch):
     """The image-jobs fixture with NO MCP server: only the API path."""
     monkeypatch.setattr(main, "SETTINGS", replace(
-        main.SETTINGS, clawforge_url="", image_jobs_enabled=False, image_jobs_flag="auto"))
+        main.SETTINGS, image_server_url="", image_jobs_enabled=False, image_jobs_flag="auto"))
     monkeypatch.setattr(image_providers, "backend", image_providers.ApiImages())
     yield _jobs_env
     monkeypatch.setattr(image_providers, "transport", None)
@@ -143,7 +143,7 @@ def test_no_shipped_animal_bot_can_draw(env, monkeypatch):
 def gated(world, monkeypatch):
     """A claimed install: the Owner, a User (Uma), a second Admin (Ada); household bot `pic` may draw."""
     monkeypatch.setattr(main, "SETTINGS", replace(
-        main.SETTINGS, clawforge_url="", image_jobs_enabled=False, image_jobs_flag="auto"))
+        main.SETTINGS, image_server_url="", image_jobs_enabled=False, image_jobs_flag="auto"))
     monkeypatch.setattr(image_providers, "backend", image_providers.ApiImages())
     monkeypatch.setattr(main, "_shutting_down", False)
     fake = _counting(monkeypatch)
@@ -206,13 +206,13 @@ def test_the_standard_switch_gates_markers_and_the_job_route(gated):
     assert len(fake.requests) == 1
 
 
-def test_a_clawforge_backed_bot_ignores_the_standard_switch(gated, monkeypatch):
+def test_an_image_server_backed_bot_ignores_the_standard_switch(gated, monkeypatch):
     settings_store.set_many({"connections.image_access.standard_user": False})
     monkeypatch.setattr(main, "SETTINGS", replace(
-        main.SETTINGS, clawforge_url="http://rig.invalid:8700/mcp", image_jobs_enabled=True))
+        main.SETTINGS, image_server_url="http://rig.invalid:8700/mcp", image_jobs_enabled=True))
     monkeypatch.setattr(image_providers, "load_config", lambda: {})     # automatic = the rig
     uma = gated["Uma"]
-    assert main._choose_image_backend("") == "clawforge"
+    assert main._choose_image_backend("") == "server"
     tid = _new_thread(uma)
     assert asyncio.run(main._thread_owner_may_generate(tid, "standard")) is False
     r = _job(uma, tid)

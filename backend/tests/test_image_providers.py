@@ -24,7 +24,7 @@ from tests.test_image_jobs import env as _jobs_env
 def env(_jobs_env, monkeypatch):
     """The image-jobs fixture, but with NO MCP server: only the API path."""
     monkeypatch.setattr(main, "SETTINGS", replace(
-        main.SETTINGS, clawforge_url="", image_jobs_enabled=False,
+        main.SETTINGS, image_server_url="", image_jobs_enabled=False,
         image_jobs_flag="auto"))
     monkeypatch.setattr(image_providers, "backend", image_providers.ApiImages())
     yield _jobs_env
@@ -202,8 +202,10 @@ def test_a_config_that_cannot_work_is_refused(env):
     r = c.put("/api/llm/image", json={"provider": "openai"})
     assert r.status_code == 400 and "need an API key" in r.json()["detail"]
     assert c.put("/api/llm/image", json={"provider": "dalle"}).status_code == 422
-    r = c.put("/api/llm/image", json={"provider": "clawforge"})
+    r = c.put("/api/llm/image", json={"provider": "server"})
     assert r.status_code == 422          # no MCP server in this fixture
+    r = c.put("/api/llm/image", json={"provider": "legacy-render"})
+    assert 400 <= r.status_code < 500    # an unknown id is refused on save
 
 
 def test_the_env_variable_wins_and_is_name_checked(env, monkeypatch):
@@ -311,15 +313,15 @@ def test_the_test_button_makes_one_generation_and_stores_nothing(env, monkeypatc
 
 def test_choose_backend_rules():
     cb = image_providers.choose_backend
-    assert cb("", clawforge=True, cfg={}) == "clawforge"     # pre-2.3.7
-    assert cb("wf", clawforge=True, cfg={}) == "clawforge"
-    assert cb("", clawforge=False, cfg={}) == ""
+    assert cb("", server=True, cfg={}) == "server"     # pre-2.3.7
+    assert cb("wf", server=True, cfg={}) == "server"
+    assert cb("", server=False, cfg={}) == ""
     api = {"provider": "minimax"}
-    assert cb("", clawforge=True, cfg=api) == "api"
-    assert cb("wf", clawforge=True, cfg=api) == "clawforge"  # a workflow keeps the rig
-    assert cb("wf", clawforge=False, cfg=api) == "api"
-    assert cb("", clawforge=True, cfg={"provider": "none"}) == ""
-    assert cb("wf", clawforge=True, cfg={"provider": "none"}) == "clawforge"
+    assert cb("", server=True, cfg=api) == "api"
+    assert cb("wf", server=True, cfg=api) == "server"  # a workflow keeps the rig
+    assert cb("wf", server=False, cfg=api) == "api"
+    assert cb("", server=True, cfg={"provider": "none"}) == ""
+    assert cb("wf", server=True, cfg={"provider": "none"}) == "server"
 
 
 def test_an_old_row_without_a_backend_reads_back_as_the_rig():

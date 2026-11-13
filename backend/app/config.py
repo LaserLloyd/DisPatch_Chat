@@ -225,7 +225,7 @@ def _image_jobs_default(flag: str, endpoint: str) -> bool:
     remote GPU box at import time would put a network round trip in front of
     every boot and make the feature's availability depend on whether the rig
     happened to be awake when DisPatch restarted. An operator who has set
-    DISPATCH_CLAWFORGE_URL has said what they want; a rig that is down then
+    DISPATCH_IMAGE_SERVER_URL has said what they want; a rig that is down then
     fails the individual job, loudly, in the thread — which is the behaviour
     this feature is built around anyway.
     """
@@ -440,10 +440,10 @@ class Settings:
     # arrives. Off unless an image server is configured — there is no default
     # endpoint, because the address of somebody's GPU box is site
     # configuration, not something to ship.
-    clawforge_url: str = env("CLAWFORGE_URL", "").strip()
+    image_server_url: str = env("IMAGE_SERVER_URL", "").strip()
     # Where the finished files are served from. Defaults to /files/ on the same
     # origin as the MCP endpoint, which is how the reference server lays it out.
-    clawforge_files_url: str = env("CLAWFORGE_FILES_URL", "").strip()
+    image_server_files_url: str = env("IMAGE_SERVER_FILES_URL", "").strip()
     # Origin the image server can POST a completion callback back to, e.g.
     # "http://192.0.2.37:8765" — DisPatch's own address AS THE RIG SEES IT,
     # which is why it cannot be derived: the rig is on another machine, so
@@ -452,8 +452,13 @@ class Settings:
     # callback is only ever an optimisation over the sweep, never a
     # replacement for it.
     callback_base: str = env("CALLBACK_BASE", "").strip().rstrip("/")
+    # Extra request-header names the image-job callback token may arrive under
+    # (comma-separated), read after the standard `X-Image-Gateway-Token`.
+    image_callback_headers: tuple[str, ...] = tuple(
+        h.strip().lower() for h in env("IMAGE_CALLBACK_HEADERS", "").split(",")
+        if h.strip())
     image_jobs_enabled: bool = _image_jobs_default(
-        env("IMAGE_JOBS", "auto"), env("CLAWFORGE_URL", ""))
+        env("IMAGE_JOBS", "auto"), env("IMAGE_SERVER_URL", ""))
     # The raw flag, for the API image provider (2.3.7): "auto" lets a provider
     # chosen in Settings switch image jobs on even with no MCP server.
     image_jobs_flag: str = env("IMAGE_JOBS", "auto")
@@ -586,9 +591,9 @@ class Bot:
     # spends time on a shared GPU and drops a picture into a family
     # conversation, so it is a per-character opt-in rather than something every
     # bot silently gains. Requires the feature itself to be configured
-    # (DISPATCH_CLAWFORGE_URL); see app/image_jobs.py.
+    # (DISPATCH_IMAGE_SERVER_URL); see app/image_jobs.py.
     image_jobs: bool = False
-    # Which ClawForge workflow this bot's pictures use when a request names
+    # Which image-server workflow this bot's pictures use when a request names
     # none. A companion whose look is curated needs one specific workflow, and
     # the inline `[[pic:…]]` marker has no room to say so — it carries a prompt
     # and a caption, nothing else. Empty means the image server's own default.

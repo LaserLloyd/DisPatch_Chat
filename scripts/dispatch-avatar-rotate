@@ -15,7 +15,7 @@ Two banks feed the rotation, in priority order:
              threads draw from). A random pair is drawn and, after a VERIFIED
              upload, BURNT into ../spent/ — the daily face can never come
              back, either as a rotation or as a thread draw. The app's
-             nightly ClawForge top-up replaces what rotation burns.
+             nightly image top-up replaces what rotation burns.
 
 If a bot has neither, it is SKIPPED — one empty bank must never stop the other
 bots from rotating.
@@ -135,11 +135,12 @@ HISTORY_KEEP = 10
 
 CURL_TIMEOUT = "60"  # seconds; a multi-MB upload plus PIL work on the server
 
-# The image CLI (ClawForge) the dated-pair generation shells out to. The daily
-# timer's unit sets no DISPATCH_IMAGE_CLI, so fall back to the on-box path; an
-# explicit env override still wins. Same binary the app's avatar_pool uses.
-IMAGE_CLI = (os.environ.get("DISPATCH_IMAGE_CLI", "").strip()
-             or str(HOME / "bin" / "clawforge"))
+# The image CLI the dated-pair generation shells out to: DISPATCH_IMAGE_CLI,
+# the same binary the app's avatar_pool uses. There is no built-in default; it
+# is only needed when a bot has a dated prompt bank, so pool rotation works
+# without it. Set to True when a run needed the CLI and it was not set.
+IMAGE_CLI = os.environ.get("DISPATCH_IMAGE_CLI", "").strip()
+IMAGE_CLI_MISSING = False
 
 
 # ── logging ─────────────────────────────────────────────────────────────────
@@ -286,12 +287,12 @@ def burn_pool_pair(bot_id: str, stem: str, log: Log) -> None:
 # ── dated-pair generation ───────────────────────────────────────────────────
 # The dated bank (choose()'s first preference) has been dead since the pool
 # migration: nothing produced it, so every rotation drew a pool pair and the
-# "<prefix>-YYYY-MM-DD" branch never fired. One ClawForge pair a day, generated
+# "<prefix>-YYYY-MM-DD" branch never fired. One generated pair a day, generated
 # into the avatar dir BEFORE the pool pick, revives it.
 #
 # Same rules as the app's avatar_pool.generate_pair: full portrait first via a
 # plain generate, then the rig's detector for the square face (--crop-face) —
-# never a local blind crop. Same ClawForge binary the app uses (IMAGE_CLI).
+# never a local blind crop. Same image CLI the app uses (DISPATCH_IMAGE_CLI).
 def _prompt_bank(bot_id: str, log: Log) -> dict:
     """The bot's prompt bank (avatar-prompts-<bot>.yaml), or {} when absent."""
     path = DATA_DIR / f"avatar-prompts-{bot_id}.yaml"
@@ -310,22 +311,28 @@ def _unlink_quiet(p: Path) -> None:
         pass
 
 
-def _run_clawforge(flags: list[str], log: Log, timeout: int = 300) -> list[Path]:
-    """One ClawForge call; the saved image files it reported, or [] on failure."""
+def _run_image_cli(flags: list[str], log: Log, timeout: int = 300) -> list[Path]:
+    """One image-CLI call; the saved image files it reported, or [] on failure."""
+    global IMAGE_CLI_MISSING
+    if not IMAGE_CLI:
+        IMAGE_CLI_MISSING = True
+        log.error("set DISPATCH_IMAGE_CLI to the image CLI path "
+                  "(needed to generate a dated avatar pair)")
+        return []
     try:
         proc = subprocess.run([IMAGE_CLI, *flags], capture_output=True,
                               text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        log.error(f"clawforge call failed ({exc})")
+        log.error(f"image CLI call failed ({exc})")
         return []
     try:
         result = json.loads((proc.stdout or "").strip() or "{}")
     except json.JSONDecodeError:
-        log.error(f"clawforge returned non-JSON: {(proc.stdout or '')[:200]!r}")
+        log.error(f"image CLI returned non-JSON: {(proc.stdout or '')[:200]!r}")
         return []
     if result.get("status") != "ok":
         msg = str(result.get("message") or result.get("error_code") or result)
-        log.error(f"clawforge refused: {msg[:300]}")
+        log.error(f"image CLI refused: {msg[:300]}")
         return []
     out: list[Path] = []
     for raw in (result.get("files") or []):
@@ -374,7 +381,7 @@ def generate_dated_pair(bot_id: str, cfg: dict, today: str, log: Log) -> bool:
             if workflow and not workflow.startswith("-"):
                 gen += ["--workflow", workflow]
             gen += ["--", prompt]
-            fulls = _run_clawforge(gen, log, timeout=300)
+            fulls = _run_image_cli(gen, log, timeout=300)
             if not fulls:
                 log.warn(f"{bot_id}: dated full render produced nothing")
                 return False
@@ -384,7 +391,7 @@ def generate_dated_pair(bot_id: str, cfg: dict, today: str, log: Log) -> bool:
                 crop += ["--shot", shot]
             if look in ("anime", "realistic"):
                 crop += ["--look", look]
-            faces = _run_clawforge(crop, log, timeout=180)
+            faces = _run_image_cli(crop, log, timeout=180)
             if not faces:
                 log.warn(f"{bot_id}: dated face crop produced nothing")
                 return False
@@ -671,6 +678,9 @@ def main() -> int:
     summary = " ".join(f"{b}={r}" for b, r in results.items())
     failed = [b for b, r in results.items() if r == "fail"]
     log.info(f"run end {summary}")
+    if IMAGE_CLI_MISSING:
+        log.error("exiting non-zero: DISPATCH_IMAGE_CLI is not set")
+        return 1
     return 1 if failed else 0
 
 

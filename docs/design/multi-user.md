@@ -39,7 +39,7 @@ accounts, ahead of a public open-source release. Written against the code as of
 > | Per-user data export / delete, OIDC | **not built** | Planned (M3). |
 
 > **Historical note (2026-08-26).** The local ComfyUI feature was removed from
-> DisPatch entirely: this box (AMD/ROCm) cannot run ComfyUI, and ClawForge on
+> DisPatch entirely: this box (AMD/ROCm) cannot run ComfyUI, and the image server on
 > the remote rig is now the only image path. Every mention below of a ComfyUI
 > service panel, its systemd control, `_require_comfy`, `_broadcast_comfy_state`
 > or the `/api/comfy/*` routes describes code that no longer exists. The

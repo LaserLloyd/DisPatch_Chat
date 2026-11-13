@@ -35,9 +35,9 @@ entries:
 
   - id: image-server
     name: Image server (MCP)
-    summary: A self-hosted ComfyUI-style image server that speaks MCP, such as a private ClawForge server if you have one. Also feeds reaction and avatar pools through an image CLI.
+    summary: A self-hosted ComfyUI-style image server that speaks MCP. Also feeds reaction and avatar pools through an image CLI.
     repo_note: No public server is published; any MCP server with generate_image / get_job works.
-    connects: "DISPATCH_CLAWFORGE_URL (MCP endpoint); pools use DISPATCH_IMAGE_CLI."
+    connects: "DISPATCH_IMAGE_SERVER_URL (MCP endpoint); pools use DISPATCH_IMAGE_CLI."
     probe: image_server
 
   - id: studioforge

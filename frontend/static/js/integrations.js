@@ -146,7 +146,7 @@ export async function mountQuickSetup(host, deps = {}) {
 
 // ===================== Image generation =====================
 
-const AUTO = '', NONE = 'none', SERVER = 'clawforge';
+const AUTO = '', NONE = 'none', SERVER = 'server';
 
 export function imageStatusText(state) {
   const cfg = (state && state.config) || {};
@@ -158,9 +158,9 @@ export function imageStatusText(state) {
     return t('integrations.img_status_api', { provider: preset.label, model: cfg.model || preset.model }) + (src ? ` ${src}` : '');
   }
   if (cfg.provider === NONE) {
-    return state.clawforge ? t('integrations.img_status_none_server') : t('integrations.img_status_off');
+    return state.image_server ? t('integrations.img_status_none_server') : t('integrations.img_status_off');
   }
-  return state.clawforge ? t('integrations.img_status_server') : t('integrations.img_status_off');
+  return state.image_server ? t('integrations.img_status_server') : t('integrations.img_status_off');
 }
 
 /** The one-line source of a provider's model list: from its own list (with the time) or from the docs,
@@ -199,7 +199,7 @@ export async function mountImageSection(host, deps = {}) {
   const presets = state.presets || [];
   const sel = el('select', { id: 'img-provider' });
   const opts = [[AUTO, t('integrations.img_auto')], [NONE, t('integrations.img_none')]];
-  if (state.clawforge) opts.push([SERVER, t('integrations.img_server')]);
+  if (state.image_server) opts.push([SERVER, t('integrations.img_server')]);
   for (const p of presets) opts.push([p.id, p.label]);
   for (const [v, label] of opts) sel.append(el('option', { value: v, text: label }));
   const base = el('input', { type: 'url', id: 'img-base-url', autocomplete: 'off', spellcheck: 'false', inputmode: 'url' });

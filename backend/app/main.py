@@ -562,6 +562,7 @@ async def _lifespan_startup(app: FastAPI) -> None:
     # Adopt or fail out image jobs left mid-render by the last shutdown BEFORE
     # the worker starts, so the sweep never sees a half-state it has to guess at.
     await _resume_image_jobs()
+    _warn_image_server_unset()
     _track(asyncio.create_task(_image_job_loop()))
     # Backstop for answers every live path missed (see _gap_sweep_loop).
     _track(asyncio.create_task(_gap_sweep_loop()))
@@ -3445,7 +3446,7 @@ def _image_jobs_configured() -> bool:
     otherwise advertise a route that can only ever fail, and "auto" already
     keys off the endpoint being set.
     """
-    if SETTINGS.image_jobs_enabled and SETTINGS.clawforge_url:
+    if SETTINGS.image_jobs_enabled and SETTINGS.image_server_url:
         return True
     # 2.3.7: an API image provider (Settings -> AI models -> Image generation)
     # switches the feature on too, unless DISPATCH_IMAGE_JOBS says off.
@@ -3466,14 +3467,37 @@ def _image_jobs_flag_allows() -> bool:
     return f not in ("0", "false", "no", "off", "")
 
 
-def _clawforge_configured() -> bool:
-    return bool(SETTINGS.image_jobs_enabled and SETTINGS.clawforge_url)
+def _warn_image_server_unset() -> None:
+    """One boot WARNING when bots ask for pictures but nothing can draw them.
+
+    Jobs are on (the flag is true or auto), at least one bot has `image_jobs`,
+    and neither an image server URL nor an API image provider is set: without
+    this line a missed environment variable only shows up as "no pictures".
+    """
+    try:
+        if SETTINGS.image_server_url or not _image_jobs_flag_allows():
+            return
+        if image_providers.api_selected():
+            return
+        names = [b.id for b in config.load_bots() if b.image_jobs]
+    except Exception:
+        log.debug("image server check skipped", exc_info=True)
+        return
+    if names:
+        log.warning("image jobs are enabled for %d bot(s) (%s) but no image "
+                    "server is set: set DISPATCH_IMAGE_SERVER_URL to the "
+                    "server's MCP endpoint, or pick an API image provider in "
+                    "Settings", len(names), ", ".join(sorted(names)[:5]))
+
+
+def _image_server_configured() -> bool:
+    return bool(SETTINGS.image_jobs_enabled and SETTINGS.image_server_url)
 
 
 def _choose_image_backend(workflow: str) -> str:
-    """"clawforge", "api" or "" for a NEW job (image_providers.choose_backend)."""
+    """"server", "api" or "" for a NEW job (image_providers.choose_backend)."""
     backend = image_providers.choose_backend(
-        workflow, clawforge=_clawforge_configured())
+        workflow, server=_image_server_configured())
     if backend == "api" and not _image_jobs_flag_allows():
         return ""
     return backend
@@ -3484,23 +3508,23 @@ def _image_backend(spec: image_jobs.ImageSpec):
     one MCP rig client for everything else (every row written before 2.3.7)."""
     if spec.backend == "api":
         return image_providers.backend
-    return _clawforge()
+    return _image_server()
 
 
-_clawforge_client: image_jobs.ClawForge | None = None
+_image_server_client: image_jobs.ImageServer | None = None
 
 
-def _clawforge() -> image_jobs.ClawForge:
+def _image_server() -> image_jobs.ImageServer:
     """The ONE rig client. Its MCP session and its unreachable-breaker are
     only worth anything if every job in the sweep shares them."""
-    global _clawforge_client
-    c = _clawforge_client
-    if (c is None or c.url != SETTINGS.clawforge_url
-            or c.files_url != (SETTINGS.clawforge_files_url or c.files_url)):
-        c = image_jobs.ClawForge(SETTINGS.clawforge_url,
-                                 files_url=SETTINGS.clawforge_files_url,
+    global _image_server_client
+    c = _image_server_client
+    if (c is None or c.url != SETTINGS.image_server_url
+            or c.files_url != (SETTINGS.image_server_files_url or c.files_url)):
+        c = image_jobs.ImageServer(SETTINGS.image_server_url,
+                                 files_url=SETTINGS.image_server_files_url,
                                  client_name="dispatch")
-        _clawforge_client = c
+        _image_server_client = c
     return c
 
 
@@ -4472,7 +4496,7 @@ async def _advance_image_job_locked(job: dict) -> None:
             # One cached `comfy_status` serves the whole sweep, and it is the
             # rig's own answer rather than an inference from `comfy.running` —
             # which says "false" routinely on a rig that renders fine, because
-            # ClawForge unloads the backend when idle and starts it on the next
+            # the image server unloads the backend when idle and starts it on the next
             # job. Fails OPEN: an unknown answer submits as before.
             ready = await forge.readiness()
             if ready.blocked:
@@ -8082,7 +8106,7 @@ async def health(request: Request):
         "viewer_denied_24h": localview.denial_stats()["denials_24h"],
         # Is the rig answering RIGHT NOW (the worker's breaker), and if not,
         # for how long. Reachability, not prose: no rig URL, no job ids.
-        "image_rig": (_clawforge().status() if _clawforge_configured()
+        "image_rig": (_image_server().status() if _image_server_configured()
                       else {"reachable": None}),
         # 2.3.7: the API image provider, when one is selected. Provider id and
         # the last error sentence only -- never a URL or a key.
@@ -8935,7 +8959,7 @@ def _image_provider_state(request: Request | None = None) -> dict:
             "can_refresh_models": can_refresh,
             "config": image_providers.public_config(),
             "presets": [p.public() for p in image_providers.DEFAULT_PRESETS],
-            "clawforge": _clawforge_configured(),
+            "image_server": _image_server_configured(),
             "enabled": _image_jobs_configured(),
             "flag_off": not _image_jobs_flag_allows(),
             "status": image_providers.backend.status()}
@@ -8964,9 +8988,9 @@ async def llm_image_put(request: Request, payload: dict = Body(...)):
         refused = _image_key_rules_refusal(request, payload, cfg)
         if refused is not None:
             return refused
-        if cfg["provider"] == image_providers.CLAWFORGE and not _clawforge_configured():
+        if cfg["provider"] == image_providers.SERVER and not _image_server_configured():
             raise ValueError("no MCP image server is configured "
-                             "(set DISPATCH_CLAWFORGE_URL and restart)")
+                             "(set DISPATCH_IMAGE_SERVER_URL and restart)")
         if image_providers.api_selected(cfg):
             image_providers.resolve(cfg)       # refuse a config that cannot work
     except ValueError as e:
@@ -11591,6 +11615,11 @@ async def image_job_status(request: Request, job_id: str):
 async def image_job_callback(request: Request, job_id: str):
     """The rig saying "this one is done". A poke, never content.
 
+    The token travels in the `X-Image-Gateway-Token` header. An operator whose
+    image server sends it under another name lists that name in
+    `DISPATCH_IMAGE_CALLBACK_HEADERS` (comma-separated); it is read after the
+    standard header and the first non-empty value wins.
+
     The BODY IS IGNORED. The rig posts what `get_job` would have returned, and
     trusting it would make a forged POST able to write a picture URL, an error
     string or a state into a family thread. Instead this advances the job
@@ -11613,7 +11642,13 @@ async def image_job_callback(request: Request, job_id: str):
     job = await db.get_image_job(job_id)
     if job is None:
         raise HTTPException(404, "Unknown image job")
-    presented = request.headers.get("x-clawforge-token") or ""
+    # The neutral header first, then any extra names the operator lists in
+    # DISPATCH_IMAGE_CALLBACK_HEADERS; the first non-empty value wins.
+    presented = ""
+    for hname in ("x-image-gateway-token", *SETTINGS.image_callback_headers):
+        presented = request.headers.get(hname) or ""
+        if presented:
+            break
     expected = job.get("callback_token") or ""
     # `compare_digest` on both halves, and an empty expected token can never
     # match: a job created before callbacks existed is not advanceable by
@@ -14963,7 +14998,7 @@ def _probe_image_api(_: str) -> tuple[str, str]:
 
 def _probe_image_server(_: str) -> tuple[str, str]:
     pools = reactions.image_cli_state() == reactions.IMAGE_CLI_OK
-    if _clawforge_configured():
+    if _image_server_configured():
         return "connected", "Pools: image CLI found" if pools else ""
     if pools:
         return "installed", "Image CLI found for pools; no MCP server for chat pictures"
