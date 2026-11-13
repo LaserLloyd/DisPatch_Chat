@@ -1300,7 +1300,40 @@ def _gate_denial(request: Request, decision: policy.Decision, req,
     if _wants_problem_json(request):
         return JSONResponse(problem.body(decision.status, decision.detail, code=decision.code) | {
             "error": body["error"]}, status_code=decision.status, media_type=problem.MEDIA_TYPE)
+    if _app_page_navigation(request) and decision.status in (401, 403):
+        return HTMLResponse(_APP_DENIED_PAGE.replace("{msg}", _APP_DENIED_MSG.get(
+            decision.code, _APP_DENIED_MSG["permission_denied"])), status_code=decision.status,
+            headers={"Cache-Control": "no-store"})
     return JSONResponse(body, status_code=decision.status)
+
+
+def _app_page_navigation(request: Request) -> bool:
+    """A person opening an app page (``/apps/<id>/``) in a browser tab, not a script or an asset fetch: they get
+    a readable page with a way back to DisPatch instead of the JSON envelope."""
+    if request.method != "GET" or not request.url.path.startswith("/apps/"):
+        return False
+    path = request.url.path
+    if not (path.endswith("/") or path.endswith(".html")):
+        return False
+    return "text/html" in (request.headers.get("accept") or "")
+
+
+_APP_DENIED_MSG = {
+    "signin_required": "Sign in to DisPatch first, then open this page again.",
+    "permission_denied": ("The profile this browser is signed in with cannot open this page. "
+                          "Open DisPatch, use Switch profile to pick a profile that can (for an admin "
+                          "page, the Owner), then open this page again."),
+}
+
+_APP_DENIED_PAGE = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DisPatch: sign in needed</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;margin:0;padding:24px 16px;background:#16181d;color:#e8e8ea}
+main{max-width:520px;margin:10vh auto}h1{font-size:1.3em}a{display:inline-block;margin-top:12px;padding:10px 16px;
+border-radius:8px;background:#3b6fd8;color:#fff;text-decoration:none}
+@media (prefers-color-scheme: light){body{background:#f6f6f8;color:#16181d}}</style></head>
+<body><main><h1>This page needs another profile</h1><p>{msg}</p><a href="/">Open DisPatch</a></main></body></html>
+"""
 
 
 def _task_done(task: asyncio.Task) -> None:

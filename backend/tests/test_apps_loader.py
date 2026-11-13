@@ -714,3 +714,22 @@ def test_jobboard_is_no_longer_a_builtin():
                  "from . import jobs", "jobs.router"):
         assert gone not in src, gone
     assert not (Path(main.__file__).parent / "jobs.py").exists()
+
+
+def test_a_denied_app_page_opened_in_a_browser_gets_a_readable_page(env):
+    """2026-11-13 (phone): a browser tab on an app page the profile may not open showed raw JSON."""
+    repo, load, make_client = env
+    _write_app(repo, "page-test")
+    load()
+    c = make_client(REMOTE)
+    auth.set_pin("1234")
+    r = c.get("/apps/page-test/", headers={"Accept": "text/html,application/xhtml+xml"})
+    assert r.status_code in (401, 403) and r.headers["content-type"].startswith("text/html")
+    assert "Open DisPatch" in r.text and 'href="/"' in r.text and "{msg}" not in r.text
+    assert r.headers.get("cache-control") == "no-store"
+    j = c.get("/apps/page-test/", headers={"Accept": "application/json"})          # scripts keep the envelope
+    assert j.status_code == r.status_code and j.json()["error"]["code"]
+    a = c.get("/apps/page-test/app.js", headers={"Accept": "text/html"})            # assets keep the envelope
+    assert a.headers["content-type"].startswith("application/json")
+    assert c.get("/api/apps/page-test/ping", headers={"Accept": "text/html"}).headers[
+        "content-type"].startswith("application/json")
