@@ -1336,6 +1336,33 @@ test('the Generate bar sticks to the bottom of the form (and the phone bar is a 
   assert.match(css, /\.st-gobar \.st-go \{[^}]*min-height: 44px/, 'the phone button is a thumb tall');
 });
 
+test('the arrow on a phone is a thumb-sized tap target (the phone rule must out-specify the base rule)', () => {
+  // The base rule that sizes the arrow sits AFTER the phone media query, so a
+  // phone rule with the same classes would lose: the arrow stayed 26x26 on a
+  // phone while every other control in that card was a thumb tall.
+  const css = readFileSync(join(APP, 'static', 'studio.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const phoneBlock = /@media\s*\(max-width:\s*860px\)\s*\{([\s\S]*?)\n\}/.exec(css);
+  assert.ok(phoneBlock, 'the phone media query is there');
+  const rules = (chunk) => {
+    const out = [];
+    const re = /([^{}]+)\{([^{}]*)\}/g;
+    let m;
+    while ((m = re.exec(chunk))) out.push({ sel: m[1].trim(), body: m[2] });
+    return out;
+  };
+  const phone = rules(phoneBlock[1]).filter((r) => r.sel.endsWith('.st-btn.st-picker-chevron'));
+  assert.equal(phone.length, 1, 'the phone media query sizes the arrow once');
+  const base = rules(css.replace(phoneBlock[0], '')).filter((r) => r.sel === '.st-btn.st-picker-chevron');
+  assert.equal(base.length, 1, 'the base rule sizes the arrow once');
+  const classes = (sel) => (sel.match(/\.[\w-]+/g) || []).length;
+  assert.ok(classes(phone[0].sel) > classes(base[0].sel),
+    `the phone rule (${phone[0].sel}) must out-specify the base rule (${base[0].sel})`);
+  assert.match(phone[0].body, /width: 44px/, 'the arrow is 44px wide on a phone');
+  assert.match(phone[0].body, /height: 44px/, 'and 44px tall');
+  assert.match(phone[0].body, /min-width: 44px/, 'and never smaller than a thumb');
+  assert.match(phone[0].body, /min-height: 44px/, 'in either direction');
+});
+
 // ------------------------------------------- the rest of the sweep
 
 test('the image server: a failed load is said in the header, so a closed card does not hide it', { skip: dom.skip }, async () => {
