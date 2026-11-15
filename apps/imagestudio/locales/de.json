@@ -164,5 +164,13 @@
   "models.note_mixed": "Aus der Modellliste von {label}, Stand {date}, plus Modelle aus der Dokumentation.",
   "models.refresh_error": "Die Modelllisten konnten nicht aktualisiert werden: {error}",
   "models.h3_hint": "MiniMax-H3-Bilder können einige Minuten dauern. Eine Anfrage wird nie automatisch wiederholt, und jedes Drücken von Erzeugen wird berechnet.",
-  "models.refresh_docs_only": "Nichts Neues: Diese Anbieter listen Bildmodelle nicht über eine API auf."
+  "models.refresh_docs_only": "Nichts Neues: Diese Anbieter listen Bildmodelle nicht über eine API auf.",
+  "picker.workflows_title": "Workflows",
+  "picker.models_title": "Modelle",
+  "picker.choose_model": "Modell auswählen",
+  "picker.search_workflows": "Workflows durchsuchen",
+  "picker.search_models": "Modelle durchsuchen",
+  "picker.count": "{shown} von {total}",
+  "picker.no_match": "Nichts passt zu „{query}“.",
+  "picker.selected": "Ausgewählt"
 }

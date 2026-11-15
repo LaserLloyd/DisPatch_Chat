@@ -165,5 +165,13 @@
   "models.note_mixed": "Issu de la liste de modèles de {label}, mise à jour le {date}, plus des modèles de sa documentation.",
   "models.refresh_error": "Impossible d'actualiser les listes de modèles : {error}",
   "models.h3_hint": "Les images MiniMax H3 peuvent prendre quelques minutes. Une requête n'est jamais répétée automatiquement et chaque clic sur Générer est facturé.",
-  "models.refresh_docs_only": "Rien de nouveau : ces fournisseurs ne listent pas leurs modèles d'image via une API."
+  "models.refresh_docs_only": "Rien de nouveau : ces fournisseurs ne listent pas leurs modèles d'image via une API.",
+  "picker.workflows_title": "Flux de travail",
+  "picker.models_title": "Modèles",
+  "picker.choose_model": "Choisir un modèle",
+  "picker.search_workflows": "Rechercher des flux de travail",
+  "picker.search_models": "Rechercher des modèles",
+  "picker.count": "{shown} sur {total}",
+  "picker.no_match": "Rien ne correspond à « {query} ».",
+  "picker.selected": "Sélectionné"
 }

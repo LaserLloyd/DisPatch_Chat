@@ -168,5 +168,13 @@
   "models.note_mixed": "من قائمة نماذج {label} المحدَّثة في {date}، مع نماذج من وثائقها.",
   "models.refresh_error": "تعذّر تحديث قوائم النماذج: {error}",
   "models.h3_hint": "قد تستغرق صور H3 بضع دقائق. لا يُعاد إرسال الطلب تلقائيًا، وكل ضغطة على توليد تُحتسب.",
-  "models.refresh_docs_only": "لا جديد: لا يعرض هؤلاء المزوّدون نماذج الصور عبر واجهة برمجية."
+  "models.refresh_docs_only": "لا جديد: لا يعرض هؤلاء المزوّدون نماذج الصور عبر واجهة برمجية.",
+  "picker.workflows_title": "سير العمل",
+  "picker.models_title": "النماذج",
+  "picker.choose_model": "اختر نموذجًا",
+  "picker.search_workflows": "ابحث في سير العمل",
+  "picker.search_models": "ابحث في النماذج",
+  "picker.count": "{shown} من {total}",
+  "picker.no_match": "لا شيء يطابق “{query}”.",
+  "picker.selected": "محدّد"
 }

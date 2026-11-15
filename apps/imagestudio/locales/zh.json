@@ -163,5 +163,13 @@
   "models.note_mixed": "来自 {label} 的模型列表({date}更新),另加文档中的模型。",
   "models.refresh_error": "无法刷新模型列表:{error}",
   "models.h3_hint": "MiniMax H3 图片可能需要几分钟。请求不会自动重试,每次点击生成都会计费。",
-  "models.refresh_docs_only": "没有新内容:这些服务商不通过 API 列出图像模型。"
+  "models.refresh_docs_only": "没有新内容:这些服务商不通过 API 列出图像模型。",
+  "picker.workflows_title": "工作流",
+  "picker.models_title": "模型",
+  "picker.choose_model": "选择模型",
+  "picker.search_workflows": "搜索工作流",
+  "picker.search_models": "搜索模型",
+  "picker.count": "{total} 个中的 {shown} 个",
+  "picker.no_match": "没有匹配“{query}”的内容。",
+  "picker.selected": "已选择"
 }

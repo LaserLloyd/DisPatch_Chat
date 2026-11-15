@@ -50,6 +50,7 @@ const S = {
   buzzLoaded: false,     // the balance was fetched once for this page
   browse: { open: false, sort: 'week', query: '', rows: [], state: 'idle', error: '' },
   workflows: { rows: [], tried: false, loading: false, error: '', sig: '' },   // the image server's gallery
+  picker: { open: false, query: '', mode: '' },   // the card under the Model field
 };
 const R = {};            // DOM refs
 const SORT_LABELS = { oldest: 'sort.oldest', newest: 'sort.newest' };
@@ -60,6 +61,9 @@ const PAY_KEY = 'dispatch-imagestudio-pay';
 const PAY_LABELS = { '': 'pay.auto', blue: 'pay.blue', yellow: 'pay.yellow' };
 const TYPE_LABELS = { blue: 'buzz.type_blue', yellow: 'buzz.type_yellow' };
 const BROWSE_LABELS = { week: 'browse.sort_week', month: 'browse.sort_month', rated: 'browse.sort_rated', new: 'browse.sort_new' };
+// More models than this and the wall of pills becomes the compact chooser
+// instead: no provider may push a long list of names onto the page.
+const PICKER_PILL_LIMIT = 8;
 
 function nimOn() {
   try { return localStorage.getItem('dispatch-nim') === '1'; } catch { return false; }
@@ -186,8 +190,10 @@ function refreshForm() {
     return o;
   }));
   renderModelPicks(p, names);
+  renderPickerMode(p);
   renderModelNote();
   refreshWorkflows();
+  renderPickerList();
   R.est.hidden = !(p && p.estimate) || !S.estText;
   R.est.textContent = S.estText;
   const civ = isCivitai() && !!p.configured;
@@ -200,15 +206,126 @@ function refreshForm() {
 }
 
 /** The model's own list as buttons: Chromium shows nothing for a datalist option
- *  that has a label and no text, so the names are offered here as well. */
+ *  that has a label and no text, so the names are offered here as well.
+ *
+ *  Two exceptions, both about the wall of pills: the image server's names are
+ *  the gallery's own tiles (the picker card lists them once, with pictures),
+ *  and a provider with a long list gets the compact chooser instead. */
 function renderModelPicks(p, names) {
   const models = (p && p.models) || [];
-  R.modelPicks.hidden = !models.length;
-  R.modelPicks.replaceChildren(...models.map((m) => {
+  const wall = models.length && !isServerProvider() && models.length <= PICKER_PILL_LIMIT;
+  R.modelPicks.hidden = !wall;
+  R.modelPicks.replaceChildren(...(wall ? models.map((m) => {
     const b = el('button', { type: 'button', class: 'st-model-pick', title: m, text: names[m] || m });
     b.addEventListener('click', () => { R.model.value = m; refreshForm(); });
     return el('li', {}, [b]);
-  }));
+  }) : []));
+}
+
+// ---------------------------------------------------------------- the picker
+//
+// One card under the Model field. For the image server it IS the gallery: the
+// workflows with the picture each one made last, a search box above them and a
+// count line, so the 34 names are listed once and the chosen one is marked in
+// its own tile. For a provider with a long model list it is the same card in
+// "models" mode, opened by a button.
+
+/** The card under the Model field: the gallery for the image server, a compact
+ *  chooser for a provider whose model list is too long for a wall of pills. */
+function renderPickerMode(p) {
+  const models = (p && p.models) || [];
+  const mode = isServerProvider() ? 'workflows'
+    : (models.length > PICKER_PILL_LIMIT ? 'models' : '');
+  if (S.picker.mode !== mode) { S.picker.mode = mode; S.picker.open = false; }
+  R.pickerCard.hidden = !mode;
+  R.pickerToggle.hidden = mode !== 'models';
+  R.pickerBody.hidden = mode === 'models' && !S.picker.open;
+  R.pickerToggle.setAttribute('aria-expanded', S.picker.open ? 'true' : 'false');
+  R.pickerTitle.textContent = t(mode === 'models' ? 'picker.models_title' : 'picker.workflows_title');
+  const search = t(mode === 'models' ? 'picker.search_models' : 'picker.search_workflows');
+  R.pickerSearch.setAttribute('aria-label', search);
+  R.pickerSearch.placeholder = search;
+}
+
+/** The rows the card lists: the image server's workflows, or a provider's models. */
+function pickerRows() {
+  if (S.picker.mode === 'workflows') return S.workflows.rows || [];
+  const p = provider();
+  const names = (p && p.model_names) || {};
+  return ((p && p.models) || []).map((m) => ({ name: m, display_name: names[m] || m }));
+}
+
+/** The rows that match what was typed: the name and the display name. */
+function filterRows(rows, query) {
+  const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return rows;
+  return rows.filter((r) => {
+    const hay = `${r.name} ${r.display_name || ''}`.toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+/** What the card shows now: the rows that match, the count and the mark on the
+ *  chosen one. The tiles themselves are kept (and their pictures with them);
+ *  the ones that do not match are hidden. */
+function renderPickerList() {
+  const mode = S.picker.mode;
+  const rows = pickerRows();
+  const shown = filterRows(rows, S.picker.query);
+  const keep = new Set(shown.map((r) => r.name));
+  R.wfList.hidden = mode !== 'workflows';
+  R.modelList.hidden = mode !== 'models';
+  for (const li of R.wfList.children) li.hidden = !keep.has(li.dataset.name);
+  if (mode === 'models') {
+    R.modelList.replaceChildren(...shown.map((r) => {
+      const b = el('button', { type: 'button', class: 'st-picker-row', title: r.name, text: r.display_name, 'aria-pressed': 'false' });
+      b.dataset.name = r.name;
+      b.addEventListener('click', () => pickModelName(r.name));
+      return el('li', {}, [b]);
+    }));
+  }
+  R.pickerCount.textContent = t('picker.count', { shown: shown.length, total: rows.length });
+  R.pickerEmpty.hidden = !(shown.length === 0 && S.picker.query);
+  if (!R.pickerEmpty.hidden) R.pickerEmpty.textContent = t('picker.no_match', { query: S.picker.query });
+  markSelected();
+}
+
+/** The chosen one is marked in the tile itself: the accent border, the badge
+ *  and aria-pressed (aria-current as well). */
+function markSelected() {
+  const cur = R.model ? R.model.value : '';
+  for (const li of R.wfList.children) {
+    const b = li.querySelector('.st-wf-tile');
+    if (!b) continue;
+    const on = b.dataset.name === cur;
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (on) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current');
+    const badge = b.querySelector('.st-wf-selected');
+    if (badge) badge.hidden = !on;
+  }
+  for (const b of R.modelList.querySelectorAll('.st-picker-row')) {
+    b.setAttribute('aria-pressed', b.dataset.name === cur ? 'true' : 'false');
+  }
+}
+
+/** The chosen tile comes into view when the list appears. */
+function scrollSelectedIntoView() {
+  const b = R.wfList.querySelector('.st-wf-tile[aria-pressed="true"]');
+  if (b) b.scrollIntoView?.({ block: 'nearest' });
+}
+
+/** Put a name in the Model box and keep the focus where it was. */
+function pickModelName(name) {
+  R.model.value = name;
+  refreshForm();
+  const again = [...R.modelList.querySelectorAll('.st-picker-row')].find((b) => b.dataset.name === name);
+  if (again) again.focus();
+}
+
+/** The rows a person can walk to with the arrow keys. */
+function pickerItems() {
+  const list = S.picker.mode === 'models' ? R.modelList : R.wfList;
+  return [...list.querySelectorAll('button')].filter((b) => !(b.closest('li') || {}).hidden);
 }
 
 /** The image server's provider: the gallery is shown for it and for nothing else. */
@@ -223,7 +340,6 @@ const thumbUrl = (u) => `${API}/workflows/thumb?u=${encodeURIComponent(u)}`;
 /** The gallery: what the image server can render, with the picture it made last. */
 function refreshWorkflows() {
   const on = isServerProvider();
-  R.workflows.hidden = !on;
   if (on && !S.workflows.tried) {
     S.workflows.tried = true;
     loadWorkflows();
@@ -257,11 +373,11 @@ async function loadWorkflows() {
 
 function renderWorkflows() {
   const rows = S.workflows.rows || [];
-  if (!isServerProvider()) { R.workflows.replaceChildren(); return; }
+  if (!isServerProvider()) { R.wfList.replaceChildren(); return; }
   const sig = rows.map((w) => w.name).join('|');
   if (sig !== S.workflows.sig) {
     S.workflows.sig = sig;
-    R.workflows.replaceChildren(...rows.map((w) => {
+    R.wfList.replaceChildren(...rows.map((w) => {
       const label = w.display_name || w.name;
       // No-Image Mode never asks for a picture: the name only.
       const media = S.nim
@@ -269,15 +385,19 @@ function renderWorkflows() {
         : (w.thumb
           ? el('img', { src: thumbUrl(w.thumb), alt: label, loading: 'lazy' })
           : el('div', { class: 'st-noimg', text: label }));
-      const b = el('button', { type: 'button', class: 'st-wf-tile', title: label }, [
+      const b = el('button', { type: 'button', class: 'st-wf-tile', title: label, 'aria-pressed': 'false' }, [
         media, el('span', { class: 'st-wf-name', text: label }),
+        el('span', { class: 'st-wf-selected', text: t('picker.selected'), hidden: '' }),
       ]);
+      b.dataset.name = w.name;
       b.addEventListener('click', () => { R.model.value = w.name; refreshForm(); });
-      return el('li', { class: 'st-wf' }, [b]);
+      return el('li', { class: 'st-wf', dataset: { name: w.name } }, [b]);
     }));
+    renderPickerList();
+    scrollSelectedIntoView();
   }
-  R.workflowsNote.hidden = !S.workflows.error;
-  if (S.workflows.error) R.workflowsNote.textContent = S.workflows.error;
+  R.pickerNote.hidden = !S.workflows.error;
+  if (S.workflows.error) R.pickerNote.textContent = S.workflows.error;
 }
 
 // ---------------------------------------------------------------- Buzz balance
@@ -973,8 +1093,21 @@ function build(root) {
     el('label', { text: t('ref.label') }), el('div', { class: 'st-muted', text: t('ref.hint') }),
     R.refPreview, el('div', { class: 'st-row' }, [refUp, refChat, R.refClear]), R.file, R.picker,
   ]);
-  R.workflows = el('ul', { class: 'st-workflows', id: 'st-workflows', hidden: '' });
-  R.workflowsNote = el('p', { class: 'st-muted st-workflows-note', hidden: '' });
+  R.wfList = el('ul', { class: 'st-workflows', id: 'st-workflows', hidden: '' });
+  R.pickerNote = el('p', { class: 'st-muted st-workflows-note', hidden: '' });
+  R.pickerSearch = el('input', { type: 'search', id: 'st-picker-search', class: 'st-picker-search', maxlength: '60', autocomplete: 'off', spellcheck: 'false', placeholder: t('picker.search_workflows'), 'aria-label': t('picker.search_workflows') });
+  R.pickerCount = el('p', { class: 'st-muted st-picker-count', role: 'status', 'aria-live': 'polite' });
+  R.pickerEmpty = el('p', { class: 'st-muted st-picker-empty', role: 'status', hidden: '' });
+  R.pickerTitle = el('strong', { class: 'st-pickertitle', text: t('picker.workflows_title') });
+  R.pickerToggle = el('button', { type: 'button', class: 'st-btn st-small st-picker-toggle', id: 'st-picker-toggle', text: t('picker.choose_model'), hidden: '', 'aria-expanded': 'false', 'aria-controls': 'st-picker-body' });
+  R.modelList = el('ul', { class: 'st-picker-models', id: 'st-picker-models', hidden: '' });
+  R.pickerBody = el('div', { class: 'st-pickerbody', id: 'st-picker-body' }, [
+    R.pickerSearch, R.pickerCount, R.pickerEmpty, R.wfList, R.modelList, R.pickerNote,
+  ]);
+  R.pickerCard = el('div', { class: 'st-picker st-pickercard', id: 'st-picker', hidden: '' }, [
+    el('div', { class: 'st-pickerhead' }, [R.pickerTitle, R.pickerToggle]),
+    R.pickerBody,
+  ]);
   R.go = el('button', { type: 'button', class: 'st-btn st-primary st-go', id: 'st-generate', text: t('generate') });
   R.cost = el('p', { class: 'st-cost', hidden: '' });
   R.h3Hint = el('p', { class: 'st-muted st-h3hint', hidden: '', text: t('models.h3_hint') });
@@ -992,9 +1125,11 @@ function build(root) {
   ]);
   R.form = el('div', { class: 'st-form' }, [
     field(t('prompt.label'), R.prompt, R.counter), R.recentWrap,
-    el('div', { class: 'st-two' }, [field(t('provider.label'), R.provider),
-      field(t('model.label'), R.model, el('div', { class: 'st-modelbox' }, [R.models, R.modelPicks]))]),
-    R.workflows, R.workflowsNote,
+    // The picker card sits under the Model field and spans the row: it is the
+    // image server's gallery, or a compact chooser for a long model list.
+    el('div', { class: 'st-two st-modelrow' }, [field(t('provider.label'), R.provider),
+      field(t('model.label'), R.model, el('div', { class: 'st-modelbox' }, [R.models, R.modelPicks])),
+      R.pickerCard]),
     R.modelRefresh, R.modelNote,
     R.browseBtn, R.browsePanel,
     el('div', { class: 'st-two' }, [field(t('ratio.label'), R.ratio), field(t('count.label'), R.count)]),
@@ -1034,7 +1169,8 @@ function build(root) {
   });
   R.provider.addEventListener('change', refreshForm);
   R.count.addEventListener('change', () => { R.count.value = String(clampCount(R.count.value, caps().max_n)); scheduleEstimate(); });
-  R.model.addEventListener('input', () => { refreshModelBits(); scheduleEstimate(); });
+  // A name typed by hand is kept, and the tile for it (if there is one) is marked.
+  R.model.addEventListener('input', () => { refreshModelBits(); scheduleEstimate(); markSelected(); });
   R.modelRefresh.addEventListener('click', refreshModels);
   R.pay.addEventListener('change', () => { S.pay = normalizeCurrency(R.pay.value); savePay(S.pay); scheduleEstimate(); });
   R.buzzRefresh.addEventListener('click', () => loadBalance());
@@ -1071,6 +1207,38 @@ function build(root) {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !R.dlg.hidden) closeDialog(); });
   R.browsePanel.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && S.browse.open) { closeBrowse(); R.browseBtn.setAttribute('aria-expanded', 'false'); R.browseBtn.focus(); }
+  });
+  // The picker card: type to narrow the list, arrows to walk it, Escape to
+  // clear the filter.
+  R.pickerSearch.addEventListener('input', () => {
+    S.picker.query = R.pickerSearch.value;
+    renderPickerList();
+  });
+  R.pickerToggle.addEventListener('click', () => {
+    S.picker.open = !S.picker.open;
+    R.pickerBody.hidden = !S.picker.open;
+    R.pickerToggle.setAttribute('aria-expanded', S.picker.open ? 'true' : 'false');
+    if (S.picker.open) { R.pickerSearch.focus(); scrollSelectedIntoView(); }
+  });
+  R.pickerCard.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (!S.picker.query) return;
+      R.pickerSearch.value = '';
+      S.picker.query = '';
+      renderPickerList();
+      e.stopPropagation();
+      return;
+    }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const items = pickerItems();
+    if (!items.length) return;
+    const doc = R.pickerCard.ownerDocument;
+    const at = items.indexOf(doc.activeElement);
+    const next = e.key === 'ArrowDown'
+      ? (at < 0 ? 0 : Math.min(at + 1, items.length - 1))
+      : (at < 0 ? items.length - 1 : Math.max(at - 1, 0));
+    e.preventDefault();
+    items[next].focus();
   });
 }
 

@@ -163,5 +163,13 @@
   "models.note_mixed": "{label}のモデル一覧({date}更新)に、ドキュメントのモデルを加えています。",
   "models.refresh_error": "モデル一覧を更新できませんでした: {error}",
   "models.h3_hint": "MiniMax H3の画像は数分かかることがあります。リクエストが自動で再送されることはなく、生成を押すたびに課金されます。",
-  "models.refresh_docs_only": "新しい情報はありません。これらのプロバイダはAPIで画像モデルを一覧できません。"
+  "models.refresh_docs_only": "新しい情報はありません。これらのプロバイダはAPIで画像モデルを一覧できません。",
+  "picker.workflows_title": "ワークフロー",
+  "picker.models_title": "モデル",
+  "picker.choose_model": "モデルを選ぶ",
+  "picker.search_workflows": "ワークフローを検索",
+  "picker.search_models": "モデルを検索",
+  "picker.count": "{total}件中 {shown}件",
+  "picker.no_match": "「{query}」に一致するものはありません",
+  "picker.selected": "選択中"
 }

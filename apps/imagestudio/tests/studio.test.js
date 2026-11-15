@@ -1004,3 +1004,158 @@ test('another provider never shows the workflow grid', { skip: dom.skip }, async
   assert.equal(doc.getElementById('st-workflows').hidden, true);
 });
 
+// ------------------------------------------- the picker under the Model field
+
+const WROWS = [
+  { name: 'wf-alpha', display_name: 'Alpha Portrait', state: 'ready', stale: false, thumb: '/ui/api/image?f=_previews/wf-alpha.png' },
+  { name: 'wf-beta', display_name: 'Beta Landscape', state: 'ready', stale: false, thumb: '/ui/api/image?f=_previews/wf-beta.png' },
+  { name: 'wf-gamma', display_name: 'Gamma Sketch', state: 'ready', stale: false, thumb: '/ui/api/image?f=_previews/wf-gamma.png' },
+];
+const WPAGE = { workflows: WROWS };
+const wpage = (opts = {}) => page({
+  state: WSTATE, extra: { 'GET /api/apps/imagestudio/workflows': () => [200, WPAGE] }, ...opts,
+});
+const picker = (doc) => doc.getElementById('st-picker');
+const wfTiles = (doc) => [...doc.querySelectorAll('#st-workflows .st-wf-tile')];
+const shownTiles = (doc) => wfTiles(doc).filter((b) => !b.closest('li').hidden);
+const type = (env, input, value) => {
+  input.value = value;
+  input.dispatchEvent(new env.win.Event('input', { bubbles: true }));
+};
+
+test('the image server: ONE picker sits under the Model field and lists the workflows by name', { skip: dom.skip }, async () => {
+  const { doc } = await wpage();
+  const card = picker(doc);
+  assert.equal(card.hidden, false, 'the picker card is there');
+  // Under the Model field, not at the bottom of the page: the card comes after
+  // the Model field inside the same row.
+  const row = card.closest('.st-modelrow');
+  assert.ok(row, 'the card lives in the provider/model row');
+  const kids = [...row.children];
+  const modelField = [...row.querySelectorAll('.st-field')].find((f) => f.querySelector('#st-model'));
+  assert.ok(modelField);
+  assert.ok(kids.indexOf(card) > kids.indexOf(modelField), 'the picker comes after the Model field');
+  // The search box is labelled and the count says how many there are.
+  const search = doc.getElementById('st-picker-search');
+  assert.equal(search.getAttribute('aria-label'), EN['picker.search_workflows']);
+  assert.match(doc.querySelector('.st-picker-count').textContent, /3 of 3/);
+  // The workflows are listed by their display names, each with its own tile.
+  assert.deepEqual(wfTiles(doc).map((b) => b.querySelector('.st-wf-name').textContent),
+    ['Alpha Portrait', 'Beta Landscape', 'Gamma Sketch']);
+  // The gallery is not on the page twice: there is one list of workflows.
+  assert.equal(doc.querySelectorAll('#st-workflows').length, 1);
+});
+
+test('the image server: typing in the search box narrows the list and the count follows', { skip: dom.skip }, async () => {
+  const env = await wpage();
+  const { doc } = env;
+  type(env, doc.getElementById('st-picker-search'), 'beta');
+  assert.deepEqual(shownTiles(doc).map((b) => b.querySelector('.st-wf-name').textContent), ['Beta Landscape']);
+  assert.match(doc.querySelector('.st-picker-count').textContent, /1 of 3/);
+  // The display name and the name itself both match.
+  type(env, doc.getElementById('st-picker-search'), 'gamma');
+  assert.deepEqual(shownTiles(doc).map((b) => b.dataset.name), ['wf-gamma']);
+  // Nothing matches: the list says so instead of looking empty.
+  type(env, doc.getElementById('st-picker-search'), 'zzz');
+  assert.equal(shownTiles(doc).length, 0);
+  assert.equal(doc.querySelector('.st-picker-empty').hidden, false);
+  assert.match(doc.querySelector('.st-picker-empty').textContent, /zzz/);
+  // Escape clears the filter and the whole list is back.
+  const search = doc.getElementById('st-picker-search');
+  key(env, search, { key: 'Escape' });
+  assert.equal(search.value, '');
+  assert.equal(shownTiles(doc).length, 3);
+  assert.match(doc.querySelector('.st-picker-count').textContent, /3 of 3/);
+});
+
+test('the image server: clicking a tile sets the model and marks that tile', { skip: dom.skip }, async () => {
+  const { doc } = await wpage();
+  const first = wfTiles(doc)[0];
+  first.click();
+  assert.equal(doc.getElementById('st-model').value, 'wf-alpha');
+  assert.equal(first.getAttribute('aria-pressed'), 'true');
+  assert.equal(first.getAttribute('aria-current'), 'true');
+  assert.equal(first.querySelector('.st-wf-selected').hidden, false, 'the tile says it is the chosen one');
+  assert.equal(wfTiles(doc)[1].getAttribute('aria-pressed'), 'false');
+  assert.equal(wfTiles(doc)[1].querySelector('.st-wf-selected').hidden, true);
+  // Another tile takes the mark.
+  wfTiles(doc)[2].click();
+  assert.equal(doc.getElementById('st-model').value, 'wf-gamma');
+  assert.equal(wfTiles(doc)[2].getAttribute('aria-pressed'), 'true');
+  assert.equal(wfTiles(doc)[0].getAttribute('aria-pressed'), 'false');
+});
+
+test('the image server: the Model box stays hand-editable', { skip: dom.skip }, async () => {
+  const env = await wpage();
+  const { doc, win } = env;
+  const model = doc.getElementById('st-model');
+  model.value = 'wf-beta';
+  model.dispatchEvent(new win.Event('input', { bubbles: true }));
+  assert.equal(model.value, 'wf-beta', 'a name typed by hand is kept');
+  assert.equal(wfTiles(doc)[1].getAttribute('aria-pressed'), 'true', 'and the tile for it is marked');
+});
+
+test('the image server: no wall of pills (the picker lists the names once)', { skip: dom.skip }, async () => {
+  const { doc } = await wpage();
+  const wall = doc.getElementById('st-model-picks');
+  assert.equal(wall.hidden, true, 'the pill wall is not shown for the image server');
+  assert.equal(wall.querySelectorAll('button').length, 0);
+  // The names are still offered as suggestions in the Model box.
+  assert.ok([...doc.querySelectorAll('#st-models option')].some((o) => o.value === 'wf-alpha'));
+});
+
+test('the image server: No-Image Mode asks for no picture in the picker either', { skip: dom.skip }, async () => {
+  const env = await wpage({ nim: true });
+  const { doc } = env;
+  assert.equal(doc.querySelectorAll('img').length, 0, 'no picture is fetched in No-Image Mode');
+  assert.match(picker(doc).textContent, /Alpha Portrait/);
+});
+
+test('the image server: the arrow keys walk the list and Enter picks', { skip: dom.skip }, async () => {
+  const env = await wpage();
+  const { doc } = env;
+  const search = doc.getElementById('st-picker-search');
+  search.focus();
+  key(env, search, { key: 'ArrowDown' });
+  assert.equal(doc.activeElement, wfTiles(doc)[0], 'the first tile takes the focus');
+  key(env, wfTiles(doc)[0], { key: 'ArrowDown' });
+  assert.equal(doc.activeElement, wfTiles(doc)[1]);
+  key(env, wfTiles(doc)[1], { key: 'ArrowUp' });
+  assert.equal(doc.activeElement, wfTiles(doc)[0]);
+  // The focused tile is a button: Enter activates it (a click stands in for it).
+  wfTiles(doc)[1].click();
+  assert.equal(doc.getElementById('st-model').value, 'wf-beta');
+});
+
+test('a provider with a long model list gets the compact chooser, not a wall of pills', { skip: dom.skip }, async () => {
+  const many = { id: 'many', label: 'Many', shape: 'openai-images', configured: true, model: 'm-1',
+    models: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6', 'm-7', 'm-8', 'm-9'],
+    supports: { reference: false, optimizer: false, seed: false, max_n: 4 } };
+  const env = await page({ state: { ...STATE, providers: [many], default: 'many' } });
+  const { doc } = env;
+  const wall = doc.getElementById('st-model-picks');
+  assert.equal(wall.hidden, true, 'no wall of pills for a long list');
+  const card = picker(doc);
+  assert.equal(card.hidden, false, 'the chooser card is there');
+  const toggle = doc.getElementById('st-picker-toggle');
+  assert.equal(toggle.hidden, false);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(doc.getElementById('st-picker-body').hidden, true, 'the list opens on demand');
+  toggle.click();
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(doc.getElementById('st-picker-body').hidden, false);
+  assert.equal(doc.querySelectorAll('#st-picker-models .st-picker-row').length, 9);
+  assert.match(doc.querySelector('.st-picker-count').textContent, /9 of 9/);
+  type(env, doc.getElementById('st-picker-search'), 'm-3');
+  assert.equal(doc.querySelectorAll('#st-picker-models .st-picker-row').length, 1);
+  doc.querySelector('#st-picker-models .st-picker-row').click();
+  assert.equal(doc.getElementById('st-model').value, 'm-3');
+});
+
+test('a provider with a short model list keeps its pills and gets no card', { skip: dom.skip }, async () => {
+  const { doc } = await page();
+  assert.equal(doc.getElementById('st-model-picks').hidden, false);
+  assert.equal(doc.querySelectorAll('#st-model-picks button').length, 2);
+  assert.equal(picker(doc).hidden, true, 'no card for a short list');
+});
+
