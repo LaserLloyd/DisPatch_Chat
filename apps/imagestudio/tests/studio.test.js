@@ -1424,3 +1424,24 @@ test('the workflow names never land on another provider (the list can arrive lat
   assert.deepEqual(models, ['image-01', 'image-01-live'], 'MiniMax still offers its own models');
   assert.equal(doc.getElementById('st-model-picks').hidden, false, 'and its own pills');
 });
+
+// ------------------------------------------- fix round 1: the reviewer's punch-list
+
+test('the header follows a name typed by hand: a closed card never names another workflow', { skip: dom.skip }, async () => {
+  const env = await wpage();
+  const { doc } = env;
+  const model = doc.getElementById('st-model');
+  const chosen = doc.getElementById('st-picker-chosen');
+  openGallery(doc);
+  wfTiles(doc)[0].click();
+  assert.match(chosen.textContent, /Alpha Portrait/, 'the header names the chosen workflow');
+  // A name typed by hand: the tile marking moves, so the header must move too.
+  type(env, model, 'wf-beta');
+  assert.equal(wfTiles(doc)[1].getAttribute('aria-pressed'), 'true', 'the tile for it is marked');
+  assert.match(chosen.textContent, /Beta Landscape/, 'and the header names the typed one');
+  assert.doesNotMatch(chosen.textContent, /Alpha Portrait/, 'the old name is gone from the header');
+  // Closed, the header still says what the form will use.
+  chevron(doc).click();
+  assert.equal(pickerBody(doc).hidden, true, 'the card is closed');
+  assert.match(chosen.textContent, /Beta Landscape/, 'the closed card names the workflow in use');
+});

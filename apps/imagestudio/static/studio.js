@@ -1259,7 +1259,9 @@ function build(root) {
   });
   R.count.addEventListener('change', () => { R.count.value = String(clampCount(R.count.value, caps().max_n)); scheduleEstimate(); });
   // A name typed by hand is kept, and the tile for it (if there is one) is marked.
-  R.model.addEventListener('input', () => { refreshModelBits(); scheduleEstimate(); markSelected(); });
+  // The header follows too: a closed card must not name a workflow the form
+  // will not use.
+  R.model.addEventListener('input', () => { refreshModelBits(); scheduleEstimate(); markSelected(); renderChosen(); });
   R.modelRefresh.addEventListener('click', refreshModels);
   R.pay.addEventListener('change', () => { S.pay = normalizeCurrency(R.pay.value); savePay(S.pay); scheduleEstimate(); });
   R.buzzRefresh.addEventListener('click', () => loadBalance());
