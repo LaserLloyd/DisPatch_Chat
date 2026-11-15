@@ -190,7 +190,9 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
 .st-wf-tile:hover { border-color: var(--accent); }
 .st-wf-tile img { width: 100%; height: auto; border-radius: 6px; display: block; }
 .st-wf-name { overflow-wrap: anywhere; }
-.st-workflows-note { margin: 0; }
+/* The card's note (loading, or the image server's own words): it sits in the
+   header, so a closed card still says why it has nothing to show. */
+.st-workflows-note { margin: 0; flex: 1 1 100%; overflow-wrap: anywhere; }
 
 /* The picker card under the Model field: the image server's gallery, or the
    compact chooser for a provider with a long model list. It spans the row, so

@@ -366,6 +366,24 @@ function isServerProvider() {
   return !!(p && p.id === 'workflows');
 }
 
+/** The names the provider on the form can actually draw with. */
+function providerModels(p) {
+  if (isServerProvider()) return (S.workflows.rows || []).map((w) => w.name);
+  return (p && p.models) || [];
+}
+
+/** The Model box must not keep a name the new provider never heard of: the image
+ *  server's workflow names mean nothing to another provider, and the other way
+ *  round. A name typed for a provider that lists no names at all is left alone. */
+function clearStaleModel(p) {
+  const name = (R.model && R.model.value) || '';
+  if (!name) return;
+  const models = providerModels(p);
+  if (!models.length) return;             // the provider lists no names: leave it be
+  if (models.includes(name)) return;      // the new provider offers this name
+  R.model.value = '';
+}
+
 /** The thumbnail comes from this server, never from the image server's own address. */
 const thumbUrl = (u) => `${API}/workflows/thumb?u=${encodeURIComponent(u)}`;
 
@@ -382,6 +400,7 @@ function refreshWorkflows() {
 
 async function loadWorkflows() {
   S.workflows.loading = true;
+  renderWorkflows();                    // the card says it is loading
   try {
     const r = await api(`${API}/workflows`);
     S.workflows.rows = r.workflows || [];
@@ -392,6 +411,8 @@ async function loadWorkflows() {
       p.models = S.workflows.rows.map((w) => w.name);
       p.model_names = Object.fromEntries(
         S.workflows.rows.map((w) => [w.name, w.display_name || w.name]));
+      // A name the image server never heard of is of no use to it.
+      clearStaleModel(p);
     }
   } catch (e) {
     S.workflows.rows = [];
@@ -438,8 +459,9 @@ function renderWorkflows() {
     renderPickerList();
     scrollSelectedIntoView();
   }
-  R.pickerNote.hidden = !S.workflows.error;
-  R.pickerNote.textContent = S.workflows.error || '';
+  // The note is in the header, so it is read whether the card is open or closed.
+  R.pickerNote.hidden = !(S.workflows.loading || S.workflows.error);
+  R.pickerNote.textContent = S.workflows.loading ? t('loading') : (S.workflows.error || '');
 }
 
 // ---------------------------------------------------------------- Buzz balance
@@ -1150,10 +1172,12 @@ function build(root) {
   R.pickerToggle = el('button', { type: 'button', class: 'st-btn st-small st-picker-toggle', id: 'st-picker-toggle', text: t('picker.choose_model'), hidden: '', 'aria-expanded': 'false', 'aria-controls': 'st-picker-body' });
   R.modelList = el('ul', { class: 'st-picker-models', id: 'st-picker-models', hidden: '' });
   R.pickerBody = el('div', { class: 'st-pickerbody', id: 'st-picker-body' }, [
-    R.pickerSearch, R.pickerEmpty, R.wfList, R.modelList, R.pickerNote,
+    R.pickerSearch, R.pickerEmpty, R.wfList, R.modelList,
   ]);
   R.pickerCard = el('div', { class: 'st-picker st-pickercard', id: 'st-picker', hidden: '' }, [
-    el('div', { class: 'st-pickerhead' }, [R.pickerTitle, R.pickerCount, R.pickerChosen, R.pickerChevron, R.pickerToggle]),
+    // The note lives in the HEADER: a closed card must not hide the reason it
+    // has nothing to show (the image server is loading, or it said no).
+    el('div', { class: 'st-pickerhead' }, [R.pickerTitle, R.pickerCount, R.pickerChosen, R.pickerChevron, R.pickerToggle, R.pickerNote]),
     R.pickerBody,
   ]);
   R.go = el('button', { type: 'button', class: 'st-btn st-primary st-go', id: 'st-generate', text: t('generate') });
@@ -1221,9 +1245,11 @@ function build(root) {
   });
   R.provider.addEventListener('change', () => {
     // A new provider means a new list: the old filter must not narrow it (and
-    // the count must go back to the whole list).
+    // the count must go back to the whole list), and the Model box must not
+    // keep a name the new provider never heard of.
     S.picker.query = '';
     R.pickerSearch.value = '';
+    clearStaleModel(provider());
     refreshForm();
   });
   R.count.addEventListener('change', () => { R.count.value = String(clampCount(R.count.value, caps().max_n)); scheduleEstimate(); });
@@ -1285,6 +1311,7 @@ function build(root) {
       return;
     }
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    if (R.pickerBody.hidden) return;      // the card is closed: there is nothing to walk
     const items = pickerItems();
     if (!items.length) return;
     const doc = R.pickerCard.ownerDocument;

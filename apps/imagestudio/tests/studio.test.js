@@ -1335,3 +1335,73 @@ test('the Generate bar sticks to the bottom of the form (and the phone bar is a 
   assert.match(css, /\.st-gobar \{[^}]*env\(safe-area-inset-bottom/, 'the phone bar keeps clear of the home indicator');
   assert.match(css, /\.st-gobar \.st-go \{[^}]*min-height: 44px/, 'the phone button is a thumb tall');
 });
+
+// ------------------------------------------- the rest of the sweep
+
+test('the image server: a failed load is said in the header, so a closed card does not hide it', { skip: dom.skip }, async () => {
+  const env = await page({
+    state: { ...STATE, providers: [WF, PROVIDERS[0]], default: 'workflows' },
+    extra: { 'GET /api/apps/imagestudio/workflows': () => [500, { detail: 'the image server said no' }] },
+  });
+  const { doc } = env;
+  const note = doc.querySelector('.st-workflows-note');
+  assert.equal(note.hidden, false, 'the failure is said');
+  assert.match(note.textContent, /the image server said no/);
+  // It is in the header: the closed card says it too.
+  assert.ok(pickerHead(doc).contains(note), 'the note is in the header');
+  assert.equal(pickerBody(doc).hidden, true, 'the card is closed');
+  assert.match(pickerHead(doc).textContent, /the image server said no/);
+});
+
+test('the image server: while the list loads the card says it is loading, not that it is empty', { skip: dom.skip }, async () => {
+  let release = null;
+  const gate = new Promise((r) => { release = r; });
+  const env = await page({
+    state: { ...STATE, providers: [WF, PROVIDERS[0]], default: 'workflows' },
+    extra: { 'GET /api/apps/imagestudio/workflows': async () => { await gate; return [200, WPAGE]; } },
+  });
+  const { doc } = env;
+  const note = doc.querySelector('.st-workflows-note');
+  assert.equal(note.hidden, false, 'the card says it is loading');
+  assert.match(note.textContent, /Loading/);
+  assert.match(pickerHead(doc).textContent, /Loading/, 'and it says it in the header');
+  release();
+  await flush(); await flush();
+  assert.equal(note.hidden, true, 'and the note goes when the list is there');
+  assert.equal(wfTiles(doc).length, 3);
+});
+
+test('a workflow name does not survive the switch to another provider (and back)', { skip: dom.skip }, async () => {
+  const env = await wpage({ state: { ...STATE, providers: [WF, PROVIDERS[0]], default: 'workflows' } });
+  const { doc, win } = env;
+  openGallery(doc);
+  wfTiles(doc)[0].click();
+  assert.equal(doc.getElementById('st-model').value, 'wf-alpha');
+  const sel = doc.getElementById('st-provider');
+  sel.value = 'minimax';
+  sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  assert.equal(doc.getElementById('st-model').value, '', 'the workflow name is gone: MiniMax never heard of it');
+});
+
+test('a name the new provider offers survives the switch', { skip: dom.skip }, async () => {
+  const env = await page();
+  const { doc, win } = env;
+  const model = doc.getElementById('st-model');
+  model.value = 'image-01';
+  model.dispatchEvent(new win.Event('input', { bubbles: true }));
+  const sel = doc.getElementById('st-provider');
+  sel.value = 'openai';
+  sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  // OpenAI lists no models in this state, so a name the person typed stays.
+  assert.equal(model.value, 'image-01');
+});
+
+test('the arrow keys do nothing while the gallery is closed', { skip: dom.skip }, async () => {
+  const env = await wpage();
+  const { doc } = env;
+  const arrow = chevron(doc);
+  arrow.focus();
+  key(env, arrow, { key: 'ArrowDown' });
+  assert.equal(doc.activeElement, arrow, 'the focus stays on the arrow');
+  assert.notEqual(doc.activeElement, wfTiles(doc)[0]);
+});
