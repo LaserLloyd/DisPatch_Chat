@@ -375,7 +375,15 @@ function renderWorkflows() {
   const rows = S.workflows.rows || [];
   // Another provider shows no workflows: the list is emptied AND its signature
   // forgotten, so coming back rebuilds the tiles (the count still says 34).
-  if (!isServerProvider()) { R.wfList.replaceChildren(); S.workflows.sig = ''; return; }
+  // The note goes too: the card now belongs to that provider, and the image
+  // server's error must not sit in another provider's chooser.
+  if (!isServerProvider()) {
+    R.wfList.replaceChildren();
+    S.workflows.sig = '';
+    R.pickerNote.hidden = true;
+    R.pickerNote.textContent = '';
+    return;
+  }
   const sig = rows.map((w) => w.name).join('|');
   if (sig !== S.workflows.sig) {
     S.workflows.sig = sig;
@@ -399,7 +407,7 @@ function renderWorkflows() {
     scrollSelectedIntoView();
   }
   R.pickerNote.hidden = !S.workflows.error;
-  if (S.workflows.error) R.pickerNote.textContent = S.workflows.error;
+  R.pickerNote.textContent = S.workflows.error || '';
 }
 
 // ---------------------------------------------------------------- Buzz balance

@@ -1173,3 +1173,20 @@ test('the image server: switching provider and back leaves the picker list whole
   assert.match(doc.querySelector('.st-picker-count').textContent, /3 of 3/);
 });
 
+test('a failed workflow load says so in the card, and another provider does not inherit the error', { skip: dom.skip }, async () => {
+  const env = await page({
+    state: { ...STATE, providers: [WF, PROVIDERS[0]], default: 'workflows' },
+    extra: { 'GET /api/apps/imagestudio/workflows': () => [500, { detail: 'the image server said no' }] },
+  });
+  const { doc, win } = env;
+  const note = doc.querySelector('.st-workflows-note');
+  assert.equal(note.hidden, false, 'the failure is said in the picker card');
+  assert.match(note.textContent, /the image server said no/);
+  // Another provider's card must not carry the image server's error.
+  const sel = doc.getElementById('st-provider');
+  sel.value = 'minimax';
+  sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  assert.equal(note.hidden, true, 'the note goes with the image server');
+  assert.equal(note.textContent, '', 'and it leaves no text behind');
+});
+
