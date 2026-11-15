@@ -374,10 +374,18 @@ function providerModels(p) {
 
 /** The Model box must not keep a name the new provider never heard of: the image
  *  server's workflow names mean nothing to another provider, and the other way
- *  round. A name typed for a provider that lists no names at all is left alone. */
+ *  round. A name typed for a provider that lists no names at all is left alone
+ *  (that provider may still take it), but a workflow name never travels. */
 function clearStaleModel(p) {
   const name = (R.model && R.model.value) || '';
   if (!name) return;
+  const server = !!(p && p.id === 'workflows');
+  // The image server's own names belong to the image server: another provider
+  // never heard of them, so they go even when that provider lists no models.
+  if (!server && (S.workflows.rows || []).some((w) => w.name === name)) {
+    R.model.value = '';
+    return;
+  }
   const models = providerModels(p);
   if (!models.length) return;             // the provider lists no names: leave it be
   if (models.includes(name)) return;      // the new provider offers this name

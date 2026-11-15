@@ -1445,3 +1445,22 @@ test('the header follows a name typed by hand: a closed card never names another
   assert.equal(pickerBody(doc).hidden, true, 'the card is closed');
   assert.match(chosen.textContent, /Beta Landscape/, 'the closed card names the workflow in use');
 });
+
+test('a workflow name never reaches another provider, not even one that lists no models', { skip: dom.skip }, async () => {
+  // OpenAI lists no models in this state: the name must still go.
+  const env = await wpage({ state: { ...STATE, providers: [WF, PROVIDERS[1]], default: 'workflows' } });
+  const { doc, win } = env;
+  openGallery(doc);
+  wfTiles(doc)[0].click();
+  assert.equal(doc.getElementById('st-model').value, 'wf-alpha');
+  const sel = doc.getElementById('st-provider');
+  sel.value = 'openai';
+  sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  assert.equal(doc.getElementById('st-model').value, '', 'the workflow name is gone: OpenAI never heard of it');
+  // And it is not sent to the other provider either.
+  fill(env, 'a red fox');
+  doc.getElementById('st-generate').click();
+  await flush();
+  const sent = gens(env).pop();
+  assert.equal(sent.body.model, '', 'the request carries no workflow name');
+});
