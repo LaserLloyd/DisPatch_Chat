@@ -94,8 +94,10 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
   .st-icon { width: 40px; height: 40px; }
   .st-actions { flex-wrap: wrap; }
   /* The picker on a phone: two columns of tiles, a full-width search box and
-     tap targets a thumb can hit. The list scrolls inside its own card. */
-  .st-workflows { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 300px; }
+     tap targets a thumb can hit. The list scrolls inside its own card.
+     The rule is scoped to the picker card: the base .st-workflows rule comes
+     later in this file, and with the same specificity it would win. */
+  .st-pickercard .st-workflows { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 300px; }
   .st-picker-search, .st-picker-toggle, .st-picker-row, .st-wf-tile { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) { .st-page * { transition: none !important; } }
