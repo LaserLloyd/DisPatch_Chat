@@ -173,5 +173,8 @@
   "picker.search_models": "Buscar modelos",
   "picker.count": "{shown} de {total}",
   "picker.no_match": "Nada coincide con «{query}».",
-  "picker.selected": "Seleccionado"
+  "picker.selected": "Seleccionado",
+  "picker.expand": "Mostrar la galería de flujos de trabajo",
+  "picker.collapse": "Ocultar la galería de flujos de trabajo",
+  "picker.chosen": "Elegido: {name}"
 }

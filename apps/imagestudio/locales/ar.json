@@ -176,5 +176,8 @@
   "picker.search_models": "ابحث في النماذج",
   "picker.count": "{shown} من {total}",
   "picker.no_match": "لا شيء يطابق “{query}”.",
-  "picker.selected": "محدّد"
+  "picker.selected": "محدّد",
+  "picker.expand": "إظهار معرض سير العمل",
+  "picker.collapse": "إخفاء معرض سير العمل",
+  "picker.chosen": "المختار: {name}"
 }

@@ -172,5 +172,8 @@
   "picker.search_models": "Search models",
   "picker.count": "{shown} of {total}",
   "picker.no_match": "Nothing matches “{query}”.",
-  "picker.selected": "Selected"
+  "picker.selected": "Selected",
+  "picker.expand": "Show the workflow gallery",
+  "picker.collapse": "Hide the workflow gallery",
+  "picker.chosen": "Chosen: {name}"
 }

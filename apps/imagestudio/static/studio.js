@@ -229,6 +229,11 @@ function renderModelPicks(p, names) {
 // count line, so the 34 names are listed once and the chosen one is marked in
 // its own tile. For a provider with a long model list it is the same card in
 // "models" mode, opened by a button.
+//
+// The card is a section: a header row (the title, the count, the chosen
+// workflow) and a body that is CLOSED when the page loads. A small arrow
+// (the chevron) opens and closes it; the header keeps saying the count and the
+// chosen workflow, so a closed card still tells you what it holds.
 
 /** The card under the Model field: the gallery for the image server, a compact
  *  chooser for a provider whose model list is too long for a wall of pills. */
@@ -236,15 +241,41 @@ function renderPickerMode(p) {
   const models = (p && p.models) || [];
   const mode = isServerProvider() ? 'workflows'
     : (models.length > PICKER_PILL_LIMIT ? 'models' : '');
+  // A different card starts closed: the gallery is closed on every page load.
   if (S.picker.mode !== mode) { S.picker.mode = mode; S.picker.open = false; }
   R.pickerCard.hidden = !mode;
   R.pickerToggle.hidden = mode !== 'models';
-  R.pickerBody.hidden = mode === 'models' && !S.picker.open;
+  R.pickerChevron.hidden = mode !== 'workflows';
+  R.pickerBody.hidden = !S.picker.open;
   R.pickerToggle.setAttribute('aria-expanded', S.picker.open ? 'true' : 'false');
+  R.pickerChevron.setAttribute('aria-expanded', S.picker.open ? 'true' : 'false');
+  R.pickerChevron.setAttribute('aria-label', t(S.picker.open ? 'picker.collapse' : 'picker.expand'));
   R.pickerTitle.textContent = t(mode === 'models' ? 'picker.models_title' : 'picker.workflows_title');
   const search = t(mode === 'models' ? 'picker.search_models' : 'picker.search_workflows');
   R.pickerSearch.setAttribute('aria-label', search);
   R.pickerSearch.placeholder = search;
+  R.pickerChosen.hidden = mode !== 'workflows';
+}
+
+/** Open or close the card's body. The chevron and the chooser button share it,
+ *  so aria-expanded never disagrees with what is on the page. */
+function setPickerOpen(open) {
+  S.picker.open = !!open;
+  R.pickerBody.hidden = !S.picker.open;
+  R.pickerToggle.setAttribute('aria-expanded', S.picker.open ? 'true' : 'false');
+  R.pickerChevron.setAttribute('aria-expanded', S.picker.open ? 'true' : 'false');
+  R.pickerChevron.setAttribute('aria-label', t(S.picker.open ? 'picker.collapse' : 'picker.expand'));
+  if (S.picker.open) { R.pickerSearch.focus(); scrollSelectedIntoView(); }
+}
+
+/** The header says which workflow is chosen, so a closed card still says what
+ *  it is for. */
+function renderChosen() {
+  const name = (R.model && R.model.value) || '';
+  const row = (S.workflows.rows || []).find((w) => w.name === name);
+  const label = row ? (row.display_name || row.name) : name;
+  R.pickerChosen.hidden = S.picker.mode !== 'workflows' || !label;
+  R.pickerChosen.textContent = label ? t('picker.chosen', { name: label }) : '';
 }
 
 /** The rows the card lists: the image server's workflows, or a provider's models. */
@@ -288,6 +319,7 @@ function renderPickerList() {
   R.pickerEmpty.hidden = !(shown.length === 0 && S.picker.query);
   if (!R.pickerEmpty.hidden) R.pickerEmpty.textContent = t('picker.no_match', { query: S.picker.query });
   markSelected();
+  renderChosen();
 }
 
 /** The chosen one is marked in the tile itself: the accent border, the badge
@@ -1108,17 +1140,26 @@ function build(root) {
   R.pickerSearch = el('input', { type: 'search', id: 'st-picker-search', class: 'st-picker-search', maxlength: '60', autocomplete: 'off', spellcheck: 'false', placeholder: t('picker.search_workflows'), 'aria-label': t('picker.search_workflows') });
   R.pickerCount = el('p', { class: 'st-muted st-picker-count', role: 'status', 'aria-live': 'polite' });
   R.pickerEmpty = el('p', { class: 'st-muted st-picker-empty', role: 'status', hidden: '' });
-  R.pickerTitle = el('strong', { class: 'st-pickertitle', text: t('picker.workflows_title') });
+  R.pickerTitle = el('h3', { class: 'st-pickertitle', id: 'st-picker-title', text: t('picker.workflows_title') });
+  // The chosen workflow, in the header: a closed card still says what it holds.
+  R.pickerChosen = el('span', { class: 'st-picker-chosen', id: 'st-picker-chosen', hidden: '' });
+  // The small arrow that opens and closes the gallery.
+  R.pickerChevron = el('button', { type: 'button', class: 'st-btn st-small st-picker-chevron', id: 'st-picker-chevron', 'aria-label': t('picker.expand'), 'aria-expanded': 'false', 'aria-controls': 'st-picker-body', hidden: '' }, [
+    el('span', { class: 'st-chevron', 'aria-hidden': 'true', text: '▸' }),
+  ]);
   R.pickerToggle = el('button', { type: 'button', class: 'st-btn st-small st-picker-toggle', id: 'st-picker-toggle', text: t('picker.choose_model'), hidden: '', 'aria-expanded': 'false', 'aria-controls': 'st-picker-body' });
   R.modelList = el('ul', { class: 'st-picker-models', id: 'st-picker-models', hidden: '' });
   R.pickerBody = el('div', { class: 'st-pickerbody', id: 'st-picker-body' }, [
-    R.pickerSearch, R.pickerCount, R.pickerEmpty, R.wfList, R.modelList, R.pickerNote,
+    R.pickerSearch, R.pickerEmpty, R.wfList, R.modelList, R.pickerNote,
   ]);
   R.pickerCard = el('div', { class: 'st-picker st-pickercard', id: 'st-picker', hidden: '' }, [
-    el('div', { class: 'st-pickerhead' }, [R.pickerTitle, R.pickerToggle]),
+    el('div', { class: 'st-pickerhead' }, [R.pickerTitle, R.pickerCount, R.pickerChosen, R.pickerChevron, R.pickerToggle]),
     R.pickerBody,
   ]);
   R.go = el('button', { type: 'button', class: 'st-btn st-primary st-go', id: 'st-generate', text: t('generate') });
+  // Generate rides in a bar that sticks to the bottom of the form column, so
+  // it is always in reach while the form scrolls.
+  R.goBar = el('div', { class: 'st-gobar' }, [R.go]);
   R.cost = el('p', { class: 'st-cost', hidden: '' });
   R.h3Hint = el('p', { class: 'st-muted st-h3hint', hidden: '', text: t('models.h3_hint') });
   R.est = el('p', { class: 'st-cost st-estimate', role: 'status', hidden: '' });
@@ -1144,7 +1185,8 @@ function build(root) {
     R.browseBtn, R.browsePanel,
     el('div', { class: 'st-two' }, [field(t('ratio.label'), R.ratio), field(t('count.label'), R.count)]),
     R.payRow,
-    R.optimizerRow, R.seedRow, R.refBox, R.go, R.h3Hint, R.cost, R.est, R.buzzRow,
+    // The Generate bar is the LAST thing in the form: nothing scrolls under it.
+    R.optimizerRow, R.seedRow, R.refBox, R.h3Hint, R.cost, R.est, R.buzzRow, R.goBar,
   ]);
   R.sort = el('select', { id: 'st-sort', class: 'st-sort' }, SORTS.map((v) => el('option', { value: v, text: t(SORT_LABELS[v]) })));
   R.sort.value = S.sort;
@@ -1177,7 +1219,13 @@ function build(root) {
     S.lastKey = now;
     generate();
   });
-  R.provider.addEventListener('change', refreshForm);
+  R.provider.addEventListener('change', () => {
+    // A new provider means a new list: the old filter must not narrow it (and
+    // the count must go back to the whole list).
+    S.picker.query = '';
+    R.pickerSearch.value = '';
+    refreshForm();
+  });
   R.count.addEventListener('change', () => { R.count.value = String(clampCount(R.count.value, caps().max_n)); scheduleEstimate(); });
   // A name typed by hand is kept, and the tile for it (if there is one) is marked.
   R.model.addEventListener('input', () => { refreshModelBits(); scheduleEstimate(); markSelected(); });
@@ -1224,12 +1272,9 @@ function build(root) {
     S.picker.query = R.pickerSearch.value;
     renderPickerList();
   });
-  R.pickerToggle.addEventListener('click', () => {
-    S.picker.open = !S.picker.open;
-    R.pickerBody.hidden = !S.picker.open;
-    R.pickerToggle.setAttribute('aria-expanded', S.picker.open ? 'true' : 'false');
-    if (S.picker.open) { R.pickerSearch.focus(); scrollSelectedIntoView(); }
-  });
+  R.pickerToggle.addEventListener('click', () => setPickerOpen(!S.picker.open));
+  // The small arrow opens and closes the gallery.
+  R.pickerChevron.addEventListener('click', () => setPickerOpen(!S.picker.open));
   R.pickerCard.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (!S.picker.query) return;

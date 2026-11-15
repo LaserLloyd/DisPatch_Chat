@@ -15,8 +15,14 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
 .st-muted { color: var(--text-secondary); font-size: 12.5px; }
 .st-error { color: var(--danger, #e5484d); }
 .st-layout { display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 20px; align-items: start; }
-.st-controls { position: sticky; top: 8px; }
-.st-form { display: flex; flex-direction: column; gap: 12px; }
+/* The controls column keeps its own scroll: a tall form must not lose its lower
+   part behind the viewport, and the Generate bar rides at the bottom of it. */
+.st-controls {
+  position: sticky; top: 8px;
+  max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px);
+  overflow-y: auto; overflow-x: hidden; scrollbar-width: thin;
+}
+.st-form { display: flex; flex-direction: column; gap: 12px; padding-bottom: 4px; }
 .st-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .st-field > label { font-weight: 600; font-size: 12.5px; }
 .st-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -48,6 +54,18 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
 .st-primary:hover:not(:disabled) { background: var(--accent-hover, var(--accent)); }
 .st-btn:disabled { opacity: .55; cursor: default; }
 .st-go { padding: 11px 16px; }
+/* Generate rides in a bar that sticks to the bottom of the form column: the
+   button is always in reach while the form scrolls, and the opaque ground (plus
+   the blur behind it) keeps the text under it from showing through. */
+.st-gobar {
+  position: sticky; bottom: 0; z-index: 6;
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 2px; padding: 10px 0 12px;
+  background: var(--bg-primary);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  border-top: 1px solid var(--border-strong);
+}
+.st-gobar .st-go { flex: 1 1 auto; }
 .st-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .st-refprev img { max-width: 140px; max-height: 140px; border-radius: 8px; border: 1px solid var(--border-strong); display: block; }
 .st-picker { border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px; background: var(--bg-secondary, var(--bg-tertiary)); display: flex; flex-direction: column; gap: 8px; }
@@ -88,7 +106,7 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
 .st-av-prev { width: 120px; height: 120px; border-radius: 50%; border: 1px solid var(--border-strong); flex: none; }
 @media (max-width: 860px) {
   .st-layout { grid-template-columns: 1fr; }
-  .st-controls { position: static; }
+  .st-controls { position: static; max-height: none; overflow: visible; }
   .st-root { padding: 12px; }
   .st-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .st-icon { width: 40px; height: 40px; }
@@ -99,6 +117,11 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
      later in this file, and with the same specificity it would win. */
   .st-pickercard .st-workflows { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 300px; }
   .st-picker-search, .st-picker-toggle, .st-picker-row, .st-wf-tile { min-height: 44px; }
+  .st-btn.st-picker-chevron { width: 32px; height: 32px; min-width: 32px; min-height: 32px; }
+  /* The Generate bar on a phone: full width, a thumb-sized button, and room
+     for the home indicator so the bar is never under it. */
+  .st-gobar { padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px)); }
+  .st-gobar .st-go { width: 100%; min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) { .st-page * { transition: none !important; } }
 /* Results header: title + the sort control (the Job Board's "Sort: [select]"). */
@@ -174,8 +197,24 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
    it sits under the Model field without squeezing it. */
 .st-modelrow > .st-pickercard { grid-column: 1 / -1; }
 .st-pickercard { gap: 8px; }
-.st-pickerhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.st-pickertitle { font-size: 12.5px; }
+/* The card's header: the title, the count, the chosen workflow and the small
+   arrow that opens and closes the body. */
+.st-pickerhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.st-pickertitle { font-size: 12.5px; margin: 0; font-weight: 600; }
+.st-picker-chosen {
+  font-size: 12.5px; color: var(--text-secondary);
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The arrow: small, but a real button with a name, a state and a focus ring. */
+.st-btn.st-picker-chevron {
+  width: 26px; height: 26px; min-width: 26px; min-height: 26px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: none; margin-left: auto;
+}
+.st-btn.st-picker-chevron .st-chevron { display: block; line-height: 1; transition: transform .15s ease; }
+.st-btn.st-picker-chevron[aria-expanded="true"] .st-chevron { transform: rotate(90deg); }
+.st-btn.st-picker-chevron:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.st-btn.st-picker-toggle { margin-left: auto; }
 .st-pickerbody { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .st-picker-search { width: 100%; }
 .st-picker-count, .st-picker-empty { margin: 0; font-variant-numeric: tabular-nums; }

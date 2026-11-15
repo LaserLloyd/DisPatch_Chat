@@ -1022,6 +1022,11 @@ const type = (env, input, value) => {
   input.value = value;
   input.dispatchEvent(new env.win.Event('input', { bubbles: true }));
 };
+// The gallery is a closed section: the small arrow in its header opens it.
+const chevron = (doc) => doc.getElementById('st-picker-chevron');
+const pickerBody = (doc) => doc.getElementById('st-picker-body');
+const pickerHead = (doc) => doc.querySelector('.st-pickerhead');
+const openGallery = (doc) => { chevron(doc).click(); return pickerBody(doc); };
 
 test('the image server: ONE picker sits under the Model field and lists the workflows by name', { skip: dom.skip }, async () => {
   const { doc } = await wpage();
@@ -1040,6 +1045,7 @@ test('the image server: ONE picker sits under the Model field and lists the work
   assert.equal(search.getAttribute('aria-label'), EN['picker.search_workflows']);
   assert.match(doc.querySelector('.st-picker-count').textContent, /3 of 3/);
   // The workflows are listed by their display names, each with its own tile.
+  openGallery(doc);
   assert.deepEqual(wfTiles(doc).map((b) => b.querySelector('.st-wf-name').textContent),
     ['Alpha Portrait', 'Beta Landscape', 'Gamma Sketch']);
   // The gallery is not on the page twice: there is one list of workflows.
@@ -1049,6 +1055,7 @@ test('the image server: ONE picker sits under the Model field and lists the work
 test('the image server: typing in the search box narrows the list and the count follows', { skip: dom.skip }, async () => {
   const env = await wpage();
   const { doc } = env;
+  openGallery(doc);
   type(env, doc.getElementById('st-picker-search'), 'beta');
   assert.deepEqual(shownTiles(doc).map((b) => b.querySelector('.st-wf-name').textContent), ['Beta Landscape']);
   assert.match(doc.querySelector('.st-picker-count').textContent, /1 of 3/);
@@ -1070,6 +1077,7 @@ test('the image server: typing in the search box narrows the list and the count 
 
 test('the image server: clicking a tile sets the model and marks that tile', { skip: dom.skip }, async () => {
   const { doc } = await wpage();
+  openGallery(doc);
   const first = wfTiles(doc)[0];
   first.click();
   assert.equal(doc.getElementById('st-model').value, 'wf-alpha');
@@ -1088,6 +1096,7 @@ test('the image server: clicking a tile sets the model and marks that tile', { s
 test('the image server: the Model box stays hand-editable', { skip: dom.skip }, async () => {
   const env = await wpage();
   const { doc, win } = env;
+  openGallery(doc);
   const model = doc.getElementById('st-model');
   model.value = 'wf-beta';
   model.dispatchEvent(new win.Event('input', { bubbles: true }));
@@ -1114,6 +1123,7 @@ test('the image server: No-Image Mode asks for no picture in the picker either',
 test('the image server: the arrow keys walk the list and Enter picks', { skip: dom.skip }, async () => {
   const env = await wpage();
   const { doc } = env;
+  openGallery(doc);
   const search = doc.getElementById('st-picker-search');
   search.focus();
   key(env, search, { key: 'ArrowDown' });
@@ -1190,3 +1200,138 @@ test('a failed workflow load says so in the card, and another provider does not 
   assert.equal(note.textContent, '', 'and it leaves no text behind');
 });
 
+
+// ------------------------------------------- the gallery as a closed section
+
+test('the image server: the gallery starts closed, behind a small named arrow', { skip: dom.skip }, async () => {
+  const { doc } = await wpage();
+  const card = picker(doc);
+  assert.equal(card.hidden, false, 'the card is there');
+  assert.equal(pickerBody(doc).hidden, true, 'the gallery is closed when the page loads');
+  const arrow = chevron(doc);
+  assert.equal(arrow.hidden, false, 'the arrow is there');
+  assert.equal(arrow.tagName, 'BUTTON', 'the arrow is a real button');
+  assert.equal(arrow.getAttribute('aria-expanded'), 'false');
+  assert.equal(arrow.getAttribute('aria-controls'), 'st-picker-body');
+  assert.ok(arrow.getAttribute('aria-label'), 'the arrow carries a name');
+  assert.equal(arrow.getAttribute('aria-label'), EN['picker.expand']);
+  // The header is a heading, so the section has a name.
+  const title = card.querySelector('.st-pickertitle');
+  assert.ok(title, 'the header has a title');
+  assert.equal(title.tagName, 'H3');
+});
+
+test('the image server: the arrow opens and closes the gallery, and aria-expanded follows', { skip: dom.skip }, async () => {
+  const { doc } = await wpage();
+  const arrow = chevron(doc);
+  arrow.click();
+  assert.equal(pickerBody(doc).hidden, false, 'the gallery is open');
+  assert.equal(arrow.getAttribute('aria-expanded'), 'true');
+  assert.equal(arrow.getAttribute('aria-label'), EN['picker.collapse']);
+  // The search box and the tiles are there when it is open.
+  assert.ok(doc.getElementById('st-picker-search'));
+  assert.equal(wfTiles(doc).length, 3);
+  arrow.click();
+  assert.equal(pickerBody(doc).hidden, true, 'and closed again');
+  assert.equal(arrow.getAttribute('aria-expanded'), 'false');
+  assert.equal(arrow.getAttribute('aria-label'), EN['picker.expand']);
+});
+
+test('the image server: the header says the count and the chosen workflow, closed or open', { skip: dom.skip }, async () => {
+  const { doc } = await wpage();
+  const head = pickerHead(doc);
+  assert.match(head.textContent, /3 of 3/, 'the count is in the header while the card is closed');
+  // Pick a workflow, the way a person does: open the gallery, click a tile.
+  openGallery(doc);
+  wfTiles(doc)[1].click();
+  const chosen = doc.getElementById('st-picker-chosen');
+  assert.equal(chosen.hidden, false, 'the header says which workflow is chosen');
+  assert.match(chosen.textContent, /Beta Landscape/);
+  // Close it: the header still says what is chosen and how many there are.
+  chevron(doc).click();
+  assert.equal(pickerBody(doc).hidden, true);
+  assert.match(pickerHead(doc).textContent, /Beta Landscape/);
+  assert.match(pickerHead(doc).textContent, /3 of 3/);
+});
+
+test('the image server: the search and the tiles still work after the gallery is expanded', { skip: dom.skip }, async () => {
+  const env = await wpage();
+  const { doc } = env;
+  openGallery(doc);
+  type(env, doc.getElementById('st-picker-search'), 'gamma');
+  assert.deepEqual(shownTiles(doc).map((b) => b.dataset.name), ['wf-gamma']);
+  assert.match(doc.querySelector('.st-picker-count').textContent, /1 of 3/);
+  shownTiles(doc)[0].click();
+  assert.equal(doc.getElementById('st-model').value, 'wf-gamma');
+  assert.equal(doc.getElementById('st-picker-chevron').getAttribute('aria-expanded'), 'true',
+    'picking a tile does not close the gallery');
+});
+
+test('switching provider clears the picker filter and puts the count back', { skip: dom.skip }, async () => {
+  const env = await wpage({ state: { ...STATE, providers: [WF, PROVIDERS[0]], default: 'workflows' } });
+  const { doc, win } = env;
+  openGallery(doc);
+  type(env, doc.getElementById('st-picker-search'), 'beta');
+  assert.match(doc.querySelector('.st-picker-count').textContent, /1 of 3/);
+  const sel = doc.getElementById('st-provider');
+  sel.value = 'minimax';
+  sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  assert.equal(doc.getElementById('st-picker-search').value, '', 'the filter text does not survive the switch');
+  // Back to the image server: the whole list is back and the count says so.
+  sel.value = 'workflows';
+  sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  assert.equal(doc.getElementById('st-picker-search').value, '');
+  assert.match(doc.querySelector('.st-picker-count').textContent, /3 of 3/);
+  assert.equal(shownTiles(doc).length, 3, 'and every workflow is listed again');
+});
+
+test('a provider with a long model list loses its filter when the provider changes', { skip: dom.skip }, async () => {
+  const many = { id: 'many', label: 'Many', shape: 'openai-images', configured: true, model: 'm-1',
+    models: ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6', 'm-7', 'm-8', 'm-9'],
+    supports: { reference: false, optimizer: false, seed: false, max_n: 4 } };
+  const env = await page({ state: { ...STATE, providers: [many, PROVIDERS[0]], default: 'many' } });
+  const { doc, win } = env;
+  doc.getElementById('st-picker-toggle').click();
+  type(env, doc.getElementById('st-picker-search'), 'm-3');
+  assert.match(doc.querySelector('.st-picker-count').textContent, /1 of 9/);
+  const sel = doc.getElementById('st-provider');
+  sel.value = 'minimax';
+  sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  assert.equal(doc.getElementById('st-picker-search').value, '', 'the filter text does not survive the switch');
+  sel.value = 'many';
+  sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  assert.match(doc.querySelector('.st-picker-count').textContent, /9 of 9/, 'the count is the whole list again');
+});
+
+// ------------------------------------------- Generate: the sticky bar
+
+test('Generate: the button is still found by its id, rides in the sticky bar and still submits', { skip: dom.skip }, async () => {
+  const env = await page({ generate: () => [200, { images: [], asked: 1 }] });
+  const { doc } = env;
+  const go = doc.getElementById('st-generate');
+  assert.ok(go, 'the button is still found by id');
+  assert.equal(go.className, 'st-btn st-primary st-go', 'and it keeps its classes');
+  const bar = go.closest('.st-gobar');
+  assert.ok(bar, 'it rides in the bar that sticks to the bottom of the form');
+  assert.equal(bar.parentElement.lastElementChild, bar, 'the bar is the last thing in the form');
+  assert.match(go.title, /Ctrl\+Enter|⌘\+Enter/, 'the shortcut is still named');
+  // And it still submits.
+  const box = doc.getElementById('st-prompt');
+  box.value = 'a cat';
+  box.dispatchEvent(new env.win.Event('input', { bubbles: true }));
+  go.click();
+  await flush();
+  assert.equal(gens(env).length, 1, 'one press, one request');
+});
+
+test('the Generate bar sticks to the bottom of the form (and the phone bar is a thumb-sized strip)', () => {
+  const css = readFileSync(join(APP, 'static', 'studio.css'), 'utf8');
+  const bar = /\.st-gobar \{([^}]*)\}/.exec(css);
+  assert.ok(bar, 'the sticky bar has a rule');
+  assert.match(bar[1], /position: sticky/);
+  assert.match(bar[1], /bottom: 0/);
+  assert.match(bar[1], /background: var\(--bg-primary\)/, 'the bar is opaque');
+  assert.match(bar[1], /backdrop-filter/, 'and blurred behind');
+  assert.match(css, /\.st-gobar \{[^}]*env\(safe-area-inset-bottom/, 'the phone bar keeps clear of the home indicator');
+  assert.match(css, /\.st-gobar \.st-go \{[^}]*min-height: 44px/, 'the phone button is a thumb tall');
+});

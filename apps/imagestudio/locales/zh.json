@@ -171,5 +171,8 @@
   "picker.search_models": "搜索模型",
   "picker.count": "{total} 个中的 {shown} 个",
   "picker.no_match": "没有匹配“{query}”的内容。",
-  "picker.selected": "已选择"
+  "picker.selected": "已选择",
+  "picker.expand": "显示工作流图库",
+  "picker.collapse": "隐藏工作流图库",
+  "picker.chosen": "已选择：{name}"
 }

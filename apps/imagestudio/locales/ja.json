@@ -171,5 +171,8 @@
   "picker.search_models": "モデルを検索",
   "picker.count": "{total}件中 {shown}件",
   "picker.no_match": "「{query}」に一致するものはありません",
-  "picker.selected": "選択中"
+  "picker.selected": "選択中",
+  "picker.expand": "ワークフロギャラリーを表示",
+  "picker.collapse": "ワークフロギャラリーを隠す",
+  "picker.chosen": "選択中: {name}"
 }
