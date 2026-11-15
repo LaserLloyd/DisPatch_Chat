@@ -69,7 +69,12 @@ export function modelsLine(c, entry, fmt = (iso) => new Date(iso).toLocaleString
     try { const s = fmt(when); if (s && s !== 'Invalid Date') shown = s; } catch { /* keep the raw stamp */ }
     head = t(e.source === 'documented' ? 'cxn.models_docs' : 'cxn.models_list', { count: n, when: shown });
   }
-  return e.error ? `${head} · ${t('cxn.models_error', { error: e.error })}` : head;
+  const line = e.error ? `${head} · ${t('cxn.models_error', { error: e.error })}` : head;
+  // The names themselves, so the list is readable without opening the form: the
+  // first eight, then an ellipsis when there are more.
+  const ids = (c && c.models) || [];
+  if (!ids.length) return line;
+  return `${line} · ${ids.slice(0, 8).join(', ')}${ids.length > 8 ? ' …' : ''}`;
 }
 
 /** The stored last_test of a connection, in the same shape. The stored test keeps no model
@@ -344,7 +349,7 @@ export async function mountConnections(pane, deps = {}) {
       // Moving a connection that holds a key (stored or a variable) sends that key to the new
       // server: the Owner's call, unless a new key is typed or the key removed at the same time.
       urlNote.hidden = owner || !(existing.credential.has_key || existing.credential.kind === 'env');
-      (existing.models || []).forEach((m) => modelList.append(el('option', { value: m })));
+      (existing.models || []).forEach((m) => modelList.append(el('option', { value: m, text: m })));
     } else {
       typeSel.value = (preset && preset.type) || state.types[0].id;
       applyType(true);
@@ -365,7 +370,7 @@ export async function mountConnections(pane, deps = {}) {
         const r = await api.testConnectionForm({ type: g.type, base_url: g.base_url, api_key: g.api_key,
           ...(editing ? { use_connection: existing.id } : {}) });
         paintResult(result, r, pickModel);
-        if (r.models) { modelList.textContent = ''; r.models.forEach((m) => modelList.append(el('option', { value: m }))); }
+        if (r.models) { modelList.textContent = ''; r.models.forEach((m) => modelList.append(el('option', { value: m, text: m }))); }
       } catch (e) { paintResult(result, { ok: false, message: errorText(e) }); }
       finally { testBtn.disabled = false; }
     });

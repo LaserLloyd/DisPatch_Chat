@@ -217,6 +217,9 @@ export async function mountImageSection(host, deps = {}) {
   const save = el('button', { type: 'button', class: 'btn-primary', id: 'img-save', text: t('integrations.img_save') });
   const result = el('span', { class: 'llm-result', id: 'img-result', role: 'status', 'aria-live': 'polite' });
   const preview = el('img', { class: 'img-preview', id: 'img-preview', alt: t('integrations.img_preview_alt'), hidden: '' });
+  // The Owner's list of the people who may use the image server (drawn only for
+  // the Owner; the route itself refuses everybody else).
+  const serverAccess = el('div', { class: 'sec-field img-server-access', id: 'img-server-access', hidden: '' });
   const apiFields = el('div', { class: 'img-api-fields', id: 'img-api-fields' }, [
     field(t('llm.base_url'), base),
     field(t('llm.model'), model, el('span', {}, [modelNote, refreshModels])),
@@ -249,11 +252,10 @@ export async function mountImageSection(host, deps = {}) {
       price.textContent = p.price_note || '';
       const cat = (state.catalog || {})[p.id] || {};
       const names = cat.names || {};
-      modelList.replaceChildren(...(cat.models || []).slice(0, 500).map((m) => {
-        const o = el('option', { value: m });
-        if (names[m]) o.label = names[m];
-        return o;
-      }));
+      // Every option carries text as well as value: Chromium shows nothing for a
+      // datalist option that has a label and no text.
+      modelList.replaceChildren(...(cat.models || []).slice(0, 500).map((m) => (
+        el('option', { value: m, text: names[m] || m }))));
       modelNote.textContent = imageModelsNote(cat);
       refreshModels.hidden = !state.can_refresh_models;
     }
@@ -340,9 +342,63 @@ export async function mountImageSection(host, deps = {}) {
     note(t('integrations.img_hint')),
     field(t('integrations.img_provider'), sel, status),
     apiFields,
+    serverAccess,
     el('div', { class: 'llm-test-row' }, [test, save, result]),
     preview,
   ]));
+  mountServerAccess(serverAccess);
+}
+
+// --------------------------------------------------------------------------- //
+// Who else may use the image server (the Owner's list, by name)
+// --------------------------------------------------------------------------- //
+
+const SERVER_ACCESS_URL = '/api/apps/imagestudio/server-access';
+const SERVER_PROFILES_KEY = 'connections.image_access.server_profiles';
+
+/** The Owner's list of the people who may use the image server: one box per profile
+ *  that may be named. A page that is not the Owner's never sees it (the route says
+ *  so), and a refused save shows the server's sentence instead of a toast. */
+async function mountServerAccess(host) {
+  if (!host) return;
+  let r;
+  try { r = await json(SERVER_ACCESS_URL); } catch { return; }
+  const rows = (r && r.profiles) || [];
+  if (!rows.length) return;
+  const boxes = new Map();
+  const list = el('ul', { class: 'sec-list', id: 'img-server-access-list' });
+  for (const p of rows) {
+    const id = `img-server-access-${p.id}`;
+    const input = el('input', { type: 'checkbox', id, checked: p.checked ? '' : null });
+    boxes.set(p.id, input);
+    list.append(el('li', {}, [input, el('label', { for: id, text: p.name })]));
+  }
+  const save = el('button', { type: 'button', class: 'btn-secondary', id: 'img-server-access-save',
+    text: t('integrations.img_server_access_save') });
+  const result = el('span', { class: 'llm-result', role: 'status', 'aria-live': 'polite' });
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    try {
+      const ids = rows.filter((p) => boxes.get(p.id).checked).map((p) => p.id);
+      await send('PATCH', '/api/settings', { set: { [SERVER_PROFILES_KEY]: ids } });
+      result.textContent = t('integrations.img_server_access_saved');
+      result.className = 'llm-result good';
+    } catch (e) {
+      // The server's own sentence (a 403 from a page that is not the Owner's):
+      // never a success toast for a save that did not happen.
+      result.textContent = errText(e);
+      result.className = 'llm-result bad';
+    } finally {
+      save.disabled = false;
+    }
+  });
+  host.replaceChildren(
+    el('h4', { class: 'dev-group-title', text: t('integrations.img_server_access_title') }),
+    note(t('integrations.img_server_access_hint')),
+    list,
+    el('div', { class: 'llm-test-row' }, [save, result]),
+  );
+  host.hidden = false;
 }
 
 // ===================== Works with DisPatch =====================

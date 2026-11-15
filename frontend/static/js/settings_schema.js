@@ -194,7 +194,10 @@ export function presetValues(def) {
  *  people.lock_target / people.default_profile: the "When locked, show" picker
  *  (people-perms.js lockTargetGroup) sets both together, so no slot draws them a second time. */
 export const BESPOKE_KEYS = new Set(['people.machine_loopback_trust', 'tools.livetools_enabled',
-  'people.lock_target', 'people.default_profile']);
+  'people.lock_target', 'people.default_profile',
+  // The image server's allowlist is drawn by integrations.js (one box per person
+  // the Owner may name), never as a raw list box.
+  'connections.image_access.server_profiles']);
 
 /** `ui_section` 'people#signin-rules' -> ['people', 'signin-rules']; falls back to the group. */
 export function uiTarget(def) {
@@ -303,6 +306,8 @@ export const HOST_KEYS = new Set([
   'connections.image_access.standard_admin', 'connections.image_access.standard_user',
   'connections.image_access.standard_basic', 'connections.image_access.civitai_admin',
   'connections.image_access.civitai_user', 'connections.image_access.civitai_basic',
+  // The image server in Image Studio: the Owner's allowlist, by name.
+  'connections.image_access.server_profiles',
   'connections.image_civitai_key',
 ]);
 /** Is this row's control locked for this session? `env` = an environment variable sets it. */

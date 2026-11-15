@@ -950,3 +950,57 @@ test('Refresh swaps in the new provider rows, keeps the selection and says what 
   assert.match(doc.querySelector('.st-status').textContent, /Updated: 3 models for MiniMax/);
   assert.equal(doc.getElementById('st-model-refresh').disabled, false);
 });
+// ------------------------------------------- the model names and the image server
+
+const WF = { id: 'workflows', label: 'Image server', shape: 'workflows', configured: true, model: '',
+  models: [], model_names: {}, gallery: true,
+  supports: { reference: false, optimizer: false, seed: false, max_n: 1 } };
+const WSTATE = { ...STATE, providers: [WF], default: 'workflows' };
+const WORKFLOWS = { workflows: [{ name: 'wf-a', display_name: 'Workflow A', state: 'ready',
+  stale: false, thumb: '/ui/api/image?f=_previews/wf-a.png' }] };
+
+test('the model names are offered as buttons too (Chromium leaves a datalist blank)', { skip: dom.skip }, async () => {
+  const env = await page({ state: CSTATE });
+  const { doc } = env;
+  const opt = doc.querySelector('#st-models option');
+  assert.equal(opt.value, AIR);
+  assert.equal(opt.textContent, 'Juggernaut XL');
+  const picks = [...doc.querySelectorAll('#st-model-picks button')];
+  assert.ok(picks.length, 'the names are offered as buttons too');
+  const pick = picks.find((b) => b.textContent === 'Juggernaut XL');
+  assert.ok(pick, 'the friendly name is on a button');
+  const model = doc.getElementById('st-model');
+  model.value = '';
+  pick.click();
+  assert.equal(model.value, AIR);
+});
+
+test('the image server: a tile per workflow, and the picture comes through this server', { skip: dom.skip }, async () => {
+  const env = await page({ state: WSTATE, extra: { 'GET /api/apps/imagestudio/workflows': () => [200, WORKFLOWS] } });
+  const { doc } = env;
+  const grid = doc.getElementById('st-workflows');
+  assert.equal(grid.hidden, false);
+  const tiles = [...grid.querySelectorAll('button')];
+  assert.equal(tiles.length, 1);
+  const img = tiles[0].querySelector('img');
+  assert.ok(img, 'the tile shows the picture it made last');
+  assert.equal(img.getAttribute('src'),
+    '/api/apps/imagestudio/workflows/thumb?u=%2Fui%2Fapi%2Fimage%3Ff%3D_previews%2Fwf-a.png');
+  tiles[0].click();
+  assert.equal(doc.getElementById('st-model').value, 'wf-a');
+});
+
+test('the image server: No-Image Mode asks for no picture at all', { skip: dom.skip }, async () => {
+  const env = await page({ nim: true, state: WSTATE, extra: { 'GET /api/apps/imagestudio/workflows': () => [200, WORKFLOWS] } });
+  const { doc } = env;
+  const grid = doc.getElementById('st-workflows');
+  assert.equal(grid.querySelectorAll('img').length, 0, 'no picture is fetched in No-Image Mode');
+  assert.match(grid.textContent, /Workflow A/);
+});
+
+test('another provider never shows the workflow grid', { skip: dom.skip }, async () => {
+  const env = await page({ state: STATE, extra: { 'GET /api/apps/imagestudio/workflows': () => [200, WORKFLOWS] } });
+  const { doc } = env;
+  assert.equal(doc.getElementById('st-workflows').hidden, true);
+});
+

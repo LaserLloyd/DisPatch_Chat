@@ -27,7 +27,7 @@ import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from '
 import {
   initLlmPanel, activateLlmPanel, repaintLlmPanel,
   firstRunCard,
-} from './llm.js?v=18';
+} from './llm.js?v=19';
 import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=20';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
@@ -59,7 +59,7 @@ import { renderOidcCard, linkButtonFor as oidcLinkButtonFor, defaultRequest as o
 import { installExpiredImages } from './media-expired.js?v=1';
 import { activeLayout, applyLayout, moveItem, saveLayout, wireRailDrag, openArrangeDialog } from './railmenu.js?v=5';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=23';
-import { mountPluginsSettings } from './plugins.js?v=26';
+import { mountPluginsSettings } from './plugins.js?v=27';
 import { addBotRow } from './bots-edit.js?v=8';
 // 3.0 (W5): connections, the schema-driven settings page, character details + starter packs, the
 // first-run wizard. Their REST calls live in w5-api.js (api.js is imported at one ?v= by too many
@@ -71,10 +71,10 @@ import {
   runSectionHooks, settingsHashRoute, charactersSectionAllowed,
 } from './settings-nav.js?v=17';
 import { mountSettingsResize } from './settings-resize.js?v=2';
-import { mountConnections } from './connections.js?v=7';
-import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=10';
+import { mountConnections } from './connections.js?v=8';
+import { mountSchemaRows, invalidateSchema, applyDeviceDefaults } from './settings_schema.js?v=11';
 import { mountBackups } from './backup.js?v=6';
-import { maybeStartWizard } from './wizard.js?v=8';
+import { maybeStartWizard } from './wizard.js?v=9';
 // thread-sections.js owns the Today / Older bucketing + section-header DOM.
 // See the module's top comment for the rule set; this file only decides WHEN
 // to render headers (suppressed on mobile, suppressed while search is open)
@@ -117,7 +117,7 @@ import { createTasksUi } from './tasks.js?v=6';
 // 4.0 chat-first profiles (Foundation scaffolding: wired once here, filled by WP-FE-YOU /
 // WP-FE-PEOPLE in their own modules).
 import { initMyBots, copyMenuItem } from './my-bots.js?v=11';
-import { initCharactersPage, mountCharactersPage, refreshCharactersPage, unmountCharactersPage, charactersMe, railDragAllowed, saveRailOrder } from './characters-page.js?v=10';
+import { initCharactersPage, mountCharactersPage, refreshCharactersPage, unmountCharactersPage, charactersMe, railDragAllowed, saveRailOrder } from './characters-page.js?v=11';
 import { packDialog } from './pack-dialog.js?v=1';
 import { initBotEditor } from './bot-editor.js?v=6';
 import { initAccountReset } from './account-reset.js?v=6';

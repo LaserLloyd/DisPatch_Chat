@@ -62,6 +62,7 @@ import asyncio
 import base64
 import contextlib
 import dataclasses
+import httpx
 import io
 import json
 import logging
@@ -75,9 +76,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from app import image_access, image_guard, image_jobs, image_providers, model_catalog
+from app import accounts, image_access, image_guard, image_jobs, image_providers, model_catalog
+from app.config import SETTINGS
 
 log = logging.getLogger("local-chat.app.imagestudio")
 
@@ -109,6 +112,24 @@ KNOWN_MODELS = {"minimax": ["MiniMax-H3-Image", "MiniMax-H3-Image-Highspeed", "i
 MODEL_NAMES = {"xai": XAI_MODEL_NAMES}
 NOT_ALLOWED = ("Your profile type can't use {label}. Ask the Owner "
                "(Settings → AI & Connections → Image generation).")
+
+#: The Image Studio provider id for the image server. NOT the chat picture path's
+#: "server" id: that one already means "chat pictures go to the image server".
+SERVER_PROVIDER_ID = "workflows"
+#: A workflow name: letters, digits, space, dot, underscore and dash, 1-80 of them.
+WORKFLOW_RE = re.compile(r"\A[A-Za-z0-9._-][A-Za-z0-9 ._-]{0,79}\Z")
+#: How long one render may take before the studio gives up on it (and cancels once).
+SERVER_WAIT_S = 180.0
+#: How often the studio asks the server how the render is doing.
+SERVER_POLL_S = 2.0
+#: The gallery routes on the image server's own web API. Read-only, no redirect, no token.
+GALLERY_TIMEOUT_S = 15.0
+#: The biggest picture the thumbnail proxy will pass through.
+THUMB_MAX_BYTES = 8 * 1024 * 1024
+
+#: The last gallery answer (the workflows on offer), so /state can list the names
+#: without asking the image server again on every page load.
+_workflows: list[dict] = []
 
 #: Guards the ledger file (append in _store, rewrite in clear); never held across a provider call.
 _lock = threading.Lock()
@@ -330,6 +351,23 @@ def _provider_rows(principal=None) -> tuple[list[dict], str]:
             row["browse"] = True
         row["supports"] = _supports_for(preset, res, current)
         rows.append(row)
+    # The image server in Image Studio: one row, and only for the profiles the
+    # Owner ticked (image_access.allows_server). It is not a preset - no API host,
+    # no model id, no key - so it never goes through image_providers.resolve.
+    if principal is not None and image_access.allows_server(principal) and SETTINGS.image_server_url:
+        names = {w["name"]: w.get("display_name") or w["name"] for w in _workflows}
+        rows.append({
+            "id": SERVER_PROVIDER_ID, "label": "Image server", "shape": SERVER_PROVIDER_ID,
+            "configured": True, "model": "", "models": list(names),
+            "model_names": names, "models_source": "image server",
+            "models_checked_at": None, "models_note": "", "models_checked": "",
+            "prompt_max": image_jobs.MAX_PROMPT_CHARS, "prompt_max_by_model": {},
+            "supports_by_model": {},
+            # The image server takes no reference picture, no seed and no optimizer,
+            # and makes one picture at a time.
+            "supports": {"reference": False, "optimizer": False, "seed": False, "max_n": 1},
+            "gallery": True,
+        })
     stored = image_providers.provider_id(image_providers.load_config())
     default = stored if any(r["id"] == stored and r["configured"] for r in rows) else ""
     if not default:
@@ -515,6 +553,18 @@ async def _pick(body, request: Request) -> tuple[str, image_providers.Resolved, 
             raise HTTPException(403, "Your profile type can't use the image generators here. Ask the Owner.")
         raise HTTPException(
             409, "No image provider has an API key yet (Settings → AI & Connections → Image generation)")
+    if pid == SERVER_PROVIDER_ID:
+        # The image server is not an API provider: no host, no model id, no key.
+        if not image_access.allows_server(principal):
+            raise HTTPException(403, NOT_ALLOWED.format(label="Image server"))
+        ratio = body.ratio.strip()
+        if ratio and not image_jobs._RATIO_RE.match(ratio):
+            raise HTTPException(422, "The aspect ratio must look like 16:9")
+        if not SETTINGS.image_server_url:
+            raise HTTPException(
+                409, "The image server is not set up yet "
+                     "(Settings → AI & Connections → Image generation)")
+        return pid, None, ratio
     preset = image_providers.PRESET_BY_ID.get(pid)
     if preset is None:
         raise HTTPException(422, "Unknown image provider")
@@ -575,6 +625,223 @@ def _civitai_gate(request: Request) -> None:
     if not image_access.allows(policy.of(request).principal, preset.access):
         raise HTTPException(403, NOT_ALLOWED.format(label=preset.label))
 
+
+
+# --------------------------------------------------------------------------- #
+# The image server: one render, one workflow
+# --------------------------------------------------------------------------- #
+
+_server_client: image_jobs.ImageServer | None = None
+
+
+def _server() -> image_jobs.ImageServer:
+    """The one client for the image server, built the way ``main._image_server()``
+    builds it. There is no second MCP client here: a test hands this function a
+    client with a transport (or a fake) instead."""
+    global _server_client
+    url = SETTINGS.image_server_url
+    c = _server_client
+    if c is None or c.url != url:
+        c = image_jobs.ImageServer(url, client_name="dispatch")
+        _server_client = c
+    return c
+
+
+async def _generate_server(body: GenerateIn, prompt: str, ratio: str,
+                           request: Request) -> dict:
+    """One picture from the image server, with the workflow the picker chose."""
+    workflow = (body.model or "").strip()
+    if not workflow or not WORKFLOW_RE.match(workflow):
+        raise HTTPException(422, "That workflow name is not valid")
+    if len(prompt) > image_jobs.MAX_PROMPT_CHARS:
+        raise HTTPException(
+            422, f"The prompt is {len(prompt)} characters; the image server takes "
+                 f"{image_jobs.MAX_PROMPT_CHARS}")
+    if body.reference:
+        raise HTTPException(422, "The image server does not take a reference image")
+    owner = _owner_of(request)
+    refusal = _take_slot(owner)
+    if refusal:
+        raise HTTPException(429, refusal)
+    try:
+        blobs = await _render_server(prompt, workflow, ratio)
+        rows = await asyncio.to_thread(
+            _store, blobs, prompt, SERVER_PROVIDER_ID, workflow, ratio,
+            None, False, False, owner, None)
+    finally:
+        _free_slot(owner)
+    return {"images": [_public_row(r) for r in rows], "asked": 1}
+
+
+async def _render_server(prompt: str, workflow: str, ratio: str) -> list[bytes]:
+    """One render from the image server. The submit happens ONCE: a refused or
+    uncertain submit is never repeated (a second submit is a second render on a
+    shared GPU that nothing would ever poll)."""
+    server = _server()
+    try:
+        ready = await server.readiness()
+    except image_jobs.ImageJobError:
+        ready = None
+    if ready is not None and ready.blocked:
+        raise HTTPException(
+            409, "The image server cannot start a render right now: "
+                 + (ready.detail or ready.reason))
+    spec = image_jobs.ImageSpec(prompt=prompt, workflow=workflow, ratio=ratio,
+                                 backend="server")
+    try:
+        res = await server.enqueue(spec)
+    except image_jobs.ImageJobError as e:
+        # "uncertain" means the request left this box and no answer came back: we
+        # do not know whether the rig acted on it, so we do not submit again.
+        raise HTTPException(502, e.message) from None
+    files_rel = res.files_rel
+    if not files_rel:
+        deadline = time.monotonic() + SERVER_WAIT_S
+        while True:
+            if time.monotonic() >= deadline:
+                with contextlib.suppress(Exception):
+                    await server.cancel(res.job_id)
+                raise HTTPException(
+                    504, "The image server did not finish the picture in time")
+            await asyncio.sleep(SERVER_POLL_S)
+            try:
+                poll = await server.poll(res.job_id)
+            except image_jobs.ImageJobError as e:
+                raise HTTPException(502, e.message) from None
+            if poll.files_rel:
+                files_rel = poll.files_rel
+                break
+            if poll.done or poll.error:
+                raise HTTPException(
+                    502, poll.error or "The image server could not make that picture")
+    try:
+        blob = await server.fetch(files_rel)
+    except image_jobs.ImageJobError as e:
+        raise HTTPException(502, e.message) from None
+    return [blob]
+
+
+# --------------------------------------------------------------------------- #
+# The gallery: what the image server can render, and what it drew last
+# --------------------------------------------------------------------------- #
+
+
+def _gallery_base() -> str:
+    """The image server's own origin: the MCP address without its /mcp tail."""
+    return re.sub(r"/mcp/?$", "", SETTINGS.image_server_url or "").rstrip("/")
+
+
+async def _gallery_get(path: str) -> dict:
+    """One read-only GET on the image server's web API. No redirect, no token."""
+    base = _gallery_base()
+    if not base:
+        raise HTTPException(502, "The image server is not set up")
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, trust_env=False,
+                                     timeout=httpx.Timeout(GALLERY_TIMEOUT_S)) as client:
+            resp = await client.get(base + path, headers={"Accept": "application/json"})
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPError:
+        raise HTTPException(502, "The image server did not answer") from None
+    except ValueError:
+        raise HTTPException(502, "The image server did not answer") from None
+    return data if isinstance(data, dict) else {}
+
+
+_THUMB_CHARS = re.compile(r"\A/[A-Za-z0-9/._~?&=%+-]+\Z")
+
+
+def _safe_thumb_path(u: str) -> str | None:
+    """The picture path ``u`` may name, or None. A path only: no scheme, no host,
+    no "..", no backslash, no "//" after the first slash, and only under the two
+    places the image server keeps pictures.
+
+    Percent-encoding is decoded before those checks, so ``%2e%2e`` cannot walk
+    out of the picture area."""
+    if not isinstance(u, str):
+        return None
+    p = u.strip()
+    if not p.startswith("/") or not _THUMB_CHARS.match(p):
+        return None
+    from urllib.parse import unquote
+    seen = p
+    for _ in range(3):
+        nxt = unquote(seen)
+        if nxt == seen:
+            break
+        seen = nxt
+    if ".." in seen or "\\" in seen or "://" in seen or "//" in seen[1:] or "\x00" in seen:
+        return None
+    if seen.startswith("/ui/api/image"):
+        rest = seen[len("/ui/api/image"):]
+        if rest and rest[0] not in "?/":
+            return None
+    elif not seen.startswith("/files/"):
+        return None
+    return p
+
+
+async def _gallery_bytes(path: str) -> tuple[bytes, str]:
+    """The bytes of one picture from the image server, and its content type.
+    Read-only, no redirect, no token, and never more than one picture's worth."""
+    base = _gallery_base()
+    if not base:
+        raise HTTPException(502, "The image server is not set up")
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, trust_env=False,
+                                     timeout=httpx.Timeout(GALLERY_TIMEOUT_S)) as client:
+            async with client.stream("GET", base + path,
+                                     headers={"Accept": "image/*"}) as resp:
+                if resp.status_code >= 400:
+                    raise HTTPException(502, "The image server did not answer")
+                ctype = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+                if not ctype.startswith("image/"):
+                    raise HTTPException(502, "That is not a picture")
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > THUMB_MAX_BYTES:
+                        raise HTTPException(502, "That picture is too large")
+                    chunks.append(chunk)
+                return b"".join(chunks), ctype
+    except httpx.HTTPError:
+        raise HTTPException(502, "The image server did not answer") from None
+
+
+def _merge_workflows(meta: dict, previews: dict) -> list[dict]:
+    """The image server's workflow list, merged with its preview list by name."""
+    rows: dict[str, dict] = {}
+    for w in (meta.get("workflows") or []):
+        if not isinstance(w, dict):
+            continue
+        name = str(w.get("name") or "").strip()
+        if not name:
+            continue
+        rows[name] = {"name": name, "display_name": str(w.get("display_name") or name),
+                      "state": str(w.get("preview_state") or w.get("state") or ""),
+                      "stale": bool(w.get("stale")), "thumb": ""}
+    for p in (previews.get("previews") or []):
+        if not isinstance(p, dict):
+            continue
+        name = str(p.get("workflow") or p.get("name") or "").strip()
+        if not name:
+            continue
+        row = rows.get(name)
+        if row is None:
+            row = {"name": name, "display_name": str(p.get("display_name") or name),
+                   "state": "", "stale": False, "thumb": ""}
+            rows[name] = row
+        if p.get("display_name"):
+            row["display_name"] = str(p["display_name"])
+        if p.get("state"):
+            row["state"] = str(p["state"])
+        row["stale"] = bool(p.get("stale"))
+        thumb = str(p.get("thumb") or "")
+        if thumb and _safe_thumb_path(thumb):
+            row["thumb"] = thumb
+    return sorted(rows.values(), key=lambda r: r["name"])
 
 
 # --------------------------------------------------------------------------- #
@@ -656,6 +923,8 @@ def build(ctx):
     async def generate(body: GenerateIn, request: Request):
         prompt = _check_prompt(body.prompt)
         pid, res, ratio = await _pick(body, request)
+        if pid == SERVER_PROVIDER_ID:
+            return await _generate_server(body, prompt, ratio, request)
         _check_length(prompt, res)
         currency = _currency(body) if res.preset.shape == "civitai" else None
         caps = image_providers.supports(res)
@@ -692,6 +961,8 @@ def build(ctx):
         ledger row, no file; the same guard and access checks as /generate."""
         prompt = _check_prompt(body.prompt)
         pid, res, ratio = await _pick(body, request)
+        if pid == SERVER_PROVIDER_ID:
+            raise HTTPException(422, "No estimate for this provider")
         _check_length(prompt, res)
         if res.preset.shape != "civitai":
             raise HTTPException(422, "No estimate for this provider")
@@ -829,6 +1100,57 @@ def build(ctx):
                          "bot": names.get(t.bot_id, t.bot_id)} for t in threads[:60]],
             "bots": [{"id": b.id, "name": b.name, "personal": b.scope == "personal"} for b in pickable],
         }
+
+    @router.get("/workflows", dependencies=op)
+    async def workflows(request: Request):
+        """What the image server can render. The Owner and the names the Owner
+        ticked only; the browser never learns the image server's own address."""
+        from app import policy
+        principal = policy.of(request).principal
+        if not image_access.allows_server(principal):
+            raise HTTPException(403, NOT_ALLOWED.format(label="Image server"))
+        if not SETTINGS.image_server_url:
+            raise HTTPException(502, "The image server is not set up")
+        meta, previews = await asyncio.gather(
+            _gallery_get("/ui/api/meta"), _gallery_get("/ui/api/previews"),
+            return_exceptions=True)
+        if isinstance(meta, BaseException) and isinstance(previews, BaseException):
+            raise HTTPException(502, "The image server did not answer")
+        rows = _merge_workflows(meta if isinstance(meta, dict) else {},
+                                previews if isinstance(previews, dict) else {})
+        global _workflows
+        _workflows = rows
+        return {"workflows": rows}
+
+    @router.get("/workflows/thumb", dependencies=op)
+    async def workflows_thumb(request: Request, u: str = Query("", max_length=512)):
+        """One picture from the image server, passed through this server: the browser
+        never gets the image server's own origin."""
+        from app import policy
+        principal = policy.of(request).principal
+        if not image_access.allows_server(principal):
+            raise HTTPException(403, NOT_ALLOWED.format(label="Image server"))
+        path = _safe_thumb_path(u)
+        if path is None:
+            raise HTTPException(422, "That is not a picture path")
+        data, ctype = await _gallery_bytes(path)
+        return Response(content=data, media_type=ctype or "application/octet-stream",
+                        headers={"Cache-Control": "private, max-age=60"})
+
+    @router.get("/server-access", dependencies=op)
+    async def server_access(request: Request):
+        """Who the Owner may let use the image server. The Owner's own page only:
+        one line per profile that may be named - no PIN, no hash, no address."""
+        from app import policy
+        principal = policy.of(request).principal
+        if not principal.is_host:
+            raise HTTPException(
+                403, "Only the Owner decides who may use the image server.")
+        stored = set(image_access.server_profiles())
+        profiles = [{"id": p.id, "name": p.name, "role": p.role.value,
+                     "checked": p.id in stored}
+                    for p in image_access.eligible_server_profiles()]
+        return {"enabled": bool(stored), "profiles": profiles}
 
     return router
 

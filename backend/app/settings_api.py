@@ -17,7 +17,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 
-from . import policy, settings_schema, settings_store, tool_manifests
+from . import image_access, policy, settings_schema, settings_store, tool_manifests
 from .api_common import actor, audit, fail
 from .contracts.permissions import Permission
 
@@ -50,6 +50,8 @@ HOST_SETTING_KEYS: frozenset[str] = frozenset({
     "connections.image_access.civitai_admin",
     "connections.image_access.civitai_user",
     "connections.image_access.civitai_basic",
+    # The image server in Image Studio: the Owner, and only the names the Owner ticked.
+    "connections.image_access.server_profiles",
     "connections.image_civitai_key",
 })
 #: The Civitai-round subset of HOST_SETTING_KEYS (their refusal names pictures, not programs).
@@ -111,6 +113,12 @@ async def settings_patch(request: Request, payload: dict[str, Any] = Body(...)):
         if locked:
             raise fail(403, "permission_denied",
                        f"Only an Admin can change {settings_schema.get_def(sorted(locked)[0]).label}.")
+    # The image server allowlist is sanitised before it is stored: an id that may not
+    # be named (a Basic profile, the shared sign-in profile, a name that does not
+    # exist) must not stick, and a hand-edited value cannot grant one either.
+    raw = changes.get(image_access.SERVER_PROFILES_KEY)
+    if isinstance(raw, list) and all(isinstance(x, str) for x in raw):
+        changes[image_access.SERVER_PROFILES_KEY] = image_access.sanitize_server_profiles(raw)
     res = settings_store.set_many(changes, actor=actor(request), reset=reset, owner=is_owner)
     if res.errors:
         from fastapi.responses import JSONResponse

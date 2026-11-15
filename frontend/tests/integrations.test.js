@@ -207,3 +207,61 @@ test('every new model-refresh key exists in all 8 locales', () => {
     for (const k of ['img_models_refresh', 'img_models_refreshing', 'img_models_done', 'img_models_cached', 'img_models_list', 'img_models_docs', 'img_models_docs_nodate', 'img_models_never']) assert.ok(d.integrations[k], `${l} integrations.${k}`);
   }
 });
+
+test('the image form: the model options carry text, and the image server list is the Owner\'s', { skip: dom.skip }, async () => {
+  const presets = [{ id: 'minimax', label: 'MiniMax', model: 'image-01', base_url: 'https://api.minimax.io/v1' }];
+  const catalog = { minimax: { models: ['MiniMax-H3-Image', 'image-01'], names: { 'MiniMax-H3-Image': 'MiniMax H3 Image (newest)' }, source: 'documented', checked_at: '2026-11-11', note: '' } };
+  const image = () => [200, { config: { provider: 'minimax' }, presets, catalog, can_refresh_models: false, image_server: false, enabled: true, flag_off: false, status: {} }];
+  const people = { enabled: true, profiles: [{ id: 'p1', name: 'Ada', role: 'admin', checked: false }] };
+  const { mod } = await setup({
+    'GET /api/llm/image': image,
+    'GET /api/apps/imagestudio/server-access': () => [200, people],
+    'PATCH /api/settings': () => [200, { ok: true }],
+  });
+  const host = document.createElement('div');
+  document.body.append(host);
+  await mod.mountImageSection(host, {});
+  await new Promise((r) => setTimeout(r, 20));   // the Owner's list arrives on its own
+  const opt = host.querySelector('#img-model-list option');
+  assert.equal(opt.value, 'MiniMax-H3-Image');
+  assert.equal(opt.textContent, 'MiniMax H3 Image (newest)');
+  const box = host.querySelector('#img-server-access');
+  assert.equal(box.hidden, false);
+  const cb = box.querySelector('input[type=checkbox]');
+  assert.ok(cb, 'one box per profile the Owner may name');
+  assert.equal(cb.checked, false);
+  cb.checked = true;
+  box.querySelector('#img-server-access-save').click();
+  await new Promise((r) => setTimeout(r, 20));
+  const patch = fetched.find((f) => f.key === 'PATCH /api/settings');
+  assert.deepEqual(patch.body, { set: { 'connections.image_access.server_profiles': ['p1'] } });
+});
+
+test('a refused save shows the server sentence, and a page that is not the Owner sees no list', { skip: dom.skip }, async () => {
+  const image = () => [200, { config: { provider: 'minimax' }, presets: [], catalog: {}, can_refresh_models: false, image_server: false, enabled: true, flag_off: false, status: {} }];
+  const { mod } = await setup({
+    'GET /api/llm/image': image,
+    'GET /api/apps/imagestudio/server-access': () => [200, { enabled: true, profiles: [{ id: 'p1', name: 'Ada', role: 'admin', checked: false }] }],
+    'PATCH /api/settings': () => [403, { detail: 'Only the Owner decides who may use the image server.' }],
+  });
+  const host = document.createElement('div');
+  document.body.append(host);
+  await mod.mountImageSection(host, {});
+  await new Promise((r) => setTimeout(r, 20));
+  const box = host.querySelector('#img-server-access');
+  box.querySelector('#img-server-access-save').click();
+  await new Promise((r) => setTimeout(r, 20));
+  const result = box.querySelector('.llm-result');
+  assert.match(result.textContent, /Only the Owner/);
+  assert.doesNotMatch(result.className, /good/);
+  const { mod: mod2 } = await setup({
+    'GET /api/llm/image': image,
+    'GET /api/apps/imagestudio/server-access': () => [403, { detail: 'Only the Owner decides who may use the image server.' }],
+  });
+  const host2 = document.createElement('div');
+  document.body.append(host2);
+  await mod2.mountImageSection(host2, {});
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(host2.querySelector('#img-server-access').hidden, true);
+});
+

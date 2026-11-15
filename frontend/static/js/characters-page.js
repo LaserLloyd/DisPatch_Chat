@@ -799,7 +799,7 @@ export function mountCharactersPage(host, opts = {}) {
       const fillModels = () => {
         const c = conns.find((x) => x.id === f.connection.value);
         modelList.replaceChildren(...((c && Array.isArray(c.models)) ? c.models : []).slice(0, 500)
-          .map((m) => el('option', { value: m })));
+          .map((m) => el('option', { value: m, text: m })));
       };
       fillModels();
       f.connection.addEventListener('change', fillModels);

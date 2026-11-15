@@ -5593,6 +5593,23 @@
         "summary": "Models Refresh"
       }
     },
+    "/api/apps/imagestudio/server-access": {
+      "get": {
+        "description": "Who the Owner may let use the image server. The Owner's own page only:\none line per profile that may be named - no PIN, no hash, no address.",
+        "operationId": "server_access_api_apps_imagestudio_server_access_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Server Access"
+      }
+    },
     "/api/apps/imagestudio/state": {
       "get": {
         "operationId": "state_api_apps_imagestudio_state_get",
@@ -5623,6 +5640,63 @@
           }
         },
         "summary": "Targets"
+      }
+    },
+    "/api/apps/imagestudio/workflows": {
+      "get": {
+        "description": "What the image server can render. The Owner and the names the Owner\nticked only; the browser never learns the image server's own address.",
+        "operationId": "workflows_api_apps_imagestudio_workflows_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Workflows"
+      }
+    },
+    "/api/apps/imagestudio/workflows/thumb": {
+      "get": {
+        "description": "One picture from the image server, passed through this server: the browser\nnever gets the image server's own origin.",
+        "operationId": "workflows_thumb_api_apps_imagestudio_workflows_thumb_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "u",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 512,
+              "title": "U",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Workflows Thumb"
       }
     },
     "/api/apps/jobboard": {

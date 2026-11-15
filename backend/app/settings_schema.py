@@ -385,6 +385,9 @@ _CORE: tuple[SettingDef, ...] = (
        "Image Studio, the Test button and pictures in chat from MiniMax, OpenAI, xAI Grok or a custom server. The Owner can always use them. (A Basic profile also needs Image Studio switched on in People.)", "connections", section="Who may make pictures"),
     _d("connections.image_access.civitai_basic", "boolean", False, "Basic profiles: Civitai",
        "Image Studio's Civitai provider, billed in Buzz with no spending limit. The Owner can always use it; the shared default profile never can.", "connections", section="Who may make pictures"),
+    _d("connections.image_access.server_profiles", "list", [], "Who else can use the image server",
+       "The Owner can always use the image server in Image Studio. Nobody else can until you tick their name here. A Basic profile and the shared sign-in profile cannot be ticked.",
+       "connections", section="Who may make pictures"),
     _d("connections.image_civitai_key", "secret", None, "Civitai API key",
        "The key Image Studio uses for Civitai. Create one on your Civitai account page. DisPatch keeps it "
        "but never shows it again.", "connections", section="Civitai", env="CIVITAI_API_KEY",

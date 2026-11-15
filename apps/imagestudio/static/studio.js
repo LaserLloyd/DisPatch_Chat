@@ -49,6 +49,7 @@ const S = {
   buzz: { state: 'idle', text: '', scope: false, helpUrl: '' },   // the Buzz balance line
   buzzLoaded: false,     // the balance was fetched once for this page
   browse: { open: false, sort: 'week', query: '', rows: [], state: 'idle', error: '' },
+  workflows: { rows: [], tried: false, loading: false, error: '', sig: '' },   // the image server's gallery
 };
 const R = {};            // DOM refs
 const SORT_LABELS = { oldest: 'sort.oldest', newest: 'sort.newest' };
@@ -177,8 +178,16 @@ function refreshForm() {
   if (p && isMetered(p)) R.cost.textContent = t('cost.note', { provider: p.label, note: p.price_note });
   const names = (p && p.model_names) || {};
   R.model.placeholder = p && p.shape === 'civitai' ? t('model.civitai_placeholder') : (p ? p.model : '');
-  R.models.replaceChildren(...((p && p.models) || []).map((m) => el('option', names[m] ? { value: m, label: names[m] } : { value: m })));
+  // Every option carries text as well as value: Chromium shows nothing for a
+  // datalist option with a label and no text.
+  R.models.replaceChildren(...((p && p.models) || []).map((m) => {
+    const o = el('option', { value: m, text: names[m] || m });
+    if (names[m]) o.setAttribute('label', names[m]);
+    return o;
+  }));
+  renderModelPicks(p, names);
   renderModelNote();
+  refreshWorkflows();
   R.est.hidden = !(p && p.estimate) || !S.estText;
   R.est.textContent = S.estText;
   const civ = isCivitai() && !!p.configured;
@@ -188,6 +197,87 @@ function refreshForm() {
   if (!civ) closeBrowse();
   else if (!S.buzzLoaded) loadBalance();
   scheduleEstimate();
+}
+
+/** The model's own list as buttons: Chromium shows nothing for a datalist option
+ *  that has a label and no text, so the names are offered here as well. */
+function renderModelPicks(p, names) {
+  const models = (p && p.models) || [];
+  R.modelPicks.hidden = !models.length;
+  R.modelPicks.replaceChildren(...models.map((m) => {
+    const b = el('button', { type: 'button', class: 'st-model-pick', title: m, text: names[m] || m });
+    b.addEventListener('click', () => { R.model.value = m; refreshForm(); });
+    return el('li', {}, [b]);
+  }));
+}
+
+/** The image server's provider: the gallery is shown for it and for nothing else. */
+function isServerProvider() {
+  const p = provider();
+  return !!(p && p.id === 'workflows');
+}
+
+/** The thumbnail comes from this server, never from the image server's own address. */
+const thumbUrl = (u) => `${API}/workflows/thumb?u=${encodeURIComponent(u)}`;
+
+/** The gallery: what the image server can render, with the picture it made last. */
+function refreshWorkflows() {
+  const on = isServerProvider();
+  R.workflows.hidden = !on;
+  if (on && !S.workflows.tried) {
+    S.workflows.tried = true;
+    loadWorkflows();
+    return;
+  }
+  renderWorkflows();
+}
+
+async function loadWorkflows() {
+  S.workflows.loading = true;
+  try {
+    const r = await api(`${API}/workflows`);
+    S.workflows.rows = r.workflows || [];
+    S.workflows.error = '';
+    // The provider row learns the names, so the Model box offers them too.
+    const p = provider();
+    if (p) {
+      p.models = S.workflows.rows.map((w) => w.name);
+      p.model_names = Object.fromEntries(
+        S.workflows.rows.map((w) => [w.name, w.display_name || w.name]));
+    }
+  } catch (e) {
+    S.workflows.rows = [];
+    S.workflows.error = (e && e.message) || String(e);
+  } finally {
+    S.workflows.loading = false;
+    renderWorkflows();
+    refreshForm();
+  }
+}
+
+function renderWorkflows() {
+  const rows = S.workflows.rows || [];
+  if (!isServerProvider()) { R.workflows.replaceChildren(); return; }
+  const sig = rows.map((w) => w.name).join('|');
+  if (sig !== S.workflows.sig) {
+    S.workflows.sig = sig;
+    R.workflows.replaceChildren(...rows.map((w) => {
+      const label = w.display_name || w.name;
+      // No-Image Mode never asks for a picture: the name only.
+      const media = S.nim
+        ? el('div', { class: 'st-noimg', text: t('nim.hidden') })
+        : (w.thumb
+          ? el('img', { src: thumbUrl(w.thumb), alt: label, loading: 'lazy' })
+          : el('div', { class: 'st-noimg', text: label }));
+      const b = el('button', { type: 'button', class: 'st-wf-tile', title: label }, [
+        media, el('span', { class: 'st-wf-name', text: label }),
+      ]);
+      b.addEventListener('click', () => { R.model.value = w.name; refreshForm(); });
+      return el('li', { class: 'st-wf' }, [b]);
+    }));
+  }
+  R.workflowsNote.hidden = !S.workflows.error;
+  if (S.workflows.error) R.workflowsNote.textContent = S.workflows.error;
 }
 
 // ---------------------------------------------------------------- Buzz balance
@@ -837,6 +927,7 @@ function build(root) {
   R.provider = el('select', { id: 'st-provider' });
   R.model = el('input', { type: 'text', id: 'st-model', list: 'st-models', autocomplete: 'off', spellcheck: 'false' });
   R.models = el('datalist', { id: 'st-models' });
+  R.modelPicks = el('ul', { class: 'st-model-picks', id: 'st-model-picks', hidden: '' });
   R.modelNote = el('p', { class: 'st-muted st-modelnote', hidden: '' });
   R.modelRefresh = el('button', { type: 'button', class: 'st-btn st-browse-btn', id: 'st-model-refresh', text: t('models.refresh'), hidden: '' });
   R.browseBtn = el('button', { type: 'button', class: 'st-btn st-browse-btn', id: 'st-browse', text: t('browse.button'), hidden: '', 'aria-expanded': 'false', 'aria-controls': 'st-browse-panel' });
@@ -882,6 +973,8 @@ function build(root) {
     el('label', { text: t('ref.label') }), el('div', { class: 'st-muted', text: t('ref.hint') }),
     R.refPreview, el('div', { class: 'st-row' }, [refUp, refChat, R.refClear]), R.file, R.picker,
   ]);
+  R.workflows = el('ul', { class: 'st-workflows', id: 'st-workflows', hidden: '' });
+  R.workflowsNote = el('p', { class: 'st-muted st-workflows-note', hidden: '' });
   R.go = el('button', { type: 'button', class: 'st-btn st-primary st-go', id: 'st-generate', text: t('generate') });
   R.cost = el('p', { class: 'st-cost', hidden: '' });
   R.h3Hint = el('p', { class: 'st-muted st-h3hint', hidden: '', text: t('models.h3_hint') });
@@ -899,7 +992,9 @@ function build(root) {
   ]);
   R.form = el('div', { class: 'st-form' }, [
     field(t('prompt.label'), R.prompt, R.counter), R.recentWrap,
-    el('div', { class: 'st-two' }, [field(t('provider.label'), R.provider), field(t('model.label'), R.model, R.models)]),
+    el('div', { class: 'st-two' }, [field(t('provider.label'), R.provider),
+      field(t('model.label'), R.model, el('div', { class: 'st-modelbox' }, [R.models, R.modelPicks]))]),
+    R.workflows, R.workflowsNote,
     R.modelRefresh, R.modelNote,
     R.browseBtn, R.browsePanel,
     el('div', { class: 'st-two' }, [field(t('ratio.label'), R.ratio), field(t('count.label'), R.count)]),

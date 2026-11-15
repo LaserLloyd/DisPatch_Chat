@@ -716,7 +716,7 @@ test('Connections: Refresh available models (all) and per-card Refresh models wi
   const pane = win.document.getElementById('spane-connections');
   await C.mountConnections(pane, { api, toast: (m) => toasts.push(m) });
   const lineA = pane.querySelector('[data-connection="a"] .cxn-models-line').textContent;
-  assert.match(lineA, /^Models: 1 · updated .+ · from the provider's list$/);
+  assert.match(lineA, /^Models: 1 · updated .+ · from the provider's list · m1$/);
   assert.match(pane.querySelector('[data-connection="b"] .cxn-models-line').textContent, /Models: 0 · not refreshed yet · Could not refresh: The key was not accepted/);
   // per-card
   const refreshB = [...pane.querySelector('[data-connection="b"]').querySelectorAll('button')].find((b) => b.textContent === EN.cxn.refresh_one);
