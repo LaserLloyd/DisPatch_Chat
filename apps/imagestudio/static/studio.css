@@ -15,14 +15,19 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
 .st-muted { color: var(--text-secondary); font-size: 12.5px; }
 .st-error { color: var(--danger, #e5484d); }
 .st-layout { display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 20px; align-items: start; }
-/* The controls column keeps its own scroll: a tall form must not lose its lower
-   part behind the viewport, and the Generate bar rides at the bottom of it. */
+/* The controls column keeps its own scroll: a tall form (the gallery open)
+   must not push its lower part out of reach, and the Generate bar rides at the
+   bottom of the column. --st-col-top is the space above the column (the page's
+   padding and the "Today" line): the column sits there and ends just above the
+   bottom of the window, so the bar is always in reach. */
 .st-controls {
-  position: sticky; top: 8px;
-  max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px);
+  --st-col-top: 44px;
+  position: sticky; top: var(--st-col-top);
+  max-height: calc(100vh - var(--st-col-top) - 8px);
+  max-height: calc(100dvh - var(--st-col-top) - 8px);
   overflow-y: auto; overflow-x: hidden; scrollbar-width: thin;
 }
-.st-form { display: flex; flex-direction: column; gap: 12px; padding-bottom: 4px; }
+.st-form { display: flex; flex-direction: column; gap: 12px; padding-bottom: 24px; }
 .st-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .st-field > label { font-weight: 600; font-size: 12.5px; }
 .st-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
