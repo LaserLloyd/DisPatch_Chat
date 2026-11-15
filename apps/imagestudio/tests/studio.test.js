@@ -1464,3 +1464,21 @@ test('a workflow name never reaches another provider, not even one that lists no
   const sent = gens(env).pop();
   assert.equal(sent.body.model, '', 'the request carries no workflow name');
 });
+
+test('the count line is silent while the workflow list is loading', { skip: dom.skip }, async () => {
+  let release = null;
+  const gate = new Promise((r) => { release = r; });
+  const env = await page({
+    state: { ...STATE, providers: [WF, PROVIDERS[0]], default: 'workflows' },
+    extra: { 'GET /api/apps/imagestudio/workflows': async () => { await gate; return [200, WPAGE]; } },
+  });
+  const { doc } = env;
+  const count = doc.querySelector('.st-picker-count');
+  assert.equal(count.hidden, true, 'no "0 of 0" beside the loading note');
+  assert.equal(count.textContent, '', 'the count line says nothing yet');
+  assert.match(pickerHead(doc).textContent, /Loading/, 'and the header says it is loading');
+  release();
+  await flush(); await flush();
+  assert.equal(count.hidden, false, 'the count comes back with the list');
+  assert.match(count.textContent, /3 of 3/);
+});

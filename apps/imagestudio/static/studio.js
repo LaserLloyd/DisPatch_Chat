@@ -315,7 +315,10 @@ function renderPickerList() {
       return el('li', {}, [b]);
     }));
   }
-  R.pickerCount.textContent = t('picker.count', { shown: shown.length, total: rows.length });
+  // While the list loads the header says so: a count of "0 of 0" would be a lie.
+  R.pickerCount.hidden = !!S.workflows.loading;
+  R.pickerCount.textContent = S.workflows.loading ? ''
+    : t('picker.count', { shown: shown.length, total: rows.length });
   R.pickerEmpty.hidden = !(shown.length === 0 && S.picker.query);
   if (!R.pickerEmpty.hidden) R.pickerEmpty.textContent = t('picker.no_match', { query: S.picker.query });
   markSelected();
