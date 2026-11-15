@@ -387,6 +387,17 @@ function clearStaleModel(p) {
 /** The thumbnail comes from this server, never from the image server's own address. */
 const thumbUrl = (u) => `${API}/workflows/thumb?u=${encodeURIComponent(u)}`;
 
+/** The image server's provider row learns the workflow names, so the Model box
+ *  offers them too. Only the image server's own row: the names must never land
+ *  on another provider (the list can arrive after the person switched). */
+function teachProviderNames() {
+  const p = ((S.info && S.info.providers) || []).find((x) => x && x.id === 'workflows');
+  if (!p) return;
+  p.models = S.workflows.rows.map((w) => w.name);
+  p.model_names = Object.fromEntries(
+    S.workflows.rows.map((w) => [w.name, w.display_name || w.name]));
+}
+
 /** The gallery: what the image server can render, with the picture it made last. */
 function refreshWorkflows() {
   const on = isServerProvider();
@@ -405,15 +416,9 @@ async function loadWorkflows() {
     const r = await api(`${API}/workflows`);
     S.workflows.rows = r.workflows || [];
     S.workflows.error = '';
-    // The provider row learns the names, so the Model box offers them too.
-    const p = provider();
-    if (p) {
-      p.models = S.workflows.rows.map((w) => w.name);
-      p.model_names = Object.fromEntries(
-        S.workflows.rows.map((w) => [w.name, w.display_name || w.name]));
-      // A name the image server never heard of is of no use to it.
-      clearStaleModel(p);
-    }
+    teachProviderNames();
+    // A name the image server never heard of is of no use to it.
+    if (isServerProvider()) clearStaleModel(provider());
   } catch (e) {
     S.workflows.rows = [];
     S.workflows.error = (e && e.message) || String(e);

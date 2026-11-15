@@ -1405,3 +1405,22 @@ test('the arrow keys do nothing while the gallery is closed', { skip: dom.skip }
   assert.equal(doc.activeElement, arrow, 'the focus stays on the arrow');
   assert.notEqual(doc.activeElement, wfTiles(doc)[0]);
 });
+
+test('the workflow names never land on another provider (the list can arrive late)', { skip: dom.skip }, async () => {
+  let release = null;
+  const gate = new Promise((r) => { release = r; });
+  const env = await page({
+    state: { ...STATE, providers: [WF, PROVIDERS[0]], default: 'workflows' },
+    extra: { 'GET /api/apps/imagestudio/workflows': async () => { await gate; return [200, WPAGE]; } },
+  });
+  const { doc, win } = env;
+  // The person switches to MiniMax while the image server's list is still loading.
+  const sel = doc.getElementById('st-provider');
+  sel.value = 'minimax';
+  sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  release();
+  await flush(); await flush();
+  const models = [...doc.querySelectorAll('#st-models option')].map((o) => o.value);
+  assert.deepEqual(models, ['image-01', 'image-01-live'], 'MiniMax still offers its own models');
+  assert.equal(doc.getElementById('st-model-picks').hidden, false, 'and its own pills');
+});
