@@ -1159,3 +1159,17 @@ test('a provider with a short model list keeps its pills and gets no card', { sk
   assert.equal(picker(doc).hidden, true, 'no card for a short list');
 });
 
+test('the image server: switching provider and back leaves the picker list whole', { skip: dom.skip }, async () => {
+  const env = await wpage({ state: { ...STATE, providers: [WF, PROVIDERS[0]], default: 'workflows' } });
+  const { doc, win } = env;
+  const sel = doc.getElementById('st-provider');
+  assert.equal(wfTiles(doc).length, 3);
+  sel.value = 'minimax';
+  sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  assert.equal(wfTiles(doc).length, 0, 'another provider shows no workflows');
+  sel.value = 'workflows';
+  sel.dispatchEvent(new win.Event('change', { bubbles: true }));
+  assert.equal(wfTiles(doc).length, 3, 'the picker is whole again');
+  assert.match(doc.querySelector('.st-picker-count').textContent, /3 of 3/);
+});
+

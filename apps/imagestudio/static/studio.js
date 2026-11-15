@@ -373,7 +373,9 @@ async function loadWorkflows() {
 
 function renderWorkflows() {
   const rows = S.workflows.rows || [];
-  if (!isServerProvider()) { R.wfList.replaceChildren(); return; }
+  // Another provider shows no workflows: the list is emptied AND its signature
+  // forgotten, so coming back rebuilds the tiles (the count still says 34).
+  if (!isServerProvider()) { R.wfList.replaceChildren(); S.workflows.sig = ''; return; }
   const sig = rows.map((w) => w.name).join('|');
   if (sig !== S.workflows.sig) {
     S.workflows.sig = sig;
