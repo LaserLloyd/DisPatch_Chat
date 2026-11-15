@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v218';  // v218: Image Studio - the example gallery is a closed section with a small arrow (the header keeps the count and the chosen workflow), Generate rides in a sticky bar at the bottom of the form, and switching provider clears the picker's filter (studio.js?v=21->22, studio.css?v=12->13, index.html, locales).
+const CACHE = 'local-chat-v219';  // v219: Image Studio - the header's chosen workflow follows a name typed by hand, a workflow name never travels to another provider, and the count line waits for the list (studio.js?v=22->23, index.html).
+// v218: Image Studio - the example gallery is a closed section with a small arrow (the header keeps the count and the chosen workflow), Generate rides in a sticky bar at the bottom of the form, and switching provider clears the picker's filter (studio.js?v=21->22, studio.css?v=12->13, index.html, locales).
 // v217: Image Studio - the phone picker rule really applies (two columns, its own 300px scroll) and a failed workflow load leaves no error in another provider's card (studio.js?v=20->21, studio.css?v=11->12, index.html).
 // v216: Image Studio - the image server's workflows are ONE searchable picker under the Model field (no wall of pills, no second gallery) (studio.js?v=19->20, studio.css?v=10->11, index.html, locales).
 // v215: the image server in Image Studio - the Owner's allowlist, the workflow gallery and the model names (integrations.js?v=8->9, llm.js?v=18->19, plugins.js?v=26->27, connections.js?v=7->8, wizard.js?v=8->9, characters-page.js?v=10->11, settings_schema.js?v=10->11, main.js?v=186->187, studio.js?v=18->19, studio.css?v=9->10, index.html, locales).
