@@ -27,7 +27,7 @@ import {
   cleanBrowseRows, rememberModelName, browseWords, browseMatches,
   ratioLabel, ratioText,
   activeModel, isH3Model, keepBrowsePicks, modelCaps, modelPromptMax, modelsNote, refreshSummary,
-  stepIndex, wheelShouldChain,
+  stepIndex, wheelShouldChain, canScroll, INNER_SCROLLPORTS,
 } from './studio-logic.js?v=12';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
@@ -1414,7 +1414,14 @@ function build(root) {
   // The wheel over the controls column: while the column can still move that
   // way, it scrolls itself; at its end the page scrolls, so the results move
   // instead of the page standing still.
+  //
+  // A wheel over a list INSIDE the column (the workflow gallery, the model
+  // list, the picker grid, the browse list, the recent prompts) belongs to
+  // that list while the list can still move that way: the column must not
+  // swallow it, or the list would only scroll by its scrollbar.
   R.controls.addEventListener('wheel', (ev) => {
+    const inner = ev.target && ev.target.closest ? ev.target.closest(INNER_SCROLLPORTS) : null;
+    if (inner && R.controls.contains(inner) && canScroll(ev.deltaY, inner)) return;
     if (!wheelShouldChain(ev.deltaY, R.controls)) return;
     ev.preventDefault();
     const se = document.scrollingElement || document.documentElement;

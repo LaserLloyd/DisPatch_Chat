@@ -1524,6 +1524,52 @@ test('the wheel over the controls column scrolls the page when the column is at 
   assert.equal(wheel(-100).defaultPrevented, false, 'the column scrolls itself');
 });
 
+test('a wheel over a list inside the controls column scrolls that list, not the page', { skip: dom.skip }, async () => {
+  const env = await wpage();
+  const { doc, win } = env;
+  const col = doc.querySelector('.st-controls');
+  // A tall window: the column is not a scrollport at all, so the column's own
+  // metrics cannot decide what a wheel over a list inside it means.
+  Object.defineProperty(col, 'scrollHeight', { configurable: true, value: 400 });
+  Object.defineProperty(col, 'clientHeight', { configurable: true, value: 400 });
+  // Where the page stands, as the browser keeps it.
+  const pageBox = doc.scrollingElement || doc.documentElement;
+  let pageTop = 0;
+  Object.defineProperty(pageBox, 'scrollTop', { configurable: true, get: () => pageTop, set: (v) => { pageTop = v; } });
+  // A list inside the column, with room to move: the image server's gallery.
+  const list = doc.getElementById('st-workflows');
+  assert.ok(col.contains(list), 'the gallery is inside the controls column');
+  let listTop = 0;
+  Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 600 });
+  Object.defineProperty(list, 'clientHeight', { configurable: true, value: 300 });
+  Object.defineProperty(list, 'scrollTop', { configurable: true, get: () => listTop, set: (v) => { listTop = v; } });
+  const wheel = (target, deltaY) => {
+    const ev = new win.WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true });
+    target.dispatchEvent(ev);
+    return ev;
+  };
+  // The gallery can still scroll down: the wheel belongs to the gallery.
+  const over = wheel(list, 100);
+  assert.equal(over.defaultPrevented, false, 'the gallery keeps the wheel');
+  assert.equal(pageTop, 0, 'and the page did not scroll');
+  // The gallery is at its end: the wheel goes on to the page, and the results move.
+  listTop = 300;
+  const atEnd = wheel(list, 100);
+  assert.equal(atEnd.defaultPrevented, true, 'the page takes the wheel');
+  assert.equal(pageTop, 100, 'the page really scrolled');
+  // The recent prompts are a list of their own, and they scroll as well.
+  const recents = doc.querySelector('.st-recents');
+  assert.ok(col.contains(recents), 'the recent prompts are inside the controls column');
+  let recentTop = 0;
+  Object.defineProperty(recents, 'scrollHeight', { configurable: true, value: 400 });
+  Object.defineProperty(recents, 'clientHeight', { configurable: true, value: 180 });
+  Object.defineProperty(recents, 'scrollTop', { configurable: true, get: () => recentTop, set: (v) => { recentTop = v; } });
+  pageTop = 0;
+  const overRecents = wheel(recents, 100);
+  assert.equal(overRecents.defaultPrevented, false, 'the recent prompts keep the wheel');
+  assert.equal(pageTop, 0, 'and the page did not scroll');
+});
+
 test('the page itself is never told not to scroll', () => {
   const css = readFileSync(join(APP, 'static', 'studio.css'), 'utf8');
   assert.doesNotMatch(css, /overscroll-behavior/, 'the column does not keep the wheel to itself');
