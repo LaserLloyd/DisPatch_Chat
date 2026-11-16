@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   PROMPT_MAX, isGenerateShortcut, shortcutLabel, promptStatus, canGenerate, clampCount, parseSeed,
   buildRequest, cropRect, defaultCropPos, galleryItems, galleryInfo, isMetered,
-  ratioLabel, ratioText, stepIndex,
+  ratioLabel, ratioText, stepIndex, wheelShouldChain,
   SORTS, normalizeSort, sortRows, clearFromHere, DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata,
 } from '../static/studio-logic.js';
 
@@ -329,4 +329,22 @@ test('the viewer steps one picture at a time and the ends stop', () => {
   assert.equal(stepIndex(0, 1, 1), 0, 'one picture stands still');
   assert.equal(stepIndex(0, 1, 0), 0, 'no picture at all');
   assert.equal(stepIndex(5, 1, 3), 2, 'an index outside the list is clamped');
+});
+
+test('the wheel over the controls column goes to the page only when the column cannot move', () => {
+  const box = { scrollTop: 0, scrollHeight: 1000, clientHeight: 400 };
+  // Not a scrollport at all: the page takes every wheel.
+  assert.equal(wheelShouldChain(100, { scrollTop: 0, scrollHeight: 400, clientHeight: 400 }), true);
+  assert.equal(wheelShouldChain(-100, { scrollTop: 0, scrollHeight: 200, clientHeight: 400 }), true);
+  // The column can still move down: it keeps the wheel.
+  assert.equal(wheelShouldChain(100, box), false);
+  assert.equal(wheelShouldChain(100, { ...box, scrollTop: 500 }), false);
+  // At the bottom, the wheel goes to the page.
+  assert.equal(wheelShouldChain(100, { ...box, scrollTop: 600 }), true);
+  // The column can still move up: it keeps the wheel.
+  assert.equal(wheelShouldChain(-100, { ...box, scrollTop: 100 }), false);
+  // At the top, the wheel goes to the page.
+  assert.equal(wheelShouldChain(-100, { ...box, scrollTop: 0 }), true);
+  // A wheel that goes nowhere changes nothing.
+  assert.equal(wheelShouldChain(0, box), true);
 });

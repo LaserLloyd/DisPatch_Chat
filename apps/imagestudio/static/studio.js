@@ -25,7 +25,7 @@ import {
   cleanBrowseRows, rememberModelName, browseWords, browseMatches,
   ratioLabel, ratioText,
   activeModel, isH3Model, keepBrowsePicks, modelCaps, modelPromptMax, modelsNote, refreshSummary,
-  stepIndex,
+  stepIndex, wheelShouldChain,
 } from './studio-logic.js?v=11';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
@@ -1365,6 +1365,9 @@ function build(root) {
   R.none = el('div', { class: 'st-none', hidden: '' }, [
     R.noneText, R.setup, R.ask,
   ]);
+  // The controls column: it scrolls itself, and at its end the wheel goes to
+  // the page, so the results keep moving.
+  R.controls = el('section', { class: 'st-controls' }, []);
   R.form = el('div', { class: 'st-form' }, [
     field(t('prompt.label'), R.prompt, R.counter), R.recentWrap,
     // The picker card sits under the Model field and spans the row: it is the
@@ -1379,6 +1382,7 @@ function build(root) {
     // The Generate bar is the LAST thing in the form: nothing scrolls under it.
     R.optimizerRow, R.seedRow, R.refBox, R.h3Hint, R.cost, R.est, R.buzzRow, R.goBar,
   ]);
+  R.controls.append(R.none, R.form, R.status);
   R.sort = el('select', { id: 'st-sort', class: 'st-sort' }, SORTS.map((v) => el('option', { value: v, text: t(SORT_LABELS[v]) })));
   R.sort.value = S.sort;
   R.sortWrap = el('label', { class: 'st-sortwrap', for: 'st-sort' }, [`${t('sort.label')}: `, R.sort]);
@@ -1393,7 +1397,7 @@ function build(root) {
   root.append(
     el('header', { class: 'st-head' }, [R.today]),
     el('div', { class: 'st-layout' }, [
-      el('section', { class: 'st-controls' }, [R.none, R.form, R.status]),
+      R.controls,
       el('section', { class: 'st-results' }, [
         el('div', { class: 'st-resultshead' }, [el('h2', { text: t('results.title') }), el('div', { class: 'st-headtools' }, [R.sortWrap, R.deleteBtn])]),
         R.empty, R.grid]),
@@ -1401,6 +1405,15 @@ function build(root) {
     R.dlg, R.viewer,
   );
 
+  // The wheel over the controls column: while the column can still move that
+  // way, it scrolls itself; at its end the page scrolls, so the results move
+  // instead of the page standing still.
+  R.controls.addEventListener('wheel', (ev) => {
+    if (!wheelShouldChain(ev.deltaY, R.controls)) return;
+    ev.preventDefault();
+    const se = document.scrollingElement || document.documentElement;
+    se.scrollTop = (se.scrollTop || 0) + ev.deltaY;
+  }, { passive: false });
   R.prompt.addEventListener('input', refreshForm);
   // Shift/Ctrl/Cmd+Enter = the Generate button, and only while it is enabled.
   R.prompt.addEventListener('keydown', (ev) => {

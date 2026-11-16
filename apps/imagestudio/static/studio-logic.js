@@ -178,6 +178,28 @@ export function isMetered(provider) {
   return !!(provider && provider.price_note);
 }
 
+// ---------------------------------------------------------------- the wheel
+
+/** Whether a wheel over the controls column belongs to the page.
+ *
+ *  The column scrolls itself while it still has room that way; at its end the
+ *  page takes the wheel, so the results move instead of the page standing
+ *  still. True = hand the wheel to the page (and keep the column where it is),
+ *  false = let the column scroll.
+ *
+ *  A column that is not a scrollport at all (it is shorter than its box) always
+ *  hands the wheel over: there is nothing of its own to scroll. */
+export function wheelShouldChain(deltaY, box = {}) {
+  const scrollTop = Number(box.scrollTop) || 0;
+  const scrollHeight = Number(box.scrollHeight) || 0;
+  const clientHeight = Number(box.clientHeight) || 0;
+  if (scrollHeight <= clientHeight + 1) return true;      // not a scrollport
+  const d = Number(deltaY) || 0;
+  if (d > 0) return scrollTop + clientHeight >= scrollHeight - 1;   // at the bottom
+  if (d < 0) return scrollTop <= 0;                                  // at the top
+  return true;      // a wheel that goes nowhere anyway
+}
+
 // ---------------------------------------------------------------- sort + clear
 
 /** The two orders the results grid offers. Newest first is the default for a

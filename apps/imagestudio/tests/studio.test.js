@@ -1498,6 +1498,38 @@ test('the Generate bar sticks to the bottom of the form (and the phone bar is a 
   assert.match(css, /\.st-gobar \.st-go \{[^}]*min-height: 44px/, 'the phone button is a thumb tall');
 });
 
+test('the wheel over the controls column scrolls the page when the column is at its end', { skip: dom.skip }, async () => {
+  const env = await page();
+  const { doc, win } = env;
+  const col = doc.querySelector('.st-controls');
+  // The column is a scrollport with room to move.
+  Object.defineProperty(col, 'scrollHeight', { configurable: true, value: 1000 });
+  Object.defineProperty(col, 'clientHeight', { configurable: true, value: 400 });
+  let top = 100;
+  Object.defineProperty(col, 'scrollTop', { configurable: true, get: () => top, set: (v) => { top = v; } });
+  const wheel = (deltaY) => {
+    const ev = new win.WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true });
+    col.dispatchEvent(ev);
+    return ev;
+  };
+  // The column can still move down: it keeps the wheel.
+  assert.equal(wheel(100).defaultPrevented, false, 'the column scrolls itself');
+  // At the bottom: the page takes the wheel, so the results move.
+  top = 600;
+  assert.equal(wheel(100).defaultPrevented, true, 'the page scrolls instead');
+  // At the top, the same the other way round.
+  top = 0;
+  assert.equal(wheel(-100).defaultPrevented, true, 'the page scrolls instead');
+  top = 200;
+  assert.equal(wheel(-100).defaultPrevented, false, 'the column scrolls itself');
+});
+
+test('the page itself is never told not to scroll', () => {
+  const css = readFileSync(join(APP, 'static', 'studio.css'), 'utf8');
+  assert.doesNotMatch(css, /overscroll-behavior/, 'the column does not keep the wheel to itself');
+  assert.doesNotMatch(css, /(?:^|[\s,{])(?:html|body)[^{]*\{[^}]*overflow:\s*hidden/, 'the page keeps scrolling');
+});
+
 test('the arrow on a phone is a thumb-sized tap target (the phone rule must out-specify the base rule)', () => {
   // The base rule that sizes the arrow sits AFTER the phone media query, so a
   // phone rule with the same classes would lose: the arrow stayed 26x26 on a
