@@ -1201,9 +1201,12 @@ function generate() {
     for (let i = 0; i < started; i++) {
       startJob({ key: ++S.jobSeq, body: { ...buildRequest(formState(), c), n: 1 } });
     }
-    setStatus(started < asked
-      ? t('results.fanout_short', { started, asked, skipped: asked - started, max })
-      : t('results.fanout', { n: started }));
+    // What the count became: the jobs that started, and the ones that did not fit.
+    if (started < asked) {
+      setStatus(t('results.fanout_short', { started, asked, skipped: asked - started, max }));
+    } else if (started > 1) {
+      setStatus(t('results.fanout', { n: started }));
+    }
     return;
   }
   if (!canStartAnother(running(), max)) {
