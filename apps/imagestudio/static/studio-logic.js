@@ -180,6 +180,27 @@ export function isMetered(provider) {
 
 // ---------------------------------------------------------------- the wheel
 
+/** The scroll areas inside the controls column: the workflow gallery, the
+ *  model list, the picker grid, the Civitai browse list and the recent
+ *  prompts. A wheel over one of these belongs to that list while the list can
+ *  still move that way. */
+export const INNER_SCROLLPORTS = '.st-workflows, .st-picker-models, .st-pickgrid, .st-browse-list, .st-recents';
+
+/** Whether a box can still move in the wheel's direction.
+ *
+ *  True = the wheel scrolls this box itself; false = there is nothing left to
+ *  scroll that way (it is not a scrollport, or it is already at that end). */
+export function canScroll(deltaY, box = {}) {
+  const scrollTop = Number(box.scrollTop) || 0;
+  const scrollHeight = Number(box.scrollHeight) || 0;
+  const clientHeight = Number(box.clientHeight) || 0;
+  if (scrollHeight <= clientHeight + 1) return false;     // not a scrollport
+  const d = Number(deltaY) || 0;
+  if (d > 0) return scrollTop + clientHeight < scrollHeight - 1;   // room below
+  if (d < 0) return scrollTop > 0;                                  // room above
+  return false;      // a wheel that goes nowhere anyway
+}
+
 /** Whether a wheel over the controls column belongs to the page.
  *
  *  The column scrolls itself while it still has room that way; at its end the
@@ -190,14 +211,7 @@ export function isMetered(provider) {
  *  A column that is not a scrollport at all (it is shorter than its box) always
  *  hands the wheel over: there is nothing of its own to scroll. */
 export function wheelShouldChain(deltaY, box = {}) {
-  const scrollTop = Number(box.scrollTop) || 0;
-  const scrollHeight = Number(box.scrollHeight) || 0;
-  const clientHeight = Number(box.clientHeight) || 0;
-  if (scrollHeight <= clientHeight + 1) return true;      // not a scrollport
-  const d = Number(deltaY) || 0;
-  if (d > 0) return scrollTop + clientHeight >= scrollHeight - 1;   // at the bottom
-  if (d < 0) return scrollTop <= 0;                                  // at the top
-  return true;      // a wheel that goes nowhere anyway
+  return !canScroll(deltaY, box);
 }
 
 // ---------------------------------------------------------------- sort + clear

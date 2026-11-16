@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   PROMPT_MAX, isGenerateShortcut, shortcutLabel, promptStatus, canGenerate, clampCount, parseSeed,
   buildRequest, cropRect, defaultCropPos, galleryItems, galleryInfo, isMetered,
-  ratioLabel, ratioText, stepIndex, wheelShouldChain,
+  ratioLabel, ratioText, stepIndex, wheelShouldChain, canScroll, INNER_SCROLLPORTS,
   SORTS, normalizeSort, sortRows, clearFromHere, DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata,
 } from '../static/studio-logic.js';
 
@@ -347,4 +347,28 @@ test('the wheel over the controls column goes to the page only when the column c
   assert.equal(wheelShouldChain(-100, { ...box, scrollTop: 0 }), true);
   // A wheel that goes nowhere changes nothing.
   assert.equal(wheelShouldChain(0, box), true);
+});
+
+test('a list inside the column keeps the wheel while it can still move that way', () => {
+  const list = { scrollTop: 0, scrollHeight: 600, clientHeight: 300 };
+  // The list has room below: the wheel scrolls the list, not the page.
+  assert.equal(canScroll(100, list), true);
+  assert.equal(canScroll(100, { ...list, scrollTop: 200 }), true);
+  // At its end: nothing left to scroll that way.
+  assert.equal(canScroll(100, { ...list, scrollTop: 300 }), false);
+  // Room above: the wheel scrolls the list back.
+  assert.equal(canScroll(-100, { ...list, scrollTop: 100 }), true);
+  assert.equal(canScroll(-100, { ...list, scrollTop: 0 }), false);
+  // A list that is not a scrollport cannot take the wheel.
+  assert.equal(canScroll(100, { scrollTop: 0, scrollHeight: 300, clientHeight: 300 }), false);
+  assert.equal(canScroll(-100, { scrollTop: 0, scrollHeight: 300, clientHeight: 300 }), false);
+  // The two rules say the same thing the other way round.
+  assert.equal(wheelShouldChain(100, list), !canScroll(100, list));
+  assert.equal(wheelShouldChain(-100, { ...list, scrollTop: 300 }), !canScroll(-100, { ...list, scrollTop: 300 }));
+});
+
+test('the scroll areas inside the controls column are the ones the wheel must leave alone', () => {
+  for (const c of ['.st-workflows', '.st-picker-models', '.st-pickgrid', '.st-browse-list', '.st-recents']) {
+    assert.ok(INNER_SCROLLPORTS.includes(c), `${c} is a scroll area of its own`);
+  }
 });
