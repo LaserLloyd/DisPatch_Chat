@@ -25,7 +25,7 @@ import {
   DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata, DELETE_SCOPE_LABELS, estimateKey, modelLabel,
   CURRENCIES, normalizeCurrency, balanceLine, BROWSE_SORTS, normalizeBrowseSort, compactCount, browseLabel,
   cleanBrowseRows, rememberModelName, browseWords, browseMatches,
-  ratioLabel, ratioText,
+  ratioText,
   activeModel, isH3Model, keepBrowsePicks, modelCaps, modelPromptMax, modelsNote, refreshSummary,
   stepIndex, wheelShouldChain, canScroll, INNER_SCROLLPORTS,
 } from './studio-logic.js?v=13';

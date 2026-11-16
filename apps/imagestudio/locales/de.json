@@ -31,7 +31,7 @@
   "ratio.wide": "Breit",
   "ratio.ultrawide": "Sehr breit",
   "ratio.portrait": "Hochformat",
-  "ratio.portrait_tall": "Hochformat, hoch",
+  "ratio.portrait_tall": "Hochformat, sehr hoch",
   "count.label": "Bilder",
   "optimizer.label": "Prompt-Optimierer",
   "optimizer.hint": "Lässt den Anbieter deinen Prompt vor dem Zeichnen umschreiben.",
