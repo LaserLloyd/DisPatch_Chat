@@ -85,6 +85,14 @@ test('clicking a recent prompt fills the box and updates the counter', { skip: d
   assert.equal(doc.querySelector('.st-counter').textContent, '17 / 1,500');
 });
 
+test('the aspect ratios are named, and the ratio rides beside the name', { skip: dom.skip }, async () => {
+  const { doc } = await page();
+  const sel = doc.getElementById('st-ratio');
+  assert.deepEqual([...sel.options].map((o) => o.textContent), ['Square (1:1)', 'Wide (16:9)', 'Portrait tall (9:16)']);
+  assert.deepEqual([...sel.options].map((o) => o.value), ['1:1', '16:9', '9:16'], 'the value is still the ratio');
+  assert.equal(sel.value, '1:1');
+});
+
 test('Ctrl+Enter generates exactly like the button; plain Enter only types; the tooltip names the shortcut', { skip: dom.skip }, async () => {
   const env = await page({
     generate: () => [200, { images: [{ ...ROWS[0], id: ID('c'), url: `/media/${ID('c')}.png`, prompt: 'a cat' }], asked: 1 }],

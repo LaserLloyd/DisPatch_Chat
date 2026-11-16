@@ -23,6 +23,7 @@ import {
   DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata, DELETE_SCOPE_LABELS, estimateKey, modelLabel,
   CURRENCIES, normalizeCurrency, balanceLine, BROWSE_SORTS, normalizeBrowseSort, compactCount, browseLabel,
   cleanBrowseRows, rememberModelName, browseWords, browseMatches,
+  ratioLabel, ratioText,
   activeModel, isH3Model, keepBrowsePicks, modelCaps, modelPromptMax, modelsNote, refreshSummary,
 } from './studio-logic.js?v=11';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
@@ -648,7 +649,9 @@ function renderProviders() {
 }
 
 function renderRatios() {
-  R.ratio.replaceChildren(...S.info.ratios.map((r) => el('option', { value: r, text: r })));
+  // The name says the shape ("Square", "Portrait tall"); the ratio beside it tells
+  // two ratios of one name apart.
+  R.ratio.replaceChildren(...S.info.ratios.map((r) => el('option', { value: r, text: ratioText(r, t) })));
   R.ratio.value = '1:1';
 }
 

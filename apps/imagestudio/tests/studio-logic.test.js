@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   PROMPT_MAX, isGenerateShortcut, shortcutLabel, promptStatus, canGenerate, clampCount, parseSeed,
   buildRequest, cropRect, defaultCropPos, galleryItems, galleryInfo, isMetered,
+  ratioLabel, ratioText,
   SORTS, normalizeSort, sortRows, clearFromHere, DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata,
 } from '../static/studio-logic.js';
 
@@ -295,4 +296,27 @@ test('a refresh keeps the checkpoints picked in Browse', () => {
   const out = keepBrowsePicks(old, fresh);
   assert.deepEqual(out.find((p) => p.id === 'civitai').models, ['urn:a', 'urn:new', 'urn:picked']);
   assert.deepEqual(out.find((p) => p.id === 'xai').models, ['grok']);
+});
+
+test('the aspect ratios have plain names, and the ratio always rides beside the name', () => {
+  assert.equal(ratioLabel('1:1'), 'ratio.square');
+  assert.equal(ratioLabel('4:3'), 'ratio.landscape');
+  assert.equal(ratioLabel('3:2'), 'ratio.landscape');
+  assert.equal(ratioLabel('16:9'), 'ratio.wide');
+  assert.equal(ratioLabel('21:9'), 'ratio.ultrawide');
+  assert.equal(ratioLabel('3:4'), 'ratio.portrait');
+  assert.equal(ratioLabel('2:3'), 'ratio.portrait');
+  assert.equal(ratioLabel('9:16'), 'ratio.portrait_tall');
+  // A ratio this table does not name has no name at all.
+  assert.equal(ratioLabel('7:5'), '');
+  assert.equal(ratioLabel(''), '');
+  // Two ratios share a name: the ratio tells them apart.
+  const t = (k) => ({ 'ratio.square': 'Square', 'ratio.landscape': 'Landscape', 'ratio.wide': 'Wide',
+    'ratio.ultrawide': 'Ultrawide', 'ratio.portrait': 'Portrait', 'ratio.portrait_tall': 'Portrait tall' }[k]);
+  assert.equal(ratioText('1:1', t), 'Square (1:1)');
+  assert.equal(ratioText('3:2', t), 'Landscape (3:2)');
+  assert.equal(ratioText('4:3', t), 'Landscape (4:3)');
+  assert.equal(ratioText('21:9', t), 'Ultrawide (21:9)');
+  assert.equal(ratioText('9:16', t), 'Portrait tall (9:16)');
+  assert.equal(ratioText('7:5', t), '7:5', 'an unnamed ratio is shown as it is');
 });

@@ -75,6 +75,35 @@ export function buildRequest(form, caps) {
   return body;
 }
 
+// ---------------------------------------------------------------- aspect ratios
+
+/** The plain name of an aspect ratio, as a locale key (never English in the DOM).
+ *  Two ratios share a name (4:3 and 3:2 are both "Landscape"; 3:4 and 2:3 are both
+ *  "Portrait"), so the ratio itself always rides beside the name. */
+export const RATIO_NAMES = {
+  '1:1': 'ratio.square',
+  '4:3': 'ratio.landscape',
+  '3:2': 'ratio.landscape',
+  '16:9': 'ratio.wide',
+  '21:9': 'ratio.ultrawide',
+  '3:4': 'ratio.portrait',
+  '2:3': 'ratio.portrait',
+  '9:16': 'ratio.portrait_tall',
+};
+
+/** The locale key of a ratio's name; '' for a ratio this table does not name. */
+export function ratioLabel(ratio) {
+  return RATIO_NAMES[String(ratio || '').trim()] || '';
+}
+
+/** "Square (1:1)" -- the name and the ratio, so two ratios of one name can be told
+ *  apart. A ratio with no name is shown as it is. */
+export function ratioText(ratio, translate = (key) => key) {
+  const key = ratioLabel(ratio);
+  const name = key ? translate(key) : '';
+  return name ? `${name} (${ratio})` : String(ratio || '');
+}
+
 /** The square to cut from a w x h picture for an avatar face. `pos` 0..1 slides
  *  the square along the long side (0.5 = centred; portraits default higher). */
 export function cropRect(w, h, pos = 0.5) {
