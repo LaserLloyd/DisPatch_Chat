@@ -28,7 +28,7 @@ import {
   ratioLabel, ratioText,
   activeModel, isH3Model, keepBrowsePicks, modelCaps, modelPromptMax, modelsNote, refreshSummary,
   stepIndex, wheelShouldChain, canScroll, INNER_SCROLLPORTS,
-} from './studio-logic.js?v=12';
+} from './studio-logic.js?v=13';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
 export const API = '/api/apps/imagestudio';
