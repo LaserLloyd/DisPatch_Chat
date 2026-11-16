@@ -11,10 +11,9 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-
-from app import (accounts, image_access, image_jobs, policy, settings_api,
-                 settings_schema, settings_store)
 from privacy_fixtures import _png
+
+from app import accounts, image_access, image_jobs, policy, settings_api, settings_schema, settings_store
 
 BASE = "/api/apps/imagestudio"
 KEY = image_access.SERVER_PROFILES_KEY

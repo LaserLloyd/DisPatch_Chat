@@ -1314,7 +1314,7 @@ def _app_page_navigation(request: Request) -> bool:
     if request.method != "GET" or not request.url.path.startswith("/apps/"):
         return False
     path = request.url.path
-    if not (path.endswith("/") or path.endswith(".html")):
+    if not path.endswith(("/", ".html")):
         return False
     return "text/html" in (request.headers.get("accept") or "")
 

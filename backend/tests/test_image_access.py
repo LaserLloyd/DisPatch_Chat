@@ -55,7 +55,7 @@ def test_each_flip_changes_exactly_its_cell(people, gen, role):
 
 def test_owner_stays_true_with_everything_off(people):
     _w, _o, p = people
-    settings_store.set_many({k: False for k in KEYS})
+    settings_store.set_many(dict.fromkeys(KEYS, False))
     assert _cells(p["owner"]) == (True, True)
     assert _cells(p["admin"]) == (False, False)
 
@@ -83,7 +83,7 @@ def test_lock_target_user_never_gets_civitai(people, monkeypatch):
 
 
 def test_schema_rows():
-    for k in KEYS + ["connections.image_civitai_key"]:
+    for k in [*KEYS, "connections.image_civitai_key"]:
         d = settings_schema.get_def(k)
         assert d is not None and d.owner_only is True, k
         assert d.ui_section == "connections#images", k

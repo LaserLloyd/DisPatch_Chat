@@ -10,7 +10,8 @@ import re
 import httpx
 import pytest
 
-from app import config, image_jobs, image_providers as ip, secret_store
+from app import config, image_jobs, secret_store
+from app import image_providers as ip
 from tests.test_image_jobs import _png
 
 BASE = "https://orchestration.civitai.com"

@@ -150,6 +150,7 @@ def gated(world, monkeypatch):
     owner = world.create_owner(world.client())
     _save("minimax", api_key="mm")
     from agents_world import sibling
+
     from app import accounts
     base = next(b for b in config.load_bots() if b.id == "main")
     config.upsert_bot(replace(base, id="pic", name="Pic", image_jobs=True, scope="household",
@@ -187,7 +188,7 @@ def _new_thread(c):
 
 
 def test_the_standard_switch_gates_markers_and_the_job_route(gated):
-    uma, owner, fake = gated["Uma"], gated["owner"], gated["fake"]
+    uma, _, fake = gated["Uma"], gated["owner"], gated["fake"]
     settings_store.set_many({"connections.image_access.standard_user": False})
     tid = _new_thread(uma)
     r = _job(uma, tid)
@@ -210,7 +211,7 @@ def test_an_image_server_backed_bot_ignores_the_standard_switch(gated, monkeypat
     settings_store.set_many({"connections.image_access.standard_user": False})
     monkeypatch.setattr(main, "SETTINGS", replace(
         main.SETTINGS, image_server_url="http://rig.invalid:8700/mcp", image_jobs_enabled=True))
-    monkeypatch.setattr(image_providers, "load_config", lambda: {})     # automatic = the rig
+    monkeypatch.setattr(image_providers, "load_config", dict)     # automatic = the rig
     uma = gated["Uma"]
     assert main._choose_image_backend("") == "server"
     tid = _new_thread(uma)

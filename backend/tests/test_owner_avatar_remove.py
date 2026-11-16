@@ -21,7 +21,7 @@ import pytest
 
 pytest.importorskip("PIL")
 
-from app import config  # noqa: E402
+from app import config
 
 
 def _png(size=(400, 300), color=(30, 90, 200)) -> bytes:

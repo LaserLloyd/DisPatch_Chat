@@ -1080,7 +1080,7 @@ async def estimate_civitai(res: Resolved, spec: image_jobs.ImageSpec, *,
     total = cost.get("total") if isinstance(cost, dict) else None
     if isinstance(total, bool) or not isinstance(total, (int, float)):
         raise image_jobs.ImageJobError(f"{label} gave no price estimate")
-    return int(round(total))
+    return round(total)
 
 
 _CIVITAI_ASK = "Paste a Civitai checkpoint link or AIR (urn:air:sdxl:checkpoint:…)"

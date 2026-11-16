@@ -389,8 +389,8 @@ def note_owner(bot_id: str, sid: str | None) -> None:
     """
     if not bot_id or not sid or path_for(sid) is None:
         return
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).isoformat()
+    from datetime import UTC, datetime
+    now = datetime.now(UTC).isoformat()
     with _owners_lock:
         doc = _read_owners()
         rows = doc.get(bot_id) if isinstance(doc.get(bot_id), dict) else {}

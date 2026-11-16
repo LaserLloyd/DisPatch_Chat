@@ -20,7 +20,7 @@ import pytest
 
 pytest.importorskip("PIL")
 
-from app import config  # noqa: E402
+from app import config
 
 
 def _png(size=(400, 300), color=(30, 90, 200)) -> bytes:
@@ -49,7 +49,7 @@ def test_remove_deletes_the_pair_clears_config_and_keeps_history(world):
     assert face, "the upload did not point the bot at a face"
     before = _owned_files("scratch")
     assert len(before) == 3, before          # face + full + thumb
-    snapshot = up.json()["avatar_url"]
+    _ = up.json()["avatar_url"]
 
     # One thread wears the picture: that pin is what /avatar/history reads.
     asyncio.run(world.db.create_thread(bot_id="scratch", owner_profile_id=None))
