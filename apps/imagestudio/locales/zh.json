@@ -54,6 +54,8 @@
   "results.empty": "你生成的图片会显示在这里。",
   "results.done": "已完成 {n} 张。",
   "results.partial": "请求了 {asked} 张,提供方返回了 {got} 张。",
+  "results.fanout": "已启动 {n} 个任务，每个任务生成一张图片。",
+  "results.fanout_short": "已启动 {asked} 个任务中的 {started} 个：{max} 个正在生成，{skipped} 个无法启动。",
   "tile.open": "查看原图",
   "tile.download": "下载",
   "tile.copy": "复制提示词",

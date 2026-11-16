@@ -54,6 +54,8 @@
   "results.empty": "作成した画像がここに表示されます。",
   "results.done": "{n}枚完了。",
   "results.partial": "{asked}枚を依頼し、プロバイダーは{got}枚を返しました。",
+  "results.fanout": "{n} 件のジョブを開始しました（1 件につき 1 枚）。",
+  "results.fanout_short": "{asked} 件のうち {started} 件を開始しました。{max} 件が作成中のため、{skipped} 件は開始できませんでした。",
   "tile.open": "原寸で開く",
   "tile.download": "ダウンロード",
   "tile.copy": "プロンプトをコピー",

@@ -971,7 +971,7 @@ test('Refresh swaps in the new provider rows, keeps the selection and says what 
 
 const WF = { id: 'workflows', label: 'Image server', shape: 'workflows', configured: true, model: '',
   models: [], model_names: {}, gallery: true,
-  supports: { reference: false, optimizer: false, seed: false, max_n: 1 } };
+  supports: { reference: false, optimizer: false, seed: false, max_n: 10, batch: false } };
 const WSTATE = { ...STATE, providers: [WF], default: 'workflows' };
 const WORKFLOWS = { workflows: [{ name: 'wf-a', display_name: 'Workflow A', state: 'ready',
   stale: false, thumb: '/ui/api/image?f=_previews/wf-a.png' }] };
@@ -1120,6 +1120,72 @@ test('the image server: the Model box stays hand-editable', { skip: dom.skip }, 
   model.dispatchEvent(new win.Event('input', { bubbles: true }));
   assert.equal(model.value, 'wf-beta', 'a name typed by hand is kept');
   assert.equal(wfTiles(doc)[1].getAttribute('aria-pressed'), 'true', 'and the tile for it is marked');
+});
+
+test('the image server: a count of three starts three jobs, one picture each', { skip: dom.skip }, async () => {
+  const env = await wpage({
+    state: { ...WSTATE, max_in_flight: 10 },
+    extra: { 'GET /api/apps/imagestudio/workflows': () => [200, WPAGE],
+      'POST /api/apps/imagestudio/generate': () => new Promise(() => {}) },
+  });
+  const { doc, win } = env;
+  const count = doc.getElementById('st-count');
+  assert.equal(count.closest('.st-field').hidden, false, 'the image server can make more than one');
+  assert.equal(count.max, '10');
+  count.value = '3';
+  count.dispatchEvent(new win.Event('change', { bubbles: true }));
+  const prompt = doc.getElementById('st-prompt');
+  prompt.value = 'a cat';
+  prompt.dispatchEvent(new win.Event('input', { bubbles: true }));
+  const model = doc.getElementById('st-model');
+  model.value = 'wf-alpha';
+  model.dispatchEvent(new win.Event('input', { bubbles: true }));
+  doc.getElementById('st-generate').click();
+  await flush();
+  const jobs = gens(env);
+  assert.equal(jobs.length, 3, 'one job per picture');
+  assert.deepEqual(jobs.map((j) => j.body.n), [1, 1, 1], 'each job asks for one picture');
+  assert.equal(jobs[0].body.model, 'wf-alpha', 'the workflow rides along');
+  assert.equal(doc.querySelectorAll('.st-pending').length, 3, 'each job has its own tile');
+  assert.match(doc.querySelector('.st-status').textContent, /3 jobs started/);
+});
+
+test('the image server: the count stops at the free slots, and says how many did not fit', { skip: dom.skip }, async () => {
+  const env = await wpage({
+    state: { ...WSTATE, max_in_flight: 2 },
+    extra: { 'GET /api/apps/imagestudio/workflows': () => [200, WPAGE],
+      'POST /api/apps/imagestudio/generate': () => new Promise(() => {}) },
+  });
+  const { doc, win } = env;
+  const count = doc.getElementById('st-count');
+  count.value = '3';
+  count.dispatchEvent(new win.Event('change', { bubbles: true }));
+  const prompt = doc.getElementById('st-prompt');
+  prompt.value = 'a cat';
+  prompt.dispatchEvent(new win.Event('input', { bubbles: true }));
+  const model = doc.getElementById('st-model');
+  model.value = 'wf-alpha';
+  model.dispatchEvent(new win.Event('input', { bubbles: true }));
+  doc.getElementById('st-generate').click();
+  await flush();
+  assert.equal(gens(env).length, 2, 'the cap is the cap');
+  assert.match(doc.querySelector('.st-status').textContent, /Started 2 of 3 jobs.*1 did not fit/);
+});
+
+test('a provider that takes the whole count in one request still sends one request', { skip: dom.skip }, async () => {
+  const env = await page();
+  const { doc, win } = env;
+  const count = doc.getElementById('st-count');
+  count.value = '3';
+  count.dispatchEvent(new win.Event('change', { bubbles: true }));
+  const prompt = doc.getElementById('st-prompt');
+  prompt.value = 'a cat';
+  prompt.dispatchEvent(new win.Event('input', { bubbles: true }));
+  doc.getElementById('st-generate').click();
+  await flush();
+  const jobs = gens(env);
+  assert.equal(jobs.length, 1, 'one request carries the count');
+  assert.equal(jobs[0].body.n, 3);
 });
 
 test('the image server: no dropdown and no wall of pills (the card lists the names once)', { skip: dom.skip }, async () => {

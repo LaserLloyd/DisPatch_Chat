@@ -55,6 +55,8 @@
   "results.empty": "Pictures you make appear here.",
   "results.done": "{n} done.",
   "results.partial": "Asked for {asked}, the provider returned {got}.",
+  "results.fanout": "{n} jobs started, one picture each.",
+  "results.fanout_short": "Started {started} of {asked} jobs: {skipped} did not fit, {max} are already being made.",
   "tile.open": "Open full size",
   "tile.download": "Download",
   "tile.copy": "Copy prompt",

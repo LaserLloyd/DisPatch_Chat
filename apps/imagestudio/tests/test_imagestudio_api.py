@@ -378,7 +378,52 @@ def test_the_install_wide_cap_is_a_429_too(env, provider, monkeypatch):
 
 def test_state_tells_the_page_its_cap(env, provider):
     s = _unlocked(env).get(BASE + "/state").json()
-    assert s["max_in_flight"] == 4 and s["in_flight"] == 0
+    assert s["max_in_flight"] == 10 and s["in_flight"] == 0
+
+
+# ---------------------------------------------------------------- the image server
+
+def _with_server(monkeypatch):
+    """The image server is set up (its address stays in the settings, never in a reply)."""
+    from dataclasses import replace
+
+    import dispatch_app_imagestudio as studio
+    monkeypatch.setattr(studio, "SETTINGS", replace(
+        studio.SETTINGS, image_server_url="http://rig.example/mcp"))
+    return studio
+
+
+def test_the_image_server_row_says_ten_pictures_and_no_batch(env, provider, monkeypatch):
+    _with_server(monkeypatch)
+    s = _unlocked(env).get(BASE + "/state").json()
+    row = next(r for r in s["providers"] if r["id"] == "workflows")
+    # One render is one picture: the server has no batch size, so the page starts
+    # one job per picture and the count may go up to ten.
+    assert row["supports"]["max_n"] == 10
+    assert row["supports"]["batch"] is False
+    assert row["supports"]["reference"] is False and row["supports"]["seed"] is False
+    assert s["max_in_flight"] == 10
+
+
+def test_a_generate_on_the_image_server_stores_one_picture(env, provider, monkeypatch):
+    studio = _with_server(monkeypatch)
+
+    async def render(prompt, workflow, ratio):
+        return [_png(20_000)]
+
+    monkeypatch.setattr(studio, "_render_server", render)
+    c = _unlocked(env)
+    r = c.post(f"{BASE}/generate", json={
+        "prompt": "a lighthouse on a cliff", "provider": "workflows",
+        "model": "wf-a", "ratio": "16:9", "n": 1})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert len(out["images"]) == 1 and out["asked"] == 1
+    rows = c.get(BASE + "/images").json()["images"]
+    assert len(rows) == 1, "one render is one picture in the ledger too"
+    assert rows[0]["provider"] == "workflows" and rows[0]["model"] == "wf-a"
+    assert rows[0]["ratio"] == "16:9"
+    assert studio._inflight == {}, "the slot is given back" 
 
 
 # ---------------------------------------------------------------- reference

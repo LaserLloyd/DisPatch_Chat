@@ -55,6 +55,8 @@
   "results.empty": "Hier erscheinen deine Bilder.",
   "results.done": "{n} fertig.",
   "results.partial": "Angefragt: {asked}, vom Anbieter geliefert: {got}.",
+  "results.fanout": "{n} Aufträge gestartet, je ein Bild.",
+  "results.fanout_short": "{started} von {asked} Aufträgen gestartet: {skipped} passten nicht, {max} werden gerade gemacht.",
   "tile.open": "In voller Größe öffnen",
   "tile.download": "Herunterladen",
   "tile.copy": "Prompt kopieren",

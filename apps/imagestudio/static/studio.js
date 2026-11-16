@@ -1114,12 +1114,45 @@ async function openDelete(scopeIn = 'hour') {
 function generate() {
   const p = provider();
   if (!p || !canGenerate({ prompt: R.prompt.value, busy: false, provider: p.configured ? p.id : '' })) return;
+  const c = caps();
   const max = S.info && S.info.max_in_flight;
+  const asked = clampCount(R.count.value, c.max_n);
+  if (!batches(c)) {
+    // The provider makes one picture per request (the image server has no batch
+    // size): one click is one job per picture, each with its own tile. The jobs
+    // stop at the free in-flight slots, and the count that did not fit is said.
+    const free = freeSlots(running(), max);
+    const started = Math.min(asked, free);
+    if (!started) {
+      setStatus(t('pending.cap', { n: max }), true);
+      return;
+    }
+    for (let i = 0; i < started; i++) {
+      startJob({ key: ++S.jobSeq, body: { ...buildRequest(formState(), c), n: 1 } });
+    }
+    setStatus(started < asked
+      ? t('results.fanout_short', { started, asked, skipped: asked - started, max })
+      : t('results.fanout', { n: started }));
+    return;
+  }
   if (!canStartAnother(running(), max)) {
     setStatus(t('pending.cap', { n: max }), true);
     return;
   }
-  startJob({ key: ++S.jobSeq, body: buildRequest(formState(), caps()) });
+  startJob({ key: ++S.jobSeq, body: buildRequest(formState(), c) });
+}
+
+/** Whether the provider takes the whole count in one request. A provider that
+ *  says nothing about it is taken at its word: one request, as it always was. */
+function batches(c) {
+  return !c || c.batch !== false;
+}
+
+/** How many more jobs may start: the in-flight slots still free. */
+function freeSlots(running, max) {
+  const cap = Number(max);
+  if (!Number.isFinite(cap) || cap <= 0) return Infinity;
+  return Math.max(0, cap - running);
 }
 
 /** Send one job (new or a retry). Several run at once; each lands in its own tile. */

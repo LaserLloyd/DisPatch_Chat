@@ -137,8 +137,10 @@ _lock = threading.Lock()
 #: Several generations may run at once. Each profile may have this many in flight (the
 #: 429 says so), and the whole install this many, so a household cannot flood a metered
 #: provider. Counted in memory: a restart forgets them, as it forgets the requests.
-MAX_PER_PROFILE = 4
-MAX_TOTAL = 8
+#: Ten, because the image server makes one picture per job and a count of ten is
+#: ten jobs (each one holds a slot for its own render, then gives it back).
+MAX_PER_PROFILE = 10
+MAX_TOTAL = 20
 _inflight: dict[str, int] = {}
 _inflight_lock = threading.Lock()
 
@@ -363,9 +365,12 @@ def _provider_rows(principal=None) -> tuple[list[dict], str]:
             "models_checked_at": None, "models_note": "", "models_checked": "",
             "prompt_max": image_jobs.MAX_PROMPT_CHARS, "prompt_max_by_model": {},
             "supports_by_model": {},
-            # The image server takes no reference picture, no seed and no optimizer,
-            # and makes one picture at a time.
-            "supports": {"reference": False, "optimizer": False, "seed": False, "max_n": 1},
+            # The image server takes no reference picture, no seed and no optimizer.
+            # One render is one picture: the server has no batch size, so the page
+            # starts one job per picture ("batch": False says so) and the count may
+            # go up to ten.
+            "supports": {"reference": False, "optimizer": False, "seed": False,
+                         "max_n": 10, "batch": False},
             "gallery": True,
         })
     stored = image_providers.provider_id(image_providers.load_config())

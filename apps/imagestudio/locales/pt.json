@@ -56,6 +56,8 @@
   "results.empty": "As imagens que criar aparecem aqui.",
   "results.done": "{n} concluída(s).",
   "results.partial": "Pedidas {asked}, o fornecedor devolveu {got}.",
+  "results.fanout": "{n} trabalhos iniciados, uma imagem cada.",
+  "results.fanout_short": "Iniciados {started} de {asked} trabalhos: {skipped} não couberam, {max} já estão a ser feitos.",
   "tile.open": "Abrir em tamanho real",
   "tile.download": "Transferir",
   "tile.copy": "Copiar prompt",
