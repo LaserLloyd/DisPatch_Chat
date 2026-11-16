@@ -25,6 +25,7 @@ import {
   cleanBrowseRows, rememberModelName, browseWords, browseMatches,
   ratioLabel, ratioText,
   activeModel, isH3Model, keepBrowsePicks, modelCaps, modelPromptMax, modelsNote, refreshSummary,
+  stepIndex,
 } from './studio-logic.js?v=11';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
@@ -53,6 +54,7 @@ const S = {
   workflows: { rows: [], tried: false, loading: false, error: '', sig: '' },   // the image server's gallery
   picker: { open: false, query: '', mode: '' },   // the card under the Model field
   modelMode: 'text',        // the model control on the page: 'select' or 'text'
+  viewer: null,             // the picture viewer of this page (only outside the shell)
 };
 const R = {};            // DOM refs
 const SORT_LABELS = { oldest: 'sort.oldest', newest: 'sort.newest' };
@@ -795,7 +797,7 @@ function renderGrid() {
       ? el('div', { class: 'st-noimg', text: t('nim.hidden') })
       : el('img', { src: r.url, alt: r.prompt, loading: 'lazy' });
     const open = el('button', { type: 'button', class: 'st-open', title: t('tile.open'), 'aria-label': t('tile.open') }, [media]);
-    open.addEventListener('click', () => openFull(i));
+    open.addEventListener('click', () => openFull(i, r.id));
     const dl = el('a', { class: 'st-icon', href: r.url, download: '', title: t('tile.download'), 'aria-label': t('tile.download') }, [railIcon(RAIL_ICONS['viewer-download'])]);
     const actions = el('div', { class: 'st-actions' }, [
       dl,
@@ -851,9 +853,78 @@ function pendingTile(job) {
   return el('li', { class: `st-tile st-pending${failed ? ' st-failed' : ''}` }, kids);
 }
 
-function openFull(index) {
+/** Whether the shell is around: the page is framed by it. */
+function isFramed() {
+  try { return !!window.parent && window.parent !== window; } catch { return false; }
+}
+
+function openFull(index, id) {
   if (S.nim) { setStatus(t('nim.hidden')); return; }
-  lightbox(galleryItems(shown(), { source: t('title'), optimizerNote: t('details.optimizer') }), index);
+  const items = galleryItems(shown(), { source: t('title'), optimizerNote: t('details.optimizer') });
+  // Framed: the shell draws the viewer (it knows about zoom, pan and No-Image Mode).
+  if (isFramed()) { lightbox(items, index); return; }
+  // On its own: the shell would not hear the post, so this page opens the
+  // picture itself.
+  openViewer(items, index, id);
+}
+
+// ---------------------------------------------------------------- the viewer
+//
+// The shell's lightbox, in this page: for a page opened on its own (its own tab
+// or window), the post to the shell would go nowhere. The dialog shows the
+// picture, steps through the same set in the same order (oldest -> newest) and
+// gives the focus back to the tile it came from.
+
+function openViewer(items, index, id) {
+  const at = Math.min(Math.max(0, Math.trunc(Number(index)) || 0), Math.max(0, items.length - 1));
+  S.viewer = { items, index: at, id: id || '' };
+  renderViewer();
+  R.viewer.hidden = false;
+  const close = R.viewer.querySelector('.st-viewer-close');
+  if (close) close.focus();
+}
+
+function renderViewer() {
+  const v = S.viewer;
+  const item = v.items[v.index] || {};
+  const many = v.items.length > 1;
+  const img = el('img', { class: 'st-viewerimg', src: item.src || '', alt: item.caption || t('viewer.title') });
+  const prev = el('button', { type: 'button', class: 'st-btn st-viewer-prev', text: t('viewer.prev') });
+  const next = el('button', { type: 'button', class: 'st-btn st-viewer-next', text: t('viewer.next') });
+  prev.addEventListener('click', () => stepViewer(-1));
+  next.addEventListener('click', () => stepViewer(1));
+  const close = el('button', { type: 'button', class: 'st-btn st-viewer-close', text: t('common.close') });
+  close.addEventListener('click', closeViewer);
+  const dl = el('a', { class: 'st-btn', href: item.downloadUrl || item.src || '#', download: '', text: t('tile.download') });
+  prev.hidden = !many;
+  next.hidden = !many;
+  R.viewer.replaceChildren(el('div', { class: 'st-dlg st-viewerdlg', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('viewer.title') }, [
+    el('div', { class: 'st-viewerframe' }, [img]),
+    item.caption ? el('p', { class: 'st-viewercap', text: item.caption }) : null,
+    el('div', { class: 'st-dlg-actions' }, [prev, next, dl, close]),
+  ]));
+}
+
+/** One picture older (-1) or newer (+1); the ends stop. */
+function stepViewer(dir) {
+  const v = S.viewer;
+  if (!v) return;
+  const at = stepIndex(v.index, dir, v.items.length);
+  if (at === v.index) return;
+  v.index = at;
+  renderViewer();
+  const b = R.viewer.querySelector(dir > 0 ? '.st-viewer-next' : '.st-viewer-prev');
+  if (b) b.focus();
+}
+
+function closeViewer() {
+  const id = S.viewer && S.viewer.id;
+  R.viewer.hidden = true;
+  R.viewer.replaceChildren();
+  S.viewer = null;
+  // The focus goes back to the tile the picture was opened from.
+  const tile = id ? R.grid.querySelector(`.st-tile[data-id="${id}"] .st-open`) : null;
+  if (tile) tile.focus();
 }
 
 async function copyPrompt(r) {
@@ -1316,6 +1387,9 @@ function build(root) {
   R.grid = el('ul', { class: 'st-grid' });
   R.empty = el('p', { class: 'st-muted st-emptynote', text: t('results.empty') });
   R.dlg = el('div', { class: 'st-dlgwrap', hidden: '' });
+  // The viewer of this page (only when the shell is not around): closed and
+  // hidden, so it never sits on top of the page.
+  R.viewer = el('div', { class: 'st-dlgwrap st-viewer', hidden: '' });
   root.append(
     el('header', { class: 'st-head' }, [R.today]),
     el('div', { class: 'st-layout' }, [
@@ -1324,7 +1398,7 @@ function build(root) {
         el('div', { class: 'st-resultshead' }, [el('h2', { text: t('results.title') }), el('div', { class: 'st-headtools' }, [R.sortWrap, R.deleteBtn])]),
         R.empty, R.grid]),
     ]),
-    R.dlg,
+    R.dlg, R.viewer,
   );
 
   R.prompt.addEventListener('input', refreshForm);
@@ -1387,7 +1461,12 @@ function build(root) {
   pickerClose.addEventListener('click', () => { R.picker.hidden = true; });
   R.refClear.addEventListener('click', () => setReference(null));
   R.dlg.addEventListener('click', (e) => { if (e.target === R.dlg) closeDialog(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !R.dlg.hidden) closeDialog(); });
+  R.viewer.addEventListener('click', (e) => { if (e.target === R.viewer) closeViewer(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!R.viewer.hidden) { closeViewer(); return; }
+    if (!R.dlg.hidden) closeDialog();
+  });
   R.browsePanel.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && S.browse.open) { closeBrowse(); R.browseBtn.setAttribute('aria-expanded', 'false'); R.browseBtn.focus(); }
   });

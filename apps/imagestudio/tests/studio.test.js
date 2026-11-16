@@ -30,7 +30,7 @@ const ROWS = [
   { id: ID('b'), url: `/media/${ID('b')}.jpg`, prompt: 'second', provider: 'minimax', model: 'image-01', ratio: '16:9', seed: 5 },
 ];
 
-async function page({ nim = false, state = STATE, generate, clear, images, sort = 'oldest', pay = null, extra = {} } = {}) {
+async function page({ nim = false, state = STATE, generate, clear, images, sort = 'oldest', pay = null, extra = {}, framed = true } = {}) {
   const posted = [];
   const env = setupDom(PAGE, PAGE_URL, {
     'GET /apps/imagestudio/locales/en.json': () => [200, EN],
@@ -44,8 +44,10 @@ async function page({ nim = false, state = STATE, generate, clear, images, sort 
   if (sort !== null) env.win.localStorage.setItem('dispatch-imagestudio-sort', sort);
   if (pay !== null) env.win.localStorage.setItem('dispatch-imagestudio-pay', pay);
   if (nim) env.win.localStorage.setItem('dispatch-nim', '1');
-  Object.defineProperty(env.win, 'parent', { configurable: true, get: () => parentWin });
   const parentWin = { postMessage: (m, o) => posted.push([m, o]) };
+  // Framed by the shell: the page posts to it. On its own, window.parent is the
+  // window itself and there is nobody to post to.
+  if (framed) Object.defineProperty(env.win, 'parent', { configurable: true, get: () => parentWin });
   globalThis.__ST_NO_AUTOMOUNT = true;
   const sdk = await import('/static/js/app-sdk.js?v=7');
   sdk._resetForTest();
@@ -180,6 +182,57 @@ test('a result opens in the shell lightbox with the whole set, oldest -> newest,
   assert.deepEqual(msg.items.map((i) => i.src), [`/media/${ID('a')}.png`, `/media/${ID('b')}.jpg`]);
   assert.equal(msg.items[1].caption, 'second');
   assert.ok(env.posted.every(([, origin]) => origin === env.win.location.origin), 'posted to our own origin only');
+});
+
+test('a page on its own opens the picture in its own dialog (the shell is not there to ask)', { skip: dom.skip }, async () => {
+  const env = await page({ framed: false });
+  const { doc, win } = env;
+  assert.equal(env.posted.filter(([m]) => m.type === 'dispatch:lightbox').length, 0, 'nobody is asked');
+  const tile = doc.querySelector('.st-open');
+  tile.click();
+  await flush();
+  const dlg = doc.querySelector('.st-viewerdlg');
+  assert.ok(dlg, 'a dialog is open');
+  assert.equal(dlg.getAttribute('role'), 'dialog');
+  assert.equal(dlg.getAttribute('aria-modal'), 'true');
+  const img = dlg.querySelector('img');
+  assert.ok(img, 'the picture is there');
+  assert.equal(img.getAttribute('src'), ROWS[0].url);
+  assert.ok(dlg.querySelector('.st-viewer-close'), 'Close');
+  assert.ok(dlg.querySelector('.st-viewer-prev'), 'previous');
+  assert.ok(dlg.querySelector('.st-viewer-next'), 'next');
+  assert.ok(dlg.querySelector('a[download]'), 'a download link');
+  // Stepping goes oldest -> newest, the order the shell's lightbox uses.
+  dlg.querySelector('.st-viewer-next').click();
+  assert.equal(doc.querySelector('.st-viewerimg').getAttribute('src'), ROWS[1].url);
+  // The ends stop: there is nothing older than the first picture.
+  doc.querySelector('.st-viewer-prev').click();
+  assert.equal(doc.querySelector('.st-viewerimg').getAttribute('src'), ROWS[0].url);
+  // Escape closes it, and the focus goes back to the tile.
+  const ev = new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true });
+  doc.dispatchEvent(ev);
+  assert.equal(doc.querySelector('.st-viewerdlg'), null, 'the dialog is gone');
+  assert.equal(doc.activeElement, tile, 'the focus is back on the tile');
+});
+
+test('one picture on its own: the viewer has no arrows', { skip: dom.skip }, async () => {
+  const env = await page({ framed: false, images: () => [200, { images: [ROWS[0]] }] });
+  const { doc } = env;
+  doc.querySelector('.st-open').click();
+  await flush();
+  const dlg = doc.querySelector('.st-viewerdlg');
+  assert.ok(dlg, 'a dialog is open');
+  assert.equal(dlg.querySelector('.st-viewer-prev').hidden, true, 'no previous with one picture');
+  assert.equal(dlg.querySelector('.st-viewer-next').hidden, true, 'and no next');
+});
+
+test('No-Image Mode on its own opens nothing and creates no picture', { skip: dom.skip }, async () => {
+  const env = await page({ framed: false, nim: true });
+  const { doc } = env;
+  doc.querySelector('.st-open').click();
+  await flush();
+  assert.equal(doc.querySelector('.st-viewerdlg'), null, 'nothing opens');
+  assert.equal(doc.querySelectorAll('img').length, 0, 'and no picture is fetched');
 });
 
 test('"use as reference" sets the reference (by result id, never by sending bytes)', { skip: dom.skip }, async () => {

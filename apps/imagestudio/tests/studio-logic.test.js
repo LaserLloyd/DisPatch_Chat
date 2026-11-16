@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   PROMPT_MAX, isGenerateShortcut, shortcutLabel, promptStatus, canGenerate, clampCount, parseSeed,
   buildRequest, cropRect, defaultCropPos, galleryItems, galleryInfo, isMetered,
-  ratioLabel, ratioText,
+  ratioLabel, ratioText, stepIndex,
   SORTS, normalizeSort, sortRows, clearFromHere, DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata,
 } from '../static/studio-logic.js';
 
@@ -319,4 +319,14 @@ test('the aspect ratios have plain names, and the ratio always rides beside the 
   assert.equal(ratioText('21:9', t), 'Ultrawide (21:9)');
   assert.equal(ratioText('9:16', t), 'Portrait tall (9:16)');
   assert.equal(ratioText('7:5', t), '7:5', 'an unnamed ratio is shown as it is');
+});
+
+test('the viewer steps one picture at a time and the ends stop', () => {
+  assert.equal(stepIndex(0, 1, 3), 1, 'next');
+  assert.equal(stepIndex(2, 1, 3), 2, 'the end stops');
+  assert.equal(stepIndex(1, -1, 3), 0, 'previous');
+  assert.equal(stepIndex(0, -1, 3), 0, 'the start stops');
+  assert.equal(stepIndex(0, 1, 1), 0, 'one picture stands still');
+  assert.equal(stepIndex(0, 1, 0), 0, 'no picture at all');
+  assert.equal(stepIndex(5, 1, 3), 2, 'an index outside the list is clamped');
 });

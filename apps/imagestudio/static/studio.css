@@ -250,3 +250,11 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
  * an id no list carries. Only one of the two is on the page at a time. */
 .st-modelbox { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 
+
+/* The picture viewer of this page (only when the shell is not around): the
+   picture, previous and next, a download link and Close. */
+.st-viewer { z-index: 30; }
+.st-viewerdlg { width: min(900px, 100%); align-items: center; }
+.st-viewerframe { display: flex; justify-content: center; min-width: 0; }
+.st-viewerimg { max-width: 100%; max-height: 70vh; object-fit: contain; border-radius: 8px; }
+.st-viewercap { margin: 0; color: var(--text-secondary); font-size: 12.5px; }

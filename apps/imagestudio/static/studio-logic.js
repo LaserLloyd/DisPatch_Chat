@@ -129,6 +129,17 @@ export function galleryItems(rows, { source = 'Image Studio', optimizerNote } = 
   }));
 }
 
+/** The next index in a gallery: one step, and the ends stop (no wrap-around, the
+ *  way the shell's own lightbox steps). The index in use stays where it is when
+ *  the step would leave the list. */
+export function stepIndex(index, dir, length) {
+  const n = Math.trunc(Number(length)) || 0;
+  if (n <= 0) return 0;
+  const at = Math.min(n - 1, Math.max(0, Math.trunc(Number(index)) || 0));
+  const next = at + (dir > 0 ? 1 : -1);
+  return (next < 0 || next >= n) ? at : next;
+}
+
 /** The lightbox details for one result: prompt, model (provider · model), seed, when. */
 export function galleryInfo(r, source = 'Image Studio', optimizerNote = 'optimizer on') {
   const info = { source };
