@@ -63,6 +63,9 @@ build/
 
 # --- Node (only used for optional tooling; the app itself has no build step) ---
 node_modules/
+# the test-run symlink to another checkout's node_modules: a symlink is a file to
+# git, so the rule above (a directory) does not catch it
+frontend/node_modules
 npm-debug.log*
 
 # --- Editors / OS ---
