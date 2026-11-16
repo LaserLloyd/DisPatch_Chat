@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v222';  // v222: Image Studio - a wheel over a list inside the controls column scrolls that list (the workflow gallery, the model list, the picker grid, the browse list, the recent prompts) instead of being swallowed by the column (studio.js?v=24->25, studio-logic.js?v=12->13, index.html).
+const CACHE = 'local-chat-v223';  // v223: Image Studio - the tall portrait is a plain name in every language and the page imports only what it uses (studio.js?v=25->26, locales).
+// v222: Image Studio - a wheel over a list inside the controls column scrolls that list (the workflow gallery, the model list, the picker grid, the browse list, the recent prompts) instead of being swallowed by the column (studio.js?v=24->25, studio-logic.js?v=12->13, index.html).
 // v221: Image Studio - the form follows the provider (a dropdown of names, the card for a long list), the image server makes one job per picture, the picture opens in this page outside the shell and the results keep scrolling (studio.js?v=23->24, studio.css?v=14->15, studio-logic.js?v=11->12, index.html, locales).
 // v220: Image Studio - the phone arrow is a thumb-sized tap target (the phone rule out-specifies the base rule) (studio.css?v=13->14, index.html).
 // v219: Image Studio - the header's chosen workflow follows a name typed by hand, a workflow name never travels to another provider, and the count line waits for the list (studio.js?v=22->23, index.html).
