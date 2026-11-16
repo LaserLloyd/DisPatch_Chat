@@ -1207,7 +1207,8 @@
       "fix": "Ask the Owner to do it.",
       "message": "Only the Owner can do this, because it runs programs or reads files on the DisPatch computer.",
       "patterns": [
-        "Only the Owner can do this, because it runs programs or reads files on the DisPatch computer."
+        "Only the Owner can do this, because it runs programs or reads files on the DisPatch computer.",
+        "Only the Owner decides who may use the image server."
       ],
       "status": 403
     },
@@ -1477,6 +1478,26 @@
       "status": 404
     },
     {
+      "code": "imagestudio_that_is_not_a_picture",
+      "docs": "imagestudio_that_is_not_a_picture",
+      "fix": "The image server sent something that is not a picture. Try again, or pick another picture.",
+      "message": "That is not a picture",
+      "patterns": [
+        "That is not a picture"
+      ],
+      "status": 502
+    },
+    {
+      "code": "imagestudio_that_is_not_a_picture_path",
+      "docs": "imagestudio_that_is_not_a_picture_path",
+      "fix": "Reload Image Studio and pick the picture again.",
+      "message": "That is not a picture path",
+      "patterns": [
+        "That is not a picture path"
+      ],
+      "status": 422
+    },
+    {
       "code": "imagestudio_that_model_name_is_not_valid",
       "docs": "imagestudio_that_model_name_is_not_valid",
       "fix": "Fix the request and resend it.",
@@ -1485,6 +1506,16 @@
         "That model name is not valid"
       ],
       "status": 422
+    },
+    {
+      "code": "imagestudio_that_picture_is_too_large",
+      "docs": "imagestudio_that_picture_is_too_large",
+      "fix": "The picture is larger than the studio will pass through. Ask for a smaller one.",
+      "message": "That picture is too large",
+      "patterns": [
+        "That picture is too large"
+      ],
+      "status": 502
     },
     {
       "code": "imagestudio_that_provider_has_no_api_key",
@@ -1507,6 +1538,16 @@
       "status": 404
     },
     {
+      "code": "imagestudio_that_workflow_name_is_not_valid",
+      "docs": "imagestudio_that_workflow_name_is_not_valid",
+      "fix": "Send a workflow name from the list the image server offers, exactly as it is written there.",
+      "message": "That workflow name is not valid",
+      "patterns": [
+        "That workflow name is not valid"
+      ],
+      "status": 422
+    },
+    {
       "code": "imagestudio_the_aspect_ratio_must_look_like",
       "docs": "imagestudio_the_aspect_ratio_must_look_like",
       "fix": "Fix the request and resend it.",
@@ -1515,6 +1556,46 @@
         "The aspect ratio must look like 16:9"
       ],
       "status": 422
+    },
+    {
+      "code": "imagestudio_the_image_server_did_not_answer",
+      "docs": "imagestudio_the_image_server_did_not_answer",
+      "fix": "The image server did not answer. Check that it is running and reachable from this computer, then try again.",
+      "message": "The image server did not answer",
+      "patterns": [
+        "The image server did not answer"
+      ],
+      "status": 502
+    },
+    {
+      "code": "imagestudio_the_image_server_did_not_finish",
+      "docs": "imagestudio_the_image_server_did_not_finish",
+      "fix": "The render did not finish in time and was cancelled. Try again, or use a workflow that renders faster.",
+      "message": "The image server did not finish the picture in time",
+      "patterns": [
+        "The image server did not finish the picture in time"
+      ],
+      "status": 504
+    },
+    {
+      "code": "imagestudio_the_image_server_is_not_set_up",
+      "docs": "imagestudio_the_image_server_is_not_set_up",
+      "fix": "Set the image server up in Settings → AI & Connections → Image generation, then try again.",
+      "message": "The image server is not set up",
+      "patterns": [
+        "The image server is not set up"
+      ],
+      "status": 502
+    },
+    {
+      "code": "imagestudio_the_image_server_is_not_set_up_yet",
+      "docs": "imagestudio_the_image_server_is_not_set_up_yet",
+      "fix": "Set the image server up in Settings → AI & Connections → Image generation, then try again.",
+      "message": "The image server is not set up yet (Settings → AI & Connections → Image generation)",
+      "patterns": [
+        "The image server is not set up yet (Settings → AI & Connections → Image generation)"
+      ],
+      "status": 409
     },
     {
       "code": "imagestudio_the_prompt_is_characters_the_limit",
@@ -1569,10 +1650,11 @@
     {
       "code": "imagestudio_this_provider_does_not_take_a",
       "docs": "imagestudio_this_provider_does_not_take_a",
-      "fix": "Fix the request and resend it.",
+      "fix": "Send the request without a reference image, or pick a provider that takes one.",
       "message": "This provider does not take a reference image",
       "patterns": [
-        "This provider does not take a reference image"
+        "This provider does not take a reference image",
+        "The image server does not take a reference image"
       ],
       "status": 422
     },

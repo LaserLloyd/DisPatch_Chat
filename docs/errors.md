@@ -165,10 +165,18 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`imagestudio_pictures_changed`](#imagestudio_pictures_changed) | 409 | The pictures changed since you confirmed; count again |
 | [`imagestudio_prompt_too_long_for_model`](#imagestudio_prompt_too_long_for_model) | 422 | The prompt is too long for the chosen image model |
 | [`imagestudio_that_chat_image_is_not_in`](#imagestudio_that_chat_image_is_not_in) | 404 | That chat image is not in the media store |
+| [`imagestudio_that_is_not_a_picture`](#imagestudio_that_is_not_a_picture) | 502 | That is not a picture |
+| [`imagestudio_that_is_not_a_picture_path`](#imagestudio_that_is_not_a_picture_path) | 422 | That is not a picture path |
 | [`imagestudio_that_model_name_is_not_valid`](#imagestudio_that_model_name_is_not_valid) | 422 | That model name is not valid |
+| [`imagestudio_that_picture_is_too_large`](#imagestudio_that_picture_is_too_large) | 502 | That picture is too large |
 | [`imagestudio_that_provider_has_no_api_key`](#imagestudio_that_provider_has_no_api_key) | 409 | That provider has no API key yet (Settings → AI & Connections → Image generation) |
 | [`imagestudio_that_result_is_gone`](#imagestudio_that_result_is_gone) | 404 | That result is gone |
+| [`imagestudio_that_workflow_name_is_not_valid`](#imagestudio_that_workflow_name_is_not_valid) | 422 | That workflow name is not valid |
 | [`imagestudio_the_aspect_ratio_must_look_like`](#imagestudio_the_aspect_ratio_must_look_like) | 422 | The aspect ratio must look like 16:9 |
+| [`imagestudio_the_image_server_did_not_answer`](#imagestudio_the_image_server_did_not_answer) | 502 | The image server did not answer |
+| [`imagestudio_the_image_server_did_not_finish`](#imagestudio_the_image_server_did_not_finish) | 504 | The image server did not finish the picture in time |
+| [`imagestudio_the_image_server_is_not_set_up`](#imagestudio_the_image_server_is_not_set_up) | 502 | The image server is not set up |
+| [`imagestudio_the_image_server_is_not_set_up_yet`](#imagestudio_the_image_server_is_not_set_up_yet) | 409 | The image server is not set up yet (Settings → AI & Connections → Image generation) |
 | [`imagestudio_the_prompt_is_characters_the_limit`](#imagestudio_the_prompt_is_characters_the_limit) | 422 | The prompt is {} characters; the limit is {} |
 | [`imagestudio_the_reference_could_not_be_read`](#imagestudio_the_reference_could_not_be_read) | 422 | The reference could not be read |
 | [`imagestudio_the_reference_image_must_be_under`](#imagestudio_the_reference_image_must_be_under) | 422 | The reference image must be under 10 MB |
@@ -1507,6 +1515,22 @@ HTTP **404** - That chat image is not in the media store
 
 **Fix:** The thing you asked for does not exist; reload and pick it again.
 
+## imagestudio_that_is_not_a_picture
+
+<a id="imagestudio_that_is_not_a_picture"></a>
+
+HTTP **502** - That is not a picture
+
+**Fix:** The image server sent something that is not a picture. Try again, or pick another picture.
+
+## imagestudio_that_is_not_a_picture_path
+
+<a id="imagestudio_that_is_not_a_picture_path"></a>
+
+HTTP **422** - That is not a picture path
+
+**Fix:** Reload Image Studio and pick the picture again.
+
 ## imagestudio_that_model_name_is_not_valid
 
 <a id="imagestudio_that_model_name_is_not_valid"></a>
@@ -1514,6 +1538,14 @@ HTTP **404** - That chat image is not in the media store
 HTTP **422** - That model name is not valid
 
 **Fix:** Fix the request and resend it.
+
+## imagestudio_that_picture_is_too_large
+
+<a id="imagestudio_that_picture_is_too_large"></a>
+
+HTTP **502** - That picture is too large
+
+**Fix:** The picture is larger than the studio will pass through. Ask for a smaller one.
 
 ## imagestudio_that_provider_has_no_api_key
 
@@ -1531,6 +1563,14 @@ HTTP **404** - That result is gone
 
 **Fix:** The thing you asked for does not exist; reload and pick it again.
 
+## imagestudio_that_workflow_name_is_not_valid
+
+<a id="imagestudio_that_workflow_name_is_not_valid"></a>
+
+HTTP **422** - That workflow name is not valid
+
+**Fix:** Send a workflow name from the list the image server offers, exactly as it is written there.
+
 ## imagestudio_the_aspect_ratio_must_look_like
 
 <a id="imagestudio_the_aspect_ratio_must_look_like"></a>
@@ -1538,6 +1578,38 @@ HTTP **404** - That result is gone
 HTTP **422** - The aspect ratio must look like 16:9
 
 **Fix:** Fix the request and resend it.
+
+## imagestudio_the_image_server_did_not_answer
+
+<a id="imagestudio_the_image_server_did_not_answer"></a>
+
+HTTP **502** - The image server did not answer
+
+**Fix:** The image server did not answer. Check that it is running and reachable from this computer, then try again.
+
+## imagestudio_the_image_server_did_not_finish
+
+<a id="imagestudio_the_image_server_did_not_finish"></a>
+
+HTTP **504** - The image server did not finish the picture in time
+
+**Fix:** The render did not finish in time and was cancelled. Try again, or use a workflow that renders faster.
+
+## imagestudio_the_image_server_is_not_set_up
+
+<a id="imagestudio_the_image_server_is_not_set_up"></a>
+
+HTTP **502** - The image server is not set up
+
+**Fix:** Set the image server up in Settings → AI & Connections → Image generation, then try again.
+
+## imagestudio_the_image_server_is_not_set_up_yet
+
+<a id="imagestudio_the_image_server_is_not_set_up_yet"></a>
+
+HTTP **409** - The image server is not set up yet (Settings → AI & Connections → Image generation)
+
+**Fix:** Set the image server up in Settings → AI & Connections → Image generation, then try again.
 
 ## imagestudio_the_prompt_is_characters_the_limit
 
@@ -1585,7 +1657,7 @@ HTTP **422** - The reference is not an image
 
 HTTP **422** - This provider does not take a reference image
 
-**Fix:** Fix the request and resend it.
+**Fix:** Send the request without a reference image, or pick a provider that takes one.
 
 ## imagestudio_unknown_image_provider
 

@@ -1781,10 +1781,11 @@
    "code": "imagestudio_this_provider_does_not_take_a",
    "status": 422,
    "message": "This provider does not take a reference image",
-   "fix": "Fix the request and resend it.",
+   "fix": "Send the request without a reference image, or pick a provider that takes one.",
    "docs": "imagestudio_this_provider_does_not_take_a",
    "patterns": [
-    "This provider does not take a reference image"
+    "This provider does not take a reference image",
+    "The image server does not take a reference image"
    ],
    "seeded": true
   },
@@ -3008,7 +3009,8 @@
    "fix": "Ask the Owner to do it.",
    "docs": "host_owner_only",
    "patterns": [
-    "Only the Owner can do this, because it runs programs or reads files on the DisPatch computer."
+    "Only the Owner can do this, because it runs programs or reads files on the DisPatch computer.",
+    "Only the Owner decides who may use the image server."
    ],
    "seeded": false
   },
@@ -3304,6 +3306,94 @@
    "docs": "imagestudio_cannot_refresh_models",
    "patterns": [
     "Only a profile that manages connections can refresh the model lists"
+   ],
+   "seeded": true
+  },
+  {
+   "code": "imagestudio_the_image_server_is_not_set_up_yet",
+   "status": 409,
+   "message": "The image server is not set up yet (Settings → AI & Connections → Image generation)",
+   "fix": "Set the image server up in Settings → AI & Connections → Image generation, then try again.",
+   "docs": "imagestudio_the_image_server_is_not_set_up_yet",
+   "patterns": [
+    "The image server is not set up yet (Settings → AI & Connections → Image generation)"
+   ],
+   "seeded": true
+  },
+  {
+   "code": "imagestudio_that_workflow_name_is_not_valid",
+   "status": 422,
+   "message": "That workflow name is not valid",
+   "fix": "Send a workflow name from the list the image server offers, exactly as it is written there.",
+   "docs": "imagestudio_that_workflow_name_is_not_valid",
+   "patterns": [
+    "That workflow name is not valid"
+   ],
+   "seeded": true
+  },
+  {
+   "code": "imagestudio_the_image_server_did_not_finish",
+   "status": 504,
+   "message": "The image server did not finish the picture in time",
+   "fix": "The render did not finish in time and was cancelled. Try again, or use a workflow that renders faster.",
+   "docs": "imagestudio_the_image_server_did_not_finish",
+   "patterns": [
+    "The image server did not finish the picture in time"
+   ],
+   "seeded": true
+  },
+  {
+   "code": "imagestudio_the_image_server_is_not_set_up",
+   "status": 502,
+   "message": "The image server is not set up",
+   "fix": "Set the image server up in Settings → AI & Connections → Image generation, then try again.",
+   "docs": "imagestudio_the_image_server_is_not_set_up",
+   "patterns": [
+    "The image server is not set up"
+   ],
+   "seeded": true
+  },
+  {
+   "code": "imagestudio_the_image_server_did_not_answer",
+   "status": 502,
+   "message": "The image server did not answer",
+   "fix": "The image server did not answer. Check that it is running and reachable from this computer, then try again.",
+   "docs": "imagestudio_the_image_server_did_not_answer",
+   "patterns": [
+    "The image server did not answer"
+   ],
+   "seeded": true
+  },
+  {
+   "code": "imagestudio_that_is_not_a_picture",
+   "status": 502,
+   "message": "That is not a picture",
+   "fix": "The image server sent something that is not a picture. Try again, or pick another picture.",
+   "docs": "imagestudio_that_is_not_a_picture",
+   "patterns": [
+    "That is not a picture"
+   ],
+   "seeded": true
+  },
+  {
+   "code": "imagestudio_that_picture_is_too_large",
+   "status": 502,
+   "message": "That picture is too large",
+   "fix": "The picture is larger than the studio will pass through. Ask for a smaller one.",
+   "docs": "imagestudio_that_picture_is_too_large",
+   "patterns": [
+    "That picture is too large"
+   ],
+   "seeded": true
+  },
+  {
+   "code": "imagestudio_that_is_not_a_picture_path",
+   "status": 422,
+   "message": "That is not a picture path",
+   "fix": "Reload Image Studio and pick the picture again.",
+   "docs": "imagestudio_that_is_not_a_picture_path",
+   "patterns": [
+    "That is not a picture path"
    ],
    "seeded": true
   }
