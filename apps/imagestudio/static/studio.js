@@ -4,7 +4,9 @@
 // provider call and the key; this page only sends the request the form
 // describes and shows what comes back. Pictures open in the SHELL's own
 // lightbox (app-sdk lightbox(): zoom, pan, swipe, arrows, download, Esc,
-// No-Image Mode) -- there is no second viewer here.
+// No-Image Mode). Only when the page is NOT in the shell (its own tab or
+// window) does it draw a small viewer of its own, because the post to the
+// shell would go nowhere.
 //
 // No-Image Mode: with the shell's flag set (localStorage 'dispatch-nim') the
 // grid shows labelled placeholders and never creates an <img>, so nothing is
@@ -65,8 +67,9 @@ const PAY_KEY = 'dispatch-imagestudio-pay';
 const PAY_LABELS = { '': 'pay.auto', blue: 'pay.blue', yellow: 'pay.yellow' };
 const TYPE_LABELS = { blue: 'buzz.type_blue', yellow: 'buzz.type_yellow' };
 const BROWSE_LABELS = { week: 'browse.sort_week', month: 'browse.sort_month', rated: 'browse.sort_rated', new: 'browse.sort_new' };
-// More models than this and the wall of pills becomes the compact chooser
-// instead: no provider may push a long list of names onto the page.
+// More models than this and the names do not fit a dropdown: the compact
+// chooser (the card under the Model field) takes over, so no provider may push
+// a long list of names onto the page.
 const PICKER_PILL_LIMIT = 8;
 
 function nimOn() {
@@ -277,7 +280,7 @@ function renderModelControl(p, names) {
 // chosen workflow, so a closed card still tells you what it holds.
 
 /** The card under the Model field: the gallery for the image server, a compact
- *  chooser for a provider whose model list is too long for a wall of pills. */
+ *  chooser for a provider whose model list is too long for a dropdown. */
 function renderPickerMode(p) {
   const models = (p && p.models) || [];
   const mode = isServerProvider() ? 'workflows'
