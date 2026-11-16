@@ -52,6 +52,7 @@ const S = {
   browse: { open: false, sort: 'week', query: '', rows: [], state: 'idle', error: '' },
   workflows: { rows: [], tried: false, loading: false, error: '', sig: '' },   // the image server's gallery
   picker: { open: false, query: '', mode: '' },   // the card under the Model field
+  modelMode: 'text',        // the model control on the page: 'select' or 'text'
 };
 const R = {};            // DOM refs
 const SORT_LABELS = { oldest: 'sort.oldest', newest: 'sort.newest' };
@@ -100,7 +101,29 @@ function isCivitai() {
 }
 
 function currentModel() {
-  return activeModel(provider(), R.model ? R.model.value : '');
+  return activeModel(provider(), modelValue());
+}
+
+/** The model name the form is sending: the control that is on the page. */
+function modelValue() {
+  if (S.modelMode === 'select' && R.modelSelect) return R.modelSelect.value || '';
+  return (R.model && R.model.value) || '';
+}
+
+/** Put a name in the model control that is on the page. */
+function setModelValue(name) {
+  const v = String(name == null ? '' : name);
+  if (S.modelMode === 'select' && R.modelSelect) {
+    if (R.modelSelect.value !== v) R.modelSelect.value = v;
+  } else if (R.model && R.model.value !== v) {
+    R.model.value = v;
+  }
+}
+
+/** Put the focus on the model control that is on the page. */
+function focusModel() {
+  const c = S.modelMode === 'select' ? R.modelSelect : R.model;
+  if (c && !c.hidden) c.focus();
 }
 
 function caps() {
@@ -117,7 +140,7 @@ function setStatus(text, isError = false) {
 
 function formState() {
   return {
-    prompt: R.prompt.value, provider: R.provider.value, model: R.model.value, ratio: R.ratio.value,
+    prompt: R.prompt.value, provider: R.provider.value, model: modelValue(), ratio: R.ratio.value,
     n: R.count.value, optimizer: R.optimizer.checked, seed: R.seed.value, reference: S.reference ? S.reference.ref : null,
     currency: isCivitai() ? normalizeCurrency(R.pay.value) : '',
   };
@@ -133,6 +156,10 @@ function refreshModelBits() {
   R.counter.classList.toggle('st-over', st.over);
   R.count.max = String(c.max_n);
   if (Number(R.count.value) > c.max_n) R.count.value = String(c.max_n);
+  // The count is only worth showing when the provider can make more than one.
+  const many = Number(c.max_n) > 1;
+  R.countField.hidden = !many;
+  R.two.classList.toggle('st-one', !many);
   R.optimizerRow.hidden = !c.optimizer;
   R.h3Hint.hidden = !isH3Model(p, currentModel());
   R.seedRow.hidden = !c.seed;
@@ -152,13 +179,13 @@ function renderModelNote() {
 async function refreshModels() {
   if (S.refreshing) return;
   S.refreshing = true; renderModelNote();
-  const chosen = { provider: R.provider.value, model: R.model.value };
+  const chosen = { provider: R.provider.value, model: modelValue() };
   try {
     const r = await api(`${API}/models/refresh`, { method: 'POST' });
     S.info = { ...S.info, providers: keepBrowsePicks(S.info.providers, r.providers), default: r.default };
     renderProviders();
     if (S.info.providers.some((p) => p.id === chosen.provider)) R.provider.value = chosen.provider;
-    R.model.value = chosen.model;
+    setModelValue(chosen.model);
     const sum = refreshSummary(r, r.providers);
     setStatus(t(sum.key, sum.vars), sum.error);
     toast(t(sum.key, sum.vars));
@@ -182,15 +209,7 @@ function refreshForm() {
   R.cost.hidden = !isMetered(p);
   if (p && isMetered(p)) R.cost.textContent = t('cost.note', { provider: p.label, note: p.price_note });
   const names = (p && p.model_names) || {};
-  R.model.placeholder = p && p.shape === 'civitai' ? t('model.civitai_placeholder') : (p ? p.model : '');
-  // Every option carries text as well as value: Chromium shows nothing for a
-  // datalist option with a label and no text.
-  R.models.replaceChildren(...((p && p.models) || []).map((m) => {
-    const o = el('option', { value: m, text: names[m] || m });
-    if (names[m]) o.setAttribute('label', names[m]);
-    return o;
-  }));
-  renderModelPicks(p, names);
+  renderModelControl(p, names);
   renderPickerMode(p);
   renderModelNote();
   refreshWorkflows();
@@ -206,21 +225,40 @@ function refreshForm() {
   scheduleEstimate();
 }
 
-/** The model's own list as buttons: Chromium shows nothing for a datalist option
- *  that has a label and no text, so the names are offered here as well.
+/** The model control follows the list the provider has:
  *
- *  Two exceptions, both about the wall of pills: the image server's names are
- *  the gallery's own tiles (the picker card lists them once, with pictures),
- *  and a provider with a long list gets the compact chooser instead. */
-function renderModelPicks(p, names) {
+ *  * a practical list (a name to eight, and not the image server) is a dropdown
+ *    of the display names -- the value is the model id, and the id rides in the
+ *    option's title when the name is shorter than the id;
+ *  * a provider that names no model at all keeps a text box, so an id can be
+ *    typed;
+ *  * a long list (and the image server) is the card under the Model field: no
+ *    giant dropdown, and no second copy of the list.
+ *
+ *  The name in use travels with the control, so switching provider never
+ *  silently drops it (nor carries a name the new provider never heard of). */
+function renderModelControl(p, names) {
   const models = (p && p.models) || [];
-  const wall = models.length && !isServerProvider() && models.length <= PICKER_PILL_LIMIT;
-  R.modelPicks.hidden = !wall;
-  R.modelPicks.replaceChildren(...(wall ? models.map((m) => {
-    const b = el('button', { type: 'button', class: 'st-model-pick', title: m, text: names[m] || m });
-    b.addEventListener('click', () => { R.model.value = m; refreshForm(); });
-    return el('li', {}, [b]);
-  }) : []));
+  const practical = !isServerProvider() && models.length > 0 && models.length <= PICKER_PILL_LIMIT;
+  const keep = modelValue();               // the name in use before the control changes
+  S.modelMode = practical ? 'select' : 'text';
+  R.modelSelect.hidden = !practical;
+  R.model.hidden = practical;
+  R.model.placeholder = p && p.shape === 'civitai' ? t('model.civitai_placeholder') : (p ? p.model : '');
+  if (practical) {
+    R.modelSelect.replaceChildren(...models.map((m) => {
+      const o = el('option', { value: m, text: names[m] || m });
+      // The id is long and the name is short: the id rides in the title.
+      if (names[m] && names[m] !== m) o.setAttribute('title', m);
+      return o;
+    }));
+    // The name in use stays; a name this provider does not list falls back to
+    // the provider's own default (the same rule the request body follows).
+    R.modelSelect.value = models.includes(keep) ? keep
+      : (models.includes(p.model) ? p.model : (models[0] || ''));
+  } else if (R.model.value !== keep) {
+    R.model.value = keep;
+  }
 }
 
 // ---------------------------------------------------------------- the picker
@@ -272,7 +310,7 @@ function setPickerOpen(open) {
 /** The header says which workflow is chosen, so a closed card still says what
  *  it is for. */
 function renderChosen() {
-  const name = (R.model && R.model.value) || '';
+  const name = modelValue();
   const row = (S.workflows.rows || []).find((w) => w.name === name);
   const label = row ? (row.display_name || row.name) : name;
   R.pickerChosen.hidden = S.picker.mode !== 'workflows' || !label;
@@ -329,7 +367,7 @@ function renderPickerList() {
 /** The chosen one is marked in the tile itself: the accent border, the badge
  *  and aria-pressed (aria-current as well). */
 function markSelected() {
-  const cur = R.model ? R.model.value : '';
+  const cur = modelValue();
   for (const li of R.wfList.children) {
     const b = li.querySelector('.st-wf-tile');
     if (!b) continue;
@@ -352,7 +390,7 @@ function scrollSelectedIntoView() {
 
 /** Put a name in the Model box and keep the focus where it was. */
 function pickModelName(name) {
-  R.model.value = name;
+  setModelValue(name);
   refreshForm();
   const again = [...R.modelList.querySelectorAll('.st-picker-row')].find((b) => b.dataset.name === name);
   if (again) again.focus();
@@ -381,19 +419,19 @@ function providerModels(p) {
  *  round. A name typed for a provider that lists no names at all is left alone
  *  (that provider may still take it), but a workflow name never travels. */
 function clearStaleModel(p) {
-  const name = (R.model && R.model.value) || '';
+  const name = modelValue();
   if (!name) return;
   const server = !!(p && p.id === 'workflows');
   // The image server's own names belong to the image server: another provider
   // never heard of them, so they go even when that provider lists no models.
   if (!server && (S.workflows.rows || []).some((w) => w.name === name)) {
-    R.model.value = '';
+    setModelValue('');
     return;
   }
   const models = providerModels(p);
   if (!models.length) return;             // the provider lists no names: leave it be
   if (models.includes(name)) return;      // the new provider offers this name
-  R.model.value = '';
+  setModelValue('');
 }
 
 /** The thumbnail comes from this server, never from the image server's own address. */
@@ -470,7 +508,7 @@ function renderWorkflows() {
         el('span', { class: 'st-wf-selected', text: t('picker.selected'), hidden: '' }),
       ]);
       b.dataset.name = w.name;
-      b.addEventListener('click', () => { R.model.value = w.name; refreshForm(); });
+      b.addEventListener('click', () => { setModelValue(w.name); refreshForm(); });
       return el('li', { class: 'st-wf', dataset: { name: w.name } }, [b]);
     }));
     renderPickerList();
@@ -587,11 +625,12 @@ function pickModel(row) {
     p.model_names = rememberModelName(p.model_names, row);
     p.models = [...new Set([...(p.models || []), row.air])];
   }
-  R.model.value = row.air;
+  refreshForm();                          // the chooser now offers the picked model
+  setModelValue(row.air);                 // and it is the one in use
+  refreshForm();
   closeBrowse();
   R.browseBtn.setAttribute('aria-expanded', 'false');
-  refreshForm();
-  R.model.focus();
+  focusModel();
 }
 
 // Civitai's own price for the form as it stands. Information only: it never blocks Generate.
@@ -1128,9 +1167,11 @@ function build(root) {
   R.recent = el('ul', { class: 'st-recents' });
   R.recentWrap = el('details', { class: 'st-recentwrap' }, [el('summary', { text: t('prompt.recent') }), R.recent]);
   R.provider = el('select', { id: 'st-provider' });
-  R.model = el('input', { type: 'text', id: 'st-model', list: 'st-models', autocomplete: 'off', spellcheck: 'false' });
-  R.models = el('datalist', { id: 'st-models' });
-  R.modelPicks = el('ul', { class: 'st-model-picks', id: 'st-model-picks', hidden: '' });
+  // The model control: a dropdown of the provider's names, or a text box for an
+  // id no list carries. Only one of the two is on the page at a time.
+  R.modelSelect = el('select', { id: 'st-model-select', 'aria-label': t('model.label'), hidden: '' });
+  R.model = el('input', { type: 'text', id: 'st-model', autocomplete: 'off', spellcheck: 'false' });
+  R.modelBox = el('div', { class: 'st-modelbox' }, [R.modelSelect, R.model]);
   R.modelNote = el('p', { class: 'st-muted st-modelnote', hidden: '' });
   R.modelRefresh = el('button', { type: 'button', class: 'st-btn st-browse-btn', id: 'st-model-refresh', text: t('models.refresh'), hidden: '' });
   R.browseBtn = el('button', { type: 'button', class: 'st-btn st-browse-btn', id: 'st-browse', text: t('browse.button'), hidden: '', 'aria-expanded': 'false', 'aria-controls': 'st-browse-panel' });
@@ -1160,6 +1201,9 @@ function build(root) {
   ]);
   R.ratio = el('select', { id: 'st-ratio' });
   R.count = el('input', { type: 'number', id: 'st-count', min: '1', max: '9', value: '1', inputmode: 'numeric' });
+  // The count only shows when the provider can make more than one picture.
+  R.countField = field(t('count.label'), R.count);
+  R.two = el('div', { class: 'st-two' }, [field(t('ratio.label'), R.ratio), R.countField]);
   R.optimizer = el('input', { type: 'checkbox', id: 'st-optimizer' });
   R.optimizerRow = el('div', { class: 'st-check' }, [R.optimizer, el('label', { for: 'st-optimizer', text: t('optimizer.label') }), el('div', { class: 'st-muted', text: t('optimizer.hint') })]);
   R.seed = el('input', { type: 'text', id: 'st-seed', inputmode: 'numeric', placeholder: t('seed.placeholder'), autocomplete: 'off' });
@@ -1222,11 +1266,11 @@ function build(root) {
     // The picker card sits under the Model field and spans the row: it is the
     // image server's gallery, or a compact chooser for a long model list.
     el('div', { class: 'st-two st-modelrow' }, [field(t('provider.label'), R.provider),
-      field(t('model.label'), R.model, el('div', { class: 'st-modelbox' }, [R.models, R.modelPicks])),
+      field(t('model.label'), R.modelBox),
       R.pickerCard]),
     R.modelRefresh, R.modelNote,
     R.browseBtn, R.browsePanel,
-    el('div', { class: 'st-two' }, [field(t('ratio.label'), R.ratio), field(t('count.label'), R.count)]),
+    R.two,
     R.payRow,
     // The Generate bar is the LAST thing in the form: nothing scrolls under it.
     R.optimizerRow, R.seedRow, R.refBox, R.h3Hint, R.cost, R.est, R.buzzRow, R.goBar,
@@ -1276,6 +1320,7 @@ function build(root) {
   // The header follows too: a closed card must not name a workflow the form
   // will not use.
   R.model.addEventListener('input', () => { refreshModelBits(); scheduleEstimate(); markSelected(); renderChosen(); });
+  R.modelSelect.addEventListener('change', () => { refreshForm(); });
   R.modelRefresh.addEventListener('click', refreshModels);
   R.pay.addEventListener('change', () => { S.pay = normalizeCurrency(R.pay.value); savePay(S.pay); scheduleEstimate(); });
   R.buzzRefresh.addEventListener('click', () => loadBalance());

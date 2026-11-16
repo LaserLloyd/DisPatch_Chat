@@ -63,6 +63,15 @@ function key(env, el, init) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const gens = (env) => env.calls.filter((c) => c.key === 'POST /api/apps/imagestudio/generate');
+/** The model control that is on the page: the dropdown of names, or the text box. */
+const modelControl = (doc) => (doc.getElementById('st-model-select').hidden
+  ? doc.getElementById('st-model') : doc.getElementById('st-model-select'));
+/** Put a model name in the control that is on the page, the way a person would. */
+function setModel(doc, win, value) {
+  const c = modelControl(doc);
+  c.value = value;
+  c.dispatchEvent(new win.Event(c.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+}
 
 test('it mounts: provider default, prompt counter, recent prompts, per-day count, past results oldest first', { skip: dom.skip }, async () => {
   const env = await page();
@@ -693,10 +702,15 @@ const AIR = 'urn:air:sdxl:checkpoint:civitai:133005@1759168';
 const CIVITAI = { id: 'civitai', label: 'Civitai', shape: 'civitai', configured: true, model: AIR, models: [AIR], model_names: { [AIR]: 'Juggernaut XL' }, price_note: 'Billed in Buzz.', estimate: true, supports: { reference: false, optimizer: false, seed: true, max_n: 4 } };
 const CSTATE = { ...STATE, providers: [PROVIDERS[0], CIVITAI], default: 'civitai' };
 
-test('civitai: model names label the datalist, seed shown, optimizer/reference hidden, count max 4', { skip: dom.skip }, async () => {
+test('civitai: the model names are the options of the dropdown, seed shown, optimizer/reference hidden, count max 4', { skip: dom.skip }, async () => {
   const env = await page({ state: CSTATE });
   const { doc } = env;
-  assert.equal(doc.querySelector('#st-models option, datalist option').getAttribute('label'), 'Juggernaut XL');
+  const sel = doc.getElementById('st-model-select');
+  assert.equal(sel.hidden, false, 'a short list is a dropdown');
+  assert.equal(doc.getElementById('st-model').hidden, true, 'and no text box beside it');
+  const opt = sel.querySelector('option');
+  assert.equal(opt.value, AIR);
+  assert.equal(opt.textContent, 'Juggernaut XL');
   assert.equal(doc.getElementById('st-count').max, '4');
   assert.equal(doc.getElementById('st-seed').closest('[hidden]'), null);
   assert.equal(doc.getElementById('st-model').placeholder, EN['model.civitai_placeholder']);
@@ -840,10 +854,10 @@ test('civitai Browse: opens a list, a row fills the Model box with the AIR and i
   assert.match(calls()[2].url, /sort=rated&fresh=true$/);
   doc.querySelectorAll('.st-browse-row')[0].click();
   await flush(); await sleep(700); await flush();
-  const model = doc.getElementById('st-model');
+  const model = modelControl(doc);
   assert.equal(model.value, ROW1.air);
   assert.equal(panel.hidden, true, 'the panel closes after a pick');
-  assert.ok([...doc.querySelectorAll('#st-models option')].some((o) => o.value === ROW1.air && o.getAttribute('label') === ROW1.name));
+  assert.ok([...doc.querySelectorAll('#st-model-select option')].some((o) => o.value === ROW1.air && o.textContent === ROW1.name));
   const prompt = doc.getElementById('st-prompt');
   prompt.value = 'a fox'; prompt.dispatchEvent(new win.Event('input', { bubbles: true }));
   await sleep(750); await flush();
@@ -896,13 +910,10 @@ test('an H3 model shows the slow-and-billed hint near Generate; image-01 does no
   const { doc, win } = await page({ state: { ...STATE, providers: H3_PROVIDERS } });
   const hint = doc.querySelector('.st-h3hint');
   assert.equal(hint.hidden, true);
-  const m = doc.getElementById('st-model');
-  m.value = 'MiniMax-H3-Image';
-  m.dispatchEvent(new win.Event('input', { bubbles: true }));
+  setModel(doc, win, 'MiniMax-H3-Image');
   assert.equal(hint.hidden, false);
   assert.match(hint.textContent, /^MiniMax H3 pictures can take a few minutes.*never repeated automatically.*billed/);
-  m.value = 'image-01';
-  m.dispatchEvent(new win.Event('input', { bubbles: true }));
+  setModel(doc, win, 'image-01');
   assert.equal(hint.hidden, true);
 });
 
@@ -932,9 +943,7 @@ test('a failed refresh request says so without an empty provider name', { skip: 
 test('picking an H3 model lifts the prompt limit and hides seed and reference', { skip: dom.skip }, async () => {
   const { doc, win } = await page({ state: { ...STATE, providers: H3_PROVIDERS } });
   assert.equal(doc.querySelector('.st-counter').textContent, '0 / 1,500');
-  const m = doc.getElementById('st-model');
-  m.value = 'MiniMax-H3-Image';
-  m.dispatchEvent(new win.Event('input', { bubbles: true }));
+  setModel(doc, win, 'MiniMax-H3-Image');
   assert.equal(doc.querySelector('.st-counter').textContent, '0 / 4,000');
   assert.equal(doc.getElementById('st-seed').closest('.st-field').hidden, true);
   assert.equal(doc.getElementById('st-count').max, '10');
@@ -947,14 +956,14 @@ test('Refresh swaps in the new provider rows, keeps the selection and says what 
     extra: { 'POST /api/apps/imagestudio/models/refresh': () => [200, {
       providers: fresh, default: 'minimax', results: { minimax: { source: 'endpoint', count: 3, error: null, cached: false } } }] },
   });
-  const { doc } = env;
-  doc.getElementById('st-model').value = 'MiniMax-H3-Image';
+  const { doc, win } = env;
+  setModel(doc, win, 'MiniMax-H3-Image');
   doc.getElementById('st-model-refresh').click();
   await flush(); await flush();
   assert.equal(env.calls.filter((c) => c.key === 'POST /api/apps/imagestudio/models/refresh').length, 1);
-  assert.equal(doc.getElementById('st-model').value, 'MiniMax-H3-Image');
+  assert.equal(modelControl(doc).value, 'MiniMax-H3-Image');
   assert.equal(doc.getElementById('st-provider').value, 'minimax');
-  assert.equal(doc.querySelectorAll('#st-models option').length, 3);
+  assert.equal(doc.querySelectorAll('#st-model-select option').length, 3);
   assert.match(doc.querySelector('.st-status').textContent, /Updated: 3 models for MiniMax/);
   assert.equal(doc.getElementById('st-model-refresh').disabled, false);
 });
@@ -967,20 +976,21 @@ const WSTATE = { ...STATE, providers: [WF], default: 'workflows' };
 const WORKFLOWS = { workflows: [{ name: 'wf-a', display_name: 'Workflow A', state: 'ready',
   stale: false, thumb: '/ui/api/image?f=_previews/wf-a.png' }] };
 
-test('the model names are offered as buttons too (Chromium leaves a datalist blank)', { skip: dom.skip }, async () => {
+test('a short model list is a dropdown of names; the id rides in the title, and no wall of pills', { skip: dom.skip }, async () => {
   const env = await page({ state: CSTATE });
   const { doc } = env;
-  const opt = doc.querySelector('#st-models option');
-  assert.equal(opt.value, AIR);
-  assert.equal(opt.textContent, 'Juggernaut XL');
-  const picks = [...doc.querySelectorAll('#st-model-picks button')];
-  assert.ok(picks.length, 'the names are offered as buttons too');
-  const pick = picks.find((b) => b.textContent === 'Juggernaut XL');
-  assert.ok(pick, 'the friendly name is on a button');
-  const model = doc.getElementById('st-model');
-  model.value = '';
-  pick.click();
-  assert.equal(model.value, AIR);
+  const opt = doc.querySelector('#st-model-select option');
+  assert.equal(opt.value, AIR, 'the option carries the model id');
+  assert.equal(opt.textContent, 'Juggernaut XL', 'and the display name');
+  assert.equal(opt.getAttribute('title'), AIR, 'the id is in the title: it is far too long for the label');
+  assert.equal(doc.querySelectorAll('.st-model-pick').length, 0, 'no wall of pills');
+  // The name in the dropdown is what Generate sends.
+  const prompt = doc.getElementById('st-prompt');
+  prompt.value = 'a cat';
+  prompt.dispatchEvent(new env.win.Event('input', { bubbles: true }));
+  doc.getElementById('st-generate').click();
+  await flush();
+  assert.equal(gens(env)[0].body.model, AIR);
 });
 
 test('the image server: a tile per workflow, and the picture comes through this server', { skip: dom.skip }, async () => {
@@ -1112,13 +1122,13 @@ test('the image server: the Model box stays hand-editable', { skip: dom.skip }, 
   assert.equal(wfTiles(doc)[1].getAttribute('aria-pressed'), 'true', 'and the tile for it is marked');
 });
 
-test('the image server: no wall of pills (the picker lists the names once)', { skip: dom.skip }, async () => {
+test('the image server: no dropdown and no wall of pills (the card lists the names once)', { skip: dom.skip }, async () => {
   const { doc } = await wpage();
-  const wall = doc.getElementById('st-model-picks');
-  assert.equal(wall.hidden, true, 'the pill wall is not shown for the image server');
-  assert.equal(wall.querySelectorAll('button').length, 0);
-  // The names are still offered as suggestions in the Model box.
-  assert.ok([...doc.querySelectorAll('#st-models option')].some((o) => o.value === 'wf-alpha'));
+  assert.equal(doc.getElementById('st-model-select').hidden, true, 'no dropdown for the image server');
+  assert.equal(doc.querySelectorAll('.st-model-pick').length, 0, 'and no wall of pills');
+  // The names are in the card, once.
+  assert.ok(wfTiles(doc).some((b) => b.dataset.name === 'wf-alpha'));
+  assert.equal(doc.getElementById('st-model').hidden, false, 'the Model box stays hand-editable');
 });
 
 test('the image server: No-Image Mode asks for no picture in the picker either', { skip: dom.skip }, async () => {
@@ -1151,8 +1161,8 @@ test('a provider with a long model list gets the compact chooser, not a wall of 
     supports: { reference: false, optimizer: false, seed: false, max_n: 4 } };
   const env = await page({ state: { ...STATE, providers: [many], default: 'many' } });
   const { doc } = env;
-  const wall = doc.getElementById('st-model-picks');
-  assert.equal(wall.hidden, true, 'no wall of pills for a long list');
+  assert.equal(doc.getElementById('st-model-select').hidden, true, 'no giant dropdown for a long list');
+  assert.equal(doc.querySelectorAll('.st-model-pick').length, 0, 'and no wall of pills');
   const card = picker(doc);
   assert.equal(card.hidden, false, 'the chooser card is there');
   const toggle = doc.getElementById('st-picker-toggle');
@@ -1170,10 +1180,35 @@ test('a provider with a long model list gets the compact chooser, not a wall of 
   assert.equal(doc.getElementById('st-model').value, 'm-3');
 });
 
-test('a provider with a short model list keeps its pills and gets no card', { skip: dom.skip }, async () => {
+test('the model control follows the provider: a dropdown for a short list, a text box when it names no model', { skip: dom.skip }, async () => {
   const { doc } = await page();
-  assert.equal(doc.getElementById('st-model-picks').hidden, false);
-  assert.equal(doc.querySelectorAll('#st-model-picks button').length, 2);
+  assert.equal(doc.getElementById('st-model-select').hidden, false, 'two names: a dropdown');
+  assert.equal(doc.getElementById('st-model').hidden, true, 'and no text box beside it');
+  // A row that names no model at all: a text box, and no empty dropdown.
+  const env2 = await page({ state: { ...STATE, providers: [PROVIDERS[1]], default: 'openai' } });
+  const doc2 = env2.doc;
+  assert.equal(doc2.getElementById('st-model-select').hidden, true);
+  assert.equal(doc2.getElementById('st-model').hidden, false);
+  assert.equal(doc2.getElementById('st-model-select').options.length, 0, 'no empty dropdown');
+});
+
+test('the count field shows only when the provider can make more than one picture', { skip: dom.skip }, async () => {
+  const one = { id: 'one', label: 'One', shape: 'openai-images', configured: true, model: 'm', models: ['m'],
+    supports: { reference: false, optimizer: false, seed: false, max_n: 1 } };
+  const { doc } = await page({ state: { ...STATE, providers: [one], default: 'one' } });
+  assert.equal(doc.getElementById('st-count').closest('.st-field').hidden, true, 'one picture: no count');
+  const env2 = await page();
+  const count = env2.doc.getElementById('st-count');
+  assert.equal(count.closest('.st-field').hidden, false);
+  assert.equal(count.max, '9', 'the count stops at what the model allows');
+});
+
+test('a provider with a short model list gets a dropdown and no card', { skip: dom.skip }, async () => {
+  const { doc } = await page();
+  const sel = doc.getElementById('st-model-select');
+  assert.equal(sel.hidden, false);
+  assert.deepEqual([...sel.options].map((o) => o.value), ['image-01', 'image-01-live']);
+  assert.equal(doc.getElementById('st-model').hidden, true, 'no text box beside the dropdown');
   assert.equal(picker(doc).hidden, true, 'no card for a short list');
 });
 
@@ -1421,14 +1456,13 @@ test('a workflow name does not survive the switch to another provider (and back)
 test('a name the new provider offers survives the switch', { skip: dom.skip }, async () => {
   const env = await page();
   const { doc, win } = env;
-  const model = doc.getElementById('st-model');
-  model.value = 'image-01';
-  model.dispatchEvent(new win.Event('input', { bubbles: true }));
+  setModel(doc, win, 'image-01');
   const sel = doc.getElementById('st-provider');
   sel.value = 'openai';
   sel.dispatchEvent(new win.Event('change', { bubbles: true }));
-  // OpenAI lists no models in this state, so a name the person typed stays.
-  assert.equal(model.value, 'image-01');
+  // OpenAI lists no models in this state, so the name in use stays.
+  assert.equal(modelControl(doc).value, 'image-01');
+  assert.equal(doc.getElementById('st-model').hidden, false, 'and a provider with no names gets a text box');
 });
 
 test('the arrow keys do nothing while the gallery is closed', { skip: dom.skip }, async () => {
@@ -1455,9 +1489,9 @@ test('the workflow names never land on another provider (the list can arrive lat
   sel.dispatchEvent(new win.Event('change', { bubbles: true }));
   release();
   await flush(); await flush();
-  const models = [...doc.querySelectorAll('#st-models option')].map((o) => o.value);
+  const models = [...doc.querySelectorAll('#st-model-select option')].map((o) => o.value);
   assert.deepEqual(models, ['image-01', 'image-01-live'], 'MiniMax still offers its own models');
-  assert.equal(doc.getElementById('st-model-picks').hidden, false, 'and its own pills');
+  assert.equal(doc.getElementById('st-model-select').hidden, false, 'and its own dropdown');
 });
 
 // ------------------------------------------- fix round 1: the reviewer's punch-list

@@ -31,6 +31,8 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
 .st-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .st-field > label { font-weight: 600; font-size: 12.5px; }
 .st-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* One field in the row (the count is hidden when the provider makes one picture). */
+.st-two.st-one { grid-template-columns: 1fr; }
 .st-page textarea, .st-page select, .st-page input[type="text"], .st-page input[type="number"], .st-page input[type="search"] {
   width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-strong);
   border-radius: var(--radius-md, 10px); padding: 8px 10px;
@@ -244,14 +246,7 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
 .st-wf-selected { font-size: 11px; color: var(--accent); }
 .st-wf-tile[aria-pressed="true"] .st-wf-selected { font-weight: 600; }
 
-/* The model's own names as buttons: Chromium shows nothing for a datalist option
- * that carries a label and no text. */
+/* The model control: the dropdown of the provider's names, or the text box for
+ * an id no list carries. Only one of the two is on the page at a time. */
 .st-modelbox { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.st-model-picks { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
-.st-model-pick {
-  background: var(--bg-tertiary); border: 1px solid var(--border-strong); border-radius: 999px;
-  padding: 3px 10px; cursor: pointer; font-size: 12px; color: inherit; max-width: 100%;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.st-model-pick:hover { border-color: var(--accent); }
 
