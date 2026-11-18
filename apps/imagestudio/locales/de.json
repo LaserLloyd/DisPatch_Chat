@@ -190,5 +190,11 @@
   "picker.selected": "Ausgewählt",
   "picker.expand": "Workflow-Galerie anzeigen",
   "picker.collapse": "Workflow-Galerie ausblenden",
-  "picker.chosen": "Ausgewählt: {name}"
+  "picker.chosen": "Ausgewählt: {name}",
+  "last.ask": "Letzte Generierung wiederherstellen?",
+  "last.reload": "Wiederherstellen",
+  "last.not_now": "Nicht jetzt",
+  "last.reload_short": "Letzte laden",
+  "last.reload_tip": "Die Einstellungen deiner letzten Generierung zurückholen",
+  "last.region": "Deine letzte Generierung"
 }

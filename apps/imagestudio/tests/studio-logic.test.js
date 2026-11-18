@@ -471,3 +471,21 @@ test('pictures still being made: only what this page did not start, polled until
   assert.equal(pollShouldContinue({ extra: 2, elapsedMs: 1000, hidden: true }), false);
   assert.equal(pollShouldContinue({ extra: 2, elapsedMs: INFLIGHT_POLL_CAP_MS, hidden: false }), false);
 });
+
+test('last generation: record -> draft, differs, preview', async () => {
+  const { lastToDraft, lastDiffers, lastPreview } = await import('../static/studio-logic.js');
+  const last = { v: 1, at: 1, provider: 'workflows', model: 'wf-b', prompt: 'a  lighthouse\nat dusk', ratio: '9:16', n: 3, seed: null, optimizer: false };
+  const d = lastToDraft(last);
+  assert.deepEqual([d.provider, d.model, d.prompt, d.ratio, d.n, d.seed, d.optimizer],
+    ['workflows', 'wf-b', 'a  lighthouse\nat dusk', '9:16', 3, '', false]);
+  assert.equal(lastToDraft(null), null);
+  assert.equal(lastToDraft({ prompt: '' }), null);
+  assert.equal(lastToDraft({ prompt: 'data:image/png;base64,AAAA' }).prompt, '', 'never a data: URL');
+  const same = { provider: 'workflows', model: 'wf-b', prompt: 'a  lighthouse\nat dusk', ratio: '9:16', n: '3', seed: '', optimizer: false };
+  assert.equal(lastDiffers(last, same), false);
+  assert.equal(lastDiffers(last, { ...same, model: 'wf-a' }), true);
+  assert.equal(lastDiffers(last, { ...same, prompt: '' }), true);
+  assert.equal(lastDiffers(null, same), false);
+  assert.equal(lastPreview(last), 'a lighthouse at dusk');
+  assert.equal(lastPreview({ prompt: 'x'.repeat(200) }).length, 90);
+});

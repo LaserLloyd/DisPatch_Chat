@@ -190,5 +190,11 @@
   "picker.selected": "Selected",
   "picker.expand": "Show the workflow gallery",
   "picker.collapse": "Hide the workflow gallery",
-  "picker.chosen": "Chosen: {name}"
+  "picker.chosen": "Chosen: {name}",
+  "last.ask": "Reload last generation?",
+  "last.reload": "Reload",
+  "last.not_now": "Not now",
+  "last.reload_short": "Reload last",
+  "last.reload_tip": "Put back the settings of your last generation",
+  "last.region": "Your last generation"
 }

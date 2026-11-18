@@ -194,5 +194,11 @@
   "picker.selected": "محدّد",
   "picker.expand": "إظهار معرض سير العمل",
   "picker.collapse": "إخفاء معرض سير العمل",
-  "picker.chosen": "المختار: {name}"
+  "picker.chosen": "المختار: {name}",
+  "last.ask": "هل تريد استعادة آخر عملية إنشاء؟",
+  "last.reload": "استعادة",
+  "last.not_now": "ليس الآن",
+  "last.reload_short": "استعادة الأخيرة",
+  "last.reload_tip": "إرجاع إعدادات آخر عملية إنشاء",
+  "last.region": "آخر عملية إنشاء لك"
 }

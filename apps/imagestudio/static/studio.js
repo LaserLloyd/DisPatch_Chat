@@ -29,7 +29,8 @@ import {
   activeModel, isH3Model, keepBrowsePicks, modelCaps, modelPromptMax, modelsNote, refreshSummary,
   stepIndex, wheelShouldChain, canScroll, INNER_SCROLLPORTS,
   draftKey, serializeDraft, parseDraft, resolveDraft, inflightExtra, pollShouldContinue, INFLIGHT_POLL_MS,
-} from './studio-logic.js?v=14';
+  lastToDraft, lastDiffers, lastPreview,
+} from './studio-logic.js?v=15';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
 export const API = '/api/apps/imagestudio';
@@ -63,6 +64,7 @@ const S = {
   draftDirty: false,        // the user changed the form here: only then is a draft written
   baseline: '',             // the form's serialised defaults: a form equal to it stores no draft
   poll: { timer: null, since: 0 },   // pictures the server is still making (not started by this page)
+  last: null,               // GET /last: the settings this profile last pressed Generate with
 };
 const R = {};            // DOM refs
 const SORT_LABELS = { oldest: 'sort.oldest', newest: 'sort.newest' };
@@ -74,6 +76,9 @@ const PAY_KEY = 'dispatch-imagestudio-pay';
 // Form values only: never a picture, a data: URL or the reference image.
 const DRAFT_PREFIX = 'dispatch-imagestudio-draft:';
 const DRAFT_SAVE_MS = 400;
+// "Not now" on the Reload-last bar, per profile, for this tab: the dismissed record's time.
+// The bar comes back once a newer generation exists (its time differs).
+const LAST_DISMISS_PREFIX = 'dispatch-imagestudio-last-dismissed:';
 const PAY_LABELS = { '': 'pay.auto', blue: 'pay.blue', yellow: 'pay.yellow' };
 const TYPE_LABELS = { blue: 'buzz.type_blue', yellow: 'buzz.type_yellow' };
 const BROWSE_LABELS = { week: 'browse.sort_week', month: 'browse.sort_month', rated: 'browse.sort_rated', new: 'browse.sort_new' };
@@ -239,6 +244,62 @@ function resetForm() {
   R.prompt.focus();
 }
 
+// ---------------------------------------------------------------- the last generation
+
+function lastDismissed() {
+  if (!S.last || !S.profileKey) return false;
+  try { return sessionStorage.getItem(LAST_DISMISS_PREFIX + S.profileKey) === String(S.last.at); } catch { return false; }
+}
+
+/** The bar at the top of the form, and the Reload last button beside Reset. */
+function renderLast() {
+  if (!R.lastBar) return;
+  const has = !!lastToDraft(S.last);
+  R.reloadLast.disabled = !has;
+  const show = has && S.draftReady && lastDiffers(S.last, draftForm()) && !lastDismissed();
+  R.lastBar.hidden = !show;
+  R.lastPreview.textContent = show ? lastPreview(S.last) : '';
+  if (show) R.lastPreview.title = S.last.prompt;
+}
+
+async function loadLast() {
+  try { S.last = (await api(`${API}/last`)).last || null; } catch { S.last = null; }
+  renderLast();
+}
+
+/** Put every setting of the last generation back on the form (nothing starts). */
+function reloadLast() {
+  const draft = lastToDraft(S.last);
+  if (!draft) return;
+  applyDraft(draft);
+  if (S.last.currency && R.pay && [...R.pay.options].some((o) => o.value === S.last.currency)) {
+    R.pay.value = S.last.currency;
+    R.pay.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  S.draftDirty = true;
+  saveDraftNow();
+  R.lastBar.hidden = true;
+  renderLast();
+  R.prompt.focus();
+}
+
+function dismissLast() {
+  if (S.last && S.profileKey) {
+    try { sessionStorage.setItem(LAST_DISMISS_PREFIX + S.profileKey, String(S.last.at)); } catch { /* the bar just hides for now */ }
+  }
+  R.lastBar.hidden = true;
+}
+
+/** Generate was pressed: this form is now the last generation (the server records the same). */
+function noteLast(body, count) {
+  S.last = {
+    v: 1, at: Date.now() / 1000, provider: body.provider, model: body.model, prompt: body.prompt,
+    ratio: body.ratio, n: count, seed: body.seed == null ? null : body.seed,
+    optimizer: !!body.optimizer, currency: body.currency || '',
+  };
+  renderLast();
+}
+
 // ---------------------------------------------------------------- pictures still being made
 
 function renderInflight() {
@@ -352,6 +413,7 @@ function refreshForm() {
   else if (!S.buzzLoaded) loadBalance();
   scheduleEstimate();
   scheduleDraftSave();
+  renderLast();
 }
 
 /** The model control follows the list the provider has:
@@ -1325,8 +1387,10 @@ function generate() {
       setStatus(t('pending.cap', { n: max }), true);
       return;
     }
+    const body = buildRequest(formState(), c);
+    noteLast(body, asked);
     for (let i = 0; i < started; i++) {
-      startJob({ key: ++S.jobSeq, body: { ...buildRequest(formState(), c), n: 1 } });
+      startJob({ key: ++S.jobSeq, body: { ...body, n: 1, count: asked } });
     }
     // What the count became: the jobs that started, and the ones that did not fit.
     if (started < asked) {
@@ -1340,7 +1404,9 @@ function generate() {
     setStatus(t('pending.cap', { n: max }), true);
     return;
   }
-  startJob({ key: ++S.jobSeq, body: buildRequest(formState(), c) });
+  const body = buildRequest(formState(), c);
+  noteLast(body, body.n);
+  startJob({ key: ++S.jobSeq, body });
 }
 
 /** Whether the provider takes the whole count in one request. A provider that
@@ -1483,7 +1549,18 @@ function build(root) {
   R.reset = el('button', { type: 'button', class: 'st-btn st-reset', id: 'st-reset', text: t('reset'), title: t('reset.tip') });
   R.reset.addEventListener('click', resetForm);
   R.inflight = el('p', { class: 'st-muted st-inflight', role: 'status', 'aria-live': 'polite', hidden: '' });
-  R.goBar = el('div', { class: 'st-gobar' }, [R.go, R.reset]);
+  R.reloadLast = el('button', { type: 'button', class: 'st-btn st-reload-last', id: 'st-reload-last', text: t('last.reload_short'), title: t('last.reload_tip'), disabled: '' });
+  R.reloadLast.addEventListener('click', reloadLast);
+  R.goBar = el('div', { class: 'st-gobar' }, [R.go, R.reloadLast, R.reset]);
+  R.lastPreview = el('span', { class: 'st-lastbar-prompt st-muted' });
+  const lastYes = el('button', { type: 'button', class: 'st-btn st-small st-primary', id: 'st-last-reload', text: t('last.reload') });
+  const lastNo = el('button', { type: 'button', class: 'st-btn st-small', id: 'st-last-dismiss', text: t('last.not_now') });
+  lastYes.addEventListener('click', reloadLast);
+  lastNo.addEventListener('click', dismissLast);
+  R.lastBar = el('div', { class: 'st-lastbar', id: 'st-lastbar', role: 'region', 'aria-label': t('last.region'), hidden: '' }, [
+    el('div', { class: 'st-lastbar-text' }, [el('strong', { text: t('last.ask') }), R.lastPreview]),
+    el('div', { class: 'st-lastbar-actions' }, [lastYes, lastNo]),
+  ]);
   R.cost = el('p', { class: 'st-cost', hidden: '' });
   R.h3Hint = el('p', { class: 'st-muted st-h3hint', hidden: '', text: t('models.h3_hint') });
   R.est = el('p', { class: 'st-cost st-estimate', role: 'status', hidden: '' });
@@ -1502,6 +1579,7 @@ function build(root) {
   // the page, so the results keep moving.
   R.controls = el('section', { class: 'st-controls' }, []);
   R.form = el('div', { class: 'st-form' }, [
+    R.lastBar,
     field(t('prompt.label'), R.prompt, R.counter), R.recentWrap,
     // The picker card sits under the Model field and spans the row: it is the
     // image server's gallery, or a compact chooser for a long model list.
@@ -1698,6 +1776,7 @@ export async function mount(root = document.getElementById('st-root')) {
     const draft = S.info.default ? loadDraft() : null;
     if (draft) applyDraft(draft);
     S.draftReady = !!draftKey(DRAFT_PREFIX, S.profileKey);
+    loadLast();
     if (inflightExtra(S.info, running())) startPolling();
   } catch (e) {
     root.replaceChildren(el('p', { class: 'st-locked', text: refused(e) ? t('locked') : e.message }));

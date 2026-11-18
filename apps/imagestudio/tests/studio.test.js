@@ -1814,6 +1814,69 @@ test('typing saves under the profile key, the Reset button clears it and the for
   assert.equal(doc.activeElement, box, 'the focus lands on the prompt');
 });
 
+// ---- Reload last generation (GET /last, the server's per-profile record) -----
+
+const LAST = { v: 1, at: 1763500000, provider: 'minimax', model: 'image-01-live', prompt: 'a red fox in the snow',
+  ratio: '16:9', n: 3, seed: 42, optimizer: true, currency: '' };
+const lastRoute = (last) => ({ 'GET /api/apps/imagestudio/last': () => [200, { last }] });
+
+test('Reload last generation: the bar shows when the form differs, Reload fills every setting, nothing generates', { skip: dom.skip }, async () => {
+  const env = await page({ state: { ...STATE, profile_key: PK_A }, extra: lastRoute(LAST) });
+  const { doc } = env;
+  await flush();
+  const bar = doc.getElementById('st-lastbar');
+  assert.equal(bar.hidden, false, 'the bar is offered');
+  assert.match(bar.textContent, /Reload last generation\?/);
+  assert.match(bar.textContent, /a red fox in the snow/);
+  assert.equal(doc.getElementById('st-reload-last').disabled, false);
+  doc.getElementById('st-last-reload').click();
+  assert.equal(doc.getElementById('st-provider').value, 'minimax');
+  assert.equal(modelControl(doc).value, 'image-01-live');
+  assert.equal(doc.getElementById('st-prompt').value, 'a red fox in the snow');
+  assert.equal(doc.getElementById('st-ratio').value, '16:9');
+  assert.equal(doc.getElementById('st-count').value, '3');
+  assert.equal(doc.getElementById('st-seed').value, '42');
+  assert.equal(doc.getElementById('st-optimizer').checked, true);
+  assert.equal(bar.hidden, true, 'the bar goes once the form matches');
+  assert.equal(gens(env).length, 0);
+  assert.equal(JSON.parse(env.win.localStorage.getItem(DKEY(PK_A))).prompt, 'a red fox in the snow', 'and it is the saved draft now');
+});
+
+test('Reload last: Not now hides the bar; the button beside Reset still reloads', { skip: dom.skip }, async () => {
+  const { doc } = await page({ state: { ...STATE, profile_key: PK_A }, extra: lastRoute(LAST) });
+  await flush();
+  doc.getElementById('st-last-dismiss').click();
+  assert.equal(doc.getElementById('st-lastbar').hidden, true);
+  doc.getElementById('st-reload-last').click();
+  assert.equal(doc.getElementById('st-prompt').value, 'a red fox in the snow');
+});
+
+test('Reload last: no bar when the restored form already is the last generation, none without a record', { skip: dom.skip }, async () => {
+  const same = JSON.stringify({ v: 1, provider: 'minimax', model: 'image-01-live', prompt: 'a red fox in the snow', ratio: '16:9', seed: '42', n: 3, optimizer: true });
+  const a = await page({ state: { ...STATE, profile_key: PK_A }, store: { [DKEY(PK_A)]: same }, extra: lastRoute(LAST) });
+  await flush();
+  assert.equal(a.doc.getElementById('st-lastbar').hidden, true);
+  const b = await page({ state: { ...STATE, profile_key: PK_B }, extra: lastRoute(null) });
+  await flush();
+  assert.equal(b.doc.getElementById('st-lastbar').hidden, true);
+  assert.equal(b.doc.getElementById('st-reload-last').disabled, true);
+  const call = b.calls.find((c) => c.key === 'GET /api/apps/imagestudio/last');
+  assert.ok(call && !/\?/.test(call.url), 'GET /last names no profile: the server answers for the caller');
+});
+
+test('Generate makes this form the last generation (no bar after it), and the fan-out sends the whole count', { skip: dom.skip }, async () => {
+  const env = await page({ state: { ...STATE, profile_key: PK_A }, extra: lastRoute(LAST) });
+  const { doc, win } = env;
+  await flush();
+  const box = doc.getElementById('st-prompt');
+  box.value = 'a new idea';
+  box.dispatchEvent(new win.Event('input', { bubbles: true }));
+  doc.getElementById('st-generate').click();
+  await flush();
+  assert.equal(gens(env).length, 1);
+  assert.equal(doc.getElementById('st-lastbar').hidden, true);
+});
+
 test('a 403 from /state reads and writes no draft', { skip: dom.skip }, async () => {
   const env = await page({ extra: { 'GET /api/apps/imagestudio/state': () => [403, { detail: 'no' }] }, store: { [DKEY(PK_A)]: DRAFT } });
   assert.equal(env.win.localStorage.getItem(DKEY(PK_A)), DRAFT, 'untouched');

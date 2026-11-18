@@ -191,5 +191,11 @@
   "picker.selected": "Selecionado",
   "picker.expand": "Mostrar a galeria de fluxos de trabalho",
   "picker.collapse": "Ocultar a galeria de fluxos de trabalho",
-  "picker.chosen": "Escolhido: {name}"
+  "picker.chosen": "Escolhido: {name}",
+  "last.ask": "Recuperar a última geração?",
+  "last.reload": "Recuperar",
+  "last.not_now": "Agora não",
+  "last.reload_short": "Recuperar a última",
+  "last.reload_tip": "Repor as definições da sua última geração",
+  "last.region": "A sua última geração"
 }

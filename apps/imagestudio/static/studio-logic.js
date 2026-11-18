@@ -558,3 +558,34 @@ export const INFLIGHT_POLL_CAP_MS = 10 * 60 * 1000;
 export function pollShouldContinue({ extra, elapsedMs, hidden }) {
   return extra > 0 && !hidden && elapsedMs < INFLIGHT_POLL_CAP_MS;
 }
+
+// ---------------------------------------------------------------- the last generation
+//
+// GET /last answers the settings this profile last pressed Generate with (the server's
+// record, so it works on another device and after browser storage was cleared). These
+// turn it into a draft the page already knows how to put back, and say whether it is
+// any different from what the form shows now.
+
+/** The server's last-generation record -> a draft (see parseDraft), or null. */
+export function lastToDraft(last) {
+  if (!last || typeof last !== 'object' || typeof last.prompt !== 'string' || !last.prompt) return null;
+  return draftFromForm({
+    provider: last.provider, model: last.model, prompt: last.prompt, ratio: last.ratio,
+    seed: last.seed == null ? '' : String(last.seed), n: last.n, optimizer: last.optimizer === true,
+  });
+}
+
+/** Does the form (draftForm() values) hold anything other than the last generation? */
+export function lastDiffers(last, form) {
+  const a = lastToDraft(last);
+  if (!a) return false;
+  const b = draftFromForm(form);
+  return ['provider', 'model', 'prompt', 'ratio', 'seed', 'n', 'optimizer']
+    .some((k) => String(a[k]).trim() !== String(b[k]).trim());
+}
+
+/** The one-line preview of a prompt for the "Reload last generation?" bar. */
+export function lastPreview(last, max = 90) {
+  const p = String((last && last.prompt) || '').replace(/\s+/g, ' ').trim();
+  return p.length > max ? `${p.slice(0, max - 1)}…` : p;
+}

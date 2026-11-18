@@ -189,5 +189,11 @@
   "picker.selected": "已选择",
   "picker.expand": "显示工作流图库",
   "picker.collapse": "隐藏工作流图库",
-  "picker.chosen": "已选择：{name}"
+  "picker.chosen": "已选择：{name}",
+  "last.ask": "载入上次的生成设置？",
+  "last.reload": "载入",
+  "last.not_now": "暂不",
+  "last.reload_short": "载入上次",
+  "last.reload_tip": "恢复你上次生成时的设置",
+  "last.region": "你上次的生成"
 }

@@ -189,5 +189,11 @@
   "picker.selected": "選択中",
   "picker.expand": "ワークフロギャラリーを表示",
   "picker.collapse": "ワークフロギャラリーを隠す",
-  "picker.chosen": "選択中: {name}"
+  "picker.chosen": "選択中: {name}",
+  "last.ask": "前回の生成を読み込みますか？",
+  "last.reload": "読み込む",
+  "last.not_now": "今はしない",
+  "last.reload_short": "前回を読み込む",
+  "last.reload_tip": "前回の生成の設定を元に戻します",
+  "last.region": "前回の生成"
 }

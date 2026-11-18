@@ -615,7 +615,7 @@ OWNER_SCOPED: dict[str, str] = {
 OWNER_SCOPED_PREFIXES: dict[str, str] = {
     "/api/apps/jobboard/": "none: the Job Board is the Admins' tracker (its manifest permission; personal data, never for Users)",
     "/api/jobs/": "none: the Job Board's legacy prefix (see /api/apps/jobboard/)",
-    "/api/apps/imagestudio/": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+    "/api/apps/imagestudio/": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
 }
 
 

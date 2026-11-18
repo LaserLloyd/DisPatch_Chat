@@ -254,6 +254,54 @@ def _recent_prompts(owner: str | None) -> list[str]:
 _PROMPTS_LOCK = threading.Lock()
 
 
+# ---- the last generation: what the form held when this profile last pressed Generate -- #
+# One small file per profile (``last-<profile id>.json``; ``last.json`` without an owner),
+# written when a generate request passes its checks. GET /last reads only the caller's own.
+# Form settings only: never a picture, the reference image or a data: URL.
+
+LAST_VERSION = 1
+
+
+def _last_path(owner: str | None) -> Path:
+    if owner and _PID_RE.match(owner):
+        return _dir() / f"last-{owner}.json"
+    return _dir() / "last.json"
+
+
+def _read_last(owner: str | None) -> dict | None:
+    try:
+        data = json.loads(_last_path(owner).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("v") != LAST_VERSION:
+        return None
+    return data
+
+
+def _remember_last(body: "GenerateIn", prompt: str, provider: str, ratio: str, owner: str | None) -> None:
+    """Record the settings of the generation just asked for. Never raises: a failure here
+    must not fail (and re-bill) the picture."""
+    record = {
+        "v": LAST_VERSION, "at": time.time(),
+        "provider": provider, "model": str(body.model or "").strip()[:200],
+        "prompt": prompt, "ratio": ratio,
+        "n": int(body.count or body.n or 1),
+        "seed": body.seed, "optimizer": bool(body.optimizer),
+        "currency": str(body.currency or "")[:16],
+    }
+    try:
+        with _PROMPTS_LOCK:
+            dest = _last_path(owner)
+            tmp = dest.with_name(f"{dest.name}.{uuid.uuid4().hex}.tmp")
+            try:
+                tmp.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+                os.replace(tmp, dest)
+            finally:
+                tmp.unlink(missing_ok=True)
+    except OSError:
+        logging.getLogger("local-chat.imagestudio").warning("could not save the last generation", exc_info=True)
+
+
 def _remember_prompt(prompt: str, owner: str | None) -> None:
     """Put ``prompt`` first in the owner's recent list. Parallel jobs run this on worker threads:
     the read-modify-write holds a lock and each write has its own temp name, and a failure is
@@ -474,6 +522,9 @@ class GenerateIn(BaseModel):
     reference: dict | None = None
     # Civitai only: which Buzz pays ("blue" | "yellow"); "" = let Civitai choose.
     currency: str = Field(default="", max_length=16)
+    # The form's whole count when the page splits it into one job per picture (the image
+    # server): recorded as the last generation's count. Never changes what this job makes.
+    count: int | None = Field(default=None, ge=1, le=20)
 
 
 #: "Delete by age": how far back from NOW (the server's clock) each scope reaches.
@@ -903,6 +954,12 @@ def build(ctx):
             "can_refresh_models": policy.of(request).can("manage_connections"),
         }
 
+    @router.get("/last", dependencies=op)
+    async def last(request: Request):
+        """The caller's own last generation settings (null when there is none). Keyed by the
+        caller's profile: no parameter can name another profile's."""
+        return {"last": await asyncio.to_thread(_read_last, _owner_of(request))}
+
     @router.post("/models/refresh", dependencies=op)
     async def models_refresh(request: Request):
         """Re-list the models of the image providers the caller may use."""
@@ -939,6 +996,7 @@ def build(ctx):
     async def generate(body: GenerateIn, request: Request):
         prompt = _check_prompt(body.prompt)
         pid, res, ratio = await _pick(body, request)
+        await asyncio.to_thread(_remember_last, body, prompt, pid, ratio, _owner_of(request))
         if pid == SERVER_PROVIDER_ID:
             return await _generate_server(body, prompt, ratio, request)
         _check_length(prompt, res)

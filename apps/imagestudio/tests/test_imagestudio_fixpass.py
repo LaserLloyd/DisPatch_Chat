@@ -228,3 +228,57 @@ def test_profile_key_for_no_owner_is_fixed_and_hides_the_id(world):
     assert b._profile_key(None) == "install" and b._profile_key("") == "install"
     k = b._profile_key("abc123")
     assert "abc123" not in k and k == b._profile_key("abc123") and len(k) == 16
+
+
+# ---- the last generation: GET /last, per profile ----------------------------- #
+
+def _server_world(world, monkeypatch):
+    from dataclasses import replace
+
+    import dispatch_app_imagestudio as studio
+    from app import image_access
+    monkeypatch.setattr(studio, "SETTINGS", replace(studio.SETTINGS, image_server_url="http://rig.example/mcp"))
+
+    async def render(prompt, workflow, ratio):
+        return [_png(21_000)]
+
+    monkeypatch.setattr(studio, "_render_server", render)
+    owner = world.create_owner()
+    ada_id = world.person(owner, "Ada", "admin", password="pw-pass-1234")["id"]  # scrub-ok: throwaway test password
+    settings_store.set_many({image_access.SERVER_PROFILES_KEY: [ada_id]})
+    ada = world.client()
+    assert world.login(ada, name="Ada", password="pw-pass-1234").status_code == 200  # scrub-ok: throwaway test password
+    return owner, ada
+
+
+def test_last_generation_is_recorded_with_every_form_setting(world, monkeypatch):
+    owner, _ = _server_world(world, monkeypatch)
+    assert owner.get(BASE + "/last").json() == {"last": None}
+    r = owner.post(f"{BASE}/generate", json={"prompt": "a lighthouse at dusk", "provider": "workflows",
+                                             "model": "wf-b", "ratio": "9:16", "n": 1, "count": 3})
+    assert r.status_code == 200, r.text
+    last = owner.get(BASE + "/last").json()["last"]
+    assert {k: last[k] for k in ("provider", "model", "prompt", "ratio", "n", "seed", "optimizer", "currency")} == {
+        "provider": "workflows", "model": "wf-b", "prompt": "a lighthouse at dusk", "ratio": "9:16",
+        "n": 3, "seed": None, "optimizer": False, "currency": ""}
+    assert last["v"] == 1 and last["at"] > 0
+    assert "reference" not in last
+
+
+def test_one_profile_never_reads_another_profiles_last_generation(world, monkeypatch):
+    owner, ada = _server_world(world, monkeypatch)
+    assert owner.post(f"{BASE}/generate", json={"prompt": "owner only", "provider": "workflows",
+                                                "model": "wf-a", "ratio": "1:1", "n": 1}).status_code == 200
+    assert ada.get(BASE + "/last").json() == {"last": None}, "Ada sees nothing of the Owner's"
+    assert ada.post(f"{BASE}/generate", json={"prompt": "ada only", "provider": "workflows",
+                                              "model": "wf-c", "ratio": "1:1", "n": 1}).status_code == 200
+    assert ada.get(BASE + "/last").json()["last"]["prompt"] == "ada only"
+    assert owner.get(BASE + "/last").json()["last"]["prompt"] == "owner only"
+    # no query parameter can point at another profile's record
+    assert ada.get(BASE + "/last", params={"owner": "x", "profile_id": "y"}).json()["last"]["prompt"] == "ada only"
+
+
+def test_last_generation_needs_a_signed_in_profile_that_may_use_studio(world, monkeypatch):
+    _server_world(world, monkeypatch)
+    anon = world.client()
+    assert anon.get(BASE + "/last").status_code in (401, 403)
