@@ -60,6 +60,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from . import config, localview, tools
+from .tool_window import default_window, parse_window
 from .contracts.permissions import is_valid_permission
 
 log = logging.getLogger("local-chat.apps")
@@ -88,7 +89,7 @@ DEFAULT_ORDER = 100
 DEFAULT_ICON = "🧩"
 
 TOP_KEYS = frozenset({"id", "title", "icon", "safe", "order", "api", "bot",
-                      "thread_hook", "env", "permission"})
+                      "thread_hook", "env", "permission", "window"})
 API_KEYS = frozenset({"legacy_prefix"})
 BOT_KEYS = frozenset({"id", "name", "emoji", "avatar", "agent", "visible"})
 
@@ -148,6 +149,8 @@ class Manifest:
     #: The Permission a profile needs to use this app (3.0). Default: use_tools. (The
     #: manifest's ``safe`` key is legacy 3.x data: still accepted, never read.)
     permission: str = "use_tools"
+    #: Window options (normalized, defaults filled; width/height only when declared).
+    window: dict = field(default_factory=default_window)
 
     @property
     def static_dir(self) -> Path:
@@ -250,10 +253,15 @@ def parse_manifest(doc: Any, app_dir: Path, source: str) -> Manifest:
             or permission == "admin_system"):
         raise ManifestError("permission", "must be a known permission (not admin_system)")
 
+    try:
+        window = parse_window(doc.get("window"))
+    except ValueError as e:
+        raise ManifestError("window", str(e)) from None
+
     return Manifest(id=app_id, title=title, icon=icon, safe=safe, order=order,
                     legacy_prefix=legacy, bot=bot, thread_hook=thread_hook,
                     env=tuple(dict.fromkeys(env)), dir=app_dir, source=source,
-                    permission=permission)
+                    permission=permission, window=window)
 
 
 def _read_manifest(app_dir: Path, source: str) -> Manifest | None:

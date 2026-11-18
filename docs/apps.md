@@ -75,6 +75,14 @@ bot:                            # OPTIONAL: a roster bot the app needs to exist
 thread_hook: true               # static/thread.js exists; mount it in that bot's threads
 env:                            # OPTIONAL: env var names the backend may read
   - SOME_SETTING
+window:                         # OPTIONAL: window options (all keys optional)
+  layout: float                 # float | left | right | full (default float)
+  width: 1100                   # first-open float width, 320..3840
+  height: 800                   # 240..2160
+  min_width: 400                # default 360, 240..1600
+  min_height: 360               # default 320, 200..1200
+  dockable: true                # default true
+  keep_alive: true              # default true
 ```
 
 The schema is **closed**: an unknown key anywhere (top level, `api`, `bot`)
@@ -88,6 +96,10 @@ refuses the manifest, so a typo never silently means "default". Other rules:
   exists, the legacy mount is skipped (logged) and the app is served at
   `/api/apps/<id>` only.
 - `thread_hook: true` needs a `bot:` and an existing `static/thread.js`.
+- `window` is a closed mapping (see `docs/design/app-windows.md` section 6):
+  unknown keys, non-integer sizes (a bool is not an integer), out-of-range
+  values, or `min_width > width` / `min_height > height` refuse the manifest.
+  `GET /api/tools` always carries the normalized block on the app's row.
 - `env` is a list of up to 32 `UPPER_CASE` names; only those reach
   `ctx.env`.
 

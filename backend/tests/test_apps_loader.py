@@ -733,3 +733,57 @@ def test_a_denied_app_page_opened_in_a_browser_gets_a_readable_page(env):
     assert a.headers["content-type"].startswith("application/json")
     assert c.get("/api/apps/page-test/ping", headers={"Accept": "text/html"}).headers[
         "content-type"].startswith("application/json")
+
+
+# --------------------------------------------------------------------------- #
+# window block (docs/design/app-windows.md section 6)
+# --------------------------------------------------------------------------- #
+
+_WIN_DEFAULTS = {"layout": "float", "min_width": 360, "min_height": 320,
+                 "dockable": True, "keep_alive": True}
+
+
+def test_manifest_window_defaults_when_absent(tmp_path):
+    assert _parse(tmp_path, {"id": "plain"}).window == _WIN_DEFAULTS
+
+
+def test_manifest_window_valid_block_fills_defaults(tmp_path):
+    m = _parse(tmp_path, {"id": "w", "window": {"layout": "right", "width": 1100, "height": 800,
+                                                "min_width": 400, "dockable": False}})
+    assert m.window == {"layout": "right", "width": 1100, "height": 800, "min_width": 400,
+                        "min_height": 320, "dockable": False, "keep_alive": True}
+    assert "width" not in _parse(tmp_path, {"id": "w2", "window": {"layout": "full"}}).window
+
+
+@pytest.mark.parametrize("win", [
+    "float", ["layout"], {"layout": "top"}, {"layout": 1}, {"colour": 1},
+    {"width": 319}, {"width": 3841}, {"height": 239}, {"height": 2161},
+    {"min_width": 239}, {"min_width": 1601}, {"min_height": 199}, {"min_height": 1201},
+    {"width": True}, {"width": "800"}, {"width": 800.0},
+    {"dockable": 1}, {"keep_alive": "yes"},
+    {"width": 400, "min_width": 500}, {"height": 300, "min_height": 350},
+])
+def test_manifest_window_refusals(tmp_path, win):
+    with pytest.raises(apps_loader.ManifestError) as ei:
+        _parse(tmp_path, {"id": "a", "window": win}, name="a")
+    assert ei.value.field == "window", str(ei.value)
+
+
+def test_manifest_window_default_min_against_small_width(tmp_path):
+    # width 320 < default min_width 360 is refused (min_width must not exceed width)
+    with pytest.raises(apps_loader.ManifestError):
+        _parse(tmp_path, {"id": "a", "window": {"width": 320}}, name="a")
+
+
+def test_api_tools_app_row_carries_window_and_put_roundtrips(env):
+    repo, load, make_client = env
+    _write_app(repo, "win-test", {"id": "win-test", "window": {"width": 900, "layout": "left"}})
+    load()
+    c = _unlocked(make_client)
+    rows = c.get("/api/tools").json()["tools"]
+    row = next(r for r in rows if r["id"] == "win-test")
+    assert row["window"] == {**_WIN_DEFAULTS, "layout": "left", "width": 900}
+    assert c.put("/api/tools", json={"tools": rows}).status_code == 200
+    row["window"] = {**row["window"], "layout": "full"}
+    r = c.put("/api/tools", json={"tools": [row]})
+    assert r.status_code == 422 and r.json()["field"] == "window"

@@ -12,3 +12,10 @@ order: 60
 # Each profile sees only its own pictures (the ledger carries owner_profile_id).
 permission: use_images
 env: []
+# Window options (docs/design/app-windows.md): Image Studio needs room.
+window:
+  layout: float
+  width: 1100
+  height: 800
+  min_width: 400
+  min_height: 360

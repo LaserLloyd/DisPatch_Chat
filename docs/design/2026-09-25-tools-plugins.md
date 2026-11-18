@@ -34,6 +34,10 @@ tools:
     entry: report.html       # static: page inside root (default index.html)
     enabled: true            # default true
     safe: false              # default false → unlocked only
+    window:                  # optional, static/url only: window layout and size
+      layout: float          # float | left | right | full; also width, height,
+                             # min_width, min_height, dockable, keep_alive —
+                             # see docs/design/app-windows.md section 6
     refresh:                 # optional, static only: regenerate the page
       argv: [uv, run, crucibleforge, report]   # fixed argv, never a shell string
       cwd: /home/you/Projects/crucibleforge
@@ -107,7 +111,8 @@ GET  /tools/<id>/{path}         → any file under root (static)
 ```
 
 `ToolOut = {id, title, icon, kind, enabled, safe, entry?, url?, root?, has_refresh,
-builtin_feature?}` where `builtin_feature ∈ {harness, studioforge, mail, practice}`
+builtin_feature?, window}` (`window` = the normalized block, defaults filled, never
+written back to tools.yaml while it equals the defaults) where `builtin_feature ∈ {harness, studioforge, mail, practice}`
 so the frontend can map a builtin to its existing opener.
 
 `/api/auth/status.features` gains `tools: true`. The WS `hello` is unchanged.

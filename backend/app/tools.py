@@ -88,6 +88,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from . import auth, config, localview, policy
 from .contracts import errors
 from .contracts.permissions import Permission
+from .tool_window import default_window, non_default, parse_window
 
 log = logging.getLogger("local-chat.tools")
 
@@ -144,7 +145,7 @@ BUILTIN_WINDOWABLE = frozenset({"studioforge-panel", "deepseek-harness"})
 #: Builtins whose default is NOT the pane. StudioForge refuses every embed.
 BUILTIN_OPEN_DEFAULT = {"studioforge-panel": "window"}
 
-_COMMON_KEYS = {"id", "title", "icon", "kind", "enabled", "safe", "open"}
+_COMMON_KEYS = {"id", "title", "icon", "kind", "enabled", "safe", "open", "window"}
 _ALLOWED_KEYS = {
     "static": _COMMON_KEYS | {"root", "entry", "refresh"},
     "url": _COMMON_KEYS | {"url", "remote_url"},
@@ -156,7 +157,7 @@ _ALLOWED_KEYS = {
 #: when they still say what the package says, and refused when they do not —
 #: a title is changed in app.yaml, not through this API.
 _APP_MIRROR_KEYS = ("title", "icon", "order", "has_refresh", "bot_id",
-                    "thread_hook", "entry", "hook_version", "mounted")
+                    "thread_hook", "entry", "hook_version", "mounted", "window")
 _REFRESH_KEYS = {"argv", "cwd", "timeout_s"}
 #: Keys GET /api/tools adds that are not part of the manifest. PUT drops them so
 #: the Settings tab can send back the rows it was given.
@@ -206,6 +207,13 @@ class Tool:
     trusted: bool = False
     #: "frame" (the pane) or "window" (its own browser tab). See module doc.
     open: str = "frame"
+    #: Non-default window options as sorted (key, value) pairs (hashable);
+    #: empty = all defaults. Use ``window_out`` for the normalized dict.
+    window: tuple = ()
+
+    @property
+    def window_out(self) -> dict:
+        return {**default_window(), **dict(self.window)}
 
     def default_open(self) -> str:
         return default_open(self.kind, self.id)
@@ -234,6 +242,8 @@ class Tool:
             d["safe"] = True
         if self.open != self.default_open():     # a default is never written
             d["open"] = self.open
+        if self.window:
+            d["window"] = dict(self.window)
         if self.refresh is not None:
             r = {"argv": list(self.refresh.argv)}
             if self.refresh.cwd:
@@ -478,6 +488,10 @@ def validate_tools(rows: list, check_fs: bool | Collection[int] = True, *,
         enabled = _check_bool(row, "enabled", True, i)
         safe = _check_bool(row, "safe", False, i)
         open_ = _check_open(row, kind, tid, i)
+        try:
+            window = tuple(sorted(non_default(parse_window(row.get("window"))).items()))
+        except ValueError as e:
+            raise ToolValidationError(i, "window", str(e)) from None
 
         if kind == "static":
             root = _check_abs_dir(row.get("root"), i, "root", fs)
@@ -487,7 +501,7 @@ def validate_tools(rows: list, check_fs: bool | Collection[int] = True, *,
                 refresh = _check_refresh(row["refresh"], i, fs)
             out.append(Tool(id=tid, kind=kind, title=title.strip(), icon=icon.strip(),
                             enabled=enabled, safe=safe, root=root, entry=entry,
-                            refresh=refresh, open=open_))
+                            refresh=refresh, open=open_, window=window))
         else:
             url = row.get("url")
             if not _http_url_ok(url):
@@ -498,7 +512,7 @@ def validate_tools(rows: list, check_fs: bool | Collection[int] = True, *,
             out.append(Tool(id=tid, kind=kind, title=title.strip(), icon=icon.strip(),
                             enabled=enabled, safe=safe, url=url.strip(),
                             remote_url=remote.strip() if remote else None,
-                            open=open_))
+                            open=open_, window=window))
     return out
 
 
@@ -955,7 +969,7 @@ def _member_visible(t: Tool) -> bool:
 def _out_operator(t: Tool) -> dict:
     d = {"id": t.id, "title": t.title, "icon": t.icon, "kind": t.kind,
          "enabled": t.enabled, "has_refresh": t.refresh is not None,
-         "open": t.open}
+         "open": t.open, "window": t.window_out}
     if t.kind == "static":
         d["root"] = t.root
         d["entry"] = t.entry
@@ -969,7 +983,8 @@ def _out_operator(t: Tool) -> dict:
 
 def _out_limited(t: Tool) -> dict:
     d = {"id": t.id, "title": t.title, "icon": t.icon, "kind": t.kind,
-         "enabled": t.enabled, "has_refresh": False, "open": t.open}
+         "enabled": t.enabled, "has_refresh": False, "open": t.open,
+         "window": t.window_out}
     if t.kind == "static":
         d["entry"] = t.entry
     else:
@@ -987,7 +1002,7 @@ def _builtin_row(tid: str) -> dict:
             "enabled": builtin_switch(tid),
             "has_refresh": False, "builtin_feature": feat,
             "available": _builtin_available(tid),
-            "open": builtin_open(tid)}
+            "open": builtin_open(tid), "window": default_window()}
     owner = _EXT_OWNER.get(tid)
     if owner:
         # Which ADD-ON registered this builtin, and what it is called. The rail
@@ -1018,7 +1033,7 @@ def _app_row(la) -> dict:
     d = {"id": m.id, "title": m.title, "icon": m.icon, "kind": "app",
          # The manifest SWITCH, like a builtin row (never a resolved value).
          "enabled": _app_enabled(m.id), "order": m.order,
-         "has_refresh": False}
+         "has_refresh": False, "window": dict(m.window)}
     if m.bot is not None:
         d["bot_id"] = m.bot.id
     d["thread_hook"] = f"/apps/{m.id}/thread.js" if m.thread_hook else None
@@ -1275,6 +1290,8 @@ def api_tools_put(request: Request, payload: dict = Body(...)):
         # row sent back without it keeps what the file holds (inert data, round-tripped).
         if "safe" not in row and stored is not None and stored.safe:
             row["safe"] = True
+        if "window" not in row and stored is not None and stored.window:
+            row["window"] = dict(stored.window)
         # The UI can never introduce or change a refresh argv: sent = must equal
         # what the file already holds; omitted/null = keep what the file holds.
         if row.get("refresh") is not None:

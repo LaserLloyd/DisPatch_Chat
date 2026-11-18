@@ -1170,3 +1170,85 @@ def test_builtin_open_url_never_reaches_a_signed_out_caller(tools_env, monkeypat
     body = c.get("/api/tools").text
     assert "198.51.100.7" not in body and "open_url" not in body
     assert c.get("/api/tools/studioforge-panel/status").status_code in (401, 403)
+
+
+# --------------------------------------------------------------------------- #
+# window block (docs/design/app-windows.md section 6)
+# --------------------------------------------------------------------------- #
+
+_WIN_DEFAULTS = {"layout": "float", "min_width": 360, "min_height": 320,
+                 "dockable": True, "keep_alive": True}
+
+
+def test_window_valid_block_and_defaults(tools_env):
+    out = tools.validate_tools([_static(window={"layout": "left", "width": 900, "dockable": False})],
+                               check_fs=False)
+    assert out[0].window_out == {**_WIN_DEFAULTS, "layout": "left", "width": 900,
+                                 "dockable": False}
+    plain = tools.validate_tools([_static()], check_fs=False)[0]
+    assert plain.window == () and plain.window_out == _WIN_DEFAULTS
+    hash(out[0])                                     # frozen Tool stays hashable
+
+
+@pytest.mark.parametrize("win", [
+    "float", ["x"], {"layout": "top"}, {"nope": 1}, {"width": 319}, {"width": 3841},
+    {"height": 2161}, {"min_width": 1601}, {"min_height": 199}, {"width": True},
+    {"width": "900"}, {"dockable": 0}, {"keep_alive": "true"},
+    {"width": 400, "min_width": 500}, {"height": 300, "min_height": 350},
+])
+def test_window_refusals(tools_env, win):
+    for row in (_static(window=win),
+                {"id": "u", "title": "U", "kind": "url", "url": "http://127.0.0.1:1/", "window": win}):
+        with pytest.raises(tools.ToolValidationError) as ei:
+            tools.validate_tools([row], check_fs=False)
+        assert ei.value.field == "window" and ei.value.index == 0
+
+
+def test_window_not_allowed_on_builtin_or_app_rows(tools_env):
+    for row in ({"id": "mail-panel", "kind": "builtin", "window": {}},
+                {"id": "someapp", "kind": "app", "window": {}}):
+        with pytest.raises(tools.ToolValidationError) as ei:
+            tools.validate_tools([row], check_fs=False)
+        assert ei.value.field == "window"
+
+
+def test_window_to_manifest_omits_defaults(tools_env):
+    t = tools.validate_tools([_static(window={"layout": "float", "keep_alive": True})],
+                             check_fs=False)[0]
+    assert "window" not in t.to_manifest()           # a default is never written
+    t = tools.validate_tools([_static(window={"width": 800, "dockable": False, "min_width": 360})],
+                             check_fs=False)[0]
+    assert t.to_manifest()["window"] == {"dockable": False, "width": 800}
+
+
+def test_api_tools_rows_emit_window(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site, window="{layout: right, width: 800}")
+              + "  - {id: ext, title: E, kind: url, url: 'http://127.0.0.1:9/'}\n")
+    c = _unlocked(make_client)
+    rows = {t["id"]: t for t in c.get("/api/tools").json()["tools"]}
+    assert rows["bench"]["window"] == {**_WIN_DEFAULTS, "layout": "right", "width": 800}
+    assert rows["ext"]["window"] == _WIN_DEFAULTS
+    assert rows["mail-panel"]["window"] == _WIN_DEFAULTS      # builtin: defaults
+
+
+def test_put_roundtrips_window(tools_env):
+    make_client, site = tools_env
+    _manifest(_bench(site, window="{layout: full, height: 700, keep_alive: false}")
+              + "  - {id: ext, title: E, kind: url, url: 'http://127.0.0.1:9/'}\n")
+    c = _unlocked(make_client)
+    rows = c.get("/api/tools").json()["tools"]
+    r = c.put("/api/tools", json={"tools": rows})
+    assert r.status_code == 200, r.text
+    assert tools.get_tool("bench").window_out == {**_WIN_DEFAULTS, "layout": "full",
+                                                  "height": 700, "keep_alive": False}
+    assert tools.get_tool("ext").window == ()
+    assert "window" not in (config.DATA_DIR / "tools.yaml").read_text().split("id: ext")[1]
+    # A row sent without `window` keeps what the file holds.
+    row = {k: v for k, v in next(x for x in rows if x["id"] == "bench").items() if k != "window"}
+    assert c.put("/api/tools", json={"tools": [row]}).status_code == 200
+    assert tools.get_tool("bench").window_out["layout"] == "full"
+    # A bad block via PUT is a 422 naming the field.
+    row["window"] = {"width": 10}
+    r = c.put("/api/tools", json={"tools": [row]})
+    assert r.status_code == 422 and r.json()["field"] == "window"
