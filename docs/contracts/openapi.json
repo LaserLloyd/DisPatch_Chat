@@ -1856,6 +1856,19 @@
       },
       "GenerateIn": {
         "properties": {
+          "count": {
+            "anyOf": [
+              {
+                "maximum": 20.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
           "currency": {
             "default": "",
             "maxLength": 16,
@@ -5574,6 +5587,23 @@
           }
         },
         "summary": "Images"
+      }
+    },
+    "/api/apps/imagestudio/last": {
+      "get": {
+        "description": "The caller's own last generation settings (null when there is none). Keyed by the\ncaller's profile: no parameter can name another profile's.",
+        "operationId": "last_api_apps_imagestudio_last_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Last"
       }
     },
     "/api/apps/imagestudio/models/refresh": {

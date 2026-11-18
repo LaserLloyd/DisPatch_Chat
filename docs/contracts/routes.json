@@ -326,7 +326,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
         "permission": "use_images"
       }
     },
@@ -338,7 +338,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
         "permission": "use_images"
       }
     },
@@ -350,7 +350,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
         "permission": "use_images"
       }
     },
@@ -362,7 +362,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
         "permission": "use_images"
       }
     },
@@ -374,7 +374,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
         "permission": "use_images"
       }
     },
@@ -386,7 +386,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
         "permission": "use_images"
       }
     },
@@ -398,7 +398,19 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
+        "permission": "use_images"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/apps/imagestudio/last",
+      "requirement": {
+        "machine": [
+          "machine:apps"
+        ],
+        "note": "mounted app",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
         "permission": "use_images"
       }
     },
@@ -410,7 +422,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
         "permission": "use_images"
       }
     },
@@ -422,7 +434,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
         "permission": "use_images"
       }
     },
@@ -434,7 +446,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
         "permission": "use_images"
       }
     },
@@ -446,7 +458,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
         "permission": "use_images"
       }
     },
@@ -458,7 +470,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
         "permission": "use_images"
       }
     },
@@ -470,7 +482,7 @@
           "machine:apps"
         ],
         "note": "mounted app",
-        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads",
+        "owner_scoped": "none: Image Studio's ledger rows carry their owner; every route lists and clears the caller's own (owner_profile_id), /targets and /chat-images read the caller's own threads, /last reads only the caller's own last-generation file (keyed by the session's profile, no id parameter)",
         "permission": "use_images"
       }
     },
