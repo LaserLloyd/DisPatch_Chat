@@ -1287,15 +1287,18 @@ const prefOn = () => { if (splitPref === null) splitPref = readPref(); return sp
 const ratioNow = () => { if (splitRatio === null) splitRatio = readRatio(); return splitRatio; };
 
 /** Width the chat + tool pair would have: the content column with the thread
- *  list showing. Measured when split is on, estimated from the grid otherwise. */
+ *  list showing, worked out from the window and the grid. */
 function contentWidth() {
-  const cv = $('chatview');
-  if (splitOn && cv && cv.clientWidth) return cv.clientWidth;
+  // Never read #chatview's own width: while split its inline-end padding can
+  // exceed a narrowed column and stretch it, which would hide the shortage.
   const app = document.querySelector('.app');
   const side = document.querySelector('.sidebar');
+  const list = $('threadlist');
   let tl = 0;
   if (!(app && app.classList.contains('tl-collapsed'))) {
-    tl = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--threadlist-width')) || 320;
+    tl = splitOn && list && list.offsetWidth
+      ? list.offsetWidth
+      : parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--threadlist-width')) || 320;
   }
   return Math.floor(window.innerWidth - (side ? side.offsetWidth : 72) - tl);
 }
@@ -1502,7 +1505,7 @@ function wireDivider() {
  *  APP in the pane (same origin), the app hears about it: see the shell ⇄
  *  frame messages below. Nothing is sent to a static or url tool. */
 export function notifyActiveThread(threadId) {
-  if (!splitOn || typeof threadId !== 'string' || !THREAD_ID_RE.test(threadId)) return false;
+  if (!splitOn || !frameLoaded || typeof threadId !== 'string' || !THREAD_ID_RE.test(threadId)) return false;
   return postToApp({ type: 'dispatch:active-thread', threadId });
 }
 

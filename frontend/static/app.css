@@ -2363,7 +2363,9 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 }
 .tool-split[aria-pressed="true"] { background: var(--bg-hover); color: var(--accent); }
 .tool-split-label { display: none; }
-.tool-return { padding: 4px 10px; white-space: nowrap; flex: 0 0 auto; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.tool-return { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; white-space: nowrap; flex: 0 1 auto; min-width: 0; max-width: 40vw; font-size: 13px; }
+.tool-return .rail-icon { flex: 0 0 auto; }
+.tool-return-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tool-return[hidden] { display: none; }
 /* If a phone user does open the Chats tab mid-tool, the list shows the tool's
    placeholder — hide the per-bot chrome (stale avatar, new/search/collapse)
