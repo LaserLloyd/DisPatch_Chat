@@ -7,6 +7,8 @@ import {
   buildRequest, cropRect, defaultCropPos, galleryItems, galleryInfo, isMetered,
   ratioLabel, ratioText, stepIndex, wheelShouldChain, canScroll, INNER_SCROLLPORTS,
   SORTS, normalizeSort, sortRows, clearFromHere, DELETE_SCOPES, normalizeScope, deleteConfirmKey, sendMetadata,
+  DRAFT_MAX_BYTES, isProfileKey, draftKey, draftFromForm, serializeDraft, parseDraft, resolveDraft,
+  inflightExtra, pollShouldContinue, INFLIGHT_POLL_CAP_MS,
 } from '../static/studio-logic.js';
 
 const key = (over = {}) => ({ key: 'Enter', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, isComposing: false, ...over });
@@ -371,4 +373,101 @@ test('the scroll areas inside the controls column are the ones the wheel must le
   for (const c of ['.st-workflows', '.st-picker-models', '.st-pickgrid', '.st-browse-list', '.st-recents']) {
     assert.ok(INNER_SCROLLPORTS.includes(c), `${c} is a scroll area of its own`);
   }
+});
+
+
+// ---- the saved form draft ---------------------------------------------------
+
+const PREFIX = 'dispatch-imagestudio-draft:';
+const KA = 'a1b2c3d4e5f60718';
+const KB = '0011223344556677';
+const PROVS = [
+  { id: 'minimax', configured: true, models: ['image-01', 'image-02'], shape: 'minimax' },
+  { id: 'workflows', configured: true, models: [], shape: 'workflows' },
+  { id: 'civitai', configured: true, models: ['urn:a'], shape: 'civitai' },
+  { id: 'nokey', configured: false, models: [], shape: 'x' },
+];
+const CTX = { providers: PROVS, ratios: ['1:1', '16:9'], workflowNames: [] };
+const FORM = { provider: 'minimax', model: 'image-02', prompt: 'a red fox', ratio: '16:9', n: '3', seed: '42', optimizer: true };
+
+test('a draft survives save -> restore with the exact values', () => {
+  const back = parseDraft(serializeDraft(FORM));
+  assert.deepEqual(resolveDraft(back, CTX), {
+    provider: 'minimax', model: 'image-02', prompt: 'a red fox', ratio: '16:9', seed: '42', n: 3, optimizer: true,
+  });
+});
+
+test('an invalid provider/model is dropped silently and the prompt still restores', () => {
+  const gone = parseDraft(serializeDraft({ ...FORM, provider: 'removed' }));
+  assert.deepEqual(resolveDraft(gone, CTX), { prompt: 'a red fox', ratio: '16:9', seed: '42', n: 3, optimizer: true });
+  const unkeyed = resolveDraft(parseDraft(serializeDraft({ ...FORM, provider: 'nokey' })), CTX);
+  assert.equal(unkeyed.provider, undefined, 'a provider without a key is not usable');
+  const badModel = resolveDraft(parseDraft(serializeDraft({ ...FORM, model: 'image-99' })), CTX);
+  assert.equal(badModel.provider, 'minimax');
+  assert.equal(badModel.model, undefined);
+  assert.equal(badModel.prompt, 'a red fox');
+  const badRatio = resolveDraft(parseDraft(serializeDraft({ ...FORM, ratio: '7:3', seed: 'x1' })), CTX);
+  assert.equal(badRatio.ratio, undefined);
+  assert.equal(badRatio.seed, undefined);
+});
+
+test('a workflow name never travels to another provider', () => {
+  const ctx = { ...CTX, workflowNames: ['anima-Rev8'] };
+  const d = parseDraft(serializeDraft({ ...FORM, provider: 'minimax', model: 'anima-Rev8' }));
+  assert.equal(resolveDraft(d, ctx).model, undefined);
+  const w = resolveDraft(parseDraft(serializeDraft({ ...FORM, provider: 'workflows', model: 'anima-Rev8' })), ctx);
+  assert.equal(w.model, 'anima-Rev8');
+  const w2 = resolveDraft(parseDraft(serializeDraft({ ...FORM, provider: 'workflows', model: 'gone' })), ctx);
+  assert.equal(w2.model, undefined, 'a name the loaded gallery lacks is dropped');
+  const early = resolveDraft(parseDraft(serializeDraft({ ...FORM, provider: 'workflows', model: 'anima-Rev8' })), CTX);
+  assert.equal(early.model, 'anima-Rev8', 'gallery not loaded yet: the page checks it on arrival');
+  assert.equal(resolveDraft(parseDraft(serializeDraft({ ...FORM, provider: 'civitai', model: 'urn:typed' })), CTX).model, 'urn:typed');
+});
+
+test('the stored draft is capped and the prompt gives way', () => {
+  const big = serializeDraft({ ...FORM, prompt: 'x'.repeat(50000) }, 50000);
+  assert.ok(big.length <= DRAFT_MAX_BYTES, `${big.length}`);
+  assert.ok(parseDraft(big).prompt.length > 1000);
+  assert.equal(parseDraft(serializeDraft({ ...FORM, prompt: 'y'.repeat(9000) })).prompt.length, PROMPT_MAX);
+  assert.equal(parseDraft('x'.repeat(DRAFT_MAX_BYTES + 1)), null);
+});
+
+test('the key is per profile: B never reads what A stored', () => {
+  const store = new Map();
+  store.set(draftKey(PREFIX, KA), serializeDraft(FORM));
+  assert.equal(draftKey(PREFIX, KA), `${PREFIX}${KA}`);
+  assert.notEqual(draftKey(PREFIX, KA), draftKey(PREFIX, KB));
+  assert.equal(parseDraft(store.get(draftKey(PREFIX, KB))), null, 'B has nothing');
+  assert.equal(draftKey(PREFIX, ''), '', 'no key before /state answered: nothing is read or written');
+  assert.equal(draftKey(PREFIX, undefined), '');
+  assert.equal(draftKey(PREFIX, '../x'), '');
+  assert.ok(isProfileKey('install') && isProfileKey(KA) && !isProfileKey('ABC'));
+});
+
+test('reset clears: nothing is left to restore', () => {
+  const store = new Map([[draftKey(PREFIX, KA), serializeDraft(FORM)]]);
+  store.delete(draftKey(PREFIX, KA));
+  assert.deepEqual(resolveDraft(parseDraft(store.get(draftKey(PREFIX, KA)) || ''), CTX), {});
+});
+
+test('no image data or data: URL is ever serialised', () => {
+  const dirty = { ...FORM, model: 'data:image/png;base64,AAAA', reference: { preview: 'data:image/png;base64,BBBB' }, image: 'data:x', preview: 'data:y' };
+  const text = serializeDraft(dirty);
+  assert.ok(!/data:/i.test(text), text);
+  assert.deepEqual(Object.keys(JSON.parse(text)).sort(), ['model', 'n', 'optimizer', 'prompt', 'provider', 'ratio', 'seed', 'v']);
+  assert.equal(draftFromForm({ prompt: 'data:text/plain,hi' }).prompt, '');
+});
+
+test('junk or another version restores nothing', () => {
+  for (const bad of [null, '', 'nope', '[]', '{"v":99,"prompt":"x"}', '{"prompt":"x"}']) assert.equal(parseDraft(bad), null, String(bad));
+});
+
+test('pictures still being made: only what this page did not start, polled until done', () => {
+  assert.equal(inflightExtra({ in_flight: 3 }, 1), 2);
+  assert.equal(inflightExtra({ in_flight: 1 }, 2), 0);
+  assert.equal(inflightExtra(null, 0), 0);
+  assert.equal(pollShouldContinue({ extra: 2, elapsedMs: 1000, hidden: false }), true);
+  assert.equal(pollShouldContinue({ extra: 0, elapsedMs: 1000, hidden: false }), false);
+  assert.equal(pollShouldContinue({ extra: 2, elapsedMs: 1000, hidden: true }), false);
+  assert.equal(pollShouldContinue({ extra: 2, elapsedMs: INFLIGHT_POLL_CAP_MS, hidden: false }), false);
 });

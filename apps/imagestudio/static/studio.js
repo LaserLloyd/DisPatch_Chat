@@ -28,7 +28,8 @@ import {
   ratioText,
   activeModel, isH3Model, keepBrowsePicks, modelCaps, modelPromptMax, modelsNote, refreshSummary,
   stepIndex, wheelShouldChain, canScroll, INNER_SCROLLPORTS,
-} from './studio-logic.js?v=13';
+  draftKey, serializeDraft, parseDraft, resolveDraft, inflightExtra, pollShouldContinue, INFLIGHT_POLL_MS,
+} from './studio-logic.js?v=14';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
 export const API = '/api/apps/imagestudio';
@@ -57,6 +58,10 @@ const S = {
   picker: { open: false, query: '', mode: '' },   // the card under the Model field
   modelMode: 'text',        // the model control on the page: 'select' or 'text'
   viewer: null,             // the picture viewer of this page (only outside the shell)
+  profileKey: '',           // GET /state profile_key: the draft is read and written under it, only once /state answered
+  draftReady: false,        // the draft was applied: from now on the form is saved
+  baseline: '',             // the form's serialised defaults: a form equal to it stores no draft
+  poll: { timer: null, since: 0 },   // pictures the server is still making (not started by this page)
 };
 const R = {};            // DOM refs
 const SORT_LABELS = { oldest: 'sort.oldest', newest: 'sort.newest' };
@@ -64,6 +69,10 @@ const SORT_LABELS = { oldest: 'sort.oldest', newest: 'sort.newest' };
 const SORT_KEY = 'dispatch-imagestudio-sort';
 // Which Buzz pays for a Civitai picture on this device (privacy.js APP_KEYS wipes it too).
 const PAY_KEY = 'dispatch-imagestudio-pay';
+// The form on this device, one key per profile (privacy.js APP_KEY_PREFIXES wipes the family).
+// Form values only: never a picture, a data: URL or the reference image.
+const DRAFT_PREFIX = 'dispatch-imagestudio-draft:';
+const DRAFT_SAVE_MS = 400;
 const PAY_LABELS = { '': 'pay.auto', blue: 'pay.blue', yellow: 'pay.yellow' };
 const TYPE_LABELS = { blue: 'buzz.type_blue', yellow: 'buzz.type_yellow' };
 const BROWSE_LABELS = { week: 'browse.sort_week', month: 'browse.sort_month', rated: 'browse.sort_rated', new: 'browse.sort_new' };
@@ -151,6 +160,115 @@ function formState() {
   };
 }
 
+// ---------------------------------------------------------------- the saved draft
+
+/** The values of the form that a draft keeps. */
+function draftForm() {
+  return {
+    provider: R.provider.value, model: modelValue(), prompt: R.prompt.value, ratio: R.ratio.value,
+    n: R.count.value, seed: R.seed.value, optimizer: R.optimizer.checked,
+  };
+}
+
+let draftTimer = null;
+function scheduleDraftSave() {
+  if (!S.draftReady) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(saveDraftNow, DRAFT_SAVE_MS);
+}
+
+/** Write the form (or drop the draft when the form is just the defaults). Never throws. */
+function saveDraftNow() {
+  clearTimeout(draftTimer);
+  if (!S.draftReady || !R.prompt) return;
+  const key = draftKey(DRAFT_PREFIX, S.profileKey);
+  if (!key) return;
+  const text = serializeDraft(draftForm(), S.info ? S.info.prompt_max : PROMPT_MAX);
+  try {
+    if (!text || text === S.baseline) localStorage.removeItem(DRAFT_PREFIX + S.profileKey);
+    else localStorage.setItem(DRAFT_PREFIX + S.profileKey, text);
+  } catch { /* private window / quota: the form just is not remembered */ }
+}
+
+function loadDraft() {
+  if (!draftKey(DRAFT_PREFIX, S.profileKey)) return null;
+  try { return parseDraft(localStorage.getItem(DRAFT_PREFIX + S.profileKey)); } catch { return null; }
+}
+
+/** Put a saved draft back on the form. Pieces that no longer fit are dropped, the rest
+ *  stays. Starts nothing: no generation, and the estimate follows the form as it always does. */
+function applyDraft(draft) {
+  const fit = resolveDraft(draft, {
+    providers: S.info.providers, ratios: S.info.ratios,
+    workflowNames: (S.workflows.rows || []).map((w) => w.name),
+  });
+  if (fit.provider) {
+    R.provider.value = fit.provider;
+    refreshForm();                       // the model control follows the provider
+    if (fit.model) setModelValue(fit.model);
+  }
+  if (fit.prompt) R.prompt.value = fit.prompt;
+  if (fit.ratio) R.ratio.value = fit.ratio;
+  refreshForm();                         // caps (count, seed, optimizer) now match the model
+  if (fit.seed && !R.seedRow.hidden) R.seed.value = fit.seed;
+  if (fit.optimizer && !R.optimizerRow.hidden) R.optimizer.checked = true;
+  if (fit.n) R.count.value = String(clampCount(fit.n, caps().max_n));
+  refreshForm();
+}
+
+/** Reset: the draft goes and the form returns to what a fresh page shows. */
+function resetForm() {
+  S.draftReady = false;
+  clearTimeout(draftTimer);
+  try { localStorage.removeItem(DRAFT_PREFIX + S.profileKey); } catch { /* nothing stored */ }
+  if (S.info && S.info.default) R.provider.value = S.info.default;
+  setModelValue('');
+  clearStaleModel(provider());
+  R.prompt.value = ''; R.ratio.value = '1:1'; R.count.value = '1'; R.seed.value = ''; R.optimizer.checked = false;
+  S.picker.query = ''; R.pickerSearch.value = '';
+  setReference(null);
+  S.estKey = '';
+  S.draftReady = true;
+  refreshForm();
+  S.baseline = serializeDraft(draftForm(), S.info ? S.info.prompt_max : PROMPT_MAX);
+  R.prompt.focus();
+}
+
+// ---------------------------------------------------------------- pictures still being made
+
+function renderInflight() {
+  const n = S.info ? inflightExtra(S.info, running()) : 0;
+  R.inflight.hidden = !n;
+  R.inflight.textContent = n ? t(n === 1 ? 'inflight.one' : 'inflight.other', { n }) : '';
+}
+
+function stopPolling() { clearTimeout(S.poll.timer); S.poll.timer = null; }
+
+/** The server keeps going after this page was unloaded: watch /state until it is done, and
+ *  let the pictures appear. Stops at zero, when the page is hidden, and after about ten minutes. */
+function startPolling() {
+  stopPolling();
+  renderInflight();
+  if (!S.poll.since) S.poll.since = Date.now();
+  const tick = async () => {
+    S.poll.timer = null;
+    const extra = S.info ? inflightExtra(S.info, running()) : 0;
+    if (!pollShouldContinue({ extra, elapsedMs: Date.now() - S.poll.since, hidden: document.hidden })) {
+      renderInflight();
+      if (!extra) S.poll.since = 0;
+      return;
+    }
+    try {
+      await reloadState(false);
+      S.images = (await api(`${API}/images`)).images;
+      renderGrid();
+    } catch { /* try again on the next tick */ }
+    renderInflight();
+    S.poll.timer = setTimeout(tick, INFLIGHT_POLL_MS);
+  };
+  S.poll.timer = setTimeout(tick, INFLIGHT_POLL_MS);
+}
+
 // ---------------------------------------------------------------- form
 
 function refreshModelBits() {
@@ -228,6 +346,7 @@ function refreshForm() {
   if (!civ) closeBrowse();
   else if (!S.buzzLoaded) loadBalance();
   scheduleEstimate();
+  scheduleDraftSave();
 }
 
 /** The model control follows the list the provider has:
@@ -1262,7 +1381,7 @@ async function startJob(job) {
 async function reloadState(rebuildProviders = true) {
   S.info = await api(`${API}/state`);
   if (rebuildProviders) renderProviders();
-  renderToday(); renderRecent(); refreshForm();
+  renderToday(); renderRecent(); refreshForm(); renderInflight();
 }
 
 // ---------------------------------------------------------------- build
@@ -1356,7 +1475,10 @@ function build(root) {
   R.go = el('button', { type: 'button', class: 'st-btn st-primary st-go', id: 'st-generate', text: t('generate') });
   // Generate rides in a bar that sticks to the bottom of the form column, so
   // it is always in reach while the form scrolls.
-  R.goBar = el('div', { class: 'st-gobar' }, [R.go]);
+  R.reset = el('button', { type: 'button', class: 'st-btn st-reset', id: 'st-reset', text: t('reset'), title: t('reset.tip') });
+  R.reset.addEventListener('click', resetForm);
+  R.inflight = el('p', { class: 'st-muted st-inflight', role: 'status', 'aria-live': 'polite', hidden: '' });
+  R.goBar = el('div', { class: 'st-gobar' }, [R.go, R.reset]);
   R.cost = el('p', { class: 'st-cost', hidden: '' });
   R.h3Hint = el('p', { class: 'st-muted st-h3hint', hidden: '', text: t('models.h3_hint') });
   R.est = el('p', { class: 'st-cost st-estimate', role: 'status', hidden: '' });
@@ -1386,7 +1508,7 @@ function build(root) {
     R.two,
     R.payRow,
     // The Generate bar is the LAST thing in the form: nothing scrolls under it.
-    R.optimizerRow, R.seedRow, R.refBox, R.h3Hint, R.cost, R.est, R.buzzRow, R.goBar,
+    R.optimizerRow, R.seedRow, R.refBox, R.h3Hint, R.cost, R.est, R.buzzRow, R.inflight, R.goBar,
   ]);
   R.controls.append(R.none, R.form, R.status);
   R.sort = el('select', { id: 'st-sort', class: 'st-sort' }, SORTS.map((v) => el('option', { value: v, text: t(SORT_LABELS[v]) })));
@@ -1428,6 +1550,14 @@ function build(root) {
     se.scrollTop = (se.scrollTop || 0) + ev.deltaY;
   }, { passive: false });
   R.prompt.addEventListener('input', refreshForm);
+  // The form is saved on every change (debounced) and at once when the page is left.
+  R.form.addEventListener('input', scheduleDraftSave);
+  R.form.addEventListener('change', scheduleDraftSave);
+  window.addEventListener('pagehide', saveDraftNow);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { saveDraftNow(); stopPolling(); }
+    else if (S.info && inflightExtra(S.info, running())) startPolling();
+  });
   // Shift/Ctrl/Cmd+Enter = the Generate button, and only while it is enabled.
   R.prompt.addEventListener('keydown', (ev) => {
     if (!isGenerateShortcut(ev)) return;
@@ -1548,6 +1678,14 @@ export async function mount(root = document.getElementById('st-root')) {
     S.images = (await api(`${API}/images`)).images;
     renderGrid();
     refreshForm();
+    // /state answered, so this profile may use Studio and we know its key: only now
+    // is the draft read (never before, never on a 403).
+    S.profileKey = (S.info && S.info.profile_key) || '';
+    S.baseline = serializeDraft(draftForm(), S.info.prompt_max);
+    const draft = S.info.default ? loadDraft() : null;
+    if (draft) applyDraft(draft);
+    S.draftReady = !!draftKey(DRAFT_PREFIX, S.profileKey);
+    if (inflightExtra(S.info, running())) startPolling();
   } catch (e) {
     root.replaceChildren(el('p', { class: 'st-locked', text: refused(e) ? t('locked') : e.message }));
   }

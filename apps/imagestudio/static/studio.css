@@ -73,6 +73,8 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
   border-top: 1px solid var(--border-strong);
 }
 .st-gobar .st-go { flex: 1 1 auto; }
+.st-gobar .st-reset { flex: 0 0 auto; }
+.st-inflight { margin: 6px 0 0; }
 .st-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .st-refprev img { max-width: 140px; max-height: 140px; border-radius: 8px; border: 1px solid var(--border-strong); display: block; }
 .st-picker { border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px; background: var(--bg-secondary, var(--bg-tertiary)); display: flex; flex-direction: column; gap: 8px; }
@@ -134,6 +136,7 @@ body.st-page *, body.st-page *::before, body.st-page *::after { box-sizing: bord
      for the home indicator so the bar is never under it. */
   .st-gobar { padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px)); }
   .st-gobar .st-go { width: 100%; min-height: 44px; }
+  .st-gobar .st-reset { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) { .st-page * { transition: none !important; } }
 /* Results header: title + the sort control (the Job Board's "Sort: [select]"). */

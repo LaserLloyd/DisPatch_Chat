@@ -85,6 +85,9 @@ export const APP_KEYS = [
 // `setItem(SOMETHING_PREFIX + …)` writer against this list.
 export const APP_KEY_PREFIXES = [
   'dispatch-tool-state:',     // tools.js (per-tool layout state bridge)
+  // apps/imagestudio studio.js: the Image Studio form (prompt, provider, model, settings),
+  // one key per profile. Form values only - never a picture or the reference image.
+  'dispatch-imagestudio-draft:',
 ];
 
 export function privacyEnabled() {

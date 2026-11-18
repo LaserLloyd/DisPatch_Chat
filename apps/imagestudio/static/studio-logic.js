@@ -443,3 +443,118 @@ export function keepBrowsePicks(oldProviders, freshProviders) {
     return extra.length ? { ...p, models: [...(p.models || []), ...extra] } : p;
   });
 }
+
+// ---------------------------------------------------------------- the form draft
+//
+// The page lives in a frame the shell unloads whenever Studio is left, so the
+// form is kept on THIS device (localStorage, key `dispatch-imagestudio-draft:<profile key>`,
+// the key coming from GET /state `profile_key`). Form values only: no picture,
+// no data: URL, no reference image (it is not restored). Pure rules here; the
+// page does the reading and writing.
+
+export const DRAFT_VERSION = 1;
+export const DRAFT_MAX_BYTES = 8192;
+/** The form fields a draft may carry, and nothing else. */
+const DRAFT_STRINGS = ['provider', 'model', 'prompt', 'ratio', 'seed'];
+
+/** Whether `key` is a profile key the server hands out (16 hex chars, or the open install's). */
+export function isProfileKey(key) {
+  return typeof key === 'string' && (key === 'install' || /^[0-9a-f]{16}$/.test(key));
+}
+
+/** The localStorage key for a profile's draft, or '' when the key is not a profile key. */
+export function draftKey(prefix, profileKey) {
+  return isProfileKey(profileKey) ? `${prefix}${profileKey}` : '';
+}
+
+const clip = (v, max) => {
+  const s = typeof v === 'string' ? v : (v == null ? '' : String(v));
+  return s.length > max ? s.slice(0, max) : s;
+};
+const isDataUrl = (s) => /^\s*data:/i.test(s);
+
+/** The draft object for a form: only the known fields, bounded, never a data: URL. */
+export function draftFromForm(form, promptMax = PROMPT_MAX) {
+  const f = form || {};
+  const d = {
+    v: DRAFT_VERSION,
+    provider: clip(f.provider, 64), model: clip(f.model, 200),
+    prompt: clip(f.prompt, promptMax), ratio: clip(f.ratio, 16),
+    seed: clip(f.seed, 12),
+    n: Math.trunc(Number(f.n)) || 1, optimizer: !!f.optimizer,
+  };
+  for (const k of DRAFT_STRINGS) if (isDataUrl(d[k])) d[k] = '';
+  return d;
+}
+
+/** The JSON text to store, or '' when there is nothing to store. Over the byte cap the
+ *  prompt is cut until it fits (the other fields are short and bounded). */
+export function serializeDraft(form, promptMax = PROMPT_MAX) {
+  const d = draftFromForm(form, promptMax);
+  let text = JSON.stringify(d);
+  while (text.length > DRAFT_MAX_BYTES && d.prompt) {
+    d.prompt = d.prompt.slice(0, Math.max(0, d.prompt.length - Math.max(64, text.length - DRAFT_MAX_BYTES)));
+    text = JSON.stringify(d);
+  }
+  return text.length > DRAFT_MAX_BYTES ? '' : text;
+}
+
+/** Stored text -> a draft object, or null (missing, junk, another version, oversized). */
+export function parseDraft(text) {
+  if (typeof text !== 'string' || !text || text.length > DRAFT_MAX_BYTES) return null;
+  let o;
+  try { o = JSON.parse(text); } catch { return null; }
+  if (!o || typeof o !== 'object' || Array.isArray(o) || o.v !== DRAFT_VERSION) return null;
+  return draftFromForm(o);
+}
+
+/** What of a draft still fits the page: {provider, model, prompt, ratio, seed, n, optimizer}
+ *  with every piece that does not fit dropped (missing key), the rest kept.
+ *
+ *   ctx = { providers: [{id, configured, models, shape}], ratios: [..], workflowNames: [..] }
+ *
+ *  The provider stays only if it is offered AND usable. A model stays only if that provider
+ *  can take it: the image server's names are checked once its gallery is in (until then
+ *  `workflowNames` is empty and the name is kept for the page's own stale-name rule); a
+ *  provider with a model list takes only names on it (Civitai takes typed ids); a provider
+ *  that lists none takes any. A workflow name never rides to another provider. */
+export function resolveDraft(draft, ctx) {
+  const out = {};
+  if (!draft) return out;
+  const providers = (ctx && ctx.providers) || [];
+  const p = providers.find((x) => x && x.id === draft.provider && x.configured);
+  if (p) {
+    out.provider = p.id;
+    const name = String(draft.model || '').trim();
+    const wf = (ctx && ctx.workflowNames) || [];
+    if (name) {
+      const server = p.id === 'workflows';
+      const models = server ? wf : (p.models || []);
+      const isWorkflow = wf.includes(name);
+      if (!server && isWorkflow) { /* a workflow name never travels */ }
+      else if (server ? (!models.length || models.includes(name))
+        : (p.shape === 'civitai' || !models.length || models.includes(name))) out.model = name;
+    }
+  }
+  if (typeof draft.prompt === 'string' && draft.prompt) out.prompt = draft.prompt;
+  if (((ctx && ctx.ratios) || []).includes(draft.ratio)) out.ratio = draft.ratio;
+  if (typeof draft.seed === 'string' && /^\d{1,10}$/.test(draft.seed)) out.seed = draft.seed;
+  if (Number.isFinite(draft.n) && draft.n >= 1) out.n = draft.n;      // clamped to the model's cap by the page
+  if (draft.optimizer === true) out.optimizer = true;
+  return out;
+}
+
+/** The "N pictures still being made" count that is NOT this page's own running jobs. */
+export function inflightExtra(info, runningHere) {
+  const n = Math.trunc(Number(info && info.in_flight)) || 0;
+  return Math.max(0, n - (Math.trunc(Number(runningHere)) || 0));
+}
+
+export const INFLIGHT_POLL_MS = 4000;
+export const INFLIGHT_POLL_CAP_MS = 10 * 60 * 1000;
+
+/** Keep polling for pictures the server is still making? Stops at zero, when the page
+ *  is hidden, and after the time cap. */
+export function pollShouldContinue({ extra, elapsedMs, hidden }) {
+  return extra > 0 && !hidden && elapsedMs < INFLIGHT_POLL_CAP_MS;
+}
