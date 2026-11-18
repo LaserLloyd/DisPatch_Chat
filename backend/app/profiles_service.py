@@ -673,6 +673,7 @@ def wipe_profile_content(profile_id: str) -> dict[str, int]:
         _unlink(Path(config.DATA_DIR) / "apps-data" / "imagestudio" / f"last-{profile_id}.json")
         if profile_id == ownership.protected_admin_id():
             _unlink(Path(config.DATA_DIR) / "apps-data" / "imagestudio" / "prompts.json")
+            _unlink(Path(config.DATA_DIR) / "apps-data" / "imagestudio" / "last.json")
         # Bots last: their chats are already gone, so nothing points at a vanished bot.
         removed = []
         for b in bots:

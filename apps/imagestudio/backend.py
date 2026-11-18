@@ -256,7 +256,7 @@ _PROMPTS_LOCK = threading.Lock()
 
 # ---- the last generation: what the form held when this profile last pressed Generate -- #
 # One small file per profile (``last-<profile id>.json``; ``last.json`` without an owner),
-# written when a generate request passes its checks. GET /last reads only the caller's own.
+# written when a generate request passes its checks and is admitted (a refused one is not). GET /last reads only the caller's own.
 # Form settings only: never a picture, the reference image or a data: URL.
 
 LAST_VERSION = 1
@@ -729,6 +729,8 @@ async def _generate_server(body: GenerateIn, prompt: str, ratio: str,
     refusal = _take_slot(owner)
     if refusal:
         raise HTTPException(429, refusal)
+    # Admitted: these are now the last generation's settings.
+    await asyncio.to_thread(_remember_last, body, prompt, SERVER_PROVIDER_ID, ratio, owner)
     try:
         blobs = await _render_server(prompt, workflow, ratio)
         rows = await asyncio.to_thread(
@@ -996,7 +998,6 @@ def build(ctx):
     async def generate(body: GenerateIn, request: Request):
         prompt = _check_prompt(body.prompt)
         pid, res, ratio = await _pick(body, request)
-        await asyncio.to_thread(_remember_last, body, prompt, pid, ratio, _owner_of(request))
         if pid == SERVER_PROVIDER_ID:
             return await _generate_server(body, prompt, ratio, request)
         _check_length(prompt, res)
@@ -1011,6 +1012,7 @@ def build(ctx):
         refusal = _take_slot(owner)
         if refusal:
             raise HTTPException(429, refusal)
+        await asyncio.to_thread(_remember_last, body, prompt, pid, ratio, owner)   # admitted
         try:
             spec = image_jobs.ImageSpec(prompt=prompt, ratio=ratio, backend="api")
             try:

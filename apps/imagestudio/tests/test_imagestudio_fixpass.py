@@ -282,3 +282,14 @@ def test_last_generation_needs_a_signed_in_profile_that_may_use_studio(world, mo
     _server_world(world, monkeypatch)
     anon = world.client()
     assert anon.get(BASE + "/last").status_code in (401, 403)
+
+
+def test_a_refused_generate_does_not_replace_the_last_generation(world, monkeypatch):
+    import dispatch_app_imagestudio as studio
+    owner, _ = _server_world(world, monkeypatch)
+    assert owner.post(f"{BASE}/generate", json={"prompt": "kept", "provider": "workflows",
+                                                "model": "wf-a", "ratio": "1:1", "n": 1}).status_code == 200
+    monkeypatch.setattr(studio, "_take_slot", lambda owner: "too many at once")
+    assert owner.post(f"{BASE}/generate", json={"prompt": "refused", "provider": "workflows",
+                                                "model": "wf-b", "ratio": "1:1", "n": 1}).status_code == 429
+    assert owner.get(BASE + "/last").json()["last"]["prompt"] == "kept"

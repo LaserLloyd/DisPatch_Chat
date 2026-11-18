@@ -90,6 +90,8 @@ export const APP_KEY_PREFIXES = [
   // apps/imagestudio studio.js: the Image Studio form (prompt, provider, model, settings),
   // one key per profile. Form values only - never a picture or the reference image.
   'dispatch-imagestudio-draft:',
+  // apps/imagestudio studio.js: "Not now" on the Reload last generation bar (a timestamp), per profile.
+  'dispatch-imagestudio-last-dismissed:',
 ];
 
 export function privacyEnabled() {

@@ -76,8 +76,9 @@ const PAY_KEY = 'dispatch-imagestudio-pay';
 // Form values only: never a picture, a data: URL or the reference image.
 const DRAFT_PREFIX = 'dispatch-imagestudio-draft:';
 const DRAFT_SAVE_MS = 400;
-// "Not now" on the Reload-last bar, per profile, for this tab: the dismissed record's time.
-// The bar comes back once a newer generation exists (its time differs).
+// "Not now" on the Reload-last bar, per profile, on this device: the dismissed record's time.
+// The bar comes back once a newer generation exists (its time differs). privacy.js
+// APP_KEY_PREFIXES wipes the family.
 const LAST_DISMISS_PREFIX = 'dispatch-imagestudio-last-dismissed:';
 const PAY_LABELS = { '': 'pay.auto', blue: 'pay.blue', yellow: 'pay.yellow' };
 const TYPE_LABELS = { blue: 'buzz.type_blue', yellow: 'buzz.type_yellow' };
@@ -248,23 +249,30 @@ function resetForm() {
 
 function lastDismissed() {
   if (!S.last || !S.profileKey) return false;
-  try { return sessionStorage.getItem(LAST_DISMISS_PREFIX + S.profileKey) === String(S.last.at); } catch { return false; }
+  try { return localStorage.getItem(LAST_DISMISS_PREFIX + S.profileKey) === String(S.last.at); } catch { return false; }
 }
 
-/** The bar at the top of the form, and the Reload last button beside Reset. */
-function renderLast() {
+/** The bar at the top of the form, and the Reload last button beside Reset. The bar is
+ *  OFFERED only when Studio opens (`offer`); later form edits may only take it away (once
+ *  the form is the last generation again), never bring it up under the user's typing. */
+function renderLast({ offer = false } = {}) {
   if (!R.lastBar) return;
   const has = !!lastToDraft(S.last);
   R.reloadLast.disabled = !has;
-  const show = has && S.draftReady && lastDiffers(S.last, draftForm()) && !lastDismissed();
-  R.lastBar.hidden = !show;
-  R.lastPreview.textContent = show ? lastPreview(S.last) : '';
-  if (show) R.lastPreview.title = S.last.prompt;
+  const differs = has && lastDiffers(S.last, draftForm());
+  if (offer) {
+    const show = differs && S.draftReady && !lastDismissed();
+    R.lastBar.hidden = !show;
+    R.lastPreview.textContent = show ? lastPreview(S.last) : '';
+    if (show) R.lastPreview.title = S.last.prompt;
+  } else if (!differs) {
+    R.lastBar.hidden = true;
+  }
 }
 
 async function loadLast() {
   try { S.last = (await api(`${API}/last`)).last || null; } catch { S.last = null; }
-  renderLast();
+  renderLast({ offer: true });
 }
 
 /** Put every setting of the last generation back on the form (nothing starts). */
@@ -285,7 +293,7 @@ function reloadLast() {
 
 function dismissLast() {
   if (S.last && S.profileKey) {
-    try { sessionStorage.setItem(LAST_DISMISS_PREFIX + S.profileKey, String(S.last.at)); } catch { /* the bar just hides for now */ }
+    try { localStorage.setItem(LAST_DISMISS_PREFIX + S.profileKey, String(S.last.at)); } catch { /* the bar just hides for now */ }
   }
   R.lastBar.hidden = true;
 }

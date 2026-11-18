@@ -1842,6 +1842,31 @@ test('Reload last generation: the bar shows when the form differs, Reload fills 
   assert.equal(JSON.parse(env.win.localStorage.getItem(DKEY(PK_A))).prompt, 'a red fox in the snow', 'and it is the saved draft now');
 });
 
+test('Reload last: typing after a Reload never brings the bar back over the prompt', { skip: dom.skip }, async () => {
+  const { doc, win } = await page({ state: { ...STATE, profile_key: PK_A }, extra: lastRoute(LAST) });
+  await flush();
+  doc.getElementById('st-last-reload').click();
+  const box = doc.getElementById('st-prompt');
+  box.value = 'a red fox in the snow, at night';
+  box.dispatchEvent(new win.Event('input', { bubbles: true }));
+  assert.equal(doc.getElementById('st-lastbar').hidden, true);
+});
+
+test('Reload last: Not now is remembered on this device for that record', { skip: dom.skip }, async () => {
+  const a = await page({ state: { ...STATE, profile_key: PK_A }, extra: lastRoute(LAST) });
+  await flush();
+  a.doc.getElementById('st-last-dismiss').click();
+  assert.equal(a.win.localStorage.getItem(`dispatch-imagestudio-last-dismissed:${PK_A}`), String(LAST.at));
+  const b = await page({ state: { ...STATE, profile_key: PK_A }, extra: lastRoute(LAST),
+    store: { [`dispatch-imagestudio-last-dismissed:${PK_A}`]: String(LAST.at) } });
+  await flush();
+  assert.equal(b.doc.getElementById('st-lastbar').hidden, true, 'not offered again for the same generation');
+  const c = await page({ state: { ...STATE, profile_key: PK_A }, extra: lastRoute({ ...LAST, at: LAST.at + 60 }),
+    store: { [`dispatch-imagestudio-last-dismissed:${PK_A}`]: String(LAST.at) } });
+  await flush();
+  assert.equal(c.doc.getElementById('st-lastbar').hidden, false, 'a newer generation is offered again');
+});
+
 test('Reload last: Not now hides the bar; the button beside Reset still reloads', { skip: dom.skip }, async () => {
   const { doc } = await page({ state: { ...STATE, profile_key: PK_A }, extra: lastRoute(LAST) });
   await flush();
