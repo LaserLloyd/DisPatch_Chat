@@ -1784,6 +1784,19 @@ test('an invalid provider is dropped, the prompt still restores', { skip: dom.sk
   assert.equal(doc.getElementById('st-prompt').value, 'keep me');
 });
 
+test('a draft that could not be put back in full is kept as stored until the user edits', { skip: dom.skip }, async () => {
+  const bad = JSON.stringify({ v: 1, provider: 'xai', model: 'grok-pic', prompt: 'keep me', ratio: '1:1', seed: '', n: 1, optimizer: false });
+  const env = await page({ state: { ...STATE, profile_key: PK_A }, store: { [DKEY(PK_A)]: bad } });
+  const { doc, win } = env;
+  win.dispatchEvent(new win.Event('pagehide'));
+  assert.equal(win.localStorage.getItem(DKEY(PK_A)), bad, 'opening and leaving the page keeps the stored provider and model');
+  const box = doc.getElementById('st-prompt');
+  box.value = 'keep me, edited';
+  box.dispatchEvent(new win.Event('input', { bubbles: true }));
+  win.dispatchEvent(new win.Event('pagehide'));
+  assert.equal(JSON.parse(win.localStorage.getItem(DKEY(PK_A))).prompt, 'keep me, edited', 'an edit saves the form as it is');
+});
+
 test('typing saves under the profile key, the Reset button clears it and the form', { skip: dom.skip }, async () => {
   const env = await page({ state: { ...STATE, profile_key: PK_A } });
   const { doc, win } = env;

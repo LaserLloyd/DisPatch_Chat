@@ -60,6 +60,7 @@ const S = {
   viewer: null,             // the picture viewer of this page (only outside the shell)
   profileKey: '',           // GET /state profile_key: the draft is read and written under it, only once /state answered
   draftReady: false,        // the draft was applied: from now on the form is saved
+  draftDirty: false,        // the user changed the form here: only then is a draft written
   baseline: '',             // the form's serialised defaults: a form equal to it stores no draft
   poll: { timer: null, since: 0 },   // pictures the server is still making (not started by this page)
 };
@@ -180,7 +181,10 @@ function scheduleDraftSave() {
 /** Write the form (or drop the draft when the form is just the defaults). Never throws. */
 function saveDraftNow() {
   clearTimeout(draftTimer);
-  if (!S.draftReady || !R.prompt) return;
+  // Nothing the user did yet: keep what is stored. A draft that could not be put
+  // back in full (its provider is off for now) must not be cut down or wiped by a
+  // page that merely opened.
+  if (!S.draftReady || !S.draftDirty || !R.prompt) return;
   const key = draftKey(DRAFT_PREFIX, S.profileKey);
   if (!key) return;
   const text = serializeDraft(draftForm(), S.info ? S.info.prompt_max : PROMPT_MAX);
@@ -219,6 +223,7 @@ function applyDraft(draft) {
 /** Reset: the draft goes and the form returns to what a fresh page shows. */
 function resetForm() {
   S.draftReady = false;
+  S.draftDirty = false;
   clearTimeout(draftTimer);
   try { localStorage.removeItem(DRAFT_PREFIX + S.profileKey); } catch { /* nothing stored */ }
   if (S.info && S.info.default) R.provider.value = S.info.default;
@@ -255,7 +260,7 @@ function startPolling() {
     const extra = S.info ? inflightExtra(S.info, running()) : 0;
     if (!pollShouldContinue({ extra, elapsedMs: Date.now() - S.poll.since, hidden: document.hidden })) {
       renderInflight();
-      if (!extra) S.poll.since = 0;
+      S.poll.since = 0;      // a later restart (the page shown again) gets a fresh window
       return;
     }
     try {
@@ -1551,11 +1556,17 @@ function build(root) {
   }, { passive: false });
   R.prompt.addEventListener('input', refreshForm);
   // The form is saved on every change (debounced) and at once when the page is left.
-  R.form.addEventListener('input', scheduleDraftSave);
-  R.form.addEventListener('change', scheduleDraftSave);
+  const userEdit = () => { S.draftDirty = true; scheduleDraftSave(); };
+  R.form.addEventListener('input', userEdit);
+  R.form.addEventListener('change', userEdit);
+  // A workflow tile, a listed model or a recent prompt is picked by a click, not an input.
+  R.form.addEventListener('click', (ev) => {
+    const tgt = ev.target;
+    if (tgt && tgt.closest && (tgt.closest('[data-name]') || R.modelList.contains(tgt) || R.recentWrap.contains(tgt))) userEdit();
+  });
   window.addEventListener('pagehide', saveDraftNow);
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { saveDraftNow(); stopPolling(); }
+    if (document.hidden) { saveDraftNow(); stopPolling(); S.poll.since = 0; }
     else if (S.info && inflightExtra(S.info, running())) startPolling();
   });
   // Shift/Ctrl/Cmd+Enter = the Generate button, and only while it is enabled.
