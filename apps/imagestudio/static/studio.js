@@ -1562,7 +1562,9 @@ function build(root) {
   // A workflow tile, a listed model or a recent prompt is picked by a click, not an input.
   R.form.addEventListener('click', (ev) => {
     const tgt = ev.target;
-    if (tgt && tgt.closest && (tgt.closest('[data-name]') || R.modelList.contains(tgt) || R.recentWrap.contains(tgt))) userEdit();
+    // Real picks only: a workflow tile or listed model (both carry data-name) or a recent
+    // prompt - never opening the Recent list or a click on empty space.
+    if (tgt && tgt.closest && tgt.closest('button[data-name], button.st-recent')) userEdit();
   });
   window.addEventListener('pagehide', saveDraftNow);
   document.addEventListener('visibilitychange', () => {
