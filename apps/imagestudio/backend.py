@@ -215,6 +215,16 @@ def _owner_of(request: Request) -> str | None:
     return ownership.for_request(request)
 
 
+def _profile_key(owner: str | None) -> str:
+    """A short, non-reversible id of the caller's profile. The page keys its device-local
+    form draft by it, so one profile's draft is never read under another on a shared
+    device. No owner (an open install, a machine) is the fixed ``install`` key."""
+    if not owner:
+        return "install"
+    import hashlib
+    return hashlib.sha256(("imagestudio-draft:" + owner).encode()).hexdigest()[:16]
+
+
 def _mine(rows: list[dict], request: Request) -> list[dict]:
     """The rows the caller may see: its own (``ownership.may_see_thread`` semantics - a row
     with no owner is the protected Admin's; an open install sees all)."""
@@ -880,6 +890,7 @@ def build(ctx):
             "prompts": await asyncio.to_thread(_recent_prompts, _owner_of(request)),
             "busy": bool(_inflight),
             "in_flight": _inflight.get(_owner_of(request) or "", 0), "max_in_flight": MAX_PER_PROFILE,
+            "profile_key": _profile_key(_owner_of(request)),
             # "Clear from here down" is offered only to a profile that may delete.
             "can_clear": policy.of(request).can("manage_history"),
             # The empty state's "Set up image generation" opens Settings -> AI & Connections;

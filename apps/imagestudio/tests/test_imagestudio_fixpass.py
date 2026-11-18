@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from types import SimpleNamespace
 
 import httpx
@@ -205,3 +206,25 @@ def test_l6_ids_generate_would_refuse_are_not_in_the_datalist(env, monkeypatch):
     c = _unlocked(env)
     row = next(p for p in c.get(BASE + "/state").json()["providers"] if p["id"] == "custom")
     assert "ok-model" in row["models"] and long_id not in row["models"] and "a@b" not in row["models"]
+
+
+# ---- device-local draft: the page keys it by this ---------------------------- #
+
+def test_state_carries_a_stable_per_profile_key(world):
+    owner = world.create_owner()
+    world.person(owner, "Ada", "admin", password="pw-pass-1234")  # scrub-ok: throwaway test password
+    ada = world.client()
+    assert world.login(ada, name="Ada", password="pw-pass-1234").status_code == 200  # scrub-ok: throwaway test password
+    k_owner = owner.get(BASE + "/state").json()["profile_key"]
+    k_ada = ada.get(BASE + "/state").json()["profile_key"]
+    assert re.fullmatch(r"[0-9a-f]{16}", k_owner) and re.fullmatch(r"[0-9a-f]{16}", k_ada)
+    assert k_owner != k_ada, "two profiles must never share a draft"
+    assert owner.get(BASE + "/state").json()["profile_key"] == k_owner, "stable across calls"
+    assert ada.get(BASE + "/state").json()["profile_key"] == k_ada
+
+
+def test_profile_key_for_no_owner_is_fixed_and_hides_the_id(world):
+    import dispatch_app_imagestudio as b
+    assert b._profile_key(None) == "install" and b._profile_key("") == "install"
+    k = b._profile_key("abc123")
+    assert "abc123" not in k and k == b._profile_key("abc123") and len(k) == 16
