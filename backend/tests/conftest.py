@@ -65,6 +65,14 @@ def _keep_path(path, basetemp) -> bool:
 from app import config as config_module
 from app import openclaw
 
+if _IMPORT_DATA_DIR is not None:
+    # config.DATA_DIR is bound now. Undo the export so no test or subprocess inherits it, and
+    # keep the import-time chats.db REFUSED, as it was when that path was the real install's:
+    # a test that forgets its own Database must fail loudly, not share one run-wide file.
+    from app import accounts as _accounts_mod
+    _accounts_mod.IMPORT_DB_EXPLICIT = False
+    os.environ.pop("DISPATCH_DATA_DIR", None)
+
 # --------------------------------------------------------------------------- #
 # No test ever opens the real install's database (fail closed, whole session).
 #
