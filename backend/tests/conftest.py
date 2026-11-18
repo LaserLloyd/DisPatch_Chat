@@ -40,6 +40,27 @@ if "DISPATCH_DATA_DIR" not in os.environ and "LOCAL_CHAT_DATA_DIR" not in os.env
     _IMPORT_DATA_DIR = tempfile.mkdtemp(prefix="dispatch-test-import-data-")
     atexit.register(shutil.rmtree, _IMPORT_DATA_DIR, ignore_errors=True)
     os.environ["DISPATCH_DATA_DIR"] = _IMPORT_DATA_DIR
+else:
+    _IMPORT_DATA_DIR = None
+
+
+def _keep_path(path, basetemp) -> bool:
+    """May a test keep ``path`` as it is? Only when it is disposable AND not under the
+    import-time data dir above: that one is a single directory the whole run shares
+    (in /tmp, so ``is_disposable`` alone would say yes), so every import-time path in
+    it is still moved to the test's own tmp dir, exactly as a live-dir path is."""
+    from pathlib import Path
+
+    from _tmpguard import is_disposable
+    if not is_disposable(path, basetemp):
+        return False
+    if _IMPORT_DATA_DIR is None:
+        return True
+    try:
+        p, root = Path(path).resolve(), Path(_IMPORT_DATA_DIR).resolve()
+    except OSError:
+        return False
+    return not (p == root or root in p.parents)
 
 from app import config as config_module
 from app import openclaw
@@ -354,7 +375,7 @@ def _accounts_and_auth_state(tmp_path, tmp_path_factory, monkeypatch):
     for name, fname in (("SECURITY_PATH", "security.yaml"), ("RECOVERY_PATH", "RECOVERY-CODE.txt"),
                         ("TRUSTED_PATH", "trusted-devices.yaml"),
                         ("SETUP_TOKEN_PATH", "SETUP-TOKEN.txt")):
-        if not is_disposable(getattr(auth, name), tmp_path_factory.getbasetemp()):
+        if not _keep_path(getattr(auth, name), tmp_path_factory.getbasetemp()):
             monkeypatch.setattr(auth, name, base / fname)
     accounts.reset_for_tests()
     auth._cache = None
@@ -407,16 +428,16 @@ def _no_writes_outside_tmp(tmp_path, tmp_path_factory, monkeypatch):
     # still monkeypatches DATA_DIR itself; this only decides where an
     # UNCONFIGURED test lands, and "somewhere disposable" beats "the family's
     # chat history".
-    if not is_disposable(_config.DATA_DIR, basetemp):
+    if not _keep_path(_config.DATA_DIR, basetemp):
         monkeypatch.setattr(_config, "DATA_DIR", tmp_path / "data")
-    if not is_disposable(_config.AVATAR_DIR, basetemp):
+    if not _keep_path(_config.AVATAR_DIR, basetemp):
         monkeypatch.setattr(_config, "AVATAR_DIR", tmp_path / "avatars")
     # CONFIG_PATH is computed from DATA_DIR at IMPORT time, so moving DATA_DIR
     # alone leaves it on the live config.yaml: a test whose own fixture forgot
     # it (turn_env-style) and called config.upsert_bot() rewrote the family
     # app's bot roster (2026-10-12: the live advisor block was replaced by a
     # test fixture's). Follow DATA_DIR unless the test already chose a path.
-    if not is_disposable(_config.CONFIG_PATH, basetemp):
+    if not _keep_path(_config.CONFIG_PATH, basetemp):
         monkeypatch.setattr(_config, "CONFIG_PATH", _config.DATA_DIR / "config.yaml")
         _config._invalidate_bots_cache()
     # Same import-time binding for the blob stores and the backup dir. Left on
@@ -426,7 +447,7 @@ def _no_writes_outside_tmp(tmp_path, tmp_path_factory, monkeypatch):
     # gateway's SQLite worker down with it).
     for name, sub in (("MEDIA_DIR", "media"), ("FILES_DIR", "files"),
                       ("BACKUP_DIR", "backups")):
-        if not is_disposable(getattr(_config, name), basetemp):
+        if not _keep_path(getattr(_config, name), basetemp):
             monkeypatch.setattr(_config, name, _config.DATA_DIR / sub)
     (tmp_path / "data").mkdir(parents=True, exist_ok=True)
     (tmp_path / "avatars").mkdir(parents=True, exist_ok=True)
@@ -453,14 +474,14 @@ def _no_writes_outside_tmp(tmp_path, tmp_path_factory, monkeypatch):
     # bound hooks at this test's data dir and drop the cached ledger/indexes.
     from app import advisor as _advisor
     from app import knowledge as _knowledge
-    if _advisor._hooks is not None and not is_disposable(_advisor._hooks.data_dir,
+    if _advisor._hooks is not None and not _keep_path(_advisor._hooks.data_dir,
                                                          basetemp):
         monkeypatch.setattr(_advisor._hooks, "data_dir", _config.DATA_DIR)
-    if _advisor._ledger is not None and not is_disposable(_advisor._ledger.path,
+    if _advisor._ledger is not None and not _keep_path(_advisor._ledger.path,
                                                           basetemp):
         monkeypatch.setattr(_advisor, "_ledger", None)
     for key, idx in list(_advisor._indexes.items()):
-        if not is_disposable(idx.db_path, basetemp):
+        if not _keep_path(idx.db_path, basetemp):
             _advisor._indexes.pop(key, None)
 
     # ...and fail LOUDLY if anything still opens an advisor ledger or a
