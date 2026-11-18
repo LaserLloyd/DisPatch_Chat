@@ -1422,7 +1422,9 @@ function paintReturnChip() {
   const tool = sidelined && openId ? findTool(openId) : null;
   chip.hidden = !tool;
   const txt = chip.querySelector('.tool-return-text');
-  if (txt) txt.textContent = tool ? t('tools.back_to', { title: toolTitle(tool) }) : '';
+  const label = tool ? t('tools.back_to', { title: toolTitle(tool) }) : '';
+  if (txt) txt.textContent = label;
+  if (label) { chip.setAttribute('title', label); chip.setAttribute('aria-label', label); }
 }
 
 /** Phone: show the chat and keep the tool loaded behind it. */

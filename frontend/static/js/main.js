@@ -90,7 +90,7 @@ import {
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen, findTool, toolGlyph, registerExtTiles, isExtFeature,
   openToolsMenu, toolsMenuOpen, groupFor,
-} from './tools.js?v=25';
+} from './tools.js?v=26';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp, api as appApi } from './app-sdk.js?v=7';
