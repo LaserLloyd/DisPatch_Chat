@@ -90,7 +90,7 @@ import {
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen, findTool, toolGlyph, registerExtTiles, isExtFeature,
   openToolsMenu, toolsMenuOpen, groupFor,
-} from './tools.js?v=24';
+} from './tools.js?v=25';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp, api as appApi } from './app-sdk.js?v=7';
@@ -4051,8 +4051,9 @@ async function selectBot(id) {
   // through tools.js, which routes builtins back to their own openers.
   if (isToolId(id)) { openTool(id); return; }
   // Leaving a tool pane for a real bot tears the view down cleanly - except the
-  // split view, where the tool stays beside the chat (its frame is not reloaded).
-  closeToolPanes(toolSplitActive() ? 'tool' : undefined);
+  // split view, where the tool stays beside the chat, and a tool parked behind the
+  // chat on a phone (its chip brings it back); neither frame is reloaded.
+  closeToolPanes(toolSplitActive() || toolParked() ? 'tool' : undefined);
   state.selectedBotId = id;
   state.threadsView = 'chats';
   paintArchivedButton();

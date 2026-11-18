@@ -1259,6 +1259,7 @@ export function closeTool({ restore = true } = {}) {
   if (splitOn) rememberPrev();
   openId = null;
   sidelined = false;
+  parking = false;
   teardown();
   resetSplitDom();
   paintReturnChip();
@@ -1282,6 +1283,7 @@ let splitRatio = null;       // the tool's share, read once
 let splitOn = false;         // the split layout is on screen right now
 let splitNoList = false;     // ...with the thread list hidden for it (narrow windows)
 let sidelined = false;       // phone: tool parked behind the chat, frame still loaded
+let parking = false;         // parkTool() sent the phone to the Bots page: that arrival must not end the tool
 let splitRaf = 0;
 
 const prefOn = () => { if (splitPref === null) splitPref = readPref(); return splitPref; };
@@ -1433,7 +1435,12 @@ function parkTool() {
   document.body.classList.remove('tool-full');
   deps.restoreView(prev, { stay: true });
   paintReturnChip();
-  deps.navigate(!st.selectedBotId ? 'bots' : st.activeThreadId ? 'chat' : 'threads');
+  // No chat to show yet: the Bots page, to pick one. That page ends a parked tool
+  // when the user goes there (closeParkedTool), but not on this way in. The view
+  // change can land later (a history pop), so the next Bots arrival is skipped once.
+  const to = !st.selectedBotId ? 'bots' : st.activeThreadId ? 'chat' : 'threads';
+  parking = to === 'bots';
+  deps.navigate(to);
 }
 
 /** Phone: bring the sidelined tool back (the frame never went away). */
@@ -1441,6 +1448,7 @@ function unparkTool() {
   if (!deps || !openId || !sidelined) return;
   const tool = findTool(openId);
   sidelined = false;
+  parking = false;
   rememberPrev();
   const view = $('tool-view');
   if (view) view.classList.remove('hidden');
@@ -1458,6 +1466,7 @@ function unparkTool() {
 
 /** main.js: the phone went home (Bots page) - a sidelined tool ends there. */
 export function closeParkedTool() {
+  if (parking) { parking = false; return; }
   if (sidelined && openId) closeTool({ restore: false });
 }
 

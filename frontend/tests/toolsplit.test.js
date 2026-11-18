@@ -133,7 +133,7 @@ test('wiring: the toggle and the divider exist with their aria, and the pins are
   assert.match(read('sw.js'), /'\/static\/js\/toolsplit\.js'/);
   assert.match(read('js/tools.js'), /from '\.\/toolsplit\.js\?v=1'/);
   const main = read('js/main.js');
-  assert.match(main, /closeToolPanes\(toolSplitActive\(\) \? 'tool' : undefined\)/, 'picking another chat keeps the tool');
+  assert.match(main, /closeToolPanes\(toolSplitActive\(\) \|\| toolParked\(\) \? 'tool' : undefined\)/, 'picking another chat keeps a split or parked tool');
   // frame security is unchanged: an app's origin + source checks stay
   const tools = read('js/tools.js');
   assert.match(tools, /ev\.origin !== location\.origin \|\| ev\.source !== frame\.contentWindow/);
@@ -179,4 +179,12 @@ test('thread key: an id round-trips in sessionStorage, junk is refused, a blocke
     assert.equal(S.writeThread('ok'), false);
     S.clearThread();
   } finally { delete globalThis.sessionStorage; }
+});
+
+test('phone park with no chat open: the Bots page it lands on does not end the tool', () => {
+  const tools = read('js/tools.js');
+  const park = /function parkTool\(\)[\s\S]*?\n\}/.exec(tools)[0];
+  assert.match(park, /parking = to === 'bots';/, 'parkTool marks its own trip to the Bots page');
+  const close = /export function closeParkedTool\(\)[\s\S]*?\n\}/.exec(tools)[0];
+  assert.match(close, /if \(parking\) \{ parking = false; return; \}/, 'that one arrival is skipped, later ones close');
 });
