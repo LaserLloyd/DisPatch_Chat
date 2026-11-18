@@ -27,6 +27,20 @@ os.environ.setdefault("DISPATCH_SECRET_STORE", "file")
 os.environ.setdefault("DISPATCH_ATLAS_GUIDES", "0")
 os.environ.setdefault("DISPATCH_RELEASE_NOTES", "0")
 
+# Importing app.main also mounts every TRUSTED data-dir app (tools.yaml `kind: app`) at IMPORT time,
+# before any fixture can redirect config.DATA_DIR. On a machine with a real install that mounted the
+# operator's own apps (riglink, lloydbench...) into every test: their routes failed the route-table
+# policy checks and their bots showed up in the roster. Point the import-time DATA_DIR at an empty
+# throwaway directory so the suite sees only the repo's own apps; the per-test fixtures below still
+# move DATA_DIR to each test's tmp_path. An explicit DISPATCH_DATA_DIR / LOCAL_CHAT_DATA_DIR wins.
+if "DISPATCH_DATA_DIR" not in os.environ and "LOCAL_CHAT_DATA_DIR" not in os.environ:
+    import atexit
+    import shutil
+    import tempfile
+    _IMPORT_DATA_DIR = tempfile.mkdtemp(prefix="dispatch-test-import-data-")
+    atexit.register(shutil.rmtree, _IMPORT_DATA_DIR, ignore_errors=True)
+    os.environ["DISPATCH_DATA_DIR"] = _IMPORT_DATA_DIR
+
 from app import config as config_module
 from app import openclaw
 
