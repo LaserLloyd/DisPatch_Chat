@@ -160,7 +160,7 @@
        and fetches ui-theme/locales/<lang>.json only if asked to. -->
   <link rel="stylesheet" href="/static/ui-theme/ui-components.css" />
   <link rel="stylesheet" href="/static/theme.css?v=8" />
-  <link rel="stylesheet" href="/static/app.css?v=125" />
+  <link rel="stylesheet" href="/static/app.css?v=126" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <link rel="stylesheet" href="/static/tasks.css?v=4" />
   <link rel="stylesheet" href="/static/w5.css?v=4" />
@@ -331,6 +331,7 @@
           <div class="ch-title" id="ch-title" dir="auto" data-i18n="chat.select">Select a chat</div>
           <div class="muted ch-sub" id="ch-sub" dir="auto"></div>
         </div>
+        <button class="btn-secondary tool-return" id="tool-return" type="button" hidden><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#arrow-left"/></svg> <span class="tool-return-text"></span></button>
         <span class="conn-dot reconnecting" id="conn-dot" role="img" title="Connecting…" aria-label="Connection status" data-i18n-attr="title=conn.connecting;aria-label=conn.aria"></span>
         <span class="model-pill" id="ch-model" hidden></span>
         <!-- Per-thread model/thinking override chip. The label shows "model · used/window"; a refusal from the
@@ -683,6 +684,7 @@
             <div class="muted terminal-subtitle" id="tool-updated" aria-live="polite"></div>
           </div>
           <button class="btn-secondary tool-refresh hidden" id="tool-refresh" type="button" title="Regenerate this page now" data-i18n-attr="title=tools.refresh_title"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#refresh-cw"/></svg> <span data-i18n="tools.refresh">Refresh</span></button>
+          <button class="icon-btn ghost tool-split" id="tool-split" type="button" aria-pressed="false" title="Split with chat" aria-label="Split with chat" data-i18n-attr="title=tools.split;aria-label=tools.split"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#messages-square"/></svg><span class="tool-split-label" aria-hidden="true">Chat</span></button>
           <a class="icon-btn ghost" id="tool-open" href="#" target="_blank" rel="noopener noreferrer" title="Open in a new tab" aria-label="Open in a new tab" data-i18n-attr="title=tools.open_tab;aria-label=tools.open_tab"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#external-link"/></svg></a>
           <button class="icon-btn ghost" id="tool-close" type="button" title="Close tool" aria-label="Close tool" data-i18n-attr="title=tools.close;aria-label=tools.close"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#x"/></svg></button>
         </header>
@@ -698,6 +700,9 @@
           </div>
         </div>
       </div>
+      <!-- Split view: the draggable divider between the chat and the tool pane
+           (js/tools.js + js/toolsplit.js). Shown only while body.tool-split. -->
+      <div class="tool-split-divider" id="tool-split-divider" role="separator" aria-orientation="vertical" aria-label="Resize chat and tool" data-i18n-attr="aria-label=tools.divider" aria-valuemin="320" aria-valuemax="320" aria-valuenow="320" tabindex="0" hidden></div>
     </section>
 
   </div>
@@ -1282,6 +1287,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=187"></script>
+  <script type="module" src="/static/js/main.js?v=188"></script>
 </body>
 </html>

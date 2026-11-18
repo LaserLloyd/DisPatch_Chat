@@ -2332,6 +2332,39 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   body.tool-full .app.tl-collapsed { grid-template-columns: var(--sidebar-width) 1fr; }
   body.tool-full .threadlist { display: none; }
 }
+/* Split view (js/tools.js + js/toolsplit.js): `tool-split` on <body> instead of
+   `tool-full` keeps the thread list and the real chat. The chat column gives up
+   the inline-end part of itself (padding) to the tool pane, which stays where it
+   always was in the DOM - so its frame is never moved or reloaded - and the
+   divider sits on the seam. --tool-split-w is the pane's width, set by js. */
+.tool-split-divider { display: none; }
+@media (min-width: 769px) {
+  body.tool-split #chatview { padding-inline-end: calc(var(--tool-split-w, 50%) + 10px); box-sizing: border-box; }
+  body.tool-split #chatview > .tool-view.split {
+    inset-inline-start: auto; inset-inline-end: 0;
+    width: var(--tool-split-w, 50%);
+  }
+  body.tool-split .tool-split-divider {
+    display: block; position: absolute; z-index: 6; inset-block: 0;
+    inset-inline-end: var(--tool-split-w, 50%);
+    width: 10px; cursor: col-resize; touch-action: none;
+    background: transparent;
+  }
+  body.tool-split .tool-split-divider::before {
+    content: ""; position: absolute; inset-block: 0; inset-inline-start: 4px; width: 2px;
+    background: var(--border-strong); transition: background .12s;
+  }
+  body.tool-split .tool-split-divider:hover::before,
+  body.tool-split .tool-split-divider:focus-visible::before,
+  body.tool-split-dragging .tool-split-divider::before { background: var(--accent); }
+  body.tool-split .tool-split-divider:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  body.tool-split-dragging { user-select: none; cursor: col-resize; }
+  body.tool-split-dragging .tool-frame { pointer-events: none; }
+}
+.tool-split[aria-pressed="true"] { background: var(--bg-hover); color: var(--accent); }
+.tool-split-label { display: none; }
+.tool-return { padding: 4px 10px; white-space: nowrap; flex: 0 0 auto; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.tool-return[hidden] { display: none; }
 /* If a phone user does open the Chats tab mid-tool, the list shows the tool's
    placeholder — hide the per-bot chrome (stale avatar, new/search/collapse)
    that means nothing for a page with no chats. */
@@ -4345,6 +4378,9 @@ body.tools-sheet-open::after {
   .tool-view .terminal-head > .icon-btn { flex: 0 0 auto; width: 40px; height: 40px; }
   .tool-view .tool-refresh { padding: 6px 9px; }
   .tool-view #tool-close { display: none; }   /* ‹ does the same job here */
+  /* The split toggle is the phone's quick switch: icon + "Chat". */
+  .tool-view .terminal-head > .tool-split { width: auto; padding-inline: 10px; gap: 6px; display: inline-flex; align-items: center; }
+  .tool-split-label { display: inline; font-size: 13px; }
 }
 
 /* An app's thread hook (docs/design/2026-09-25-apps.md) renders into this

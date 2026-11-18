@@ -40,12 +40,25 @@
 // column goes away and the pane owns the whole content area. Closing takes the
 // class off and hands the previous selection back to main.js.
 //
+// Split view (generic pane only, desktop widths): the "Split with chat" toggle
+// in the pane header swaps `tool-full` for `tool-split` on <body>. The thread
+// list stays, #chatview keeps its real chat and the pane takes the inline-end
+// part of it, with a draggable divider between (js/toolsplit.js has the sums).
+// The frame is never moved or unloaded by any of it, and `selectedBotId` is the
+// CHAT's bot while split (the tool is `openId`). On a phone there is no split:
+// the same button reads "Chat" and PARKS the tool - its pane is hidden, the
+// frame stays loaded - and a chip in the chat header brings it back.
+//
 // Pure-ish module: no side effects at import time (it is in sw.js SHELL and
 // imported by main.js). main.js injects everything app-shaped via wireTools().
 
 import { api } from './api.js?v=37';
 import { t, relTimeLong } from './i18n.js?v=5';
 import { el, railIcon, RAIL_ICONS, spriteIcon } from './util.js?v=23';
+import {
+  DIVIDER, canSplit, chatRange, ratioForChat, shouldSplit, stepRatio, widths,
+  readPref, writePref, readRatio, writeRatio,
+} from './toolsplit.js?v=1';
 
 // Builtin ids are the pseudo-bot ids main.js has always used, in rail order.
 // `icon` names a RAIL_ICONS entry: a builtin tile is chrome, so it is drawn in
@@ -643,7 +656,7 @@ function menuRow(tool) {
   const b = tool.kind === 'builtin' ? builtinOf(tool) : null;
   const title = toolTitle(tool);
   // A grouped tab's id selects its group's row (the row is what was clicked).
-  const active = rowIdFor(st.selectedBotId) === tool.id;
+  const active = rowIdFor(st.selectedBotId) === tool.id || (splitOn && rowIdFor(openId) === tool.id);
   const row = el('button', {
     class: 'tools-item' + (active ? ' active' : ''),
     type: 'button',
@@ -1186,7 +1199,10 @@ export function openTool(id, { launch = true } = {}) {
   if (openId && openId !== id) teardown();
   openId = id;
   refreshing = false;
-  st.selectedBotId = id;
+  sidelined = false;
+  paintReturnChip();
+  const split = wantSplit();
+  if (!split) st.selectedBotId = id;
 
   const icon = $('tool-icon');
   if (icon) icon.replaceChildren(toolGlyph(tool));
@@ -1204,9 +1220,15 @@ export function openTool(id, { launch = true } = {}) {
   paintRefreshBtn(tool);
   const view = $('tool-view');
   if (view) view.classList.remove('hidden');
-  document.body.classList.add('tool-full');
-  deps.renderSidebar();
-  if (deps.paintPlaceholder) deps.paintPlaceholder(toolTitle(tool), toolGlyph(tool));
+  if (split) {
+    setSplitMode();
+  } else {
+    resetSplitDom();
+    document.body.classList.add('tool-full');
+    deps.renderSidebar();
+    if (deps.paintPlaceholder) deps.paintPlaceholder(toolTitle(tool), toolGlyph(tool));
+  }
+  paintSplitBtn();
   if (deps.isMobile()) deps.navigate('chat');
   loadFrame(tool);
   refreshStatus(tool);
@@ -1232,8 +1254,14 @@ function teardown() {
  *  to show something else (another tool, a bot) and owns the selection. */
 export function closeTool({ restore = true } = {}) {
   if (!openId) return;
+  // Split: the selection already IS the chat, and it may have moved on since
+  // the tool opened - hand THAT back, not the chat from before.
+  if (splitOn) rememberPrev();
   openId = null;
+  sidelined = false;
   teardown();
+  resetSplitDom();
+  paintReturnChip();
   document.body.classList.remove('tool-full');
   setHash(null);
   // `restore: false` = the caller is showing something else. If that is
@@ -1247,6 +1275,237 @@ export function closeTool({ restore = true } = {}) {
 
 export function toolOpen() { return openId; }
 
+// ===================== Split view + phone quick switch =====================
+
+let splitPref = null;        // saved "split" preference, read once
+let splitRatio = null;       // the tool's share, read once
+let splitOn = false;         // the split layout is on screen right now
+let sidelined = false;       // phone: tool parked behind the chat, frame still loaded
+let splitRaf = 0;
+
+const prefOn = () => { if (splitPref === null) splitPref = readPref(); return splitPref; };
+const ratioNow = () => { if (splitRatio === null) splitRatio = readRatio(); return splitRatio; };
+
+/** Width the chat + tool pair would have: the content column with the thread
+ *  list showing. Measured when split is on, estimated from the grid otherwise. */
+function contentWidth() {
+  const cv = $('chatview');
+  if (splitOn && cv && cv.clientWidth) return cv.clientWidth;
+  const app = document.querySelector('.app');
+  const side = document.querySelector('.sidebar');
+  let tl = 0;
+  if (!(app && app.classList.contains('tl-collapsed'))) {
+    tl = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--threadlist-width')) || 320;
+  }
+  return Math.floor(window.innerWidth - (side ? side.offsetWidth : 72) - tl);
+}
+
+function wantSplit() {
+  if (!openId || !deps || deps.isMobile() || !prefOn()) return false;   // cheap exits before any measuring
+  return shouldSplit({ pref: true, mobile: false, total: contentWidth() });
+}
+
+/** Is the generic pane showing beside the chat? (main.js keeps the tool open
+ *  when the user picks another chat while this is true.) */
+export function toolSplitActive() { return !!openId && splitOn; }
+
+/** Phone: is the tool parked behind the chat? */
+export function toolParked() { return !!openId && sidelined; }
+
+function isRtl() { return document.documentElement.getAttribute('dir') === 'rtl'; }
+
+function resetSplitDom() {
+  splitOn = false;
+  document.body.classList.remove('tool-split', 'tool-split-dragging');
+  const view = $('tool-view');
+  if (view) view.classList.remove('split');
+  const cv = $('chatview');
+  if (cv) cv.style.removeProperty('--tool-split-w');
+  const div = $('tool-split-divider');
+  if (div) div.hidden = true;
+}
+
+function applyGeometry() {
+  const cv = $('chatview');
+  const div = $('tool-split-divider');
+  if (!cv || !div) return false;
+  const total = contentWidth();
+  const w = widths(ratioNow(), total);
+  const range = chatRange(total);
+  if (!w || !range) return false;
+  cv.style.setProperty('--tool-split-w', `${w.tool}px`);
+  div.setAttribute('aria-valuemin', String(range.min));
+  div.setAttribute('aria-valuemax', String(range.max));
+  div.setAttribute('aria-valuenow', String(w.chat));
+  return true;
+}
+
+/** Put the pane beside the chat. The chat's bot becomes the selection again
+ *  (the first time), the thread list comes back, the frame is left alone. */
+function setSplitMode() {
+  const was = splitOn;
+  splitOn = true;
+  const body = document.body;
+  body.classList.remove('tool-full');
+  body.classList.add('tool-split');
+  const view = $('tool-view');
+  if (view) view.classList.add('split');
+  const div = $('tool-split-divider');
+  if (div) div.hidden = false;
+  if (!was) deps.restoreView(prev, { stay: true });
+  applyGeometry();
+  if (!was) notifyActiveThread(deps.state.activeThreadId);
+}
+
+/** Back to the full-width pane (window too narrow, or the toggle went off). */
+function enterFull() {
+  const tool = openId ? findTool(openId) : null;
+  if (splitOn) rememberPrev();   // so ✕ lands on the chat as it is now
+  resetSplitDom();
+  document.body.classList.add('tool-full');
+  deps.state.selectedBotId = openId;
+  deps.renderSidebar();
+  if (tool && deps.paintPlaceholder) deps.paintPlaceholder(toolTitle(tool), toolGlyph(tool));
+}
+
+/** Re-decide split vs full for the open pane: after a resize, a toggle, or a
+ *  phone ⇄ desktop change. A no-op when nothing is open. */
+export function syncToolSplit() {
+  if (!deps || !openId) return;
+  if (sidelined) {
+    if (!deps.isMobile()) unparkTool();
+    return;
+  }
+  if (wantSplit()) setSplitMode();
+  else if (splitOn) enterFull();
+  paintSplitBtn();
+}
+
+function paintSplitBtn() {
+  const b = $('tool-split');
+  if (!b) return;
+  const phone = !!deps && deps.isMobile();
+  const label = phone ? t('tools.to_chat') : t('tools.split');
+  b.setAttribute('aria-label', label);
+  b.setAttribute('title', label);
+  const span = b.querySelector('.tool-split-label');
+  if (span) span.textContent = t('tools.to_chat');
+  if (phone) b.removeAttribute('aria-pressed');
+  else b.setAttribute('aria-pressed', prefOn() ? 'true' : 'false');
+}
+
+function paintReturnChip() {
+  const chip = $('tool-return');
+  if (!chip) return;
+  const tool = sidelined && openId ? findTool(openId) : null;
+  chip.hidden = !tool;
+  const txt = chip.querySelector('.tool-return-text');
+  if (txt) txt.textContent = tool ? t('tools.back_to', { title: toolTitle(tool) }) : '';
+}
+
+/** Phone: show the chat and keep the tool loaded behind it. */
+function parkTool() {
+  if (!deps || !openId || sidelined) return;
+  const st = deps.state;
+  sidelined = true;
+  const view = $('tool-view');
+  if (view) view.classList.add('hidden');
+  document.body.classList.remove('tool-full');
+  deps.restoreView(prev, { stay: true });
+  paintReturnChip();
+  deps.navigate(!st.selectedBotId ? 'bots' : st.activeThreadId ? 'chat' : 'threads');
+}
+
+/** Phone: bring the sidelined tool back (the frame never went away). */
+function unparkTool() {
+  if (!deps || !openId || !sidelined) return;
+  const tool = findTool(openId);
+  sidelined = false;
+  rememberPrev();
+  const view = $('tool-view');
+  if (view) view.classList.remove('hidden');
+  paintReturnChip();
+  if (wantSplit()) setSplitMode();
+  else {
+    document.body.classList.add('tool-full');
+    deps.state.selectedBotId = openId;
+    deps.renderSidebar();
+    if (tool && deps.paintPlaceholder) deps.paintPlaceholder(toolTitle(tool), toolGlyph(tool));
+  }
+  paintSplitBtn();
+  if (deps.isMobile()) deps.navigate('chat');
+}
+
+/** main.js: the phone went home (Bots page) - a sidelined tool ends there. */
+export function closeParkedTool() {
+  if (sidelined && openId) closeTool({ restore: false });
+}
+
+function onSplitToggle() {
+  if (!deps) return;
+  if (deps.isMobile()) { parkTool(); return; }
+  splitPref = !prefOn();
+  writePref(splitPref);
+  if (splitPref && !canSplit(contentWidth()) && typeof deps.toast === 'function') {
+    deps.toast(t('tools.split_narrow'));
+  }
+  syncToolSplit();
+  paintSplitBtn();
+}
+
+function setRatio(r, { save = false } = {}) {
+  if (r == null) return;
+  splitRatio = r;
+  applyGeometry();
+  if (save) writeRatio(r);
+}
+
+function wireDivider() {
+  const div = $('tool-split-divider');
+  if (!div) return;
+  let dragId = null;
+  div.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || !splitOn) return;
+    e.preventDefault();
+    dragId = e.pointerId;
+    try { div.setPointerCapture(e.pointerId); } catch { /* not fatal */ }
+    document.body.classList.add('tool-split-dragging');
+  });
+  div.addEventListener('pointermove', (e) => {
+    if (dragId === null || e.pointerId !== dragId || !splitOn) return;
+    const cv = $('chatview');
+    if (!cv) return;
+    const rect = cv.getBoundingClientRect();
+    const chatPx = isRtl() ? rect.right - e.clientX : e.clientX - rect.left;
+    const total = contentWidth();
+    setRatio(ratioForChat(chatPx - DIVIDER / 2, total));
+  });
+  const end = (e) => {
+    if (dragId === null || e.pointerId !== dragId) return;
+    dragId = null;
+    try { div.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+    document.body.classList.remove('tool-split-dragging');
+    writeRatio(ratioNow());
+  };
+  div.addEventListener('pointerup', end);
+  div.addEventListener('pointercancel', end);
+  div.addEventListener('keydown', (e) => {
+    if (!splitOn || e.altKey || e.ctrlKey || e.metaKey) return;
+    const next = stepRatio(e.key, { ratio: ratioNow(), total: contentWidth(), rtl: isRtl(), shift: e.shiftKey });
+    if (next == null) return;
+    e.preventDefault();
+    setRatio(next, { save: true });
+  });
+}
+
+/** main.js calls this when the chat's open thread changes. While split with an
+ *  APP in the pane (same origin), the app hears about it: see the shell ⇄
+ *  frame messages below. Nothing is sent to a static or url tool. */
+export function notifyActiveThread(threadId) {
+  if (!splitOn || typeof threadId !== 'string' || !THREAD_ID_RE.test(threadId)) return false;
+  return postToApp({ type: 'dispatch:active-thread', threadId });
+}
+
 // ===================== Apps: shell ⇄ frame messaging =====================
 // The frame of an app is unsandboxed and same-origin, so it could reach into
 // the shell directly; the contract says it does not, and the shell holds up
@@ -1254,6 +1513,12 @@ export function toolOpen() { return openId; }
 // (b) come from the frame that is on screen right now, while it holds an app.
 // Anything else — another window, a stale frame, a static tool (opaque
 // origin), a url tool (someone else's origin) — is ignored.
+//
+// Shell → app messages: dispatch:theme, dispatch:lang, dispatch:frame (live
+// `app:<id>:*` frames), and — only while the pane is split beside the chat —
+//   {type:'dispatch:active-thread', threadId}   the chat half's open thread,
+// posted when split starts, on every change, and after the frame loads. An app
+// may ignore it; nothing is sent to static or url tools.
 
 const THREAD_ID_RE = /^[A-Za-z0-9_.:-]{1,200}$/;
 
@@ -1284,6 +1549,8 @@ function shellTheme() {
  *  this on a language switch; the frame's 'load' and the theme runtime's
  *  'ui-theme-change' event call it too. */
 export function syncAppFrame() {
+  paintSplitBtn();     // main.js calls this on a language switch: relabel the toggle
+  paintReturnChip();
   if (!openApp()) return;
   postToApp(shellTheme());
   postToApp({ type: 'dispatch:lang', lang: document.documentElement.getAttribute('lang') || 'en' });
@@ -1880,6 +2147,11 @@ export function wireTools(d) {
   if (back) back.addEventListener('click', () => { closeTool(); if (deps.isMobile()) deps.navigate('bots'); });
   const refresh = $('tool-refresh');
   if (refresh) refresh.addEventListener('click', () => doRefresh());
+  const splitBtn = $('tool-split');
+  if (splitBtn) splitBtn.addEventListener('click', onSplitToggle);
+  const chip = $('tool-return');
+  if (chip) chip.addEventListener('click', () => unparkTool());
+  wireDivider();
   window.addEventListener('hashchange', () => { if (hashToolId()) openFromHash(); });
   // Apps: messages from the framed page, and the shell's theme/language
   // handed to it once it has loaded and whenever either changes.
@@ -1893,6 +2165,7 @@ export function wireTools(d) {
       onFrameLoad();
       if (openApp()) syncAppFrame();
       pushToolState();
+      notifyActiveThread(deps.state.activeThreadId);
     });
   }
   document.addEventListener('ui-theme-change', () => syncAppFrame());
@@ -1922,5 +2195,8 @@ export function wireTools(d) {
   window.addEventListener('resize', () => {
     if (menuOpen) closeToolsMenu();
     if (deps && compactRail() !== lastCompact) renderToolRail();
+    if (openId && !splitRaf) {
+      splitRaf = requestAnimationFrame(() => { splitRaf = 0; syncToolSplit(); });
+    }
   });
 }

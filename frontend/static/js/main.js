@@ -28,7 +28,7 @@ import {
   initLlmPanel, activateLlmPanel, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=19';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=20';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=21';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
@@ -36,7 +36,7 @@ import {
   setAllowed as setQuickAllowed, setUpload as setQuickUpload, getActions as quickActionList,
 } from './quick-actions.js?v=7';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=8';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=26';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=27';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
 // DisPatch Voice add-on — mounted into the shell by the loader, through the
 // SDK's frozen shell object. With none installed, Settings → Voice explains
@@ -86,10 +86,11 @@ import { isMenuBot, toggleMenuBot, pruneMenuBots, menuBotIds, setMenuScope } fro
 import {
   loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
   openFromHash, mountToolsSettings, rememberPrev,
+  toolSplitActive, toolParked, closeParkedTool, notifyActiveThread,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen, findTool, toolGlyph, registerExtTiles, isExtFeature,
   openToolsMenu, toolsMenuOpen, groupFor,
-} from './tools.js?v=23';
+} from './tools.js?v=24';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp, api as appApi } from './app-sdk.js?v=7';
@@ -758,6 +759,8 @@ function announceMessage(msg) {
 // ===================== Mobile view switching =====================
 function setView(view) {
   dom.app.dataset.view = view;
+  // Phone: the Bots page is home - a tool parked behind the chat ends there.
+  if (view === 'bots') closeParkedTool();
   dom['mobile-tabs'].querySelectorAll('.tab').forEach((t) => {
     // The New chat tab is an action, not a view: it lights up while a chat is open.
     const on = t.dataset.view === view || (t.dataset.action === 'new-chat' && view === 'chat');
@@ -823,7 +826,7 @@ window.addEventListener('popstate', (e) => {
 
 /** Is any full-page tool (builtin or generic) on screen? */
 function anyToolPaneOpen() {
-  return !!toolOpen() || harnessOpen || studioforgeOpen || mailOpen || clientsOpen;
+  return (!!toolOpen() && !toolParked()) || harnessOpen || studioforgeOpen || mailOpen || clientsOpen;
 }
 
 /** Leave whatever tool pane is up for the Bots page (the phone's ‹ on every
@@ -4047,8 +4050,9 @@ async function selectBot(id) {
   // Every tool — the four builtins and anything in tools.yaml — opens
   // through tools.js, which routes builtins back to their own openers.
   if (isToolId(id)) { openTool(id); return; }
-  // Leaving a tool pane for a real bot tears the view down cleanly.
-  closeToolPanes();
+  // Leaving a tool pane for a real bot tears the view down cleanly - except the
+  // split view, where the tool stays beside the chat (its frame is not reloaded).
+  closeToolPanes(toolSplitActive() ? 'tool' : undefined);
   state.selectedBotId = id;
   state.threadsView = 'chats';
   paintArchivedButton();
@@ -4103,6 +4107,7 @@ async function openThread(id, { background = false, botId = null } = {}) {
   }
   const t = state.threads.find((x) => x.id === id);
   state.activeThreadId = id;
+  notifyActiveThread(id);   // split view: an app in the pane hears which chat is beside it
   state.activeThread = t || state.activeThread;
   // From an app pane (or any other path that hands a thread_id without first
   // calling selectBot()): state.threads only holds the previously-selected

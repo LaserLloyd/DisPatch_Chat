@@ -379,6 +379,8 @@ const SHELL = [
   // Tools rail group + generic tool pane + Settings → Tools (2026-09-25).
   // Pure module, statically imported by main.js.
   '/static/js/tools.js',
+  // Split view maths + its two stored preferences (statically imported by tools.js).
+  '/static/js/toolsplit.js',
   // Extensions (2.2.0): the loader, the SDK shell object and the page the
   // Voice tab shows while the voice add-on is absent, all statically imported
   // by main.js. An add-on (/ext/<id>/…) is NEVER cached here: see the fetch
