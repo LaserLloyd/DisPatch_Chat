@@ -270,3 +270,51 @@ when it is floating or docked (it went to the split pane before).
   move, resize, snap left/right, divider, full, reload, two pills, close by button
   and by drag, keyboard-only, second profile, Restricted profile, Reload last
   generation, no console errors.
+
+## 9. Plan review (independent, before the build) and what changed
+
+An independent review read the owner's words and this note against the code.
+Folded in (these override the sections above where they differ):
+
+1. **One fixed window layer; frames never move.** Dock = the chat column reserves
+   width through a CSS variable (the split view's mechanism); float/full/sheet are
+   styles only.
+2. **Per-window panes behind the current `tools.js` exports**; every message is
+   routed by `event.source` to the window that owns that frame (app messages and
+   the tool-state bridge alike).
+3. **Live frames, theme and language go to every live window**, minimised ones
+   included (so "2 making" and the attention dot work, and a restored window has
+   the current theme). `active-thread` goes to the visible float/dock only.
+   Minimised frames get `dispatch:window-state {state:'min'}` so they may slow down.
+4. **Phone Back:** the sheet takes a history entry (the shell's `historyPush`);
+   ⌄, swipe-down and Back all release it. The old "Back out of a full-page tool"
+   popstate path no longer applies to tool windows.
+5. **`win.setBusy(n)`** (work running). Close asks while busy **or** unsaved.
+   Image Studio reports its running jobs as busy + status; its draft is autosaved,
+   so it never claims `unsaved`.
+6. **Basic (Restricted) profiles:** no drag-to-close on pills (✕ only, confirm
+   when busy). Targets ≥ 44 px on phones for everyone.
+7. **At most 3 live frames.** Restoring/opening a fourth unloads the least
+   recently used minimised one; its pill stays and it reloads on restore.
+8. **After a reload:** desktop reopens the window that was open; a phone brings
+   every window back as a pill (a sheet over the chat at boot is a surprise).
+9. **No saved window state without a profile id** (no `shared` key).
+10. **First float:** at most 60 % of the content width (never under the tool's
+    minimum) and ≤ 760 px tall, at the inline-end side, its bottom above the pill
+    tray; the tray is drawn above a float.
+11. **Alt+Shift+M dropped** (Option+Shift+M types a character on a Mac). **F6**
+    cycles focus between the visible window and the chat.
+12. **New-tab tools** (`open: window`) never get a window or a pill.
+13. **Screen readers:** the tray is a labelled toolbar; pill status text is not a
+    live region; "finished while minimised" is announced once, politely.
+14. The split view module, its test, the phone return chip and the chat-half
+    `sessionStorage` key go in the same change; new modules join the sw.js SHELL.
+
+Kept against the review:
+* **"Back to chat" on the phone keeps the owner's wording** (the review suggested
+  "Minimise"). It minimises and, when a chat is open underneath, shows that chat.
+* **Built-in panes** (Harness, StudioForge, Emails, Clients) were asked to become
+  window bodies in v1. They are DOM with their own openers, selection and
+  full-pane rules in `main.js`; v1 makes them minimise the visible tool window
+  instead of closing it, and hosting them in windows is the next step (section 3,
+  "Built-in panes"). Done in this round only if the core lands with time to spare.

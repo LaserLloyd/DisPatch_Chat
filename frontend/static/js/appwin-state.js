@@ -1,0 +1,323 @@
+// App windows - the pure half (docs/design/app-windows.md). Which tool windows
+// exist, which one is on screen, which are minimised to pills and in what
+// order, each tool's remembered layout / float rectangle / dock share, the
+// snap zones and the clamping sums. No DOM and no side effects at import, so
+// it is node-tested (tests/appwin-state.test.js); js/appwin.js draws it.
+//
+// model = {
+//   wins:  [{id, state: 'open'|'min', order}],   live windows, at most ONE open
+//   open:  id | null,                             the one on screen
+//   prefs: {id: {layout, rect?, ratio?}},         per tool, kept after a close
+//   def:   {layout, ratio} | null,                default for a tool with no prefs
+//   seq:   n,                                     minimise counter (pill order)
+// }
+// Status, badge, attention and unsaved are live-only and live in js/appwin.js.
+
+export const VERSION = 1;
+export const KEY_PREFIX = 'dispatch-appwin:v1:';
+export const LAYOUTS = Object.freeze(['float', 'left', 'right', 'full']);
+export const DOCKS = Object.freeze(['left', 'right']);
+export const MAX_WINS = 24;
+export const MAX_BYTES = 8 * 1024;
+export const SNAP_EDGE = 24;          // px from an edge of the content area that snaps
+export const KEY_MOVE = 24;           // px per arrow press on the move handle
+export const KEY_MOVE_BIG = 96;       // with Shift
+export const DEFAULT_W = 1040;        // first-open float size when the tool names none
+export const DEFAULT_H = 760;
+export const FLOOR_W = 240;           // never smaller than this whatever a manifest says
+export const FLOOR_H = 200;
+
+export const OPTION_DEFAULTS = Object.freeze({
+  layout: 'float', min_width: 360, min_height: 320, dockable: true, keep_alive: true,
+});
+
+const ID_RE = /^[a-z0-9-]{1,40}$/;
+const PROFILE_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const SPLIT_KEY = 'dispatch-tool-split';
+const SPLIT_RATIO_KEY = 'dispatch-tool-split-ratio';
+
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const int = (v, lo, hi) => { const n = num(v); return n !== null && Number.isInteger(n) && n >= lo && n <= hi ? n : null; };
+
+/** A tool row's `window` block (already validated by the server) with every
+ *  default filled; anything odd falls back to the default. */
+export function windowOptions(raw) {
+  const w = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const o = { ...OPTION_DEFAULTS };
+  if (LAYOUTS.includes(w.layout)) o.layout = w.layout;
+  const mw = int(w.min_width, FLOOR_W, 1600); if (mw !== null) o.min_width = mw;
+  const mh = int(w.min_height, FLOOR_H, 1200); if (mh !== null) o.min_height = mh;
+  const ww = int(w.width, 320, 3840); if (ww !== null) o.width = ww;
+  const hh = int(w.height, 240, 2160); if (hh !== null) o.height = hh;
+  if (typeof w.dockable === 'boolean') o.dockable = w.dockable;
+  if (typeof w.keep_alive === 'boolean') o.keep_alive = w.keep_alive;
+  if (!o.dockable && DOCKS.includes(o.layout)) o.layout = 'float';
+  return o;
+}
+
+export function empty() { return { wins: [], open: null, prefs: {}, def: null, seq: 0 }; }
+
+export function find(model, id) { return model.wins.find((w) => w.id === id) || null; }
+
+/** Minimised windows in pill order (oldest minimise first). */
+export function pills(model) {
+  return model.wins.filter((w) => w.state === 'min').sort((a, b) => a.order - b.order);
+}
+
+/** The remembered (or default) layout settings for a tool. */
+export function prefsFor(model, id, opts = OPTION_DEFAULTS) {
+  const p = model.prefs[id];
+  const o = opts || OPTION_DEFAULTS;
+  let layout = (p && p.layout) || (model.def && model.def.layout) || o.layout || 'float';
+  if (!o.dockable && DOCKS.includes(layout)) layout = 'float';
+  const ratio = p && num(p.ratio) !== null ? p.ratio : (model.def && num(model.def.ratio) !== null ? model.def.ratio : 0.5);
+  return { layout, rect: p && p.rect ? { ...p.rect } : null, ratio };
+}
+
+function withPrefs(model, id, patch) {
+  const cur = model.prefs[id] || {};
+  return { ...model, prefs: { ...model.prefs, [id]: { ...cur, ...patch } } };
+}
+
+function minimiseOthers(model, keep) {
+  let seq = model.seq;
+  const wins = model.wins.map((w) => {
+    if (w.id === keep || w.state !== 'open') return w;
+    seq += 1;
+    return { ...w, state: 'min', order: seq };
+  });
+  return { ...model, wins, seq };
+}
+
+/** Open a tool's window, or bring back the one it already has. Whatever else
+ *  was on screen is minimised (never closed). Returns the new model. */
+export function openWin(model, id) {
+  if (!ID_RE.test(String(id || ''))) return model;
+  let m = minimiseOthers(model, id);
+  if (find(m, id)) {
+    m = { ...m, wins: m.wins.map((w) => (w.id === id ? { ...w, state: 'open' } : w)) };
+  } else {
+    if (m.wins.length >= MAX_WINS) {
+      // The oldest pill gives way (a cap so storage stays small).
+      const oldest = pills(m)[0];
+      if (oldest) m = { ...m, wins: m.wins.filter((w) => w.id !== oldest.id) };
+    }
+    m = { ...m, wins: [...m.wins, { id, state: 'open', order: 0 }] };
+  }
+  return { ...m, open: id };
+}
+
+export const restore = openWin;
+
+/** Back to chat: the window becomes a pill at the end of the tray. */
+export function minimize(model, id) {
+  const w = find(model, id);
+  if (!w || w.state === 'min') return model;
+  const seq = model.seq + 1;
+  return {
+    ...model, seq,
+    wins: model.wins.map((x) => (x.id === id ? { ...x, state: 'min', order: seq } : x)),
+    open: model.open === id ? null : model.open,
+  };
+}
+
+/** Close: the window goes; its remembered layout stays for next time. */
+export function closeWin(model, id) {
+  if (!find(model, id)) return model;
+  return { ...model, wins: model.wins.filter((w) => w.id !== id), open: model.open === id ? null : model.open };
+}
+
+/** Drop every window whose tool this session cannot see (a profile's tool list,
+ *  a tool switched off). Prefs of unknown tools go too. */
+export function filterKnown(model, ids) {
+  const ok = new Set(ids);
+  const wins = model.wins.filter((w) => ok.has(w.id));
+  const prefs = {};
+  for (const [k, v] of Object.entries(model.prefs)) if (ok.has(k)) prefs[k] = v;
+  return { ...model, wins, prefs, open: model.open && ok.has(model.open) ? model.open : null };
+}
+
+export function setLayout(model, id, layout, opts = OPTION_DEFAULTS) {
+  if (!LAYOUTS.includes(layout)) return model;
+  if (DOCKS.includes(layout) && opts && opts.dockable === false) return model;
+  return withPrefs(model, id, { layout });
+}
+
+export function setRect(model, id, rect) {
+  const r = cleanRect(rect);
+  return r ? withPrefs(model, id, { rect: r }) : model;
+}
+
+export function setRatio(model, id, ratio) {
+  const v = num(ratio);
+  return v !== null && v > 0 && v < 1 ? withPrefs(model, id, { ratio: Math.round(v * 10000) / 10000 }) : model;
+}
+
+// ---- geometry (content-area relative CSS px) ----
+
+function cleanRect(r) {
+  if (!r || typeof r !== 'object') return null;
+  const x = num(r.x); const y = num(r.y); const w = num(r.w); const h = num(r.h);
+  if (x === null || y === null || w === null || h === null || w <= 0 || h <= 0) return null;
+  if (Math.abs(x) > 20000 || Math.abs(y) > 20000 || w > 20000 || h > 20000) return null;
+  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+}
+
+/** Keep a float inside `bounds` ({w, h}) and no smaller than the tool's minimum
+ *  (unless the area itself is smaller, then it fills it). */
+export function clampRect(rect, bounds, opts = OPTION_DEFAULTS) {
+  const bw = Math.max(0, Math.floor(num(bounds && bounds.w) || 0));
+  const bh = Math.max(0, Math.floor(num(bounds && bounds.h) || 0));
+  const r = cleanRect(rect) || initialRect(opts, bounds);
+  const minW = Math.min(bw, (opts && opts.min_width) || OPTION_DEFAULTS.min_width);
+  const minH = Math.min(bh, (opts && opts.min_height) || OPTION_DEFAULTS.min_height);
+  const w = Math.min(bw, Math.max(minW, r.w));
+  const h = Math.min(bh, Math.max(minH, r.h));
+  const x = Math.min(Math.max(0, r.x), bw - w);
+  const y = Math.min(Math.max(0, r.y), bh - h);
+  return { x, y, w, h };
+}
+
+/** A tool's first float: its own size, else a large window, centred. */
+export function initialRect(opts, bounds) {
+  const bw = Math.max(0, Math.floor(num(bounds && bounds.w) || 0));
+  const bh = Math.max(0, Math.floor(num(bounds && bounds.h) || 0));
+  const o = opts || OPTION_DEFAULTS;
+  const w = Math.min(Math.floor(bw * 0.92), o.width || DEFAULT_W);
+  const h = Math.min(Math.floor(bh * 0.9), o.height || DEFAULT_H);
+  const ww = Math.max(Math.min(bw, o.min_width || 0), w);
+  const hh = Math.max(Math.min(bh, o.min_height || 0), h);
+  return { x: Math.max(0, Math.round((bw - ww) / 2)), y: Math.max(0, Math.round((bh - hh) / 2)), w: ww, h: hh };
+}
+
+/** Where a title-bar drag would snap: pointer `pt` relative to the content
+ *  area. Left/right edges dock (if the tool may), the top edge fills. */
+export function snapZone(pt, bounds, { dockable = true, edge = SNAP_EDGE } = {}) {
+  const x = num(pt && pt.x); const y = num(pt && pt.y);
+  const w = num(bounds && bounds.w); const h = num(bounds && bounds.h);
+  if (x === null || y === null || !w || !h) return null;
+  if (y <= edge) return 'full';
+  if (dockable && x <= edge) return 'left';
+  if (dockable && x >= w - edge) return 'right';
+  return null;
+}
+
+/** What is actually drawn: a phone always gets the sheet; a dock that does not
+ *  fit (or a tool that may not dock) is shown full until it fits again. */
+export function effectiveLayout(layout, { mobile = false, canDock = true, dockable = true } = {}) {
+  if (mobile) return 'sheet';
+  if (DOCKS.includes(layout)) return dockable && canDock ? layout : 'full';
+  return LAYOUTS.includes(layout) ? layout : 'float';
+}
+
+/** Keyboard on the move handle: arrows move, Alt+arrows resize. Returns the
+ *  new clamped rect, or null when the key is not ours. `rtl` does not flip:
+ *  the keys move the window the way the arrow points. */
+export function keyRect(key, rect, bounds, opts, { shift = false, alt = false } = {}) {
+  const step = shift ? KEY_MOVE_BIG : KEY_MOVE;
+  const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[key];
+  if (!d) return null;
+  const r = clampRect(rect, bounds, opts);
+  const next = alt ? { ...r, w: r.w + d[0], h: r.h + d[1] } : { ...r, x: r.x + d[0], y: r.y + d[1] };
+  return clampRect(next, bounds, opts);
+}
+
+// ---- storage ----
+
+export function storageKey(profileId) {
+  const p = typeof profileId === 'string' && PROFILE_RE.test(profileId) ? profileId : 'shared';
+  return KEY_PREFIX + p;
+}
+
+/** What is written: ids, states, order, layouts, rects, ratios. Nothing a tool said. */
+export function serialize(model) {
+  const prefs = {};
+  for (const [k, v] of Object.entries(model.prefs || {})) {
+    if (!ID_RE.test(k) || !v) continue;
+    const o = {};
+    if (LAYOUTS.includes(v.layout)) o.layout = v.layout;
+    const r = cleanRect(v.rect); if (r) o.rect = r;
+    const q = num(v.ratio); if (q !== null && q > 0 && q < 1) o.ratio = q;
+    prefs[k] = o;
+  }
+  return JSON.stringify({
+    v: VERSION,
+    wins: model.wins.map((w) => ({ id: w.id, state: w.state, order: w.order })),
+    open: model.open,
+    prefs,
+    def: model.def,
+    seq: model.seq,
+  });
+}
+
+/** Read stored state. Anything malformed is dropped piece by piece; a wholly
+ *  unreadable value is an empty model. */
+export function parse(raw) {
+  const m = empty();
+  if (typeof raw !== 'string' || !raw || raw.length > MAX_BYTES) return m;
+  let d;
+  try { d = JSON.parse(raw); } catch { return m; }
+  if (!d || typeof d !== 'object' || d.v !== VERSION) return m;
+  const seen = new Set();
+  if (Array.isArray(d.wins)) {
+    for (const w of d.wins.slice(0, MAX_WINS)) {
+      if (!w || !ID_RE.test(String(w.id)) || seen.has(w.id)) continue;
+      if (w.state !== 'open' && w.state !== 'min') continue;
+      seen.add(w.id);
+      m.wins.push({ id: w.id, state: w.state, order: int(w.order, 0, 1e9) ?? 0 });
+    }
+  }
+  // At most one open, and `open` must name it.
+  const open = typeof d.open === 'string' && m.wins.some((w) => w.id === d.open && w.state === 'open') ? d.open : null;
+  let seq = int(d.seq, 0, 1e9) ?? 0;
+  m.wins = m.wins.map((w) => {
+    if (w.state === 'open' && w.id !== open) { seq += 1; return { ...w, state: 'min', order: seq }; }
+    return w;
+  });
+  m.open = open;
+  m.seq = Math.max(seq, ...m.wins.map((w) => w.order), 0);
+  if (d.prefs && typeof d.prefs === 'object' && !Array.isArray(d.prefs)) {
+    for (const [k, v] of Object.entries(d.prefs).slice(0, 64)) {
+      if (!ID_RE.test(k) || !v || typeof v !== 'object') continue;
+      const o = {};
+      if (LAYOUTS.includes(v.layout)) o.layout = v.layout;
+      const r = cleanRect(v.rect); if (r) o.rect = r;
+      const q = num(v.ratio); if (q !== null && q > 0 && q < 1) o.ratio = q;
+      m.prefs[k] = o;
+    }
+  }
+  if (d.def && typeof d.def === 'object' && DOCKS.includes(d.def.layout)) {
+    const q = num(d.def.ratio);
+    m.def = { layout: d.def.layout, ratio: q !== null && q > 0 && q < 1 ? q : 0.5 };
+  }
+  return m;
+}
+
+export function load(profileId) {
+  try { return parse(localStorage.getItem(storageKey(profileId))); } catch { return empty(); }
+}
+
+export function save(profileId, model) {
+  try {
+    const s = serialize(model);
+    if (s.length > MAX_BYTES) return false;
+    localStorage.setItem(storageKey(profileId), s);
+    return true;
+  } catch { return false; }
+}
+
+/** The morning's split view preference becomes the default layout of a tool
+ *  opened for the first time: docked on the inline end at the saved share.
+ *  Read once per device; the old keys are removed afterwards. */
+export function migrateSplit(model, { rtl = false } = {}) {
+  let on = false; let ratio = null;
+  try {
+    on = localStorage.getItem(SPLIT_KEY) === '1';
+    ratio = Number(localStorage.getItem(SPLIT_RATIO_KEY));
+    localStorage.removeItem(SPLIT_KEY);
+    localStorage.removeItem(SPLIT_RATIO_KEY);
+  } catch { return model; }
+  if (!on || model.def) return model;
+  const r = Number.isFinite(ratio) && ratio > 0 && ratio < 1 ? ratio : 0.5;
+  return { ...model, def: { layout: rtl ? 'left' : 'right', ratio: r } };
+}
