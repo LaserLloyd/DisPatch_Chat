@@ -2364,6 +2364,9 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   body.tool-split-nolist .app.tl-collapsed { grid-template-columns: var(--sidebar-width) 1fr; }
   body.tool-split-nolist .threadlist { display: none; }
   body.tool-split-dragging { user-select: none; cursor: col-resize; }
+  /* The chat's drop overlay covers the chat half only: a file dragged over the
+     tool half is for the tool (Image Studio's reference picture), not the chat. */
+  body.tool-split #chatview > .chat-drop { inset-inline-end: calc(var(--tool-split-w, 50%) + 10px); }
   body.tool-split-dragging .tool-frame { pointer-events: none; }
 }
 .tool-split[aria-pressed="true"] { background: var(--bg-hover); color: var(--accent); }
@@ -2376,6 +2379,7 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
 }
 .tool-return:hover, .tool-return:focus-visible { background: var(--bg-hover); }
 .tool-return .rail-icon { flex: 0 0 auto; }
+[dir="rtl"] .tool-return .rail-icon { transform: scaleX(-1); }
 .tool-return-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tool-return[hidden] { display: none; }
 /* If a phone user does open the Chats tab mid-tool, the list shows the tool's
