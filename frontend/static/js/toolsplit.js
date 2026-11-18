@@ -123,3 +123,28 @@ export function writeRatio(ratio) {
   if (!Number.isFinite(v) || v <= 0 || v >= 1) return false;
   try { localStorage.setItem(RATIO_KEY, String(Math.round(v * 10000) / 10000)); return true; } catch { return false; }
 }
+
+// ---- the chat half's thread, per tab (sessionStorage, an id and nothing else) ----
+export const THREAD_KEY = 'dispatch-tool-split-thread';
+const THREAD_OK = /^[A-Za-z0-9_.:-]{1,200}$/;
+
+export function readThread() {
+  try { const v = sessionStorage.getItem(THREAD_KEY); return v && THREAD_OK.test(v) ? v : null; } catch { return null; }
+}
+export function writeThread(id) {
+  if (typeof id !== 'string' || !THREAD_OK.test(id)) return false;
+  try { sessionStorage.setItem(THREAD_KEY, id); return true; } catch { return false; }
+}
+export function clearThread() {
+  try { sessionStorage.removeItem(THREAD_KEY); } catch { /* not fatal */ }
+}
+
+/** Which split layout fits: 'list' (thread list showing), 'nolist' (list hidden
+ *  for the split) or null (neither - show the tool full width). `totals` are the
+ *  content widths with and without the thread list. */
+export function splitMode({ pref, mobile, withList, noList }) {
+  if (!pref || mobile) return null;
+  if (canSplit(withList)) return 'list';
+  if (canSplit(noList)) return 'nolist';
+  return null;
+}

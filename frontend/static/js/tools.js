@@ -56,8 +56,8 @@ import { api } from './api.js?v=37';
 import { t, relTimeLong } from './i18n.js?v=5';
 import { el, railIcon, RAIL_ICONS, spriteIcon } from './util.js?v=23';
 import {
-  DIVIDER, canSplit, chatRange, ratioForChat, shouldSplit, stepRatio, widths,
-  readPref, writePref, readRatio, writeRatio,
+  DIVIDER, canSplit, chatRange, ratioForChat, stepRatio, widths,
+  readPref, writePref, readRatio, writeRatio, readThread, writeThread, clearThread, splitMode,
 } from './toolsplit.js?v=1';
 
 // Builtin ids are the pseudo-bot ids main.js has always used, in rail order.
@@ -1280,33 +1280,39 @@ export function toolOpen() { return openId; }
 let splitPref = null;        // saved "split" preference, read once
 let splitRatio = null;       // the tool's share, read once
 let splitOn = false;         // the split layout is on screen right now
+let splitNoList = false;     // ...with the thread list hidden for it (narrow windows)
 let sidelined = false;       // phone: tool parked behind the chat, frame still loaded
 let splitRaf = 0;
 
 const prefOn = () => { if (splitPref === null) splitPref = readPref(); return splitPref; };
 const ratioNow = () => { if (splitRatio === null) splitRatio = readRatio(); return splitRatio; };
 
-/** Width the chat + tool pair would have: the content column with the thread
- *  list showing, worked out from the window and the grid. */
-function contentWidth() {
-  // Never read #chatview's own width: while split its inline-end padding can
-  // exceed a narrowed column and stretch it, which would hide the shortage.
+/** Content-column widths the chat + tool pair could have: with the thread list
+ *  showing and without it, worked out from the window and the grid. (Never read
+ *  #chatview's own width: its inline-end padding can stretch it.) */
+function roomWidths() {
   const app = document.querySelector('.app');
   const side = document.querySelector('.sidebar');
-  const list = $('threadlist');
-  let tl = 0;
-  if (!(app && app.classList.contains('tl-collapsed'))) {
-    tl = splitOn && list && list.offsetWidth
-      ? list.offsetWidth
-      : parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--threadlist-width')) || 320;
-  }
-  return Math.floor(window.innerWidth - (side ? side.offsetWidth : 72) - tl);
+  const base = Math.floor(window.innerWidth - (side ? side.offsetWidth : 72));
+  const collapsed = !!(app && app.classList.contains('tl-collapsed'));
+  const tl = collapsed ? 0
+    : parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--threadlist-width')) || 320;
+  return { withList: base - tl, noList: base };
 }
 
-function wantSplit() {
-  if (!openId || !deps || deps.isMobile() || !prefOn()) return false;   // cheap exits before any measuring
-  return shouldSplit({ pref: true, mobile: false, total: contentWidth() });
+/** The width the split is laid out in right now (follows the mode on screen). */
+function contentWidth() {
+  const r = roomWidths();
+  return splitNoList ? r.noList : r.withList;
 }
+
+function wantMode() {
+  if (!openId || !deps || deps.isMobile() || !prefOn()) return null;   // cheap exits before any measuring
+  const r = roomWidths();
+  return splitMode({ pref: true, mobile: false, withList: r.withList, noList: r.noList });
+}
+
+function wantSplit() { return !!wantMode(); }
 
 /** Is the generic pane showing beside the chat? (main.js keeps the tool open
  *  when the user picks another chat while this is true.) */
@@ -1319,7 +1325,9 @@ function isRtl() { return document.documentElement.getAttribute('dir') === 'rtl'
 
 function resetSplitDom() {
   splitOn = false;
-  document.body.classList.remove('tool-split', 'tool-split-dragging');
+  splitNoList = false;
+  clearThread();
+  document.body.classList.remove('tool-split', 'tool-split-nolist', 'tool-split-dragging');
   const view = $('tool-view');
   if (view) view.classList.remove('split');
   const cv = $('chatview');
@@ -1347,15 +1355,24 @@ function applyGeometry() {
  *  (the first time), the thread list comes back, the frame is left alone. */
 function setSplitMode() {
   const was = splitOn;
+  const mode = wantMode() || (splitNoList ? 'nolist' : 'list');
   splitOn = true;
+  splitNoList = mode === 'nolist';
   const body = document.body;
   body.classList.remove('tool-full');
   body.classList.add('tool-split');
+  body.classList.toggle('tool-split-nolist', splitNoList);
   const view = $('tool-view');
   if (view) view.classList.add('split');
   const div = $('tool-split-divider');
   if (div) div.hidden = false;
-  if (!was) deps.restoreView(prev, { stay: true });
+  if (!was) {
+    deps.restoreView(prev, { stay: true });
+    // Nothing open in the chat half (a reload): bring back this tab's thread.
+    if (!deps.state.activeThreadId && typeof deps.restoreSplitChat === 'function') {
+      deps.restoreSplitChat(readThread());
+    }
+  }
   applyGeometry();
   if (!was) notifyActiveThread(deps.state.activeThreadId);
 }
@@ -1505,6 +1522,7 @@ function wireDivider() {
  *  APP in the pane (same origin), the app hears about it: see the shell ⇄
  *  frame messages below. Nothing is sent to a static or url tool. */
 export function notifyActiveThread(threadId) {
+  if (splitOn) writeThread(threadId);   // this tab's chat half, for a reload
   if (!splitOn || !frameLoaded || typeof threadId !== 'string' || !THREAD_ID_RE.test(threadId)) return false;
   return postToApp({ type: 'dispatch:active-thread', threadId });
 }
@@ -1591,6 +1609,11 @@ function onAppMessage(ev) {
       }
       // rememberPrev semantics: ✕-style close, the rail goes back to the last
       // real chat, THEN the thread opens over it.
+      // Split: the thread opens in the chat half and the pane stays put.
+      if (splitOn && typeof deps.openThreadInSplit === 'function') {
+        deps.openThreadInSplit(id, { botId: tool.bot_id || null, hint, appId: tool.id });
+        return;
+      }
       closeTool();
       if (typeof deps.openThread === 'function') deps.openThread(id, { botId: tool.bot_id || null, hint, appId: tool.id });
       return;

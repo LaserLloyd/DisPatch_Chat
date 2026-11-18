@@ -2358,12 +2358,23 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   body.tool-split .tool-split-divider:focus-visible::before,
   body.tool-split-dragging .tool-split-divider::before { background: var(--accent); }
   body.tool-split .tool-split-divider:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  /* Not enough room beside the thread list: it steps aside for the split (the
+     saved collapse choice is untouched). Chats stay reachable from the rail. */
+  body.tool-split-nolist .app,
+  body.tool-split-nolist .app.tl-collapsed { grid-template-columns: var(--sidebar-width) 1fr; }
+  body.tool-split-nolist .threadlist { display: none; }
   body.tool-split-dragging { user-select: none; cursor: col-resize; }
   body.tool-split-dragging .tool-frame { pointer-events: none; }
 }
 .tool-split[aria-pressed="true"] { background: var(--bg-hover); color: var(--accent); }
 .tool-split-label { display: none; }
-.tool-return { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; white-space: nowrap; flex: 0 1 auto; min-width: 0; max-width: 40vw; font-size: 13px; }
+.tool-return {
+  display: flex; align-items: center; gap: 8px; width: 100%; flex: 0 0 auto; min-width: 0;
+  padding: 8px 14px; border: 0; border-bottom: 1px solid var(--border-strong);
+  background: var(--bg-secondary); color: var(--text-primary); font: inherit; font-size: 13px;
+  text-align: start; cursor: pointer; white-space: nowrap;
+}
+.tool-return:hover, .tool-return:focus-visible { background: var(--bg-hover); }
 .tool-return .rail-icon { flex: 0 0 auto; }
 .tool-return-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tool-return[hidden] { display: none; }

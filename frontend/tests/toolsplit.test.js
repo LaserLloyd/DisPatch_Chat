@@ -125,7 +125,8 @@ test('wiring: the toggle and the divider exist with their aria, and the pins are
   for (const re of [/role="separator"/, /aria-orientation="vertical"/, /aria-valuenow="/, /aria-valuemin="/, /aria-valuemax="/, /tabindex="0"/, /aria-label="[^"]+"/]) {
     assert.match(div[0], re);
   }
-  assert.ok(/id="tool-return"/.test(html), 'the phone chip');
+  assert.ok(/id="tool-return"/.test(html), 'the phone bar');
+  assert.match(html, /<\/header>\s*<button class="tool-return" id="tool-return"/, 'the bar sits directly under the chat header');
   const priv = read('js/privacy.js');
   assert.match(priv, /'dispatch-tool-split',/);
   assert.match(priv, /'dispatch-tool-split-ratio',/);
@@ -146,4 +147,36 @@ test('every locale carries the split strings', () => {
     }
     assert.match(t.back_to, /\{title\}/, `${l} keeps {title}`);
   }
+});
+
+test('splitMode: the thread list steps aside only when needed', () => {
+  const base = { pref: true, mobile: false };
+  assert.equal(S.splitMode({ ...base, withList: 1048, noList: 1368 }), 'list');
+  assert.equal(S.splitMode({ ...base, withList: 632, noList: 952 }), 'nolist');   // 1024 window
+  assert.equal(S.splitMode({ ...base, withList: 428, noList: 748 }), 'nolist');   // 820 window
+  assert.equal(S.splitMode({ ...base, withList: 300, noList: 600 }), null);
+  assert.equal(S.splitMode({ ...base, pref: false, withList: 1048, noList: 1368 }), null);
+  assert.equal(S.splitMode({ ...base, mobile: true, withList: 1048, noList: 1368 }), null);
+});
+
+test('thread key: an id round-trips in sessionStorage, junk is refused, a blocked store never throws', () => {
+  const m = new Map();
+  const st = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) };
+  Object.defineProperty(globalThis, 'sessionStorage', { value: st, configurable: true, writable: true });
+  try {
+    assert.equal(S.readThread(), null);
+    assert.equal(S.writeThread('abc-123'), true);
+    assert.equal(m.get('dispatch-tool-split-thread'), 'abc-123');
+    assert.equal(S.readThread(), 'abc-123');
+    assert.equal(S.writeThread('bad id <x>'), false);
+    assert.equal(S.writeThread(42), false);
+    m.set('dispatch-tool-split-thread', '<script>');
+    assert.equal(S.readThread(), null);
+    S.clearThread();
+    assert.equal(m.has('dispatch-tool-split-thread'), false);
+    Object.defineProperty(globalThis, 'sessionStorage', { value: { getItem() { throw new Error('x'); }, setItem() { throw new Error('x'); }, removeItem() { throw new Error('x'); } }, configurable: true, writable: true });
+    assert.equal(S.readThread(), null);
+    assert.equal(S.writeThread('ok'), false);
+    S.clearThread();
+  } finally { delete globalThis.sessionStorage; }
 });

@@ -331,7 +331,6 @@
           <div class="ch-title" id="ch-title" dir="auto" data-i18n="chat.select">Select a chat</div>
           <div class="muted ch-sub" id="ch-sub" dir="auto"></div>
         </div>
-        <button class="btn-secondary tool-return" id="tool-return" type="button" hidden><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#arrow-left"/></svg> <span class="tool-return-text"></span></button>
         <span class="conn-dot reconnecting" id="conn-dot" role="img" title="Connecting…" aria-label="Connection status" data-i18n-attr="title=conn.connecting;aria-label=conn.aria"></span>
         <span class="model-pill" id="ch-model" hidden></span>
         <!-- Per-thread model/thinking override chip. The label shows "model · used/window"; a refusal from the
@@ -375,6 +374,8 @@
           <button data-act="delete" class="danger"><span class="icn" data-icon="trash" aria-hidden="true"></span><span data-i18n="chat.delete_thread">Delete</span></button>
         </div>
       </header>
+      <!-- Phone: a parked tool comes back from here (js/tools.js). -->
+      <button class="tool-return" id="tool-return" type="button" hidden><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#arrow-left"/></svg> <span class="tool-return-text"></span></button>
 
       <!-- An app's thread hook (docs/design/2026-09-25-apps.md): when the open
            thread belongs to an app's bot, main.js imports that app's

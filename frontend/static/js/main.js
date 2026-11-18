@@ -7322,6 +7322,30 @@ function openThreadFromApp(id, { botId = null, hint = null, appId = null } = {})
   if (isMobile()) navigate('chat');
 }
 
+/** Split view (tools.js): open a thread in the chat half and leave the tool
+ *  pane alone. selectBot() keeps the pane while split, so the bot switch is safe. */
+async function openThreadInSplit(id, { botId = null, hint = null, appId = null } = {}) {
+  try {
+    if (botId && state.selectedBotId !== botId && botById(botId)) await selectBot(botId);
+  } catch { /* the thread opens below regardless */ }
+  openThreadFromApp(id, { botId, hint, appId });
+}
+
+/** Split view restored with an empty chat half: the thread this tab had open
+ *  (an id from sessionStorage), else the selected bot's newest one, else nothing.
+ *  A thread this profile cannot read (404) simply leaves the half empty. */
+function restoreSplitChat(savedId) {
+  if (savedId) {
+    api.thread(savedId).then((row) => {
+      if (!row || row.id !== savedId || state.activeThreadId) return;
+      return openThreadInSplit(savedId, { botId: row.bot_id || null });
+    }).catch(() => {});
+    return;
+  }
+  const first = state.selectedBotId && state.threads.find((x) => x.bot_id === state.selectedBotId && !x.is_archived);
+  if (first) openThread(first.id, { botId: first.bot_id });
+}
+
 // ===================== Live streaming render =====================
 // Render the accumulating reply as MARKDOWN while it streams (rAF-coalesced),
 // so it looks identical to the finalized row — no plain-text→formatted snap.
@@ -8099,6 +8123,10 @@ function wireEvents() {
     },
     // An app pane asked for one of its threads (open-thread postMessage).
     openThread: openThreadFromApp,
+    // Split view: an app's thread opens in the chat half, the pane stays up.
+    openThreadInSplit,
+    // Split view after a reload: this tab's chat-half thread, else the bot's newest.
+    restoreSplitChat,
     // An app pane asked to show a picture set in the shell's own lightbox.
     lightbox: openAppGallery,
     // An app's "set this up" button: Settings on that section (the section
