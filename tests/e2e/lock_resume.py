@@ -2,7 +2,8 @@
 """Headless check of lock / resume / keep-unlocked (docs/design/lock-resume.md).
 
 Drives a scratch DisPatch (tests/e2e/_scratch.py) in chrome-headless-shell at desktop and
-phone width. Each check prints PASS/FAIL; exit 1 on any failure.
+phone width. Each check prints PASS/FAIL
+exit 1 on any failure.
 
     cd backend && uv run --with playwright python ../tests/e2e/lock_resume.py \
         --port 18861 --data /var/tmp/dp-lock-scratch
@@ -19,8 +20,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _scratch import Scratch, find_headless_shell  # noqa: E402
-from playwright.sync_api import sync_playwright  # noqa: E402
+from _scratch import Scratch, find_headless_shell
+from playwright.sync_api import sync_playwright
 
 IDLE = 60
 RESULTS: list[tuple[str, bool, str]] = []
@@ -179,7 +180,7 @@ def send_canary(d: Dev):
         box.fill(CANARY, timeout=4000)
         box.press("Enter")
         pg.wait_for_timeout(2500)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         print("  (no composer:", type(e).__name__, ")")
 
 
@@ -251,7 +252,7 @@ def run(args) -> int:
                 # ---- wrong PINs: each goes to main; after 5 the resume is no longer offered
                 d.lock()
                 went_main = True
-                for i in range(5):
+                for _ in range(5):
                     if not d.split_shown():
                         d.goto_switch()
                     if not d.split_shown():
@@ -272,7 +273,6 @@ def run(args) -> int:
                 d.lock()
                 d.sign_in("Admin", via_split_others=True)
                 d.dismiss()
-                st_a = d.status()
                 d.lock()
                 d.pad(seed["profiles"]["User"]["pin"])
                 check(f"{W}: another profile's PIN does not resume the held one", not d.signed_in_as("User")
@@ -320,14 +320,17 @@ def run(args) -> int:
                     d.page.wait_for_timeout((IDLE + 20) * 1000)
                     check(f"{W}: keep-unlocked: still in past the idle timeout", d.signed_in_as("Owner")
                           and d.page.locator("#lock-screen.hidden").count() == 1)
-                    d.page.reload(); d.page.wait_for_timeout(1500)
+                    d.page.reload()
+                    d.page.wait_for_timeout(1500)
                     check(f"{W}: keep-unlocked: reload -> straight in", d.signed_in_as("Owner")
                           and d.page.locator("#lock-screen.hidden").count() == 1)
                     s.restart()
                     d.open()
                     check(f"{W}: keep-unlocked: server restart -> straight in", d.signed_in_as("Owner")
                           and d.page.locator("#lock-screen.hidden").count() == 1)
-                    d.page.close(); d.page = d.ctx.new_page(); d.open()
+                    d.page.close()
+                    d.page = d.ctx.new_page()
+                    d.open()
                     check(f"{W}: keep-unlocked: reopen -> straight in", d.signed_in_as("Owner")
                           and d.page.locator("#lock-screen.hidden").count() == 1)
                     # turn it off in Settings -> This device
@@ -341,7 +344,8 @@ def run(args) -> int:
                         d.page.wait_for_timeout(1500)
                     st = d.status()
                     check(f"{W}: Settings -> This device turns keep-unlocked off", present and st.get("keep_unlocked") is False)
-                    d.page.goto(s.base + "/"); d.page.wait_for_timeout(1500)
+                    d.page.goto(s.base + "/")
+                    d.page.wait_for_timeout(1500)
                     d.page.wait_for_timeout((IDLE + 25) * 1000)
                     check(f"{W}: keep-unlocked off: idle lock applies (split shown)", d.split_shown() and not d.signed_in_as("Owner"))
                     d.pad(seed["profiles"]["Owner"]["pin"])
