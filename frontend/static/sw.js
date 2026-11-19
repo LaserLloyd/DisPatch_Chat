@@ -122,7 +122,7 @@ const CACHE = 'local-chat-v225';  // v225: tool windows - every app / static / u
   //   info-level dot. main.js 102→103, app.css 86→87, index.html.
   // v126: Tools — new module js/tools.js (in
   //   SHELL): a Tools group in the rail (#tool-list), a generic full-page tool
-  //   pane (#tool-view), Settings → Tools, `body.tool-full` on every tool
+  //   window (js/appwin.js; it was the #tool-view pane until v225), Settings → Tools, `body.tool-full` on every tool
   //   opener; the ⌥ menu keeps only parked bots. main.js 101→102, api.js
   //   28→29 (and every importer: checklist 5→6, reactions 18→19, clients
   //   5→6, jobs 8→9, job-thread 9→10), app.css 85→86, index.html, every locale.
@@ -381,7 +381,7 @@ const SHELL = [
   // Tools rail group + generic tool pane + Settings → Tools (2026-09-25).
   // Pure module, statically imported by main.js.
   '/static/js/tools.js',
-  // Split view maths + its two stored preferences (statically imported by tools.js).
+  // Tool windows: the manager and its pure state/geometry (statically imported by tools.js).
   '/static/js/appwin.js',
   '/static/js/appwin-state.js',
   // Extensions (2.2.0): the loader, the SDK shell object and the page the

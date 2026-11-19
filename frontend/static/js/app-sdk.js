@@ -441,6 +441,8 @@ export const win = {
   onState(fn) {
     wireWindow();
     winListeners.add(fn);
+    // Subscribed after the shell's post-load message: hear the known state now.
+    if (winState) { try { fn({ ...winState }); } catch (e) { console.error('[app-sdk] win.onState handler', e); } }
     return () => winListeners.delete(fn);
   },
   /** Last known {state, layout}, or null. */

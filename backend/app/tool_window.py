@@ -50,10 +50,13 @@ def parse_window(value: Any) -> dict:
             if not isinstance(value[k], bool):
                 raise ValueError(f"{k} must be true or false")
             out[k] = value[k]
-    if "width" in out and out["min_width"] > out["width"]:
-        raise ValueError("min_width must not exceed width")
-    if "height" in out and out["min_height"] > out["height"]:
-        raise ValueError("min_height must not exceed height")
+    # A minimum the author set must fit the size they set; a default minimum
+    # simply follows a smaller size (width 320 is in range, so it is honoured).
+    for size, low in (("width", "min_width"), ("height", "min_height")):
+        if size in out and out[low] > out[size]:
+            if low in value:
+                raise ValueError(f"{low} must not exceed {size}")
+            out[low] = out[size]
     return out
 
 

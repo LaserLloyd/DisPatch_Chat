@@ -121,12 +121,17 @@ export async function closeWindow(id, { force = false } = {}) {
   if (!force && (r.live.busy > 0 || r.live.unsaved)) {
     const name = r.title;
     const ok = await askConfirm(t(r.live.busy > 0 ? 'win.confirm_busy' : 'win.confirm_unsaved', { name }));
-    if (!ok || !recs.has(id)) return false;
+    // The same window still (a lock or a profile switch may have replaced it).
+    if (!ok || recs.get(id) !== r) return false;
   }
   const wasOpen = model.open === id;
+  const trayIds = S.pills(model).map((w) => w.id);
+  const at = trayIds.indexOf(id);
   model = S.closeWin(model, id);
   destroyRec(r);
-  apply({ focusAfterClose: wasOpen || true });
+  // Focus: a closed window hands it to the chat (or the window under it);
+  // a closed pill to its neighbour in the tray (design §3).
+  apply(wasOpen ? { focusAfterClose: true } : { focusAfterClose: true, focusNear: at });
   return true;
 }
 
@@ -230,7 +235,6 @@ function ensureRec(id) {
     used: 0,
     eff: null,
     sent: '',
-    histPop: null,
   };
   buildWindow(r);
   recs.set(id, r);
@@ -239,10 +243,37 @@ function ensureRec(id) {
 }
 
 function destroyRec(r) {
-  if (r.histPop) { const p = r.histPop; r.histPop = null; try { p(); } catch { /* not fatal */ } }
   try { host && host.destroy(r); } catch (e) { console.warn('[appwin] destroy', e); }
   r.el.remove();
   recs.delete(r.id);
+}
+
+/** A page's frame goes (past the live cap, or keep_alive: false): what it
+ *  said about itself goes with it, or its pill would say "2 making" forever. */
+function unloadRec(r) {
+  r.loaded = false;
+  r.sent = '';
+  r.live = { status: '', badge: 0, busy: 0, unsaved: false, attention: false };
+  host.unload(r);
+}
+
+// The sheet's history entry, and calls waiting for its pop to land.
+let sheetPop = null;
+let histWaiters = null;
+function holdHistory() {
+  if (histWaiters) return;
+  histWaiters = [];
+  const flush = () => {
+    const fns = histWaiters || []; histWaiters = null;
+    for (const fn of fns) { try { fn(); } catch (e) { console.warn('[appwin] after history', e); } }
+  };
+  window.addEventListener('popstate', () => setTimeout(flush, 0), { once: true });
+  setTimeout(() => { if (histWaiters) flush(); }, 400);   // a browser that never pops
+}
+/** Run `fn` once a sheet's history entry has gone (at once when none is going):
+ *  navigation pushed before that pop lands would be the entry it pops. */
+export function afterHistory(fn) {
+  if (histWaiters) histWaiters.push(fn); else fn();
 }
 
 let useSeq = 0;
@@ -387,7 +418,7 @@ function clearDock() {
   if (divider) divider.hidden = true;
 }
 
-function apply({ focus = null, focusPill = null, focusAfterClose = false, save = true, quiet = false } = {}) {
+function apply({ focus = null, focusPill = null, focusAfterClose = false, focusNear = -1, save = true, quiet = false } = {}) {
   ensureLayer();
   const phone = mobile();
   const open = model.open ? recs.get(model.open) : null;
@@ -409,13 +440,14 @@ function apply({ focus = null, focusPill = null, focusAfterClose = false, save =
   for (const r of recs.values()) {
     const w = S.find(model, r.id);
     if (w && w.state === 'open' && !r.loaded) { r.loaded = true; host.load(r); }
-    if (w && w.state === 'min' && r.loaded && r.opts.keep_alive === false) { r.loaded = false; host.unload(r); }
+    if (w && w.state === 'min' && r.loaded && r.opts.keep_alive === false) unloadRec(r);
   }
-  const live = [...recs.values()].filter((r) => r.loaded).sort((a, b) => b.used - a.used);
+  // Keep the open one, then pages with work in hand, then the most recent.
+  const keep = (r) => (model.open === r.id ? 2 : (r.live.busy > 0 || r.live.unsaved ? 1 : 0));
+  const live = [...recs.values()].filter((r) => r.loaded).sort((a, b) => (keep(b) - keep(a)) || (b.used - a.used));
   for (const r of live.slice(MAX_LIVE)) {
     if (model.open === r.id) continue;
-    r.loaded = false;
-    host.unload(r);
+    unloadRec(r);
   }
   // 3. the tray first (a float stops above it)
   paintTray();
@@ -431,14 +463,21 @@ function apply({ focus = null, focusPill = null, focusAfterClose = false, save =
   document.body.classList.toggle('appwin-open', !!open);
   document.body.classList.toggle('appwin-covers', !!open && (open.eff === 'full' || open.eff === 'sheet'));
   placeTray();
-  // 5. phone Back minimises a sheet: it owns one history entry while up
-  for (const r of recs.values()) {
-    const want = r.eff === 'sheet';
-    if (want && !r.histPop && deps && typeof deps.historyPush === 'function') {
-      r.histPop = deps.historyPush('appwin', 'appwin', () => { r.histPop = null; if (model.open === r.id) minimizeWindow(r.id); });
-    } else if (!want && r.histPop) {
-      const pop = r.histPop; r.histPop = null; pop();
-    }
+  // 5. phone Back minimises a sheet: ONE history entry while any sheet is up.
+  // A sheet replacing another takes the entry over (a pop then a push would
+  // race: history.back() lands later and would take the new sheet down).
+  const sheet = open && open.eff === 'sheet' ? open : null;
+  if (sheet && !sheetPop && deps && typeof deps.historyPush === 'function') {
+    sheetPop = deps.historyPush('appwin', 'appwin', () => {
+      sheetPop = null;
+      const cur = model.open && recs.get(model.open);
+      if (cur && cur.eff === 'sheet') minimizeWindow(cur.id);
+    });
+  } else if (!sheet && sheetPop) {
+    const pop = sheetPop; sheetPop = null;
+    const willPop = !!(history.state && history.state.ext === 'appwin');
+    if (willPop) holdHistory();
+    pop();
   }
   // 6. tell each frame its state when it changed; clear attention on screen
   for (const r of recs.values()) {
@@ -457,7 +496,8 @@ function apply({ focus = null, focusPill = null, focusAfterClose = false, save =
     if (b) b.focus({ preventScroll: true });
   } else if (focusAfterClose) {
     const pills = tray.querySelectorAll('.appwin-pill-main');
-    if (open) open.handle.focus({ preventScroll: true });
+    if (focusNear >= 0 && pills.length) pills[Math.min(focusNear, pills.length - 1)].focus({ preventScroll: true });
+    else if (open) open.handle.focus({ preventScroll: true });
     else if (pills.length) pills[pills.length - 1].focus({ preventScroll: true });
     else if (deps && typeof deps.focusChat === 'function') deps.focusChat();
   }
@@ -491,7 +531,7 @@ function place(r, dock) {
   clearBox(r.el);
   if (e === 'sheet') {
     // CSS owns the sheet; it stops above the tray when pills are showing.
-    r.el.style.setProperty('--appwin-tray-h', `${tray && !tray.hidden ? tray.offsetHeight : 0}px`);
+    r.el.style.setProperty('--appwin-tray-h', `${tray && !tray.hidden ? tray.offsetHeight + 14 : 0}px`);
     return;
   }
   if (e === 'float') {
@@ -959,7 +999,10 @@ function askConfirm(text) {
     no.textContent = t('win.keep_open');
     yes.textContent = t('win.close_anyway');
     confirmDlg.querySelector('p').textContent = text;
+    let settled = false;
     const done = (v) => {
+      if (settled) return;
+      settled = true;
       no.onclick = null; yes.onclick = null; confirmDlg.oncancel = null;
       if (confirmDlg.open) confirmDlg.close();
       resolve(v);
@@ -967,6 +1010,8 @@ function askConfirm(text) {
     no.onclick = () => done(false);
     yes.onclick = () => done(true);
     confirmDlg.oncancel = (e) => { e.preventDefault(); done(false); };
+    // Closed from outside (a lock tears every overlay down): the answer is no.
+    confirmDlg.addEventListener('close', () => done(false), { once: true });
     if (typeof confirmDlg.showModal === 'function') { confirmDlg.showModal(); no.focus(); }
     else resolve(window.confirm(text));
   });
@@ -990,6 +1035,7 @@ export function wireAppWindows(d) {
   recs.clear();
   model = S.empty(); profileId = undefined; firstSync = true; lastVisible = null;
   layer = tray = divider = preview = confirmDlg = null;
+  sheetPop = null; histWaiters = null;
   deps = d;
   ensureLayer();
   window.addEventListener('resize', relayout);
@@ -1006,5 +1052,6 @@ export function _resetForTest() {
   recs.clear();
   model = S.empty(); profileId = undefined; firstSync = true; deps = null; host = null;
   layer = tray = divider = preview = confirmDlg = null; lastVisible = null;
+  sheetPop = null; histWaiters = null;
 }
 export function _model() { return model; }

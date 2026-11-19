@@ -68,7 +68,8 @@ function wire(mod, over = {}) {
     navigate: () => {},
     toast: (m, err) => rec.toasts.push([m, !!err]),
     isBotId: (id) => id === 'main',
-    openSettings: () => {},
+    openSettings: (t) => (rec.settings ||= []).push(t),
+    lightbox: (x) => (rec.lightbox ||= []).push(x),
     historyPush: (...a) => { rec.pushed.push(a); return () => { rec.released += 1; }; },
     announce: (m) => rec.announced.push(m),
     focusChat: () => { rec.focusedChat += 1; },
@@ -431,4 +432,53 @@ test('phone: Back to chat asks the shell to show the chat; system Back does not'
   onBack();
   assert.equal(asked, 1, 'system Back only minimises (it steps back, it does not jump to the chat)');
   assert.equal(visible(doc, 'benchmark'), false);
+});
+
+test('review: a url tool (someone else\'s site) cannot use the window controls; a static page can', { skip: dom.skip }, async () => {
+  const { mod, doc, win } = await ready();
+  mod.openTool('rig-panel');
+  const f = frameOf(doc, 'rig-panel');
+  const origin = new URL(f.getAttribute('src'), win.location.href).origin;
+  windowMsg(win, 'rig-panel', 'status', 'Sign in again', { origin });
+  windowMsg(win, 'rig-panel', 'busy', 999, { origin });
+  assert.equal(inWin(doc, 'rig-panel', '.appwin-status').textContent, '');
+  const asked = stubConfirm(win, { value: false });
+  inWin(doc, 'rig-panel', '.appwin-close').click();
+  await tick();
+  assert.equal(asked.length, 0, 'no "still working" question held over Close');
+  assert.equal(winEl(doc, 'rig-panel'), null);
+  mod.openTool('benchmark');
+  windowMsg(win, 'benchmark', 'status', 'ready', { origin: 'null' });
+  assert.equal(inWin(doc, 'benchmark', '.appwin-status').textContent, 'ready');
+});
+
+test('review: a pill cannot pop the lightbox, Settings or a toast over the chat', { skip: dom.skip }, async () => {
+  const { mod, doc, win, rec } = await ready();
+  mod.openTool('jobboard');
+  await tick();
+  inWin(doc, 'jobboard', '.appwin-min').click();
+  fromFrame(win, 'jobboard', { type: 'dispatch:lightbox', items: [], index: 0 });
+  fromFrame(win, 'jobboard', { type: 'dispatch:open-settings', target: 'images' });
+  fromFrame(win, 'jobboard', { type: 'dispatch:toast', text: 'hi' });
+  assert.equal(rec.toasts.length, 0);
+  assert.equal(rec.lightbox, undefined);
+  assert.equal(rec.settings, undefined);
+  // The same messages from the window on screen still work.
+  pillOf(doc, 'jobboard').querySelector('.appwin-pill-main').click();
+  fromFrame(win, 'jobboard', { type: 'dispatch:toast', text: 'hi' });
+  fromFrame(win, 'jobboard', { type: 'dispatch:lightbox', items: [], index: 0 });
+  assert.equal(rec.toasts.length, 1);
+  assert.equal(rec.lightbox.length, 1);
+});
+
+test('review: an offline boot (network error on /api/tools) never drops the saved windows', { skip: dom.skip }, async () => {
+  const win = setup();
+  win.localStorage.setItem('dispatch-appwin:v1:p1', JSON.stringify({ v: 1, wins: [{ id: 'benchmark', state: 'min', order: 1 }], open: null, prefs: {}, seq: 1 }));
+  const mod = await freshTools();
+  wire(mod);
+  mod.setToolProfile('p1');
+  globalThis.fetch = async () => { throw new TypeError('offline'); };
+  await mod.loadTools();
+  const kept = JSON.parse(win.localStorage.getItem('dispatch-appwin:v1:p1'));
+  assert.deepEqual(kept.wins.map((w) => w.id), ['benchmark'], 'still saved for when the list comes back');
 });

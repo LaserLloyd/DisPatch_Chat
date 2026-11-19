@@ -1188,6 +1188,10 @@ def test_window_valid_block_and_defaults(tools_env):
     plain = tools.validate_tools([_static()], check_fs=False)[0]
     assert plain.window == () and plain.window_out == _WIN_DEFAULTS
     hash(out[0])                                     # frozen Tool stays hashable
+    # A small size the author gave wins over the DEFAULT minimum (only an
+    # author's own minimum must fit their size).
+    small = tools.validate_tools([_static(window={"width": 320, "height": 240})], check_fs=False)[0]
+    assert small.window_out["min_width"] == 320 and small.window_out["min_height"] == 240
 
 
 @pytest.mark.parametrize("win", [

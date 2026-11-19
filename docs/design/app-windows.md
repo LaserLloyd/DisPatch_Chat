@@ -100,7 +100,9 @@ restores the one that exists). States:
 ### Phone (narrow layout)
 
 * The window is a **sheet** covering the screen below a small top gap (safe-area
-  aware), above the bottom tabs. No float, no dock (the layout menu is hidden).
+  aware), over the bottom tabs ("covers pretty much the entire screen"; Back to
+  chat brings them back), with other pills above its lower edge. No float, no
+  dock (the layout menu is hidden).
 * Bar: grab handle, icon, title/status, **⌄ Back to chat**, ✕ Close (44 px each).
   Swiping the handle/title down ≥ 96 px minimises (the ⌄ button is the tap
   alternative). The phone's **Back** minimises the sheet (Android bubble rule).

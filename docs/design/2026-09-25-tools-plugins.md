@@ -149,7 +149,7 @@ moved in the same day).
   `body.tools-sheet-open`; a scrim tap only closes it). Tools first, then the
   parked bots; with no tools the row is "More bots". Keyboard: Enter/Space/arrows open, arrows/Home/End
   move, Esc closes and refocuses the button, click-outside closes.
-- Generic pane `#tool-view` (one, reused): header row = icon+title, "updated N
+- Generic pane `#tool-view` (one, reused; replaced by tool windows in v225, see `app-windows.md`): header row = icon+title, "updated N
   min ago" (from `status.mtime`), ↻ Refresh button when `has_refresh` (disabled
   while `refreshing`; on completion reloads the iframe; a non-zero rc shows the
   stderr tail in a collapsed strip), "open in new tab" ↗, and ✕. Body = sandboxed

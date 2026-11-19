@@ -57,7 +57,7 @@ import {
   setHost as winSetHost, openWindow as winOpen, minimizeWindow as winMinimize, closeWindow as winClose,
   closeAll as winCloseAll, setProfile as winSetProfile, syncKnown as winSyncKnown, setLive as winSetLive,
   setTitle as winSetTitle, visibleId as winVisibleId, visibleLayout as winVisibleLayout,
-  coversChat as winCoversChat, repaintAll as winRepaint, isMinimized as winIsMinimized, wireAppWindows,
+  coversChat as winCoversChat, repaintAll as winRepaint, isMinimized as winIsMinimized, wireAppWindows, afterHistory as winAfterHistory,
 } from './appwin.js?v=1';
 
 // Builtin ids are the pseudo-bot ids main.js has always used, in rail order.
@@ -450,22 +450,25 @@ export function railEntries() {
 
 /** Fetch /api/tools and repaint the rail. Never throws. */
 export async function loadTools() {
+  let answered = false;
   try {
     const r = await api.tools();
     tools = normalize(r && r.tools);
     toolsPath = (r && typeof r.path === 'string') ? r.path : '';
+    answered = true;
   } catch (e) {
     // 404: a backend without the tools feature — keep the builtin fallback.
     // 401/403: this tier may see none.
-    if (e && e.status === 404) tools = null;
-    else if (e && (e.status === 401 || e.status === 403)) tools = [];
+    if (e && e.status === 404) { tools = null; answered = true; }
+    else if (e && (e.status === 401 || e.status === 403)) { tools = []; answered = true; }
     // Anything else (network): keep whatever we had.
   }
-  toolsLoaded = true;
   renderToolRail();
   // Windows of tools this session may no longer open go; after a reload the
-  // saved ones come back (js/appwin.js).
-  winSyncKnown();
+  // saved ones come back (js/appwin.js). Only against a list the server gave
+  // THIS profile: an offline boot or the previous profile's list would drop
+  // (and save away) windows that are still fine.
+  if (answered) { toolsLoaded = true; winSyncKnown(); }
   return tools;
 }
 
@@ -1306,12 +1309,18 @@ export function closeTool() {
 
 /** A lock or a profile switch: every window is torn down at once. */
 export function closeAllTools() {
+  toolsLoaded = false;   // the next session's list decides what comes back
   winCloseAll();
   setHash(null);
 }
 
 /** Which profile is using the app (its windows are its own, on this device). */
-export function setToolProfile(profileId) { winSetProfile(profileId); }
+export function setToolProfile(profileId) {
+  const next = typeof profileId === 'string' && profileId ? profileId : null;
+  if (next !== toolProfile) { toolProfile = next; toolsLoaded = false; }
+  winSetProfile(profileId);
+}
+let toolProfile;
 
 /** The tool window on screen, or null. */
 export function toolOpen() { return winVisibleId(); }
@@ -1447,16 +1456,19 @@ function onAppMessage(ev) {
         return;
       }
       winMinimize(p.id);
-      if (typeof deps.openThread === 'function') deps.openThread(id, opts);
+      // A phone sheet gives back its history entry (async): navigate after it.
+      if (typeof deps.openThread === 'function') winAfterHistory(() => deps.openThread(id, opts));
       return;
     }
     case 'dispatch:lightbox': {
+      if (winVisibleId() !== p.id) return;   // a pill never pops a viewer over the chat
       // A picture set (Image Studio results) for the shell's own viewer. The
       // shell validates it (same-origin paths only, capped) before it opens.
       if (typeof deps.lightbox === 'function') deps.lightbox({ items: msg.items, index: msg.index });
       return;
     }
     case 'dispatch:open-settings': {
+      if (winVisibleId() !== p.id) return;   // only from the window on screen
       // An app's "set this up" button (Image Studio's empty state): open Settings on
       // a section, never anything else. The shell decides what this session may see.
       const target = String(msg.target == null ? '' : msg.target);
@@ -1469,6 +1481,7 @@ function onAppMessage(ev) {
       winClose(p.id, { force: true });
       return;
     case 'dispatch:toast': {
+      if (winVisibleId() !== p.id) return;   // a pill speaks through its status line
       const text = String(msg.text == null ? '' : msg.text).slice(0, 500);
       if (text) deps.toast(text, !!msg.error);
       return;
@@ -1489,7 +1502,9 @@ function onWindowMessage(ev) {
   if (!msg || typeof msg !== 'object' || msg.type !== 'dispatch:window' || !WINDOW_OPS.has(msg.op)) return;
   const p = paneBySource(ev.source);
   const tool = p ? findTool(p.id) : null;
-  if (!p || !isFramed(tool) || !stateOriginOk(tool, ev.origin)) return;
+  // Apps and static pages only: a url tool is someone else's site, and must not
+  // write under our title, hold Close behind a question or ask for attention.
+  if (!p || !tool || !(isApp(tool) || tool.kind === 'static') || !stateOriginOk(tool, ev.origin)) return;
   winSetLive(p.id, msg.op, msg.op === 'attention' || msg.op === 'minimize' ? true : msg.value);
 }
 
