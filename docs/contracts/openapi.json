@@ -6747,9 +6747,26 @@
         "summary": "Auth Forget Devices"
       }
     },
+    "/api/auth/keep-unlocked": {
+      "post": {
+        "description": "4.4: \"Keep this device unlocked\" for the caller's own live session. ON exempts this\ndevice from the idle lock and makes the session a remembered one if it was not (that\nneeds the profile's credential, through the normal throttle: a found unlocked tab must\nnot turn itself into 30 days of access; within auth.FRESH_SIGNIN_SECONDS of the sign-in\nthat minted the session it does not, which is the offer card after a sign-in). OFF never\nneeds one. Refused for Basic, for\nthe shared default profile (no session) and while remembering is off install-wide.",
+        "operationId": "auth_keep_unlocked_api_auth_keep_unlocked_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Keep Unlocked"
+      }
+    },
     "/api/auth/lock": {
       "post": {
-        "description": "Lock = sign out on this device and land on the lock target (4.0, BUILD-PLAN-v2 §1.4):\nthe default profile (``lock_target: default_profile``) or the profile list. The push\nsubscription of the session being closed goes with it (a signed-out device pings nobody).",
+        "description": "Lock this device and land on the lock target (4.0, BUILD-PLAN-v2 §1.4): the default\nprofile (``lock_target: default_profile``) or the profile list.\n\n4.4 (docs/design/lock-resume.md): the session is HELD, not ended: from now on it is nobody\non every route, and only POST /api/auth/resume with its profile's credential brings it\nback (for auth.HOLD_SECONDS). The cookie stays so the browser can resume. The push\nsubscription goes (a locked device pings nobody). ``{\"reason\": \"idle\"}`` (a tab's idle\ntimer) is refused while the session was used inside its idle window, by another tab or\nwindow of the same browser for instance, or keeps this device unlocked; a manual lock is\nnever refused.",
         "operationId": "auth_lock_api_auth_lock_post",
         "responses": {
           "200": {
@@ -6966,6 +6983,23 @@
           }
         },
         "summary": "Auth Remember Config"
+      }
+    },
+    "/api/auth/resume": {
+      "post": {
+        "description": "4.4: resume this browser's held (locked) session with its profile's PIN or password.\n\nThe answer never names the profile before success: a wrong secret and \"nothing to\nresume\" get the same 401 body, and the check always does the same work (auth.verify_any).\nAttempts are throttled in their own bucket (device + \"resume\", the address bucket and the\nglobal ceiling, same thresholds as a sign-in) and never in the held profile's own bucket,\nso the lock screen cannot be used to find out whose session it is. At\nauth.RESUME_MAX_FAILS wrong secrets the hold is dropped for good.",
+        "operationId": "auth_resume_api_auth_resume_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Resume"
       }
     },
     "/api/auth/setup": {

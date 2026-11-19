@@ -750,9 +750,17 @@
     },
     {
       "method": "POST",
+      "path": "/api/auth/keep-unlocked",
+      "requirement": {
+        "note": "YOUR OWN device's idle-lock exemption; turning it on for a non-remembered session needs your credential (throttled); refused for Basic",
+        "permission": "use_chat"
+      }
+    },
+    {
+      "method": "POST",
       "path": "/api/auth/lock",
       "requirement": {
-        "note": "dropping your own session needs no permission",
+        "note": "locking (holding) your own session needs no permission",
         "public": true
       }
     },
@@ -801,6 +809,14 @@
       "path": "/api/auth/remember-config",
       "requirement": {
         "permission": "manage_settings"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/resume",
+      "requirement": {
+        "note": "credential check for this browser's own held session; throttled in its own bucket, never names the profile",
+        "public": true
       }
     },
     {
