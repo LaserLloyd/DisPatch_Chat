@@ -105,6 +105,16 @@ CREATE TABLE IF NOT EXISTS files (
 
 CREATE INDEX IF NOT EXISTS idx_files_created ON files(created_at DESC);
 
+-- Today's use of the daily spend caps for paid picture providers (image_spend.py): one row per
+-- local day, scope ('install' or a profile id) and unit (usd | buzz | pictures:<provider>).
+CREATE TABLE IF NOT EXISTS image_spend (
+    day    TEXT NOT NULL,
+    scope  TEXT NOT NULL,
+    unit   TEXT NOT NULL,
+    amount REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, scope, unit)
+);
+
 -- Agent-fired image jobs (app/image_jobs.py). One row per request, created in
 -- the same breath as the placeholder message it will eventually rewrite.
 --
