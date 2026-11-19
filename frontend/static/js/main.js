@@ -8119,6 +8119,15 @@ function wireEvents() {
     announce: (text) => announce(text),
     focusChat: () => { const i = dom['input']; if (i && i.offsetParent !== null && !i.disabled) i.focus(); else { const r = document.querySelector('.sidebar button'); if (r) r.focus(); } },
     canDragClose: () => state.role !== 'basic',
+    // The phone's "Back to chat" on a window opened from the bot list: the open
+    // chat comes up. Called before the sheet gives back its history entry, so
+    // wait for that pop to land before stepping forward to the chat.
+    backToChat: () => {
+      if (!isMobile() || !state.activeThreadId || dom.app.dataset.view === 'chat') return;
+      const go = () => { if (state.activeThreadId) navigate('chat'); };
+      if (history.state && history.state.ext === 'appwin') window.addEventListener('popstate', () => setTimeout(go, 0), { once: true });
+      else go();
+    },
     // An app pane asked to show a picture set in the shell's own lightbox.
     lightbox: openAppGallery,
     // An app's "set this up" button: Settings on that section (the section

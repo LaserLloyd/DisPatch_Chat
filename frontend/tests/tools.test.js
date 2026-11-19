@@ -32,6 +32,9 @@ function setup(url = 'http://127.0.0.1:8765/') {
   globalThis.location = win.location;
   globalThis.history = win.history;
   globalThis.CSS = win.CSS || { escape: (s) => s };
+  // appwin-state.js / appwin.js read these as bare globals.
+  globalThis.localStorage = win.localStorage;
+  globalThis.getComputedStyle = win.getComputedStyle.bind(win);
   calls = [];
   routes = {
     'GET /api/tools': () => [200, FIXTURE],
@@ -61,7 +64,7 @@ async function freshTools() {
  *  page, one tile per tool — what most of these cases inspect; false = the
  *  desktop rail, ONE Tools button with a popup (the "desktop rail" cases). */
 function wire(mod, over = {}) {
-  const rec = { opened: [], closedWith: [], restored: [], sidebar: 0, toasts: [], navigated: [], threads: [] };
+  const rec = { opened: [], closedWith: [], restored: [], sidebar: 0, toasts: [], navigated: [], threads: [], splitThreads: [], pushed: [], announced: [] };
   const state = { selectedBotId: 'main', activeThreadId: 't-1', ...over.state };
   const flags = { harness: true, studioforge: true, mail: true, practice: false, ...over.flags };
   mod.wireTools({
@@ -76,6 +79,11 @@ function wire(mod, over = {}) {
     closeToolPanes: (except) => rec.closedWith.push(except),
     builtinOn: (f) => !!flags[f],
     builtinDot: (f) => (f === 'harness' ? 'harness-sidedot harness-running' : ''),
+    openThreadInSplit: (id, opts) => rec.splitThreads.push([id, opts]),
+    historyPush: (...a) => { rec.pushed.push(a); return () => {}; },
+    announce: (m) => rec.announced.push(m),
+    focusChat: () => {},
+    canDragClose: () => true,
     restoreView: (p) => rec.restored.push(p),
     renderSidebar: () => { rec.sidebar += 1; mod.renderToolRail(); },
     isMobile: () => (over.mobile === undefined ? true : !!over.mobile),
@@ -87,6 +95,14 @@ function wire(mod, over = {}) {
   });
   return { rec, state };
 }
+
+// ---- tool-window helpers (each framed tool lives in section.appwin[data-tool]) ----
+const winEl = (doc, id) => doc.querySelector(`.appwin[data-tool="${id}"]`);
+const frameOf = (doc, id) => { const w = winEl(doc, id); return w && w.querySelector('iframe.tool-frame'); };
+const inWin = (doc, id, sel) => { const w = winEl(doc, id); return w && w.querySelector(sel); };
+const pillOf = (doc, id) => doc.querySelector(`#appwin-tray .appwin-pill[data-tool="${id}"]`);
+const winVisible = (doc, id) => { const w = winEl(doc, id); return !!w && !w.hidden; };
+const tick = () => new Promise((r) => setTimeout(r, 0));
 
 // Per-tool tiles drawn straight into the rail. Neither layout has any since
 // 2026-09-26: the phone got the desktop's one control (as a row + a sheet).
@@ -175,8 +191,8 @@ test('menu rows: the theme\'s line icons, typed emoji kept, the active row marke
   pointerClick(win, win.document.getElementById('tools-menu-btn'));
   assert.ok(row('benchmark').classList.contains('active'));
   assert.equal(row('benchmark').getAttribute('aria-current'), 'page');
-  // The pane header shows the same glyph as the row.
-  assert.ok(win.document.querySelector('#tool-icon svg.rail-icon'));
+  // The window's title bar shows the same glyph as the row.
+  assert.ok(inWin(win.document, 'benchmark', '.appwin-icon svg.rail-icon'));
 });
 
 test('rail: a backend without /api/tools still shows the builtins', { skip: dom.skip }, async () => {
@@ -188,7 +204,7 @@ test('rail: a backend without /api/tools still shows the builtins', { skip: dom.
   assert.deepEqual(listedIds(win), ['deepseek-harness', 'studioforge-panel', 'mail-panel']);
 });
 
-test('opening a static tool: full-page, strict sandbox, served path, refresh shown', { skip: dom.skip }, async () => {
+test('opening a static tool: a window, strict sandbox, served path, refresh shown', { skip: dom.skip }, async () => {
   const win = setup();
   const mod = await freshTools();
   const { rec, state } = wire(mod);
@@ -196,57 +212,64 @@ test('opening a static tool: full-page, strict sandbox, served path, refresh sho
   pick(win, 'benchmark');
 
   const doc = win.document;
-  assert.ok(doc.body.classList.contains('tool-full'), 'body.tool-full must be set');
-  assert.equal(doc.getElementById('tool-view').classList.contains('hidden'), false);
-  const frame = doc.getElementById('tool-frame');
+  const w = winEl(doc, 'benchmark');
+  assert.ok(w, 'a window exists for the tool');
+  assert.equal(w.hidden, false);
+  assert.equal(w.getAttribute('role'), 'dialog');
+  assert.equal(doc.body.classList.contains('tool-full'), false, 'body.tool-full is gone');
+  const frame = frameOf(doc, 'benchmark');
   assert.equal(frame.getAttribute('src'), '/tools/benchmark/');
   assert.equal(frame.getAttribute('sandbox'), 'allow-scripts allow-forms allow-popups');
-  assert.equal(doc.getElementById('tool-title').textContent, 'Benchmark Board');
-  assert.equal(doc.getElementById('tool-open').getAttribute('href'), '/tools/benchmark/');
-  assert.equal(doc.getElementById('tool-refresh').classList.contains('hidden'), false);
+  assert.equal(inWin(doc, 'benchmark', '.appwin-title').textContent, 'Benchmark Board');
+  assert.equal(inWin(doc, 'benchmark', 'a.tool-open').getAttribute('href'), '/tools/benchmark/');
+  assert.equal(inWin(doc, 'benchmark', 'button.tool-refresh').classList.contains('hidden'), false);
   assert.deepEqual(rec.closedWith, ['tool'], 'the builtin panes are closed first');
-  assert.equal(state.selectedBotId, 'benchmark');
+  assert.equal(state.selectedBotId, 'main', 'opening a window never changes the selection');
   assert.ok(doc.getElementById('tools-menu-btn').classList.contains('active'), 'the Tools control is lit while a tool is open');
   assert.equal(win.location.hash, '#tool=benchmark');
   // Status lands asynchronously: "updated … ago".
-  await new Promise((r) => setTimeout(r, 0));
-  await new Promise((r) => setTimeout(r, 0));
-  assert.notEqual(doc.getElementById('tool-updated').textContent, '');
+  await tick(); await tick();
+  assert.notEqual(inWin(doc, 'benchmark', '.appwin-updated').textContent, '');
 
-  // ✕ restores the selection the tool replaced.
-  doc.getElementById('tool-close').click();
-  assert.equal(doc.body.classList.contains('tool-full'), false);
-  assert.ok(doc.getElementById('tool-view').classList.contains('hidden'));
+  // ✕ closes and unloads; the chat underneath was never touched.
+  inWin(doc, 'benchmark', '.appwin-close').click();
+  assert.equal(winEl(doc, 'benchmark'), null, 'the window is gone');
   assert.equal(frame.hasAttribute('src'), false, 'the frame is unloaded on close');
-  assert.deepEqual(rec.restored, [{ botId: 'main', threadId: 't-1' }]);
+  assert.deepEqual(rec.restored, [], 'nothing to restore: the chat was never replaced');
   assert.equal(win.location.hash, '');
 });
 
-test('✕ on a generic tool opened over a builtin pane restores the last real chat', { skip: dom.skip }, async () => {
+// REWRITTEN for tool windows: the old premise (✕ on a generic pane restores the
+// last real chat) is gone. Now opening a window over a builtin pane puts the
+// chat back UNDER the window via restoreView(prev, {stay:true}), and closing the
+// window does not touch the selection.
+test('a window opened over a builtin pane restores the chat underneath; closing it restores nothing', { skip: dom.skip }, async () => {
   const win = setup();
   const mod = await freshTools();
   const { rec, state } = wire(mod);
   // The builtin openers are main.js's; mimic one: rememberPrev() BEFORE the
   // selection moves to the builtin's id.
-  rec.opened.length = 0;
   const openHarness = () => { mod.rememberPrev(); state.selectedBotId = 'deepseek-harness'; state.activeThreadId = null; };
   await mod.loadTools();
   openHarness();
   assert.equal(mod.openTool('benchmark'), true);
-  win.document.getElementById('tool-close').click();
   assert.deepEqual(rec.restored, [{ botId: 'main', threadId: 't-1' }],
     'without rememberPrev the restore target was the builtin (= no bot selected)');
+  assert.deepEqual(rec.closedWith, ['tool']);
+  assert.equal(mod.toolOpen(), 'benchmark');
 
-  // Generic → builtin → generic keeps the original chat too: the builtin
-  // closing the generic pane with restore:false must not drop it.
+  // Closing the window leaves the selection to the chat underneath.
   rec.restored.length = 0;
+  winEl(win.document, 'benchmark').querySelector('.appwin-close').click();
+  assert.deepEqual(rec.restored, []);
+  assert.equal(mod.toolOpen(), null);
+
+  // Hopping tool to tool over a selected chat restores nothing at all.
   state.selectedBotId = 'main'; state.activeThreadId = 't-2';
   mod.openTool('benchmark');
-  mod.closeTool({ restore: false });          // what closeToolPanes('harness') does
-  openHarness();                              // selection is still 'benchmark' → no-op
   mod.openTool('rig-panel');
-  win.document.getElementById('tool-close').click();
-  assert.deepEqual(rec.restored, [{ botId: 'main', threadId: 't-2' }]);
+  assert.deepEqual(rec.restored, []);
+  assert.equal(state.selectedBotId, 'main');
 });
 
 test('closing a tool navigates its frame to about:blank before dropping src', { skip: dom.skip }, async () => {
@@ -255,7 +278,7 @@ test('closing a tool navigates its frame to about:blank before dropping src', { 
   wire(mod);
   await mod.loadTools();
   mod.openTool('benchmark');
-  const frame = win.document.getElementById('tool-frame');
+  const frame = frameOf(win.document, 'benchmark');
   const seen = [];
   const proto = Object.getPrototypeOf(frame);
   const desc = Object.getOwnPropertyDescriptor(proto, 'src')
@@ -267,9 +290,10 @@ test('closing a tool navigates its frame to about:blank before dropping src', { 
   });
   const rm = frame.removeAttribute.bind(frame);
   frame.removeAttribute = (n) => { seen.push(['remove', n]); rm(n); };
-  mod.closeTool();
+  winEl(win.document, 'benchmark').querySelector('.appwin-close').click();
   assert.deepEqual(seen, [['set', 'about:blank'], ['remove', 'src']]);
   assert.equal(frame.hasAttribute('src'), false);
+  assert.equal(winEl(win.document, 'benchmark'), null);
 });
 
 test('url tool: loopback address loads only on the host, with allow-same-origin', { skip: dom.skip }, async () => {
@@ -278,17 +302,17 @@ test('url tool: loopback address loads only on the host, with allow-same-origin'
   wire(mod);
   await mod.loadTools();
   mod.openTool('rig-panel');
-  let frame = win.document.getElementById('tool-frame');
+  let frame = frameOf(win.document, 'rig-panel');
   assert.ok(frame.classList.contains('hidden'), 'off-host: no frame');
   assert.equal(frame.hasAttribute('src'), false);
-  assert.equal(win.document.getElementById('tool-note').classList.contains('hidden'), false);
+  assert.equal(inWin(win.document, 'rig-panel', '.tool-note').classList.contains('hidden'), false);
 
   win = setup('http://127.0.0.1:8765/');
   mod = await freshTools();
   wire(mod);
   await mod.loadTools();
   mod.openTool('rig-panel');
-  frame = win.document.getElementById('tool-frame');
+  frame = frameOf(win.document, 'rig-panel');
   assert.equal(frame.getAttribute('src'), 'http://127.0.0.1:8080/');
   assert.equal(frame.getAttribute('sandbox'), 'allow-scripts allow-forms allow-popups allow-same-origin');
 });
@@ -303,11 +327,11 @@ test('url tool: a remote_url is framed off the host; the loopback url stays host
   wire(mod);
   await mod.loadTools();
   mod.openTool('rig-panel');
-  let frame = win.document.getElementById('tool-frame');
+  let frame = frameOf(win.document, 'rig-panel');
   assert.equal(frame.getAttribute('src'), 'https://host.tailnet.example:8452/');
   assert.equal(frame.getAttribute('sandbox'), 'allow-scripts allow-forms allow-popups allow-same-origin');
-  assert.ok(win.document.getElementById('tool-note').classList.contains('hidden'));
-  assert.equal(win.document.getElementById('tool-open').getAttribute('href'), 'https://host.tailnet.example:8452/');
+  assert.ok(inWin(win.document, 'rig-panel', '.tool-note').classList.contains('hidden'));
+  assert.equal(inWin(win.document, 'rig-panel', 'a.tool-open').getAttribute('href'), 'https://host.tailnet.example:8452/');
   // On the host: the plain url, remote or not.
   win = setup('http://127.0.0.1:8765/');
   routes['GET /api/tools'] = withRemote;
@@ -315,7 +339,7 @@ test('url tool: a remote_url is framed off the host; the loopback url stays host
   wire(mod);
   await mod.loadTools();
   mod.openTool('rig-panel');
-  frame = win.document.getElementById('tool-frame');
+  frame = frameOf(win.document, 'rig-panel');
   assert.equal(frame.getAttribute('src'), 'http://127.0.0.1:8080/');
   // And it survives a Settings save round-trip.
   const rows = mod.serializeTools([{ id: 'x', kind: 'url', title: 'X', url: 'http://127.0.0.1:1/', remote_url: 'https://h.example/' }]);
@@ -343,23 +367,23 @@ test('refresh: rc≠0 shows the stderr tail collapsed; rc 0 reloads the frame', 
   await mod.loadTools();
   mod.openTool('benchmark');
   const doc = win.document;
-  const tick = () => new Promise((r) => setTimeout(r, 0));
+  const refresh = inWin(doc, 'benchmark', 'button.tool-refresh');
 
   routes['POST /api/tools/benchmark/refresh'] = () => [200, { rc: 2, seconds: 1.2, stdout_tail: '', stderr_tail: 'Traceback: boom' }];
-  doc.getElementById('tool-refresh').click();
-  assert.equal(doc.getElementById('tool-refresh').disabled, true, 'disabled while running');
+  refresh.click();
+  assert.equal(refresh.disabled, true, 'disabled while running');
   for (let i = 0; i < 4; i++) await tick();
-  const box = doc.getElementById('tool-error');
+  const box = inWin(doc, 'benchmark', 'details.tool-error');
   assert.equal(box.classList.contains('hidden'), false);
   assert.equal(box.open, false, 'collapsed by default');
-  assert.equal(doc.getElementById('tool-error-text').textContent, 'Traceback: boom');
-  assert.equal(doc.getElementById('tool-refresh').disabled, false);
+  assert.equal(inWin(doc, 'benchmark', '.tool-error-text').textContent, 'Traceback: boom');
+  assert.equal(refresh.disabled, false);
 
   routes['POST /api/tools/benchmark/refresh'] = () => [200, { rc: 0, seconds: 3, stdout_tail: 'ok', stderr_tail: '' }];
-  doc.getElementById('tool-refresh').click();
+  refresh.click();
   for (let i = 0; i < 4; i++) await tick();
   assert.ok(box.classList.contains('hidden'), 'a good run clears the old error');
-  assert.equal(doc.getElementById('tool-frame').getAttribute('src'), '/tools/benchmark/');
+  assert.equal(frameOf(doc, 'benchmark').getAttribute('src'), '/tools/benchmark/');
   assert.ok(rec.toasts.some(([, err]) => !err), 'a success toast');
   assert.ok(calls.filter((c) => c.key === 'POST /api/tools/benchmark/refresh').length === 2);
 });
@@ -442,40 +466,46 @@ test('Settings → Tools: table, add, toggle, PUT, inline 422', { skip: dom.skip
 // =============================================================================
 
 /** A message event as the browser would deliver it to the shell window. */
-function appMessage(win, data, { origin = win.location.origin, source } = {}) {
-  const src = source === undefined ? win.document.getElementById('tool-frame').contentWindow : source;
+function appMessage(win, data, { origin = win.location.origin, source, id } = {}) {
+  const f = id ? frameOf(win.document, id) : win.document.querySelector('.appwin:not([hidden]) iframe.tool-frame');
+  const src = source === undefined ? f.contentWindow : source;
   const ev = new win.MessageEvent('message', { data, origin });
   // jsdom validates MessageEventInit.source; define it directly instead.
   Object.defineProperty(ev, 'source', { value: src });
   win.dispatchEvent(ev);
 }
 
-test('an app opens full-page in the tool pane, framed from /apps/<id>/ with NO sandbox', { skip: dom.skip }, async () => {
+test('an app opens in a window, framed from /apps/<id>/ with NO sandbox', { skip: dom.skip }, async () => {
   const win = setup();
   const mod = await freshTools();
   const { rec, state } = wire(mod);
   await mod.loadTools();
   pick(win, 'jobboard');
   const doc = win.document;
-  const frame = doc.getElementById('tool-frame');
-  assert.ok(doc.body.classList.contains('tool-full'));
+  const frame = frameOf(doc, 'jobboard');
+  assert.equal(winVisible(doc, 'jobboard'), true);
   assert.equal(frame.getAttribute('src'), '/apps/jobboard/');
   assert.equal(frame.hasAttribute('sandbox'), false, 'an app frame has no sandbox attribute at all');
-  assert.equal(doc.getElementById('tool-title').textContent, 'Job Board');
-  assert.ok(doc.getElementById('tool-refresh').classList.contains('hidden'), 'apps have no refresh');
+  assert.equal(inWin(doc, 'jobboard', '.appwin-title').textContent, 'Job Board');
+  assert.ok(inWin(doc, 'jobboard', 'button.tool-refresh').classList.contains('hidden'), 'apps have no refresh');
   assert.equal(win.location.hash, '#tool=jobboard', 'deep link');
-  assert.equal(state.selectedBotId, 'jobboard');
+  assert.equal(state.selectedBotId, 'main', 'the selection is never changed');
   assert.deepEqual(rec.closedWith, ['tool']);
 
-  // The next tool that is NOT an app gets its sandbox back before its src.
+  // The next tool that is NOT an app gets its OWN frame with the sandbox
+  // (one window per tool; the app's window is minimised, not reused).
   mod.openTool('benchmark');
-  assert.equal(frame.getAttribute('sandbox'), 'allow-scripts allow-forms allow-popups');
-  assert.equal(frame.getAttribute('src'), '/tools/benchmark/');
+  const bframe = frameOf(doc, 'benchmark');
+  assert.notEqual(bframe, frame);
+  assert.equal(bframe.getAttribute('sandbox'), 'allow-scripts allow-forms allow-popups');
+  assert.equal(bframe.getAttribute('src'), '/tools/benchmark/');
+  assert.equal(frame.hasAttribute('sandbox'), false, 'the app frame stays unsandboxed');
 
-  // Deep link straight to the app.
+  // Deep link straight to the app: the minimised window comes back.
   mod.closeTool();
   win.location.hash = '#tool=jobboard';
   assert.equal(mod.openFromHash(), true);
+  assert.equal(frameOf(doc, 'jobboard'), frame, 'the same frame');
   assert.equal(frame.getAttribute('src'), '/apps/jobboard/');
   assert.equal(frame.hasAttribute('sandbox'), false);
 });
@@ -487,7 +517,7 @@ test('an app entry that points outside /apps/<id>/ is ignored', { skip: dom.skip
   wire(mod);
   await mod.loadTools();
   mod.openTool('jobboard');
-  assert.equal(win.document.getElementById('tool-frame').getAttribute('src'), '/apps/jobboard/',
+  assert.equal(frameOf(win.document, 'jobboard').getAttribute('src'), '/apps/jobboard/',
     'an unsandboxed frame only ever holds our own origin');
 });
 
@@ -505,13 +535,14 @@ test('appForBot: the enabled app that owns a roster bot (case-insensitive)', { s
   assert.equal(mod.openTool('jobboard'), false);
 });
 
-test('app messages: only our origin AND the frame on screen are obeyed', { skip: dom.skip }, async () => {
+test('app messages: only our origin AND the frame of a live window are obeyed', { skip: dom.skip }, async () => {
   const win = setup();
   const mod = await freshTools();
   const { rec } = wire(mod);
   await mod.loadTools();
   mod.openTool('jobboard');
-  const frame = win.document.getElementById('tool-frame');
+  const doc = win.document;
+  const frame = frameOf(doc, 'jobboard');
 
   // Wrong origin: ignored.
   appMessage(win, { type: 'dispatch:toast', text: 'x' }, { origin: 'http://evil.example' });
@@ -527,28 +558,48 @@ test('app messages: only our origin AND the frame on screen are obeyed', { skip:
   appMessage(win, { type: 'dispatch:toast', text: 'Broke', error: true });
   assert.deepEqual(rec.toasts, [['Saved', false], ['Broke', true]]);
   appMessage(win, { type: 'dispatch:set-title', text: 'Job Board — March' });
-  assert.equal(win.document.getElementById('tool-title').textContent, 'Job Board — March');
+  assert.equal(inWin(doc, 'jobboard', '.appwin-title').textContent, 'Job Board — March');
 
-  // open-thread: close the pane (restoring the chat it covered), then open
-  // the thread with the app's bot and the hint for its hook.
+  // open-thread from a phone sheet (isMobile is true here): the window is
+  // minimised (NOT closed, and the chat is not "restored" — it was never
+  // replaced), then the thread opens with the app's bot and the hint.
   appMessage(win, { type: 'dispatch:open-thread', threadId: 'thr-2026-09', hint: { job_id: 'j-1' } });
-  assert.equal(mod.toolOpen(), null, 'the app pane is closed');
-  assert.equal(win.document.body.classList.contains('tool-full'), false);
-  assert.deepEqual(rec.restored, [{ botId: 'main', threadId: 't-1' }], 'rememberPrev semantics');
+  assert.equal(mod.toolOpen(), null, 'the window is out of the way');
+  assert.ok(pillOf(doc, 'jobboard'), 'minimised to a pill, not closed');
+  assert.equal(frame.getAttribute('src'), '/apps/jobboard/', 'the app document stays loaded');
+  assert.deepEqual(rec.restored, []);
   assert.deepEqual(rec.threads, [['thr-2026-09', { botId: 'jobboard', hint: { job_id: 'j-1' }, appId: 'jobboard' }]]);
-  assert.equal(frame.hasAttribute('src'), false, 'the app document is unloaded');
-
-  // With the pane closed, a late message from that frame does nothing.
-  appMessage(win, { type: 'dispatch:open-thread', threadId: 'thr-x' });
-  assert.equal(rec.threads.length, 1);
+  assert.deepEqual(rec.splitThreads, []);
 
   // A malformed thread id is refused; `close` closes.
   mod.openTool('jobboard');
   appMessage(win, { type: 'dispatch:open-thread', threadId: '../../etc' });
   assert.equal(rec.threads.length, 1);
   assert.equal(mod.toolOpen(), 'jobboard');
+  const cw = frame.contentWindow;
   appMessage(win, { type: 'dispatch:close' });
   assert.equal(mod.toolOpen(), null);
+  assert.equal(winEl(doc, 'jobboard'), null);
+
+  // With the window gone, a late message from that frame does nothing.
+  appMessage(win, { type: 'dispatch:open-thread', threadId: 'thr-x' }, { source: cw });
+  appMessage(win, { type: 'dispatch:toast', text: 'late' }, { source: cw });
+  assert.equal(rec.threads.length, 1);
+  assert.equal(rec.toasts.length, 2);
+});
+
+test('open-thread from a floating window on the desktop opens the thread beside it and keeps the window', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  const { rec } = wire(mod, { mobile: false });
+  await mod.loadTools();
+  mod.openTool('jobboard');
+  const w = winEl(win.document, 'jobboard');
+  assert.equal(w.dataset.layout, 'float');
+  appMessage(win, { type: 'dispatch:open-thread', threadId: 'thr-1' });
+  assert.deepEqual(rec.splitThreads, [['thr-1', { botId: 'jobboard', hint: null, appId: 'jobboard' }]]);
+  assert.deepEqual(rec.threads, []);
+  assert.equal(mod.toolOpen(), 'jobboard');
 });
 
 test('a static tool cannot drive the shell through the app channel', { skip: dom.skip }, async () => {
@@ -559,7 +610,9 @@ test('a static tool cannot drive the shell through the app channel', { skip: dom
   mod.openTool('benchmark');
   appMessage(win, { type: 'dispatch:open-thread', threadId: 't-9' });
   appMessage(win, { type: 'dispatch:close' });
+  appMessage(win, { type: 'dispatch:open-thread', threadId: 't-9' }, { origin: 'null' });
   assert.deepEqual(rec.threads, []);
+  assert.deepEqual(rec.splitThreads, []);
   assert.equal(mod.toolOpen(), 'benchmark');
 });
 
@@ -572,7 +625,7 @@ test('the shell posts theme + language to the app, and forwards only its own fra
   win.document.documentElement.setAttribute('data-theme', 'light');
   win.document.documentElement.setAttribute('lang', 'de');
   mod.openTool('jobboard');
-  const frame = win.document.getElementById('tool-frame');
+  const frame = frameOf(win.document, 'jobboard');
   const posted = [];
   frame.contentWindow.postMessage = (msg, origin) => posted.push([msg, origin]);
   mod.syncAppFrame();
@@ -589,11 +642,16 @@ test('the shell posts theme + language to the app, and forwards only its own fra
   assert.deepEqual(posted.map(([m]) => m.type), ['dispatch:frame']);
   assert.equal(posted[0][0].frame.type, 'app:jobboard:job_updated');
 
-  // Nothing is posted to a static tool's frame.
+  // Nothing is posted to a static tool's frame (its own window), and the
+  // minimised app keeps hearing the shell (live frames, pills included).
   mod.openTool('benchmark');
-  frame.contentWindow.postMessage = () => { throw new Error('must not post to a static tool'); };
+  const sframe = frameOf(win.document, 'benchmark');
+  sframe.contentWindow.postMessage = () => { throw new Error('must not post to a static tool'); };
+  assert.equal(mod.toolOpen(), 'benchmark');
+  posted.length = 0;
   mod.syncAppFrame();
-  assert.equal(mod.forwardAppFrame({ type: 'app:jobboard:job_updated' }), false);
+  assert.deepEqual(posted.map(([m]) => m.type), ['dispatch:theme', 'dispatch:lang'], 'the minimised app window still gets theme + lang');
+  assert.equal(mod.forwardAppFrame({ type: 'app:jobboard:job_updated' }), true, 'live frames reach a pill too');
 });
 
 test('Settings → Tools: an app is a row with a switch, no remove, no editable fields', { skip: dom.skip }, async () => {
@@ -626,9 +684,8 @@ test('an app whose backend did not mount says so in the pane', { skip: dom.skip 
   wire(mod);
   await mod.loadTools();
   mod.openTool('jobboard');
-  await new Promise((r) => setTimeout(r, 0));
-  await new Promise((r) => setTimeout(r, 0));
-  assert.equal(win.document.getElementById('tool-error').classList.contains('hidden'), false);
+  await tick(); await tick();
+  assert.equal(inWin(win.document, 'jobboard', 'details.tool-error').classList.contains('hidden'), false);
 });
 
 // =============================================================================
@@ -704,17 +761,17 @@ test('desktop rail: a row opens its tool and closes the popup; the button is act
 
   pointerClick(win, doc.getElementById('tools-menu-btn'));
   doc.querySelector('#tools-menu [data-tool="benchmark"]').click();
-  assert.equal(state.selectedBotId, 'benchmark');
-  assert.ok(doc.body.classList.contains('tool-full'));
+  assert.equal(state.selectedBotId, 'main', 'a window never takes the selection');
+  assert.equal(winVisible(doc, 'benchmark'), true);
   assert.equal(doc.getElementById('tools-menu').hidden, true);
   assert.ok(doc.getElementById('tools-menu-btn').classList.contains('active'), 'active while a tool pane is open');
   pointerClick(win, doc.getElementById('tools-menu-btn'));
   assert.ok(doc.querySelector('#tools-menu [data-tool="benchmark"]').classList.contains('active'));
-  doc.getElementById('tool-close').click();
-  // main.js's restoreView puts the chat back and repaints the rail; mimic it.
-  state.selectedBotId = 'main';
-  mod.renderToolRail();
+  pointerClick(win, doc.getElementById('tools-menu-btn'));   // shut the menu again
+  // Back to chat minimises: the rail marks only the OPEN window as active.
+  inWin(doc, 'benchmark', '.appwin-min').click();
   assert.equal(doc.getElementById('tools-menu-btn').classList.contains('active'), false);
+  assert.ok(pillOf(doc, 'benchmark'));
 });
 
 test('desktop rail: parked bots follow the tools under a separator', { skip: dom.skip }, async () => {
@@ -889,8 +946,8 @@ test('crossing the breakpoint re-lays the one control out (rail button ⇄ phone
 // A framed tool keeps its viewer's layout in the shell: a sandboxed static
 // page (opaque origin) has no localStorage of its own.
 
-function stateRecorder(win) {
-  const frame = win.document.getElementById('tool-frame');
+function stateRecorder(win, id) {
+  const frame = frameOf(win.document, id);
   const posted = [];
   frame.contentWindow.postMessage = (msg, target) => posted.push([msg, target]);
   return posted;
@@ -902,7 +959,7 @@ test('tool state: accepted from the static frame on screen (origin "null"), stor
   wire(mod);
   await mod.loadTools();
   mod.openTool('benchmark');
-  const posted = stateRecorder(win);
+  const posted = stateRecorder(win, 'benchmark');
 
   appMessage(win, { type: 'dispatch:tool-state', op: 'get' }, { origin: 'null' });
   assert.deepEqual(posted, [[{ type: 'dispatch:tool-state', state: null }, '*']]);
@@ -913,13 +970,16 @@ test('tool state: accepted from the static frame on screen (origin "null"), stor
   assert.deepEqual(posted[1], [{ type: 'dispatch:tool-state', state: layout }, '*'], 'the set is acked with what is stored');
 
   // Round trip: close, reopen — the frame's load pushes the stored layout once.
-  mod.closeTool();
+  mod.closeTool();                       // minimise: the same frame comes back, no reload…
   mod.openTool('benchmark');
-  const again = stateRecorder(win);
-  win.document.getElementById('tool-frame').dispatchEvent(new win.Event('load'));
-  assert.deepEqual(again, [[{ type: 'dispatch:tool-state', state: layout }, '*']]);
+  const again = stateRecorder(win, 'benchmark');
+  frameOf(win.document, 'benchmark').dispatchEvent(new win.Event('load'));   // …so fire its load by hand
+  // New with windows: the load also tells the page its window state.
+  assert.deepEqual(again.filter(([m]) => m.type === 'dispatch:tool-state'), [[{ type: 'dispatch:tool-state', state: layout }, '*']]);
+  assert.deepEqual(again.filter(([m]) => m.type === 'dispatch:window-state').map(([m]) => [m.state, m.layout]), [['open', 'sheet']]);
+  again.length = 0;
   appMessage(win, { type: 'dispatch:tool-state', op: 'get' }, { origin: 'null' });
-  assert.deepEqual(again[1][0].state, layout);
+  assert.deepEqual(again[0][0].state, layout);
   assert.deepEqual(mod.readToolState('benchmark'), layout);
   assert.equal(mod.readToolState('family-page'), null, 'state is per tool id');
 
@@ -934,7 +994,7 @@ test('tool state: a foreign source, a wrong origin or a closed pane is ignored; 
   wire(mod);
   await mod.loadTools();
   mod.openTool('benchmark');
-  const posted = stateRecorder(win);
+  const posted = stateRecorder(win, 'benchmark');
   const set = { type: 'dispatch:tool-state', op: 'set', state: { evil: true } };
 
   appMessage(win, set, { origin: 'null', source: win });                    // another window
@@ -947,7 +1007,7 @@ test('tool state: a foreign source, a wrong origin or a closed pane is ignored; 
 
   // An app frame: our origin only; the opaque origin is refused.
   mod.openTool('jobboard');
-  const appPosted = stateRecorder(win);
+  const appPosted = stateRecorder(win, 'jobboard');
   appMessage(win, { type: 'dispatch:tool-state', op: 'set', state: { a: 1 } }, { origin: 'null' });
   assert.equal(win.localStorage.getItem('dispatch-tool-state:jobboard'), null);
   appMessage(win, { type: 'dispatch:tool-state', op: 'set', state: { a: 1 } });
@@ -956,14 +1016,15 @@ test('tool state: a foreign source, a wrong origin or a closed pane is ignored; 
 
   // A url tool: its own origin (allow-same-origin) or 'null'; replies go to that origin.
   mod.openTool('rig-panel');
-  const urlPosted = stateRecorder(win);
+  const urlPosted = stateRecorder(win, 'rig-panel');
   appMessage(win, { type: 'dispatch:tool-state', op: 'get' }, { origin: 'http://127.0.0.1:8080' });
   appMessage(win, { type: 'dispatch:tool-state', op: 'get' }, { origin: 'http://127.0.0.1:9999' });
   assert.deepEqual(urlPosted, [[{ type: 'dispatch:tool-state', state: null }, 'http://127.0.0.1:8080']]);
 
-  // Closed pane: a late message from the old frame does nothing.
-  mod.closeTool();
-  appMessage(win, set, { origin: 'null' });
+  // Closed window: a late message from the old frame does nothing.
+  const old = frameOf(win.document, 'rig-panel').contentWindow;
+  winEl(win.document, 'rig-panel').querySelector('.appwin-close').click();
+  appMessage(win, set, { origin: 'null', source: old });
   assert.equal(win.localStorage.getItem('dispatch-tool-state:rig-panel'), null);
 });
 
@@ -973,7 +1034,7 @@ test('tool state: over 16 KB (or not JSON) is refused and the stored state kept'
   wire(mod);
   await mod.loadTools();
   mod.openTool('benchmark');
-  const posted = stateRecorder(win);
+  const posted = stateRecorder(win, 'benchmark');
   const small = { version: 1, text: 'ok' };
   appMessage(win, { type: 'dispatch:tool-state', op: 'set', state: small }, { origin: 'null' });
   const big = { version: 1, text: 'x'.repeat(mod.TOOL_STATE_MAX) };

@@ -304,7 +304,12 @@ function buildWindow(r) {
   layer.append(win);
   Object.assign(r, { el: win, bar, handle, icon, titleEl: title, statusEl: status, slot, layoutBtn, minBtn, minLabel, closeBtn, body });
 
-  minBtn.addEventListener('click', () => minimizeWindow(r.id));
+  // "Back to chat" means it: on a phone opened from the bot list, the chat
+  // that was open comes up under the pill (system Back only steps back).
+  minBtn.addEventListener('click', () => {
+    if (mobile() && deps && typeof deps.backToChat === 'function') { try { deps.backToChat(); } catch { /* the pill still comes */ } }
+    minimizeWindow(r.id);
+  });
   closeBtn.addEventListener('click', () => closeWindow(r.id));
   layoutBtn.addEventListener('click', () => toggleLayoutMenu(r));
   handle.addEventListener('dblclick', () => { if (!mobile()) chooseLayout(r, r.eff === 'full' ? 'float' : 'full'); });
@@ -604,7 +609,8 @@ function placeTray() {
       left = l + 8; width = w - 16;
     } else if (phone) {
       const tabs = $('mobile-tabs');
-      if (tabs && tabs.offsetParent !== null) bottom = window.innerHeight - tabs.getBoundingClientRect().top + 6;
+      // position: fixed, so offsetParent is always null: ask the style.
+      if (tabs && getComputedStyle(tabs).display !== 'none') bottom = window.innerHeight - tabs.getBoundingClientRect().top + 6;
     }
   }
   tray.style.bottom = `${Math.max(0, Math.round(bottom))}px`;

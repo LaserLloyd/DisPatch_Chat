@@ -1435,6 +1435,9 @@ function onAppMessage(ev) {
         // A hint is data for the app's own thread hook: small, and plain JSON.
         try { const s = JSON.stringify(msg.hint); if (s.length <= 2048) hint = JSON.parse(s); } catch { /* dropped */ }
       }
+      // Only the window on screen may move the chat: a pill (or a page left
+      // live behind another window) asking would switch the chat unasked.
+      if (winVisibleId() !== p.id) return;
       const opts = { botId: tool.bot_id || null, hint, appId: tool.id };
       // Beside the chat (float / dock): the thread opens there and the window
       // stays. Covering it (full, a phone sheet): the window goes to the tray.
@@ -1443,7 +1446,7 @@ function onAppMessage(ev) {
         deps.openThreadInSplit(id, opts);
         return;
       }
-      if (winVisibleId() === p.id) winMinimize(p.id);
+      winMinimize(p.id);
       if (typeof deps.openThread === 'function') deps.openThread(id, opts);
       return;
     }
@@ -2008,6 +2011,7 @@ export function wireTools(d) {
     announce: d.announce,
     focusChat: d.focusChat,
     canDragClose: d.canDragClose,
+    backToChat: d.backToChat,
   });
   window.addEventListener('hashchange', () => { if (hashToolId()) openFromHash(); });
   // Apps: messages from a window's frame, routed by source to that window.

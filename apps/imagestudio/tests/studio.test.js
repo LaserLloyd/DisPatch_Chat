@@ -1850,6 +1850,10 @@ test('Reload last: typing after a Reload never brings the bar back over the prom
   box.value = 'a red fox in the snow, at night';
   box.dispatchEvent(new win.Event('input', { bubbles: true }));
   assert.equal(doc.getElementById('st-lastbar').hidden, true);
+  // Write the pending draft now, inside this test: a debounced save landing
+  // during a later test would overwrite that test's seeded draft.
+  win.dispatchEvent(new win.Event('pagehide'));
+  await flush();
 });
 
 test('Reload last: Not now is remembered on this device for that record', { skip: dom.skip }, async () => {
