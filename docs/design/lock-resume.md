@@ -59,9 +59,10 @@ session is the only resumable one (one session cookie per browser).
 4. **Cookie.** `GET /api/auth/status` from a remembered session re-sets the cookie's
    `Max-Age` (same attributes), so use keeps it alive.
 5. **Idle lock asks first.** The tab's idle timer POSTs `/api/auth/lock {reason: "idle"}`;
-   the server answers `{ok: false, active: true}` unless its own idle clock (touched by
-   every request and socket frame from any tab) is within 90 s of the timeout, and the tab
-   re-arms. A manual Lock is never refused; a lock request that fails falls through to
+   the server answers `{ok: false, active: true}` while any tab of the session reported
+   GENUINE use (its socket's `active` / `send` frames, which only real keys, pointer and
+   sends produce) within the timeout minus 90 s, and the tab re-arms. A page's own
+   background polling does not count (it would have kept every open tab unlocked). A manual Lock is never refused; a lock request that fails falls through to
    the local lock (fail closed).
 6. Frame activity as built: `tools.js` attaches capture listeners to same-origin app
    frames directly (no `app-sdk.js` change) and counts only trusted events (a script's
@@ -108,8 +109,8 @@ gets the normal sign-in, unchanged.
 * **Constant work**: every resume attempt runs one PBKDF2 (install PIN, dummy salt when
   none) and two argon2id verifications (dummy hashes where the profile has no PIN or no
   password), whether or not anything is held, so timing says nothing either.
-* **Back from main**: while `resumable`, the "Switch profile"/sign-in action on the main
-  profile shows this split screen again (its top is "Go to main", plus "Other profiles"
+* **Back from main**: while `resumable` (re-read from the server each time), the "Switch
+  profile"/sign-in action on the main profile shows this split screen again (its top is "Go to main", plus "Other profiles"
   for a normal sign-in). Other people get in by the normal sign-in tiles from there.
 * **PIN-less previous profile**: its held session is never offered (`resumable: false`;
   showing it would let anyone in and the pad would leak "no PIN"); that person picks their
