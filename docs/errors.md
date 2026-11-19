@@ -296,6 +296,7 @@ RFC 9457 `application/problem+json` document with the same `error` object.
 | [`starter_pack_not_found`](#starter_pack_not_found) | 404 | Unknown starter pack |
 | [`stop_sharing_stale`](#stop_sharing_stale) | 409 | Who has a copy of this bot has changed. Look at the numbers again before confirming. |
 | [`storage_limit`](#storage_limit) | 507 | Storage limit reached — free space or delete files |
+| [`studio_form_not_saved`](#studio_form_not_saved) | 503 | The form could not be saved just now |
 | [`task_not_found`](#task_not_found) | 404 | Task not found |
 | [`task_state_conflict`](#task_state_conflict) | 409 | The task cannot do that in its current state. |
 | [`template_has_no_copy`](#template_has_no_copy) | 409 | That's a household bot and the Owner has no copy of it. |
@@ -2562,6 +2563,14 @@ HTTP **409** - Who has a copy of this bot has changed. Look at the numbers again
 HTTP **507** - Storage limit reached — free space or delete files
 
 **Fix:** Free disk space or delete files, then retry.
+
+## studio_form_not_saved
+
+<a id="studio_form_not_saved"></a>
+
+HTTP **503** - The form could not be saved just now
+
+**Fix:** Keep going: Image Studio keeps the form on screen and tries again.
 
 ## task_not_found
 

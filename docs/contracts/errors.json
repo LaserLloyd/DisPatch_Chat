@@ -679,7 +679,9 @@
       "docs": "conflict",
       "fix": "The state changed under you; reload and retry.",
       "message": "Conflict.",
-      "patterns": [],
+      "patterns": [
+        "You are signed in as someone else now; this page's form was not saved"
+      ],
       "status": 409
     },
     {
@@ -2275,7 +2277,8 @@
         "File too large (max {}MB)",
         "Image too large (max 25MB)",
         "Image too large (max {}MB)",
-        "Face crop too large (max 25MB)"
+        "Face crop too large (max 25MB)",
+        "The form is too large to keep"
       ],
       "status": 413
     },
@@ -2285,7 +2288,8 @@
       "fix": "Ask an Admin to grant your profile the permission shown in required_permission.",
       "message": "Your profile does not have permission to do that.",
       "patterns": [
-        "Your profile does not have permission to do that."
+        "Your profile does not have permission to do that.",
+        "This profile cannot keep a saved form"
       ],
       "status": 403
     },
@@ -2794,6 +2798,16 @@
         "Disk write failed"
       ],
       "status": 507
+    },
+    {
+      "code": "studio_form_not_saved",
+      "docs": "studio_form_not_saved",
+      "fix": "Keep going: Image Studio keeps the form on screen and tries again.",
+      "message": "The form could not be saved just now",
+      "patterns": [
+        "The form could not be saved just now"
+      ],
+      "status": 503
     },
     {
       "code": "task_not_found",

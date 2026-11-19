@@ -837,7 +837,8 @@
    "fix": "Ask an Admin to grant your profile the permission shown in required_permission.",
    "docs": "permission_denied",
    "patterns": [
-    "Your profile does not have permission to do that."
+    "Your profile does not have permission to do that.",
+    "This profile cannot keep a saved form"
    ],
    "seeded": false
   },
@@ -1356,7 +1357,9 @@
    "message": "Conflict.",
    "fix": "The state changed under you; reload and retry.",
    "docs": "conflict",
-   "patterns": [],
+   "patterns": [
+    "You are signed in as someone else now; this page's form was not saved"
+   ],
    "seeded": false
   },
   {
@@ -1607,7 +1610,8 @@
     "File too large (max {}MB)",
     "Image too large (max 25MB)",
     "Image too large (max {}MB)",
-    "Face crop too large (max 25MB)"
+    "Face crop too large (max 25MB)",
+    "The form is too large to keep"
    ],
    "seeded": false
   },
@@ -3396,6 +3400,17 @@
     "That is not a picture path"
    ],
    "seeded": true
+  },
+  {
+   "code": "studio_form_not_saved",
+   "status": 503,
+   "message": "The form could not be saved just now",
+   "fix": "Keep going: Image Studio keeps the form on screen and tries again.",
+   "docs": "studio_form_not_saved",
+   "patterns": [
+    "The form could not be saved just now"
+   ],
+   "seeded": false
   }
  ]
 }

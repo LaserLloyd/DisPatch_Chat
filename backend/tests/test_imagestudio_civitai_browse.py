@@ -123,12 +123,14 @@ def test_estimate_and_generate_pass_the_currency(studio):
     assert json.loads(rig.orch()[0].content)["currencies"] == ["yellow"]
     r = c.post(f"{BASE}/generate", json=_body(currency="blue"))
     assert r.status_code == 200, r.text
-    sent = json.loads(rig.orch()[1].content)
+    # a generate also asks Civitai's own price first (the daily spend cap's reservation, no externalId)
+    real = lambda: [b for b in (json.loads(x.content) for x in rig.orch()) if "externalId" in b]   # noqa: E731
+    sent = real()[0]
     assert sent["currencies"] == ["blue"]
     assert r.json()["images"][0]["currency"] == "blue"
     # nothing chosen: no field sent, nothing recorded
     r = c.post(f"{BASE}/generate", json=_body())
-    assert "currencies" not in json.loads(rig.orch()[2].content)
+    assert "currencies" not in real()[1]
     assert r.json()["images"][0]["currency"] is None
 
 
