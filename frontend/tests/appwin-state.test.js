@@ -135,11 +135,16 @@ test('clampRect keeps a float on screen and no smaller than its minimum', () => 
   assert.deepEqual(W.clampRect(null, b, o), W.initialRect(o, b));
 });
 
-test('initialRect: the tool size when it fits, centred; otherwise most of the area', () => {
-  const o = W.windowOptions({ width: 800, height: 600 });
-  assert.deepEqual(W.initialRect(o, { w: 1200, h: 900 }), { x: 200, y: 150, w: 800, h: 600 });
-  const big = W.initialRect(W.windowOptions({}), { w: 900, h: 600 });
-  assert.ok(big.w <= 900 && big.h <= 600 && big.x >= 0 && big.y >= 0);
+test('initialRect: at most 60% wide and 760 tall, never under the minimum, at the inline end', () => {
+  const o = W.windowOptions({ width: 1100, height: 800, min_width: 400, min_height: 360 });
+  assert.deepEqual(W.initialRect(o, { w: 1500, h: 900 }), { x: 1500 - 900 - 16, y: 16, w: 900, h: 760 });
+  assert.deepEqual(W.initialRect(o, { w: 1500, h: 900 }, { rtl: true }), { x: 16, y: 16, w: 900, h: 760 });
+  const small = W.windowOptions({ width: 500, height: 400 });
+  assert.deepEqual(W.initialRect(small, { w: 1500, h: 900 }), { x: 1500 - 500 - 16, y: 16, w: 500, h: 400 });
+  // A narrow area: the minimum wins over the 60 % rule.
+  const n = W.initialRect(o, { w: 600, h: 500 });
+  assert.equal(n.w, 400);
+  assert.ok(n.x >= 0 && n.x + n.w <= 600 && n.y + n.h <= 500);
 });
 
 test('snapZone: left/right edges dock, top fills, middle floats; a non-dockable tool only fills', () => {
@@ -205,10 +210,16 @@ test('parse refuses junk piece by piece', () => {
   assert.equal(m.def, null);
 });
 
-test('storage keys are per profile; odd profile ids fall back to "shared"', () => {
+test('storage keys are per profile; no profile id = nothing stored at all', () => {
   assert.equal(W.storageKey('abc123'), 'dispatch-appwin:v1:abc123');
-  assert.equal(W.storageKey(null), 'dispatch-appwin:v1:shared');
-  assert.equal(W.storageKey('../../x'), 'dispatch-appwin:v1:shared');
+  assert.equal(W.storageKey(null), null);
+  assert.equal(W.storageKey('../../x'), null);
+  const st = fakeStorage();
+  withStorage(st, () => {
+    assert.equal(W.save(null, W.openWin(W.empty(), 'a')), false);
+    assert.equal(st._m.size, 0);
+    assert.deepEqual(W.load(null), W.empty());
+  });
 });
 
 test('load/save: one profile never reads another profile\'s windows', () => {
@@ -249,4 +260,30 @@ test('a tool with remembered prefs ignores the migrated default', () => {
   m = W.setLayout(m, 'a', 'float');
   assert.equal(W.prefsFor(m, 'a').layout, 'float');
   assert.equal(W.prefsFor(m, 'b').layout, 'right');
+});
+
+test('dock sums: both minimums or no dock; the thread list steps aside first', () => {
+  const o = W.windowOptions({});
+  assert.equal(W.canDock(W.MIN_CHAT + W.MIN_TOOL + W.DIVIDER, o), true);
+  assert.equal(W.canDock(W.MIN_CHAT + W.MIN_TOOL + W.DIVIDER - 1, o), false);
+  assert.equal(W.canDock(800, W.windowOptions({ min_width: 600 })), false);
+  assert.equal(W.dockMode({ withList: 1200, noList: 1520 }, o), 'list');
+  assert.equal(W.dockMode({ withList: 600, noList: 920 }, o), 'nolist');
+  assert.equal(W.dockMode({ withList: 300, noList: 600 }, o), null);
+  const w = W.dockWidths(0.5, 1010, o);
+  assert.equal(w.chat + w.tool, 1000);
+  assert.deepEqual(W.dockWidths(0.99, 1010, o), { chat: W.MIN_CHAT, tool: 1000 - W.MIN_CHAT });
+  assert.equal(W.dockWidths(0.5, 500, o), null);
+});
+
+test('divider keys move the seam the way the arrow points, for either side', () => {
+  const o = W.windowOptions({});
+  const total = 1010;
+  const base = W.dockWidths(0.5, total, o).tool;
+  const right = W.dockWidths(W.stepDock('ArrowRight', { ratio: 0.5, total, side: 'right', opts: o }), total, o).tool;
+  assert.equal(right, base - W.KEY_STEP);
+  const left = W.dockWidths(W.stepDock('ArrowRight', { ratio: 0.5, total, side: 'left', opts: o }), total, o).tool;
+  assert.equal(left, base + W.KEY_STEP);
+  assert.equal(W.dockWidths(W.stepDock('Home', { ratio: 0.5, total, opts: o }), total, o).tool, W.MIN_TOOL);
+  assert.equal(W.stepDock('x', { ratio: 0.5, total, opts: o }), null);
 });

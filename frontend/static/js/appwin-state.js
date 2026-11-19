@@ -14,7 +14,7 @@
 // Status, badge, attention and unsaved are live-only and live in js/appwin.js.
 
 export const VERSION = 1;
-export const KEY_PREFIX = 'dispatch-appwin:v1:';
+export const KEY_PREFIX = 'dispatch-appwin:';   // + 'v1:' + profile id
 export const LAYOUTS = Object.freeze(['float', 'left', 'right', 'full']);
 export const DOCKS = Object.freeze(['left', 'right']);
 export const MAX_WINS = 24;
@@ -35,6 +35,7 @@ const ID_RE = /^[a-z0-9-]{1,40}$/;
 const PROFILE_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const SPLIT_KEY = 'dispatch-tool-split';
 const SPLIT_RATIO_KEY = 'dispatch-tool-split-ratio';
+const SPLIT_THREAD_KEY = 'dispatch-tool-split-thread';
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const int = (v, lo, hi) => { const n = num(v); return n !== null && Number.isInteger(n) && n >= lo && n <= hi ? n : null; };
@@ -178,16 +179,21 @@ export function clampRect(rect, bounds, opts = OPTION_DEFAULTS) {
   return { x, y, w, h };
 }
 
-/** A tool's first float: its own size, else a large window, centred. */
-export function initialRect(opts, bounds) {
+/** A tool's first float: its own size, but never more than 60 % of the area's
+ *  width (the chat beside it stays usable) or 760 px tall, and never under its
+ *  minimum; placed at the inline-end side, a margin in from the edges. */
+export const FIRST_SHARE = 0.6;
+export const FIRST_MAX_H = 760;
+export const MARGIN = 16;
+export function initialRect(opts, bounds, { rtl = false } = {}) {
   const bw = Math.max(0, Math.floor(num(bounds && bounds.w) || 0));
   const bh = Math.max(0, Math.floor(num(bounds && bounds.h) || 0));
   const o = opts || OPTION_DEFAULTS;
-  const w = Math.min(Math.floor(bw * 0.92), o.width || DEFAULT_W);
-  const h = Math.min(Math.floor(bh * 0.9), o.height || DEFAULT_H);
-  const ww = Math.max(Math.min(bw, o.min_width || 0), w);
-  const hh = Math.max(Math.min(bh, o.min_height || 0), h);
-  return { x: Math.max(0, Math.round((bw - ww) / 2)), y: Math.max(0, Math.round((bh - hh) / 2)), w: ww, h: hh };
+  const w = Math.min(bw, Math.max(o.min_width || 0, Math.min(Math.floor(bw * FIRST_SHARE), o.width || DEFAULT_W)));
+  const h = Math.min(bh, Math.max(o.min_height || 0, Math.min(Math.floor(bh - 2 * MARGIN), FIRST_MAX_H, o.height || DEFAULT_H)));
+  const x = rtl ? Math.min(MARGIN, bw - w) : Math.max(0, bw - w - MARGIN);
+  const y = Math.max(0, Math.min(MARGIN, bh - h));
+  return { x: Math.max(0, x), y, w, h };
 }
 
 /** Where a title-bar drag would snap: pointer `pt` relative to the content
@@ -224,9 +230,10 @@ export function keyRect(key, rect, bounds, opts, { shift = false, alt = false } 
 
 // ---- storage ----
 
+/** The key for a profile's windows, or null: a session with no profile id
+ *  keeps its windows for this page only (never a key two people share). */
 export function storageKey(profileId) {
-  const p = typeof profileId === 'string' && PROFILE_RE.test(profileId) ? profileId : 'shared';
-  return KEY_PREFIX + p;
+  return typeof profileId === 'string' && PROFILE_RE.test(profileId) ? `${KEY_PREFIX}v${VERSION}:${profileId}` : null;
 }
 
 /** What is written: ids, states, order, layouts, rects, ratios. Nothing a tool said. */
@@ -294,14 +301,18 @@ export function parse(raw) {
 }
 
 export function load(profileId) {
-  try { return parse(localStorage.getItem(storageKey(profileId))); } catch { return empty(); }
+  const k = storageKey(profileId);
+  if (!k) return empty();
+  try { return parse(localStorage.getItem(k)); } catch { return empty(); }
 }
 
 export function save(profileId, model) {
+  const k = storageKey(profileId);
+  if (!k) return false;
   try {
     const s = serialize(model);
     if (s.length > MAX_BYTES) return false;
-    localStorage.setItem(storageKey(profileId), s);
+    localStorage.setItem(KEY_PREFIX + k.slice(KEY_PREFIX.length), s);
     return true;
   } catch { return false; }
 }
@@ -316,8 +327,77 @@ export function migrateSplit(model, { rtl = false } = {}) {
     ratio = Number(localStorage.getItem(SPLIT_RATIO_KEY));
     localStorage.removeItem(SPLIT_KEY);
     localStorage.removeItem(SPLIT_RATIO_KEY);
+    if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(SPLIT_THREAD_KEY);
   } catch { return model; }
   if (!on || model.def) return model;
   const r = Number.isFinite(ratio) && ratio > 0 && ratio < 1 ? ratio : 0.5;
   return { ...model, def: { layout: rtl ? 'left' : 'right', ratio: r } };
+}
+
+// ---- docking: the chat and the tool share the chat column (the split view's sums) ----
+// `total` is the width the pair can have; `ratio` is the TOOL's share of it once
+// the divider is taken out. The chat never goes under MIN_CHAT, the tool never
+// under its own minimum (MIN_TOOL at least).
+
+export const MIN_CHAT = 320;
+export const MIN_TOOL = 360;
+export const DIVIDER = 10;
+export const DEFAULT_RATIO = 0.5;
+export const KEY_STEP = 24;
+export const KEY_STEP_BIG = 96;
+
+const minTool = (opts) => Math.max(MIN_TOOL, (opts && opts.min_width) || 0);
+
+export function room(total) {
+  const n = Number(total);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n) - DIVIDER) : 0;
+}
+
+export function canDock(total, opts) { return room(total) >= MIN_CHAT + minTool(opts); }
+
+/** 'list' (the thread list stays), 'nolist' (it steps aside) or null (no room: full). */
+export function dockMode({ withList, noList }, opts) {
+  if (canDock(withList, opts)) return 'list';
+  if (canDock(noList, opts)) return 'nolist';
+  return null;
+}
+
+export function clampRatio(ratio, total, opts) {
+  if (!canDock(total, opts)) return null;
+  const r = room(total);
+  let v = Number(ratio);
+  if (!Number.isFinite(v) || v <= 0 || v >= 1) v = DEFAULT_RATIO;
+  return Math.min(1 - MIN_CHAT / r, Math.max(minTool(opts) / r, v));
+}
+
+/** {chat, tool} whole px summing to room(total), or null when it cannot dock. */
+export function dockWidths(ratio, total, opts) {
+  const v = clampRatio(ratio, total, opts);
+  if (v == null) return null;
+  const r = room(total);
+  const tool = Math.round(r * v);
+  return { chat: r - tool, tool };
+}
+
+export function ratioForTool(toolPx, total, opts) {
+  const r = room(total);
+  if (!r) return DEFAULT_RATIO;
+  return clampRatio(Number(toolPx) / r, total, opts);
+}
+
+/** A key on the divider -> the new ratio, or null. Left/Right move the divider
+ *  that way on screen; `side` is where the TOOL is ('left'|'right'); Shift is a
+ *  bigger step; Home/End give the tool its smallest / largest share. */
+export function stepDock(key, { ratio, total, side = 'right', shift = false, opts } = {}) {
+  const w = dockWidths(ratio, total, opts);
+  if (!w) return null;
+  const step = shift ? KEY_STEP_BIG : KEY_STEP;
+  const r = room(total);
+  let tool;
+  if (key === 'ArrowRight') tool = w.tool + (side === 'right' ? -step : step);
+  else if (key === 'ArrowLeft') tool = w.tool + (side === 'right' ? step : -step);
+  else if (key === 'Home') tool = minTool(opts);
+  else if (key === 'End') tool = r - MIN_CHAT;
+  else return null;
+  return ratioForTool(tool, total, opts);
 }

@@ -82,7 +82,7 @@ test('Image Studio .st-primary (color-contrast): beats `.st-page button { color:
 });
 
 test('icon-only chrome buttons carry a tooltip from the same locale key as their name', () => {
-  for (const [id, key] of [['back-btn', 'common.back'], ['send', 'composer.send'], ['tool-back', 'common.back'], ['bm-close', 'common.close']]) {
+  for (const [id, key] of [['back-btn', 'common.back'], ['send', 'composer.send'], ['bm-close', 'common.close']]) {
     const m = HTML.match(new RegExp(`<button[^>]*id="${id}"[^>]*>`));
     assert.ok(m, id);
     assert.match(m[0], / title="[^"]+"/, `${id} has a title`);

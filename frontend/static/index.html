@@ -160,7 +160,7 @@
        and fetches ui-theme/locales/<lang>.json only if asked to. -->
   <link rel="stylesheet" href="/static/ui-theme/ui-components.css" />
   <link rel="stylesheet" href="/static/theme.css?v=8" />
-  <link rel="stylesheet" href="/static/app.css?v=127" />
+  <link rel="stylesheet" href="/static/app.css?v=128" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <link rel="stylesheet" href="/static/tasks.css?v=4" />
   <link rel="stylesheet" href="/static/w5.css?v=4" />
@@ -374,8 +374,6 @@
           <button data-act="delete" class="danger"><span class="icn" data-icon="trash" aria-hidden="true"></span><span data-i18n="chat.delete_thread">Delete</span></button>
         </div>
       </header>
-      <!-- Phone: a parked tool comes back from here (js/tools.js). -->
-      <button class="tool-return" id="tool-return" type="button" title="Back to the tool" aria-label="Back to the tool" hidden><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#arrow-left"/></svg> <span class="tool-return-text"></span></button>
 
       <!-- An app's thread hook (docs/design/2026-09-25-apps.md): when the open
            thread belongs to an app's bot, main.js imports that app's
@@ -664,49 +662,38 @@
         </div>
       </div>
 
-      <!-- Generic tool pane (js/tools.js): ONE view, reused for every app /
-           static / url tool. Same terminal-view chrome as the builtin panes
-           above; opening it puts body.tool-full on, so it fills the content
-           column with only the rail beside it.
-           The frame's sandbox is rewritten per tool before its src is set —
-           static pages get scripts/forms/popups and NO allow-same-origin (they
-           cannot reach DisPatch's cookies or DOM); url tools add
-           allow-same-origin because they are another origin anyway; an APP
-           (/apps/<id>/, trusted repo code on this origin) gets the attribute
-           removed. The default here is the strict one, so the frame is never
-           unsandboxed until tools.js has decided it holds an app.
-           allow="" drops every permission-policy feature. -->
-      <div class="terminal-view tool-view hidden" id="tool-view">
-        <header class="terminal-head">
-          <button class="back-btn" id="tool-back" type="button" aria-label="Back" title="Back" data-i18n-attr="aria-label=common.back;title=common.back"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#arrow-left"/></svg></button>
-          <span class="terminal-avatar-mini tool-avatar-mini" id="tool-icon" aria-hidden="true"></span>
-          <div class="terminal-head-info">
-            <div class="terminal-title" id="tool-title"></div>
-            <div class="muted terminal-subtitle" id="tool-updated" aria-live="polite"></div>
-          </div>
-          <button class="btn-secondary tool-refresh hidden" id="tool-refresh" type="button" title="Regenerate this page now" data-i18n-attr="title=tools.refresh_title"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="14" height="14"><use href="/static/ui-theme/icons.svg#refresh-cw"/></svg> <span data-i18n="tools.refresh">Refresh</span></button>
-          <button class="icon-btn ghost tool-split" id="tool-split" type="button" aria-pressed="false" title="Split with chat" aria-label="Split with chat" data-i18n-attr="title=tools.split;aria-label=tools.split"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#messages-square"/></svg><span class="tool-split-label" aria-hidden="true">Chat</span></button>
-          <a class="icon-btn ghost" id="tool-open" href="#" target="_blank" rel="noopener noreferrer" title="Open in a new tab" aria-label="Open in a new tab" data-i18n-attr="title=tools.open_tab;aria-label=tools.open_tab"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#external-link"/></svg></a>
-          <button class="icon-btn ghost" id="tool-close" type="button" title="Close tool" aria-label="Close tool" data-i18n-attr="title=tools.close;aria-label=tools.close"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="18" height="18"><use href="/static/ui-theme/icons.svg#x"/></svg></button>
-        </header>
-        <details class="tool-error hidden" id="tool-error">
-          <summary id="tool-error-summary"></summary>
-          <pre class="tool-error-text" id="tool-error-text"></pre>
+      <!-- Tool windows (js/tools.js + js/appwin.js, docs/design/app-windows.md):
+           every app / static / url tool opens in a window built at runtime in
+           #appwin-layer; this template is the body of each one. The frame's
+           sandbox is rewritten per tool before its src is set - static pages
+           get scripts/forms/popups and NO allow-same-origin (they cannot reach
+           DisPatch's cookies or DOM); url tools add allow-same-origin because
+           they are another origin anyway; an APP (/apps/<id>/, trusted repo
+           code on this origin) gets the attribute removed. The default here is
+           the strict one, so a frame is never unsandboxed until tools.js has
+           decided it holds an app. allow="" drops every permission-policy
+           feature. A frame is never moved once in the page (that reloads it). -->
+      <template id="tool-window-tpl">
+        <details class="tool-error hidden">
+          <summary class="tool-error-summary"></summary>
+          <pre class="tool-error-text"></pre>
         </details>
         <div class="terminal-body tool-body">
-          <iframe class="tool-frame hidden" id="tool-frame" title="Tool page" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-popups" allow=""></iframe>
-          <div class="harness-note tool-note hidden" id="tool-note">
-            <p id="tool-note-text"></p>
-            <p class="muted" id="tool-note-hint"></p>
+          <iframe class="tool-frame hidden" title="Tool page" referrerpolicy="no-referrer" sandbox="allow-scripts allow-forms allow-popups" allow=""></iframe>
+          <div class="harness-note tool-note hidden">
+            <p class="tool-note-text"></p>
+            <p class="muted tool-note-hint"></p>
           </div>
         </div>
-      </div>
-      <!-- Split view: the draggable divider between the chat and the tool pane
-           (js/tools.js + js/toolsplit.js). Shown only while body.tool-split. -->
-      <div class="tool-split-divider" id="tool-split-divider" role="separator" aria-orientation="vertical" aria-label="Resize chat and tool" data-i18n-attr="aria-label=tools.divider" aria-valuemin="320" aria-valuemax="320" aria-valuenow="320" tabindex="0" hidden></div>
+      </template>
     </section>
 
   </div>
+
+  <!-- Tool windows and the tray of minimised ones (js/appwin.js). -->
+  <div class="appwin-layer" id="appwin-layer"></div>
+  <div class="appwin-tray" id="appwin-tray" hidden></div>
+  <div class="appwin-divider" id="appwin-divider" hidden></div>
 
   <!-- Mobile bottom tabs -->
   <nav class="mobile-tabs" id="mobile-tabs">
@@ -1288,6 +1275,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=190"></script>
+  <script type="module" src="/static/js/main.js?v=191"></script>
 </body>
 </html>

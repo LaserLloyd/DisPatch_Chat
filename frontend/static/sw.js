@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v224';  // v224: Image Studio keeps its form per profile on this device (Reset, pictures still being made, Reload last generation from the server record) and the tool pane can sit beside the chat (split view, draggable divider, phone quick switch); new js/toolsplit.js joins SHELL (studio.js?v=26->30, studio-logic.js?v=13->15, studio.css?v=15->17, tools.js?v=23->26, privacy.js?v=20->21 and importers pins.js?v=26->27, main.js?v=187->190, app.css?v=125->127, index.html, locales).
+const CACHE = 'local-chat-v225';  // v225: tool windows - every app / static / url tool opens in a window that floats, docks left or right beside the chat (draggable divider), fills the screen or (phone) is a sheet; Back to chat turns it into a pill in a tray above the composer and keeps its page alive (new js/appwin.js + js/appwin-state.js join SHELL, js/toolsplit.js leaves it; tools.js?v=26->27, app-sdk.js?v=7->8 (the win SDK) and importers ext-sdk.js?v=26->27, main.js, Image Studio studio.js?v=30->31, Job Board board.js / thread.js; privacy.js?v=21->22 (dispatch-appwin: keys wiped) and importers pins.js?v=27->28, main.js?v=190->191, app.css?v=127->128, index.html, locales win.*).
+// v224: Image Studio keeps its form per profile on this device (Reset, pictures still being made, Reload last generation from the server record) and the tool pane can sit beside the chat (split view, draggable divider, phone quick switch); new js/toolsplit.js joins SHELL (studio.js?v=26->30, studio-logic.js?v=13->15, studio.css?v=15->17, tools.js?v=23->26, privacy.js?v=20->21 and importers pins.js?v=26->27, main.js?v=187->190, app.css?v=125->127, index.html, locales).
 // v223: Image Studio - the tall portrait is a plain name in every language and the page imports only what it uses (studio.js?v=25->26, locales).
 // v222: Image Studio - a wheel over a list inside the controls column scrolls that list (the workflow gallery, the model list, the picker grid, the browse list, the recent prompts) instead of being swallowed by the column (studio.js?v=24->25, studio-logic.js?v=12->13, index.html).
 // v221: Image Studio - the form follows the provider (a dropdown of names, the card for a long list), the image server makes one job per picture, the picture opens in this page outside the shell and the results keep scrolling (studio.js?v=23->24, studio.css?v=14->15, studio-logic.js?v=11->12, index.html, locales).
@@ -381,7 +382,8 @@ const SHELL = [
   // Pure module, statically imported by main.js.
   '/static/js/tools.js',
   // Split view maths + its two stored preferences (statically imported by tools.js).
-  '/static/js/toolsplit.js',
+  '/static/js/appwin.js',
+  '/static/js/appwin-state.js',
   // Extensions (2.2.0): the loader, the SDK shell object and the page the
   // Voice tab shows while the voice add-on is absent, all statically imported
   // by main.js. An add-on (/ext/<id>/…) is NEVER cached here: see the fetch

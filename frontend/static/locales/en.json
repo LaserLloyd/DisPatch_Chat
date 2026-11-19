@@ -1132,11 +1132,6 @@
     "refresh_busy": "A refresh is already running",
     "refresh_error": "Refresh could not run: {error}",
     "open_tab": "Open in a new tab",
-    "close": "Close tool",
-    "split": "Split with chat",
-    "split_narrow": "Not enough room to split here. It will split when the window is wider.",
-    "to_chat": "Chat",
-    "back_to": "Back to {title}",
     "divider": "Resize chat and tool",
     "unreachable_text": "The page behind this tool is not reachable right now.",
     "unreachable_hint": "Check that the service it comes from is running.",
@@ -2785,5 +2780,26 @@
     "all_added_note": "Every bot in this pack is already added.",
     "list_aria": "Bots in {name}",
     "who_note": "You get your own copy of each new bot. To give one to another profile, open its Details and use Who can use it."
+  },
+  "win": {
+    "back_to_chat": "Back to chat",
+    "close": "Close {name}",
+    "layout": "Window layout",
+    "float": "Float",
+    "dock_left": "Dock left",
+    "dock_right": "Dock right",
+    "full": "Full screen",
+    "move": "{name}. Drag to move. With the keyboard: arrows move it, Alt and arrows resize it, Enter fills the screen.",
+    "tray": "Minimised tools",
+    "restore": "Open {name}",
+    "pill_status": "{name}, {status}",
+    "release_close": "Let go to close",
+    "confirm_busy": "{name} is still working on something. Close it anyway?",
+    "confirm_unsaved": "{name} has changes that are not saved. Close it anyway?",
+    "keep_open": "Keep it open",
+    "close_anyway": "Close",
+    "finished": "{name} has something new",
+    "narrow": "Not enough room to dock here. It fills the screen until the window is wider.",
+    "minimized": "minimised, waiting at the bottom"
   }
 }

@@ -28,7 +28,7 @@ import {
   initLlmPanel, activateLlmPanel, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=19';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=21';
+import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=22';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
@@ -36,7 +36,7 @@ import {
   setAllowed as setQuickAllowed, setUpload as setQuickUpload, getActions as quickActionList,
 } from './quick-actions.js?v=7';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=8';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=27';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=28';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
 // DisPatch Voice add-on — mounted into the shell by the loader, through the
 // SDK's frozen shell object. With none installed, Settings → Voice explains
@@ -44,7 +44,7 @@ import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=27';
 import { createLoader, createPaneHost, createAddinTabs } from './extensions.js?v=5';
 import {
   EXT_API, installShell, createShell, disposeExtension, emitLocale, emitLocked, emitThreadChange,
-} from './ext-sdk.js?v=26';
+} from './ext-sdk.js?v=27';
 import { renderVoiceHeard } from './voice-heard.js?v=1';
 import {
   maybeShowSignInNotice, armSignInNotice, paintDisclosure, showLandingBanner, landingText, maybeShowPasswordCard,
@@ -86,14 +86,14 @@ import { isMenuBot, toggleMenuBot, pruneMenuBots, menuBotIds, setMenuScope } fro
 import {
   loadTools, renderToolRail, openTool, closeTool, wireTools, isToolId, railToolDot,
   openFromHash, mountToolsSettings, rememberPrev,
-  toolSplitActive, toolParked, closeParkedTool, notifyActiveThread,
+  toolCoversChat, closeAllTools, setToolProfile, notifyActiveThread,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen, findTool, toolGlyph, registerExtTiles, isExtFeature,
   openToolsMenu, toolsMenuOpen, groupFor,
-} from './tools.js?v=26';
+} from './tools.js?v=27';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
-import { forApp, api as appApi } from './app-sdk.js?v=7';
+import { forApp, api as appApi } from './app-sdk.js?v=8';
 import { renderLinkRail, linksSection } from './links.js?v=10';
 import {
   createGallery, createChrome, keyDirection, overMedia, swipeDirection, normalizeGalleryRequest,
@@ -759,8 +759,6 @@ function announceMessage(msg) {
 // ===================== Mobile view switching =====================
 function setView(view) {
   dom.app.dataset.view = view;
-  // Phone: the Bots page is home - a tool parked behind the chat ends there.
-  if (view === 'bots') closeParkedTool();
   dom['mobile-tabs'].querySelectorAll('.tab').forEach((t) => {
     // The New chat tab is an action, not a view: it lights up while a chat is open.
     const on = t.dataset.view === view || (t.dataset.action === 'new-chat' && view === 'chat');
@@ -826,7 +824,9 @@ window.addEventListener('popstate', (e) => {
 
 /** Is any full-page tool (builtin or generic) on screen? */
 function anyToolPaneOpen() {
-  return (!!toolOpen() && !toolParked()) || harnessOpen || studioforgeOpen || mailOpen || clientsOpen;
+  // A tool WINDOW (js/appwin.js) is not a pane: its phone sheet owns its own
+  // history entry, so Back minimises it there and never lands here.
+  return harnessOpen || studioforgeOpen || mailOpen || clientsOpen;
 }
 
 /** Leave whatever tool pane is up for the Bots page (the phone's ‹ on every
@@ -4050,10 +4050,10 @@ async function selectBot(id) {
   // Every tool — the four builtins and anything in tools.yaml — opens
   // through tools.js, which routes builtins back to their own openers.
   if (isToolId(id)) { openTool(id); return; }
-  // Leaving a tool pane for a real bot tears the view down cleanly - except the
-  // split view, where the tool stays beside the chat, and a tool parked behind the
-  // chat on a phone (its chip brings it back); neither frame is reloaded.
-  closeToolPanes(toolSplitActive() || toolParked() ? 'tool' : undefined);
+  // Leaving a tool pane for a real bot tears a built-in pane down; a tool
+  // WINDOW stays where it is beside the chat (float / dock) and goes to the
+  // tray when it covers the chat (full) - never closed, never reloaded.
+  closeToolPanes(toolCoversChat() ? undefined : 'tool');
   state.selectedBotId = id;
   state.threadsView = 'chats';
   paintArchivedButton();
@@ -7323,28 +7323,13 @@ function openThreadFromApp(id, { botId = null, hint = null, appId = null } = {})
   if (isMobile()) navigate('chat');
 }
 
-/** Split view (tools.js): open a thread in the chat half and leave the tool
- *  pane alone. selectBot() keeps the pane while split, so the bot switch is safe. */
+/** A tool window beside the chat (float / dock): open a thread in the chat and
+ *  leave the window alone. selectBot() keeps such a window, so the bot switch is safe. */
 async function openThreadInSplit(id, { botId = null, hint = null, appId = null } = {}) {
   try {
     if (botId && state.selectedBotId !== botId && botById(botId)) await selectBot(botId);
   } catch { /* the thread opens below regardless */ }
   openThreadFromApp(id, { botId, hint, appId });
-}
-
-/** Split view restored with an empty chat half: the thread this tab had open
- *  (an id from sessionStorage), else the selected bot's newest one, else nothing.
- *  A thread this profile cannot read (404) simply leaves the half empty. */
-function restoreSplitChat(savedId) {
-  if (savedId) {
-    api.thread(savedId).then((row) => {
-      if (!row || row.id !== savedId || state.activeThreadId) return;
-      return openThreadInSplit(savedId, { botId: row.bot_id || null });
-    }).catch(() => {});
-    return;
-  }
-  const first = state.selectedBotId && state.threads.find((x) => x.bot_id === state.selectedBotId && !x.is_archived);
-  if (first) openThread(first.id, { botId: first.bot_id });
 }
 
 // ===================== Live streaming render =====================
@@ -8124,10 +8109,16 @@ function wireEvents() {
     },
     // An app pane asked for one of its threads (open-thread postMessage).
     openThread: openThreadFromApp,
-    // Split view: an app's thread opens in the chat half, the pane stays up.
+    // An app's window beside the chat: its thread opens in the chat, the window stays.
     openThreadInSplit,
-    // Split view after a reload: this tab's chat-half thread, else the bot's newest.
-    restoreSplitChat,
+    // Tool windows (js/appwin.js): the phone sheet's Back entry, the screen
+    // reader line for "finished while minimised", where F6 / a closed window
+    // hands focus back, and whether a pill may be dragged away (not on a
+    // Basic profile, a child's phone: the ✕ only).
+    historyPush,
+    announce: (text) => announce(text),
+    focusChat: () => { const i = dom['input']; if (i && i.offsetParent !== null && !i.disabled) i.focus(); else { const r = document.querySelector('.sidebar button'); if (r) r.focus(); } },
+    canDragClose: () => state.role !== 'basic',
     // An app pane asked to show a picture set in the shell's own lightbox.
     lightbox: openAppGallery,
     // An app's "set this up" button: Settings on that section (the section
@@ -8385,6 +8376,8 @@ function applyAuthChrome() {
   // whenever a different profile takes over.
   if (applyAuthChrome._lastWho !== profileKey()) {
     applyAuthChrome._lastWho = profileKey();
+    // Tool windows are per profile on this device (js/appwin.js).
+    setToolProfile(state.auth.profile ? state.auth.profile.id : null);
     resetReactions();
     loadReactions(true);
   }
@@ -9426,6 +9419,8 @@ function closeAllOverlays() {
   // fetched, but the last frame stayed visible, which is exactly what Safe
   // Mode exists to prevent.
   closeToolPanes();
+  // Every tool window (open or a pill) goes too: the next person sees none of them.
+  closeAllTools();
   tasksUi.closeAll();
   // An app's thread hook (the Job Board's job detail, say) is operator UI
   // painted into the chat: a lock takes it down with the panes

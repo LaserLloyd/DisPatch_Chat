@@ -59,8 +59,6 @@ export const APP_KEYS = [
   'dispatch-last-character',  // newchat.js (the character the phone New chat tab goes to)
   'dispatch-imagestudio-sort', // apps/imagestudio studio.js (the results grid's order)
   'dispatch-imagestudio-pay',  // apps/imagestudio studio.js (which Buzz pays for a Civitai picture)
-  'dispatch-tool-split',      // toolsplit.js (a tool pane opens beside the chat on this device)
-  'dispatch-tool-split-ratio', // toolsplit.js (how the split divides the width on this device)
   'dispatch-rail-layout',     // railmenu.js (which rail buttons sit in Tools & more)
   'dispatch-settings-size',   // settings-resize.js (the Settings window's size on this device)
   'dispatch-settings-last',   // main.js (the Settings section this device opened last)
@@ -92,6 +90,9 @@ export const APP_KEY_PREFIXES = [
   'dispatch-imagestudio-draft:',
   // apps/imagestudio studio.js: "Not now" on the Reload last generation bar (a timestamp), per profile.
   'dispatch-imagestudio-last-dismissed:',
+  // js/appwin-state.js: which tool windows a profile has open or minimised, and
+  // each tool's layout (float rect, dock side and share), per profile id.
+  'dispatch-appwin:',
 ];
 
 export function privacyEnabled() {

@@ -46,18 +46,19 @@ test('index.html has the #tool-list rail group directly after #bot-list', () => 
     '#tool-list must be a <nav> right under #bot-list (and outside it — the roster repaint wipes #bot-list)');
 });
 
-test('index.html has ONE generic #tool-view with a sandboxed frame', () => {
-  const views = MARKUP.match(/id="tool-view"/g) || [];
-  assert.equal(views.length, 1);
-  const frame = /<iframe[^>]*id="tool-frame"[^>]*>/.exec(MARKUP);
-  assert.ok(frame, '#tool-frame iframe must exist');
+test('index.html has ONE tool-window template whose frame carries the strict sandbox', () => {
+  assert.equal((MARKUP.match(/id="tool-window-tpl"/g) || []).length, 1);
+  assert.doesNotMatch(MARKUP, /id="tool-view"|id="tool-return"|id="tool-split-divider"/, 'the single pane, the return chip and the split divider are gone');
+  const tpl = /<template id="tool-window-tpl">([\s\S]*?)<\/template>/.exec(MARKUP)[1];
+  const frames = tpl.match(/<iframe[^>]*>/g) || [];
+  assert.equal(frames.length, 1);
   // The markup default is the STRICT sandbox — never unsandboxed, never
   // same-origin until tools.js decides the kind.
-  assert.match(frame[0], /sandbox="allow-scripts allow-forms allow-popups"/);
-  assert.doesNotMatch(frame[0], /allow-same-origin/);
-  for (const id of ['tool-close', 'tool-refresh', 'tool-open', 'tool-back', 'tool-error', 'tool-note']) {
-    assert.match(MARKUP, new RegExp(`id="${id}"`), `#${id} must exist in #tool-view`);
-  }
+  assert.match(frames[0], /sandbox="allow-scripts allow-forms allow-popups"/);
+  assert.doesNotMatch(frames[0], /allow-same-origin/);
+  assert.match(frames[0], /allow=""/);
+  for (const c of ['tool-error', 'tool-note', 'tool-frame']) assert.match(tpl, new RegExp(`class="[^"]*${c}`), c);
+  for (const id of ['appwin-layer', 'appwin-tray', 'appwin-divider']) assert.match(MARKUP, new RegExp(`id="${id}"`), id);
 });
 
 test('no leftover hardcoded tool rows in the ⌥ menu', () => {
@@ -121,8 +122,9 @@ test('every tool opener toggles body.tool-full (and nothing uses terminal-active
     assert.match(fnBody(MAIN, open), /document\.body\.classList\.add\('tool-full'\)/, `${open} must add tool-full`);
     assert.match(fnBody(MAIN, close), /document\.body\.classList\.remove\('tool-full'\)/, `${close} must remove tool-full`);
   }
-  assert.match(fnBody(TOOLS, 'openTool'), /document\.body\.classList\.add\('tool-full'\)/, 'openTool must add tool-full');
-  assert.match(fnBody(TOOLS, 'closeTool'), /document\.body\.classList\.remove\('tool-full'\)/, 'closeTool must remove tool-full');
+  // A tool WINDOW never takes the chat's place: no tool-full, no selection change.
+  assert.doesNotMatch(fnBody(TOOLS, 'openTool'), /tool-full|selectedBotId =/, 'openTool opens a window, not a full pane');
+  assert.match(fnBody(TOOLS, 'openTool'), /return winOpen\(id\);/);
   assert.doesNotMatch(MAIN, /terminal-active/);
   assert.doesNotMatch(read('app.css').replace(/\/\*[\s\S]*?\*\//g, ''), /terminal-active/);
 });
@@ -212,7 +214,7 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v224 (the Image Studio form is kept per profile, and the tool pane splits beside the chat)', () => {
+test('the sw.js CACHE is local-chat-v225 (tool windows: float, dock, full, phone sheet, pills)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
   // v181: round-3 fixes (a later deep link wins over one still mounting; backups-card notes).
@@ -289,7 +291,7 @@ test('the sw.js CACHE is local-chat-v224 (the Image Studio form is kept per prof
   // v168: ForgeUI 1.2.0 vendored whole (ui-components + locales join SHELL; dispatch-extra.css).
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v224');
+  assert.equal(m[1], 'local-chat-v225');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {
@@ -316,9 +318,12 @@ test('an app frame gets NO sandbox; every other frame keeps one', () => {
 test('the app message listener checks origin AND source before anything else', () => {
   const body = fnBody(TOOLS, 'onAppMessage');
   assert.match(body, /ev\.origin !== location\.origin/);
-  assert.match(body, /ev\.source !== frame\.contentWindow/);
-  const guard = body.indexOf('ev.source !== frame.contentWindow');
+  // The source names the window: only a live window's own frame is found.
+  assert.match(body, /const p = paneBySource\(ev\.source\);/);
+  assert.match(body, /if \(!p \|\| !isApp\(tool\) \|\| ev\.origin !== location\.origin\) return;/);
+  const guard = body.indexOf('ev.origin !== location.origin');
   assert.ok(guard > 0 && guard < body.indexOf('switch (msg.type)'), 'the guard precedes every handler');
+  assert.match(fnBody(TOOLS, 'paneBySource'), /p\.frame\.contentWindow === src/);
   for (const type of ['open-thread', 'close', 'toast', 'set-title']) {
     assert.match(body, new RegExp(`case 'dispatch:${type}'`), `handles dispatch:${type}`);
   }
@@ -418,7 +423,8 @@ test('an app hint is keyed by app AND thread, so another app on the same bot can
   assert.match(sync, /pendingHints\.get\(hintKey\(app\.id, th\.id\)\)/);
   assert.match(sync, /pendingHints\.delete\(hintKey\(app\.id, th\.id\)\)/);
   // Both callers name the app.
-  assert.match(fnBody(TOOLS, 'onAppMessage'), /deps\.openThread\(id, \{[^}]*appId: tool\.id \}\)/);
+  assert.match(fnBody(TOOLS, 'onAppMessage'), /const opts = \{[^}]*appId: tool\.id \};/);
+  assert.match(fnBody(TOOLS, 'onAppMessage'), /deps\.openThread\(id, opts\)/);
   assert.match(sync, /openThreadFromApp\(id, \{[^}]*appId: app\.id \}\)/);
 });
 

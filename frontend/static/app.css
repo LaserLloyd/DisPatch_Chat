@@ -2332,56 +2332,178 @@ img.tl-avatar:not([src]), img.ch-avatar:not([src]) { visibility: hidden; }
   body.tool-full .app.tl-collapsed { grid-template-columns: var(--sidebar-width) 1fr; }
   body.tool-full .threadlist { display: none; }
 }
-/* Split view (js/tools.js + js/toolsplit.js): `tool-split` on <body> instead of
-   `tool-full` keeps the thread list and the real chat. The chat column gives up
-   the inline-end part of itself (padding) to the tool pane, which stays where it
-   always was in the DOM - so its frame is never moved or reloaded - and the
-   divider sits on the seam. --tool-split-w is the pane's width, set by js. */
-.tool-split-divider { display: none; }
+/* ===== Tool windows (js/appwin.js, docs/design/app-windows.md) =====
+   One fixed layer holds every window for its whole life (a frame is never
+   moved: that reloads it). js sets the box (left/top/width/height) for float,
+   dock and full; the phone sheet is CSS. Below menus (60/70), above the chat. */
+.appwin-layer { position: fixed; inset: 0; z-index: 55; pointer-events: none; }
+.appwin {
+  position: fixed; pointer-events: auto; display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  background: var(--bg-primary); color: var(--text-primary);
+  border: 1px solid var(--border-strong); border-radius: 12px; overflow: hidden;
+  box-shadow: 0 18px 48px rgba(0,0,0,.35), 0 2px 8px rgba(0,0,0,.2);
+}
+.appwin[hidden] { display: none; }
+.appwin[data-layout="full"], .appwin[data-layout="left"], .appwin[data-layout="right"] { border-radius: 0; box-shadow: none; border-block: 0; }
+.appwin[data-layout="full"] { border-inline: 0; }
+.appwin-bar {
+  position: relative; display: flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  min-height: 48px; padding: 4px 6px 4px 4px; padding-inline: 4px 6px;
+  background: var(--bg-secondary); border-bottom: 1px solid var(--border-strong);
+  touch-action: none; user-select: none;
+}
+.appwin-grip { display: none; }
+.appwin-handle {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px;
+  min-height: 40px; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent;
+  color: inherit; font: inherit; text-align: start; cursor: grab;
+}
+.appwin[data-layout="full"] .appwin-handle, .appwin[data-layout="left"] .appwin-handle, .appwin[data-layout="right"] .appwin-handle { cursor: default; }
+.appwin-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+body.appwin-dragging .appwin-handle { cursor: grabbing; }
+.appwin-icon { flex: 0 0 auto; display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; }
+.appwin-icon > * { max-width: 28px; max-height: 28px; }
+.appwin-titles { min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.appwin-title { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.appwin-status { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.appwin-status[hidden] { display: none; }
+.appwin-slot { display: flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; }
+.appwin-updated { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 16em; }
+.appwin-updated:empty { display: none; }
+.appwin-btn { flex: 0 0 auto; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; }
+.appwin-btn[hidden], .appwin-slot .hidden { display: none; }
+.appwin-min { width: auto; padding-inline: 10px; gap: 6px; font-size: 13px; border-radius: 8px; }
+.appwin-min-label { white-space: nowrap; }
+.appwin-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.appwin-body > .tool-body { flex: 1 1 auto; display: flex; min-height: 0; }
+/* While anything is dragged, frames must not swallow the pointer. */
+body.appwin-dragging { user-select: none; }
+body.appwin-dragging .appwin iframe { pointer-events: none; }
+/* Resize edges and corners (a float only). */
+.appwin-rs { position: absolute; z-index: 2; display: none; touch-action: none; }
+.appwin[data-layout="float"] .appwin-rs { display: block; }
+.appwin-rs-e { top: 12px; bottom: 12px; right: 0; width: 8px; cursor: ew-resize; }
+.appwin-rs-w { top: 12px; bottom: 12px; left: 0; width: 8px; cursor: ew-resize; }
+.appwin-rs-s { inset-inline: 12px; bottom: 0; height: 8px; cursor: ns-resize; }
+.appwin-rs-se { right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; }
+.appwin-rs-sw { left: 0; bottom: 0; width: 16px; height: 16px; cursor: nesw-resize; }
+.appwin-rs-se::after {
+  content: ""; position: absolute; right: 3px; bottom: 3px; width: 8px; height: 8px;
+  border-right: 2px solid var(--border-strong); border-bottom: 2px solid var(--border-strong); border-radius: 0 0 3px 0;
+}
+/* Snap preview while a title bar is dragged to an edge. */
+.appwin-preview {
+  position: fixed; pointer-events: none; z-index: 1; border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent); border: 2px solid var(--accent);
+}
+.appwin-preview[hidden] { display: none; }
+/* Layout menu (Float / Dock left / Dock right / Full screen). */
+.appwin-menu {
+  position: absolute; top: calc(100% + 4px); inset-inline-end: 8px; z-index: 5; min-width: 190px;
+  display: flex; flex-direction: column; padding: 4px; border-radius: 10px;
+  background: var(--bg-secondary); border: 1px solid var(--border-strong); box-shadow: 0 8px 24px rgba(0,0,0,.3);
+}
+.appwin-menu-item {
+  display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 6px 10px; border: 0; border-radius: 6px;
+  background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer;
+}
+.appwin-menu-item:hover, .appwin-menu-item:focus-visible { background: var(--bg-hover); outline: none; }
+.appwin-menu-item[aria-checked="true"] { color: var(--accent); font-weight: 600; }
+/* Docked: the chat column makes room on that side (the window sits over it). */
 @media (min-width: 769px) {
-  body.tool-split #chatview { padding-inline-end: calc(var(--tool-split-w, 50%) + 10px); box-sizing: border-box; }
-  body.tool-split #chatview > .tool-view.split {
-    inset-inline-start: auto; inset-inline-end: 0;
-    width: var(--tool-split-w, 50%);
-  }
-  body.tool-split .tool-split-divider {
-    display: block; position: absolute; z-index: 6; inset-block: 0;
-    inset-inline-end: var(--tool-split-w, 50%);
-    width: 10px; cursor: col-resize; touch-action: none;
-    background: transparent;
-  }
-  body.tool-split .tool-split-divider::before {
-    content: ""; position: absolute; inset-block: 0; inset-inline-start: 4px; width: 2px;
-    background: var(--border-strong); transition: background .12s;
-  }
-  body.tool-split .tool-split-divider:hover::before,
-  body.tool-split .tool-split-divider:focus-visible::before,
-  body.tool-split-dragging .tool-split-divider::before { background: var(--accent); }
-  body.tool-split .tool-split-divider:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  /* Not enough room beside the thread list: it steps aside for the split (the
+  body.appwin-dock-right #chatview { padding-right: var(--appwin-dock-w, 50%); box-sizing: border-box; }
+  body.appwin-dock-left #chatview { padding-left: var(--appwin-dock-w, 50%); box-sizing: border-box; }
+  body.appwin-dock-right #chatview > .chat-drop { right: var(--appwin-dock-w, 50%); }
+  body.appwin-dock-left #chatview > .chat-drop { left: var(--appwin-dock-w, 50%); }
+  /* Not enough room beside the thread list: it steps aside for the dock (the
      saved collapse choice is untouched). Chats stay reachable from the rail. */
-  body.tool-split-nolist .app,
-  body.tool-split-nolist .app.tl-collapsed { grid-template-columns: var(--sidebar-width) 1fr; }
-  body.tool-split-nolist .threadlist { display: none; }
-  body.tool-split-dragging { user-select: none; cursor: col-resize; }
-  /* The chat's drop overlay covers the chat half only: a file dragged over the
-     tool half is for the tool (Image Studio's reference picture), not the chat. */
-  body.tool-split #chatview > .chat-drop { inset-inline-end: calc(var(--tool-split-w, 50%) + 10px); }
-  body.tool-split-dragging .tool-frame { pointer-events: none; }
+  body.appwin-dock-nolist .app,
+  body.appwin-dock-nolist .app.tl-collapsed { grid-template-columns: var(--sidebar-width) 1fr; }
+  body.appwin-dock-nolist .threadlist { display: none; }
 }
-.tool-split[aria-pressed="true"] { background: var(--bg-hover); color: var(--accent); }
-.tool-split-label { display: none; }
-.tool-return {
-  display: flex; align-items: center; gap: 8px; width: 100%; flex: 0 0 auto; min-width: 0;
-  padding: 8px 14px; border: 0; border-bottom: 1px solid var(--border-strong);
-  background: var(--bg-secondary); color: var(--text-primary); font: inherit; font-size: 13px;
-  text-align: start; cursor: pointer; white-space: nowrap;
+.appwin-divider { position: fixed; z-index: 56; cursor: col-resize; touch-action: none; background: transparent; }
+.appwin-divider[hidden] { display: none; }
+.appwin-divider::before {
+  content: ""; position: absolute; inset-block: 0; left: 4px; width: 2px;
+  background: var(--border-strong); transition: background .12s;
 }
-.tool-return:hover, .tool-return:focus-visible { background: var(--bg-hover); }
-.tool-return .rail-icon { flex: 0 0 auto; }
-[dir="rtl"] .tool-return .rail-icon { transform: scaleX(-1); }
-.tool-return-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tool-return[hidden] { display: none; }
+.appwin-divider:hover::before, .appwin-divider:focus-visible::before, body.appwin-dragging .appwin-divider::before { background: var(--accent); }
+.appwin-divider:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* The tray of minimised tools: right above the composer (js measures it). */
+.appwin-tray {
+  position: fixed; z-index: 57; display: flex; gap: 8px; align-items: center;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; padding: 2px; pointer-events: none;
+}
+.appwin-tray[hidden], .appwin-tray.kbd-hidden { display: none; }
+.appwin-pill {
+  pointer-events: auto; flex: 0 0 auto; display: inline-flex; align-items: stretch; max-width: 280px;
+  border-radius: 999px; background: var(--bg-secondary); border: 1px solid var(--border-strong);
+  box-shadow: 0 4px 14px rgba(0,0,0,.25); touch-action: none; transition: transform .12s, background .12s;
+}
+.appwin-pill.dragging { transition: none; z-index: 1; }
+.appwin-pill.armed { background: var(--danger, #c0392b); color: #fff; border-color: transparent; }
+.appwin-pill-main {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 40px;
+  padding-block: 4px; padding-inline: 6px 4px; border: 0; background: transparent; color: inherit; font: inherit;
+  border-radius: 999px; cursor: pointer; text-align: start;
+}
+.appwin-pill-main:focus-visible, .appwin-pill-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.appwin-pill-icon { flex: 0 0 auto; display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; }
+.appwin-pill-icon > * { max-width: 28px; max-height: 28px; }
+.appwin-pill-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.appwin-pill-status { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.appwin-pill.armed .appwin-pill-status { color: inherit; }
+.appwin-pill-badge { min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: var(--bg-primary); font-size: 11px; font-weight: 700; text-align: center; line-height: 18px; }
+.appwin-pill-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+.appwin-pill.busy .appwin-pill-icon { animation: appwin-pulse 1.6s ease-in-out infinite; }
+@keyframes appwin-pulse { 50% { opacity: .55; } }
+.appwin-pill-x {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 36px; min-height: 40px;
+  border: 0; background: transparent; color: inherit; border-radius: 999px; cursor: pointer; opacity: .75;
+}
+.appwin-pill-x:hover { opacity: 1; background: var(--bg-hover); }
+/* The message list keeps its last line clear of the tray. */
+.messages { scroll-padding-bottom: var(--appwin-tray-space, 0px); }
+body.appwin-has-pills .messages::after { content: ""; display: block; flex: 0 0 auto; height: var(--appwin-tray-space, 0px); }
+/* The rail's Tools menu marks a tool waiting in the tray. */
+.tools-item-parked { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--accent); margin-inline-start: auto; }
+/* "Close it anyway?" */
+.appwin-confirm {
+  max-width: min(420px, calc(100vw - 32px)); padding: 20px; border-radius: 12px;
+  background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-strong);
+}
+.appwin-confirm::backdrop { background: rgba(0,0,0,.5); }
+.appwin-confirm-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 16px; }
+/* Phone: the window is a sheet over everything (bottom tabs included) with a
+   grab handle; no float, no dock. 44px targets. */
+@media (max-width: 768px) {
+  .appwin-layer { z-index: 92; }
+  .appwin[data-layout="sheet"] {
+    left: 0 !important; right: 0; width: auto !important;
+    top: calc(env(safe-area-inset-top, 0px) + 8px) !important;
+    bottom: var(--appwin-tray-h, 0px); height: auto !important;
+    border-radius: 16px 16px 0 0; border-inline: 0; border-bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-shadow: 0 -8px 30px rgba(0,0,0,.35);
+  }
+  .appwin[data-layout="sheet"] .appwin-bar { padding-top: 14px; min-height: 56px; }
+  .appwin[data-layout="sheet"] .appwin-grip {
+    display: block; position: absolute; top: 5px; left: 50%; width: 40px; height: 5px; margin-left: -20px;
+    border-radius: 3px; background: var(--border-strong);
+  }
+  .appwin-handle { cursor: default; min-height: 44px; }
+  .appwin-btn { width: 44px; height: 44px; }
+  .appwin-min { width: auto; }
+  .appwin-updated, .appwin .tool-open { display: none; }
+  .appwin-tray { z-index: 93; }
+  .appwin-pill-main { min-height: 44px; }
+  .appwin-pill-x { width: 44px; min-height: 44px; }
+  .appwin-pill { max-width: 70vw; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .appwin-pill, .appwin-divider::before { transition: none; }
+  .appwin-pill.busy .appwin-pill-icon { animation: none; }
+}
 /* If a phone user does open the Chats tab mid-tool, the list shows the tool's
    placeholder — hide the per-bot chrome (stale avatar, new/search/collapse)
    that means nothing for a page with no chats. */
@@ -4388,18 +4510,6 @@ body.tools-sheet-open::after {
   .app[data-view="bots"] .tool-list-row .tools-menu-btn.active .tool-avatar { border-width: 1px; }
 }
 
-/* Phone: one header row, always. Title shrinks, the controls keep their
-   size — a wrapped second row of ↗/✕ costs a whole line of the page. */
-@media (max-width: 768px) {
-  .tool-view .terminal-head { flex-wrap: nowrap; gap: 6px; padding-inline: 8px; }
-  .tool-view .terminal-head > .icon-btn { flex: 0 0 auto; width: 40px; height: 40px; }
-  .tool-view .tool-refresh { padding: 6px 9px; }
-  .tool-view #tool-close { display: none; }   /* ‹ does the same job here */
-  /* The split toggle is the phone's quick switch: icon + "Chat". */
-  .tool-view .terminal-head > .tool-split { width: auto; padding-inline: 10px; gap: 6px; display: inline-flex; align-items: center; }
-  .tool-split-label { display: inline; font-size: 13px; }
-}
-
 /* An app's thread hook (docs/design/2026-09-25-apps.md) renders into this
    strip between the chat header and the messages. The app styles what it puts
    inside; the shell only gives it a place that never pushes the composer off
@@ -4410,7 +4520,7 @@ body.tools-sheet-open::after {
   background: var(--bg-secondary);
 }
 
-/* Generic tool pane: one frame (or a note) filling the body. */
+/* A tool window's body: one frame (or a note) filling it. */
 .tool-body { flex-direction: column; }
 .tool-frame { flex: 1 1 auto; }
 .tool-note { flex: 1 1 auto; }

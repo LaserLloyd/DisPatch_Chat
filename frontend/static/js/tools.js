@@ -36,18 +36,16 @@
 // a blank pane. `open` only moves WHERE a page opens: every gate on WHO
 // may open it (the profile's permissions, the loopback rule) runs first, unchanged.
 //
-// Every opener, builtin or generic, puts `tool-full` on <body>: the thread
-// column goes away and the pane owns the whole content area. Closing takes the
-// class off and hands the previous selection back to main.js.
+// The four builtin panes put `tool-full` on <body>: the thread column goes away
+// and the pane owns the content area; their close hands the previous selection
+// back to main.js.
 //
-// Split view (generic pane only, desktop widths): the "Split with chat" toggle
-// in the pane header swaps `tool-full` for `tool-split` on <body>. The thread
-// list stays, #chatview keeps its real chat and the pane takes the inline-end
-// part of it, with a draggable divider between (js/toolsplit.js has the sums).
-// The frame is never moved or unloaded by any of it, and `selectedBotId` is the
-// CHAT's bot while split (the tool is `openId`). On a phone there is no split:
-// the same button reads "Chat" and PARKS the tool - its pane is hidden, the
-// frame stays loaded - and a chip in the chat header brings it back.
+// Every app / static / url tool opens in a WINDOW instead (js/appwin.js, docs/
+// design/app-windows.md): float, dock left/right beside the chat, full, or a
+// sheet on a phone; Back to chat turns it into a pill in a tray at the bottom
+// of the chat column and keeps its frame alive. The chat's selection is never
+// taken over by a window. (This replaced the split view and the phone return
+// chip of the same day.)
 //
 // Pure-ish module: no side effects at import time (it is in sw.js SHELL and
 // imported by main.js). main.js injects everything app-shaped via wireTools().
@@ -56,9 +54,11 @@ import { api } from './api.js?v=37';
 import { t, relTimeLong } from './i18n.js?v=5';
 import { el, railIcon, RAIL_ICONS, spriteIcon } from './util.js?v=23';
 import {
-  DIVIDER, canSplit, chatRange, ratioForChat, stepRatio, widths,
-  readPref, writePref, readRatio, writeRatio, readThread, writeThread, clearThread, splitMode,
-} from './toolsplit.js?v=1';
+  setHost as winSetHost, openWindow as winOpen, minimizeWindow as winMinimize, closeWindow as winClose,
+  closeAll as winCloseAll, setProfile as winSetProfile, syncKnown as winSyncKnown, setLive as winSetLive,
+  setTitle as winSetTitle, visibleId as winVisibleId, visibleLayout as winVisibleLayout,
+  coversChat as winCoversChat, repaintAll as winRepaint, isMinimized as winIsMinimized, wireAppWindows,
+} from './appwin.js?v=1';
 
 // Builtin ids are the pseudo-bot ids main.js has always used, in rail order.
 // `icon` names a RAIL_ICONS entry: a builtin tile is chrome, so it is drawn in
@@ -202,7 +202,7 @@ const SANDBOX_URL = 'allow-scripts allow-forms allow-popups allow-same-origin';
 // Fields the manifest schema accepts. Everything else in a ToolOut
 // (has_refresh, builtin_feature) is output-only and must not be sent back —
 // the schema is closed and would 422 it.
-const WRITABLE = ['id', 'title', 'icon', 'kind', 'root', 'entry', 'url', 'remote_url', 'enabled', 'refresh', 'open'];
+const WRITABLE = ['id', 'title', 'icon', 'kind', 'root', 'entry', 'url', 'remote_url', 'enabled', 'refresh', 'open', 'window'];
 
 // A framed page that has not fired `load` by now gets the "not finished
 // loading" card (the frame keeps loading underneath and is shown if it lands).
@@ -211,13 +211,8 @@ export const FRAME_TIMEOUT_MS = 20000;
 let deps = null;
 let tools = null;        // null = never loaded / API absent; [] = loaded, none
 let toolsPath = '';
-let openId = null;       // the generic tool on screen, or null
-let prev = null;         // {botId, threadId} to hand back on close
-let refreshing = false;
-let statusSeq = 0;
-let frameTimer = null;   // the FRAME_TIMEOUT_MS watchdog for the open frame
-let frameLoaded = false; // the open frame fired `load` for its current src
-let cardShown = null;    // why the card is up ('slow', 'refuses', …) or null
+let toolsLoaded = false; // /api/tools answered at least once (windows may come back)
+let prev = null;         // {botId, threadId} a BUILT-IN pane hands back on close
 
 // Settings draft
 let draft = null;        // working copy while Settings → Tools is open
@@ -466,7 +461,11 @@ export async function loadTools() {
     else if (e && (e.status === 401 || e.status === 403)) tools = [];
     // Anything else (network): keep whatever we had.
   }
+  toolsLoaded = true;
   renderToolRail();
+  // Windows of tools this session may no longer open go; after a reload the
+  // saved ones come back (js/appwin.js).
+  winSyncKnown();
   return tools;
 }
 
@@ -551,7 +550,7 @@ function groupDotClass(mode, bots) {
  *  'bots' for the phone's parked-bots tile. */
 function menuButton(entries, bots, mode) {
   const st = deps.state;
-  const active = (mode === 'tools' && (entries.some((x) => x.id === rowIdFor(st.selectedBotId)) || !!openId))
+  const active = (mode === 'tools' && (entries.some((x) => x.id === rowIdFor(st.selectedBotId)) || !!winVisibleId()))
     || bots.some((b) => b.active);
   const label = groupLabel(mode);
   const btn = el('button', {
@@ -656,14 +655,17 @@ function menuRow(tool) {
   const b = tool.kind === 'builtin' ? builtinOf(tool) : null;
   const title = toolTitle(tool);
   // A grouped tab's id selects its group's row (the row is what was clicked).
-  const active = rowIdFor(st.selectedBotId) === tool.id || (splitOn && rowIdFor(openId) === tool.id);
+  const active = rowIdFor(st.selectedBotId) === tool.id || winVisibleId() === tool.id;
+  // A tool waiting in the tray: a quiet marker, and the click brings it back.
+  const parked = !active && winIsMinimized(tool.id);
   const row = el('button', {
-    class: 'tools-item' + (active ? ' active' : ''),
+    class: 'tools-item' + (active ? ' active' : '') + (parked ? ' parked' : ''),
     type: 'button',
     role: 'menuitem',
     tabindex: '-1',
     dataset: { tool: tool.id },
-    'aria-label': (b ? t(b.aria) : title) + (openMode(tool) === 'window' ? ' — ' + t('tools.opens_window') : ''),
+    'aria-label': (b ? t(b.aria) : title) + (openMode(tool) === 'window' ? ' — ' + t('tools.opens_window') : '')
+      + (parked ? ' — ' + t('win.minimized') : ''),
   });
   if (active) row.setAttribute('aria-current', 'page');
   row.addEventListener('click', () => { closeToolsMenu(); openTool(tool.id); });
@@ -671,6 +673,7 @@ function menuRow(tool) {
   row.append(el('span', { class: 'tools-item-label', text: title }));
   // The "leaves DisPatch" affordance, the same external-link icon the pane header uses.
   if (openMode(tool) === 'window') row.append(el('span', { class: 'muted tools-item-ext', 'aria-hidden': 'true' }, [spriteIcon('external-link', 14)]));
+  if (parked) row.append(el('span', { class: 'tools-item-parked', 'aria-hidden': 'true' }));
   if (b) {
     const dot = deps.builtinDot(b.feature);
     if (dot) row.append(el('span', { class: 'bot-status-dot terminal-sidedot ' + dot }));
@@ -922,19 +925,68 @@ function unloadFrame(frame) {
   frame.removeAttribute('src');
 }
 
-function clearFrameTimer() {
-  if (frameTimer) { clearTimeout(frameTimer); frameTimer = null; }
+// ===================== Tool windows =====================
+// Every framed tool (app / static / url) opens in a WINDOW (js/appwin.js draws
+// the chrome, the pills, float / dock / full / the phone sheet; docs/design/
+// app-windows.md). This module fills each window's body with a PANE: the
+// tool's frame (cloned from <template id="tool-window-tpl">, whose iframe
+// carries the strict sandbox until loadFrame decides otherwise), its card, its
+// error strip, its refresh button and its status bookkeeping. One pane per
+// window, several alive at once: everything below takes the pane it works on,
+// and every message from a frame is routed by `event.source` to the pane that
+// owns that frame.
+
+const panes = new Map();     // tool id -> pane
+
+function isFramed(tool) { return !!tool && (tool.kind === 'static' || tool.kind === 'url' || isApp(tool)); }
+
+function paneBySource(src) {
+  if (!src) return null;
+  for (const p of panes.values()) if (p.frame && p.frame.contentWindow === src) return p;
+  return null;
 }
 
-/** The card's action row, created once inside #tool-note (the markup only
- *  carries the two text lines). Existing themed button classes only. */
-function noteActions() {
-  const note = $('tool-note');
-  if (!note) return null;
-  let box = $('tool-note-actions');
+function makePane(rec) {
+  const tpl = $('tool-window-tpl');
+  if (tpl && tpl.content) rec.body.append(tpl.content.cloneNode(true));
+  const q = (c) => rec.body.querySelector(c);
+  const p = {
+    id: rec.id, rec,
+    frame: q('.tool-frame'), note: q('.tool-note'), noteText: q('.tool-note-text'), noteHint: q('.tool-note-hint'),
+    err: q('.tool-error'), errSummary: q('.tool-error-summary'), errText: q('.tool-error-text'),
+    timer: null, loaded: false, card: null, refreshing: false, seq: 0,
+  };
+  // The tool's own buttons in the window's bar: "Updated …", Refresh, Open in a new tab.
+  p.upd = el('span', { class: 'appwin-updated muted', 'aria-live': 'polite' });
+  p.refreshBtn = el('button', { type: 'button', class: 'btn-secondary tool-refresh hidden', title: t('tools.refresh_title') });
+  p.refreshBtn.append(spriteIcon('refresh-cw', 14), el('span', { class: 'tool-refresh-label', text: t('tools.refresh') }));
+  p.refreshBtn.addEventListener('click', () => doRefresh(p));
+  p.openLink = el('a', { class: 'icon-btn ghost appwin-btn tool-open', target: '_blank', rel: 'noopener noreferrer', title: t('tools.open_tab'), 'aria-label': t('tools.open_tab') });
+  p.openLink.append(spriteIcon('external-link', 18));
+  rec.slot.append(p.upd, p.refreshBtn, p.openLink);
+  if (p.frame) p.frame.addEventListener('load', () => onPaneLoad(p));
+  panes.set(rec.id, p);
+  const tool = findTool(rec.id);
+  if (tool) {
+    const src = frameSrc(tool);
+    p.openLink.classList.toggle('hidden', !src);
+    if (src) p.openLink.setAttribute('href', src);
+    paintRefreshBtn(p, tool);
+  }
+  return p;
+}
+
+function clearFrameTimer(p) {
+  if (p.timer) { clearTimeout(p.timer); p.timer = null; }
+}
+
+/** The card's action row, created once inside the pane's note. */
+function noteActions(p) {
+  if (!p.note) return null;
+  let box = p.note.querySelector('.tool-note-actions');
   if (!box) {
-    box = el('div', { class: 'tools-add-actions tool-note-actions', id: 'tool-note-actions' });
-    note.append(box);
+    box = el('div', { class: 'tools-add-actions tool-note-actions' });
+    p.note.append(box);
   }
   return box;
 }
@@ -943,84 +995,79 @@ function noteActions() {
  *  a new window — only offered when this browser has an address to open) and
  *  'retry'. `keepFrame`: leave the frame loading underneath (the slow case —
  *  if it lands after all, onFrameLoad swaps it back in). */
-function showNote(textKey, hintKey, { actions = [], vars = {}, keepFrame = false, why = 'note' } = {}) {
-  const note = $('tool-note');
-  const frame = $('tool-frame');
-  if (frame) {
-    if (keepFrame) frame.classList.add('hidden');
-    else { clearFrameTimer(); unloadFrame(frame); }
+function showNote(p, textKey, hintKey, { actions = [], vars = {}, keepFrame = false, why = 'note' } = {}) {
+  if (p.frame) {
+    if (keepFrame) p.frame.classList.add('hidden');
+    else { clearFrameTimer(p); unloadFrame(p.frame); }
   }
-  if (!note) return;
-  cardShown = why;
-  $('tool-note-text').textContent = t(textKey, vars);
-  $('tool-note-hint').textContent = hintKey ? t(hintKey, vars) : '';
-  const box = noteActions();
+  if (!p.note) return;
+  p.card = why;
+  p.noteText.textContent = t(textKey, vars);
+  p.noteHint.textContent = hintKey ? t(hintKey, vars) : '';
+  const box = noteActions(p);
   if (box) {
     box.textContent = '';
-    const tool = openId ? findTool(openId) : null;
+    const tool = findTool(p.id);
     if (tool && actions.includes('window') && windowUrl(tool)) {
       box.append(el('button', {
-        type: 'button', class: 'btn-primary', id: 'tool-note-window', text: t('tools.open_window'),
-        onclick: () => { const cur = openId && findTool(openId); if (cur) launchWindow(cur); },
+        type: 'button', class: 'btn-primary tool-note-window', text: t('tools.open_window'),
+        onclick: () => { const cur = findTool(p.id); if (cur) launchWindow(cur); },
       }));
     }
     if (tool && actions.includes('retry')) {
       box.append(el('button', {
-        type: 'button', class: 'btn-secondary', id: 'tool-note-retry', text: t('tools.retry'),
-        onclick: () => { const cur = openId && findTool(openId); if (cur) { loadFrame(cur); refreshStatus(cur); } },
+        type: 'button', class: 'btn-secondary tool-note-retry', text: t('tools.retry'),
+        onclick: () => { const cur = findTool(p.id); if (cur) { loadFrame(p, cur); refreshStatus(p, cur); } },
       }));
     }
     box.hidden = !box.childElementCount;
   }
-  note.classList.remove('hidden');
+  p.note.classList.remove('hidden');
 }
 
-function hideNote() {
-  cardShown = null;
-  const note = $('tool-note');
-  if (note) note.classList.add('hidden');
+function hideNote(p) {
+  p.card = null;
+  if (p.note) p.note.classList.add('hidden');
 }
 
-/** The open frame fired `load`. Cross-origin, that proves little (a
+/** The pane's frame fired `load`. Cross-origin, that proves little (a
  *  browser's own error page fires it too — the status probe covers what the
  *  headers say); what it does prove is that the page is not stuck. */
-function onFrameLoad() {
-  frameLoaded = true;
-  clearFrameTimer();
-  if (cardShown === 'slow') {
-    hideNote();
-    const frame = $('tool-frame');
-    if (frame) frame.classList.remove('hidden');
+function onFrameLoad(p) {
+  p.loaded = true;
+  clearFrameTimer(p);
+  if (p.card === 'slow') {
+    hideNote(p);
+    if (p.frame) p.frame.classList.remove('hidden');
   }
 }
 
-function armFrameTimer(tool) {
-  clearFrameTimer();
-  frameLoaded = false;
-  const id = tool.id;
-  frameTimer = setTimeout(() => {
-    frameTimer = null;
-    if (openId !== id || frameLoaded || cardShown) return;
-    showNote('tools.slow_text', 'tools.slow_hint', { actions: ['window', 'retry'], keepFrame: true, why: 'slow' });
+function armFrameTimer(p, tool) {
+  clearFrameTimer(p);
+  p.loaded = false;
+  p.timer = setTimeout(() => {
+    p.timer = null;
+    if (!panes.has(p.id) || p.loaded || p.card) return;
+    showNote(p, 'tools.slow_text', 'tools.slow_hint', { actions: ['window', 'retry'], keepFrame: true, why: 'slow' });
   }, FRAME_TIMEOUT_MS);
 }
 
-function loadFrame(tool) {
-  const frame = $('tool-frame');
+function loadFrame(p, tool) {
+  const frame = p.frame;
   if (!frame) return;
   const src = frameSrc(tool);
-  if (!src) { showNote('tools.bad_url_text', 'tools.location_hint'); return; }
+  if (!src) { showNote(p, 'tools.bad_url_text', 'tools.location_hint'); return; }
   if (tool.kind === 'url' && isLoopbackHost(new URL(src).hostname) && !onHost()) {
-    showNote('tools.loopback_text', 'tools.loopback_hint');
+    showNote(p, 'tools.loopback_text', 'tools.loopback_hint');
     return;
   }
   // A window-mode tool reached without a click (a #tool= restore): the pane
   // says where it lives and offers the one button a popup blocker allows.
   if (openMode(tool) === 'window') {
-    showNote('tools.window_text', 'tools.window_hint', { actions: ['window'], vars: { name: toolTitle(tool) }, why: 'window' });
+    showNote(p, 'tools.window_text', 'tools.window_hint', { actions: ['window'], vars: { name: toolTitle(tool) }, why: 'window' });
     return;
   }
-  hideNote();
+  hideNote(p);
   // Sandbox BEFORE src: the attribute is read when the navigation starts.
   // An app is trusted repo code on our own origin and needs the session
   // cookie for its own API, so its frame has NO sandbox attribute at all —
@@ -1029,7 +1076,7 @@ function loadFrame(tool) {
   else frame.setAttribute('sandbox', tool.kind === 'url' ? SANDBOX_URL : SANDBOX_STATIC);
   frame.setAttribute('title', t('tools.frame_title', { name: toolTitle(tool) }));
   frame.classList.remove('hidden');
-  armFrameTimer(tool);
+  armFrameTimer(p, tool);
   frame.setAttribute('src', src);
 }
 
@@ -1039,102 +1086,105 @@ function toIso(mtime) {
   return String(mtime);
 }
 
-function paintRefreshBtn(tool) {
-  const btn = $('tool-refresh');
+function paintRefreshBtn(p, tool) {
+  const btn = p.refreshBtn;
   if (!btn) return;
   const show = !!(tool && tool.has_refresh);
   btn.classList.toggle('hidden', !show);
-  btn.disabled = refreshing;
-  const lbl = btn.querySelector('[data-i18n]');
-  if (lbl) { lbl.setAttribute('data-i18n', refreshing ? 'tools.refreshing' : 'tools.refresh'); lbl.textContent = refreshing ? t('tools.refreshing') : t('tools.refresh'); }
-  else btn.textContent = refreshing ? t('tools.refreshing') : t('tools.refresh');
-  btn.setAttribute('aria-busy', refreshing ? 'true' : 'false');
+  btn.disabled = p.refreshing;
+  const lbl = btn.querySelector('.tool-refresh-label');
+  if (lbl) lbl.textContent = p.refreshing ? t('tools.refreshing') : t('tools.refresh');
+  btn.setAttribute('aria-busy', p.refreshing ? 'true' : 'false');
 }
 
-function hideError() {
-  const box = $('tool-error');
-  if (box) { box.classList.add('hidden'); box.open = false; }
+function hideError(p) {
+  if (p.err) { p.err.classList.add('hidden'); p.err.open = false; }
 }
-function showError(summary, detail) {
-  const box = $('tool-error');
-  if (!box) return;
-  $('tool-error-summary').textContent = summary;
-  $('tool-error-text').textContent = detail || '';
-  box.open = false;             // collapsed: the summary says enough
-  box.classList.remove('hidden');
+function showError(p, summary, detail) {
+  if (!p.err) return;
+  p.errSummary.textContent = summary;
+  p.errText.textContent = detail || '';
+  p.err.open = false;             // collapsed: the summary says enough
+  p.err.classList.remove('hidden');
 }
 
-/** Ask the server about the open tool: mtime, reachability, refresh state. */
-async function refreshStatus(tool) {
-  const seq = ++statusSeq;
-  const upd = $('tool-updated');
+/** Ask the server about a pane's tool: mtime, reachability, refresh state. */
+async function refreshStatus(p, tool) {
+  const seq = ++p.seq;
   let st = null;
   try { st = await api.toolStatus(tool.id); } catch { /* status is decoration */ }
-  if (seq !== statusSeq || openId !== tool.id) return;
-  if (upd) {
-    const iso = st ? toIso(st.mtime) : null;
-    upd.textContent = iso ? t('tools.updated', { when: relTimeLong(iso) }) : '';
-  }
-  if (st && st.refreshing && !refreshing) {
+  if (seq !== p.seq || panes.get(tool.id) !== p) return;
+  const iso = st ? toIso(st.mtime) : null;
+  p.upd.textContent = iso ? t('tools.updated', { when: relTimeLong(iso) }) : '';
+  if (st && st.refreshing && !p.refreshing) {
     // Another tab (or the server) is mid-run: reflect it, poll until done.
-    refreshing = true;
-    paintRefreshBtn(tool);
+    p.refreshing = true;
+    paintRefreshBtn(p, tool);
     setTimeout(() => {
-      if (openId !== tool.id) return;
-      refreshing = false;
-      refreshStatus(tool);
+      if (panes.get(tool.id) !== p) return;
+      p.refreshing = false;
+      refreshStatus(p, tool);
     }, 3000);
     return;
   }
-  paintRefreshBtn(tool);
+  paintRefreshBtn(p, tool);
   // The card, not an empty frame, whenever the server already knows the
   // frame cannot show the page. A card that is already up (the loopback
   // rule, a window-mode tool) is more specific and stays.
-  if (st && !cardShown && openMode(tool) === 'frame') {
+  if (st && !p.card && openMode(tool) === 'frame') {
     if (tool.kind === 'url' && st.reachable === false) {
-      showNote('tools.unreachable_text', 'tools.unreachable_hint', { actions: ['window', 'retry'], why: 'unreachable' });
+      showNote(p, 'tools.unreachable_text', 'tools.unreachable_hint', { actions: ['window', 'retry'], why: 'unreachable' });
     } else if (tool.kind === 'url' && st.framable === false) {
       // Its server forbids embedding: no browser will draw it in the frame.
-      showNote('tools.refuses_text', 'tools.refuses_hint', { actions: ['window'], why: 'refuses' });
+      showNote(p, 'tools.refuses_text', 'tools.refuses_hint', { actions: ['window'], why: 'refuses' });
     } else if (tool.kind === 'static' && Object.prototype.hasOwnProperty.call(st, 'mtime') && st.mtime == null) {
       // The entry file does not resolve: the frame would show a bare 404.
-      showNote('tools.missing_text', 'tools.missing_hint', { actions: ['retry'], why: 'missing' });
+      showNote(p, 'tools.missing_text', 'tools.missing_hint', { actions: ['retry'], why: 'missing' });
     }
   }
   // An app whose backend failed to import/build: the page may load, its API
   // will not. Say which half is missing.
   if (isApp(tool) && st && st.mounted === false) {
-    showError(t('tools.app_unmounted_text'), t('tools.app_unmounted_hint'));
+    showError(p, t('tools.app_unmounted_text'), t('tools.app_unmounted_hint'));
   }
 }
 
-async function doRefresh() {
-  const id = openId;
-  const tool = id && findTool(id);
-  if (!tool || refreshing) return;
-  refreshing = true;
-  hideError();
-  paintRefreshBtn(tool);
+async function doRefresh(p) {
+  const tool = findTool(p.id);
+  if (!tool || p.refreshing) return;
+  p.refreshing = true;
+  hideError(p);
+  paintRefreshBtn(p, tool);
   try {
-    const r = await api.toolRefresh(id);
-    if (openId !== id) return;
+    const r = await api.toolRefresh(p.id);
+    if (panes.get(p.id) !== p) return;
     const rc = r && typeof r.rc === 'number' ? r.rc : -1;
     if (rc === 0) {
-      const frame = $('tool-frame');
-      if (frame && frame.getAttribute('src')) { armFrameTimer(tool); frame.setAttribute('src', frameSrc(tool)); }
+      if (p.frame && p.frame.getAttribute('src')) { armFrameTimer(p, tool); p.frame.setAttribute('src', frameSrc(tool)); }
       deps.toast(t('tools.refresh_ok'));
     } else {
-      showError(t('tools.refresh_failed', { rc: String(rc) }),
+      showError(p, t('tools.refresh_failed', { rc: String(rc) }),
         (r && (r.stderr_tail || r.stdout_tail)) || '');
     }
   } catch (e) {
-    if (openId !== id) return;
+    if (panes.get(p.id) !== p) return;
     if (e && e.status === 409) deps.toast(t('tools.refresh_busy'), true);
-    else showError(t('tools.refresh_error', { error: (e && e.message) || '' }), '');
+    else showError(p, t('tools.refresh_error', { error: (e && e.message) || '' }), '');
   } finally {
-    refreshing = false;
-    if (openId === id) { paintRefreshBtn(tool); refreshStatus(tool); }
+    p.refreshing = false;
+    if (panes.get(p.id) === p) { paintRefreshBtn(p, tool); refreshStatus(p, tool); }
   }
+}
+
+/** Unload a pane's frame (a pill past the live limit, keep_alive: false). */
+function unloadPane(p) {
+  p.seq += 1;
+  p.refreshing = false;
+  if (p.frame) unloadFrame(p.frame);
+  clearFrameTimer(p);
+  hideNote(p);
+  hideError(p);
+  p.loaded = false;
 }
 
 function setHash(id) {
@@ -1144,20 +1194,64 @@ function setHash(id) {
   } catch { /* not fatal */ }
 }
 
-/** Remember the chat a tool is replacing, so ✕ can hand it back. Called on
- *  entry into ANY tool — generic here, builtin from main.js's openers — and a
- *  no-op when hopping tool to tool (builtin or generic), or the "previous
- *  thread" would become the tool we just left and ✕ would land on nothing. */
+/** Remember the chat a BUILT-IN pane is replacing, so its ✕ can hand it back.
+ *  Called by main.js's builtin openers; a no-op when hopping tool to tool. */
 export function rememberPrev() {
   const st = deps && deps.state;
   if (!st || isToolId(st.selectedBotId)) return;
   prev = { botId: st.selectedBotId, threadId: st.activeThreadId };
 }
 
-/** Open a tool by id. Builtins go to their own opener; static/url tools get
- *  the generic pane. Either way the page ends up in `tool-full` — except a
- *  window-mode tool opened by a click, which launches in its own tab and
- *  leaves the current view (and selection) exactly as it was. */
+/** The window manager's view of the tools (js/appwin.js host contract). */
+const winHost = {
+  ready: () => toolsLoaded,
+  info(id) {
+    const tool = findTool(id);
+    if (!isFramed(tool) || tool.enabled === false) return null;
+    return { title: toolTitle(tool), glyph: () => toolGlyph(tool), window: tool.window || null };
+  },
+  knownIds: () => allTools().filter((x) => isFramed(x) && x.enabled !== false).map((x) => x.id),
+  mount: (rec) => { makePane(rec); },
+  load(rec) {
+    const p = panes.get(rec.id);
+    const tool = findTool(rec.id);
+    if (!p || !tool) return;
+    hideError(p);
+    loadFrame(p, tool);
+    refreshStatus(p, tool);
+  },
+  unload(rec) { const p = panes.get(rec.id); if (p) unloadPane(p); },
+  destroy(rec) {
+    const p = panes.get(rec.id);
+    if (p) { unloadPane(p); panes.delete(rec.id); }
+  },
+  stateChanged(rec, s) {
+    const p = panes.get(rec.id);
+    if (p) postWindowState(p, s);
+    if (s.state === 'open' && p) notifyPane(p, deps && deps.state.activeThreadId);
+  },
+  visibleChanged(id) {
+    setHash(id);
+    if (deps) renderToolRail();
+  },
+};
+
+/** The window state, to a pane's frame (apps and static pages alike; it says
+ *  nothing but "open/min" and the layout). */
+function postWindowState(p, s) {
+  const tool = findTool(p.id);
+  if (!tool || !p.frame || !p.frame.contentWindow || !p.frame.getAttribute('src')) return false;
+  try { p.frame.contentWindow.postMessage({ type: 'dispatch:window-state', state: s.state, layout: s.layout }, stateTarget(tool)); return true; } catch { return false; }
+}
+
+function currentWinState(id) {
+  const vis = winVisibleId() === id;
+  return { state: vis ? 'open' : 'min', layout: vis ? (winVisibleLayout() || 'float') : 'min' };
+}
+
+/** Open a tool by id. Builtins go to their own opener; static/url/app tools
+ *  open (or come back) in their window. A window-mode tool opened by a click
+ *  launches in its own tab and leaves the current view exactly as it was. */
 export function openTool(id, { launch = true } = {}) {
   if (!deps || !id) return false;
   // A folded add-on: open the tab it was last on (or its first one). The tab's
@@ -1190,380 +1284,78 @@ export function openTool(id, { launch = true } = {}) {
     opener();
     return true;
   }
-  if (!tool || tool.enabled === false) return false;
-  if (tool.kind !== 'static' && tool.kind !== 'url' && !isApp(tool)) return false;
+  if (!isFramed(tool) || tool.enabled === false) return false;
   if (openMode(tool) === 'window' && launch && launchWindow(tool)) return true;
-
-  rememberPrev();
+  // A built-in pane on screen goes (it is not a window) and the chat it
+  // covered comes back under the window.
   deps.closeToolPanes('tool');
-  if (openId && openId !== id) teardown();
-  openId = id;
-  refreshing = false;
-  sidelined = false;
-  paintReturnChip();
-  const split = wantSplit();
-  if (!split) st.selectedBotId = id;
-
-  const icon = $('tool-icon');
-  if (icon) icon.replaceChildren(toolGlyph(tool));
-  const title = $('tool-title');
-  if (title) title.textContent = toolTitle(tool);
-  const upd = $('tool-updated');
-  if (upd) upd.textContent = '';
-  const open = $('tool-open');
-  const src = frameSrc(tool);
-  if (open) {
-    open.classList.toggle('hidden', !src);
-    if (src) open.setAttribute('href', src); else open.removeAttribute('href');
+  if (isToolId(st.selectedBotId)) {
+    const p = prev;
+    prev = null;
+    deps.restoreView(p, { stay: true });
   }
-  hideError();
-  paintRefreshBtn(tool);
-  const view = $('tool-view');
-  if (view) view.classList.remove('hidden');
-  if (split) {
-    setSplitMode();
-  } else {
-    resetSplitDom();
-    document.body.classList.add('tool-full');
-    deps.renderSidebar();
-    if (deps.paintPlaceholder) deps.paintPlaceholder(toolTitle(tool), toolGlyph(tool));
-  }
-  paintSplitBtn();
-  if (deps.isMobile()) deps.navigate('chat');
-  loadFrame(tool);
-  refreshStatus(tool);
-  setHash(id);
-  return true;
+  return winOpen(id);
 }
 
-/** Take the generic pane down without touching the selection. */
-function teardown() {
-  statusSeq += 1;
-  refreshing = false;
-  const view = $('tool-view');
-  if (view) view.classList.add('hidden');
-  // Unload: a hidden frame keeps its scripts and sockets running.
-  const frame = $('tool-frame');
-  if (frame) unloadFrame(frame);
-  clearFrameTimer();
-  hideNote();
-  hideError();
+/** main.js's closeToolPanes(): a built-in pane is opening, or the chat must be
+ *  seen. The window on screen goes to the tray; nothing is closed. */
+export function closeTool() {
+  const id = winVisibleId();
+  if (id) winMinimize(id);
 }
 
-/** Close the generic tool pane. `restore: false` is for a caller that is about
- *  to show something else (another tool, a bot) and owns the selection. */
-export function closeTool({ restore = true } = {}) {
-  if (!openId) return;
-  // Split: the selection already IS the chat, and it may have moved on since
-  // the tool opened - hand THAT back, not the chat from before.
-  if (splitOn) rememberPrev();
-  openId = null;
-  sidelined = false;
-  parking = false;
-  teardown();
-  resetSplitDom();
-  paintReturnChip();
-  document.body.classList.remove('tool-full');
+/** A lock or a profile switch: every window is torn down at once. */
+export function closeAllTools() {
+  winCloseAll();
   setHash(null);
-  // `restore: false` = the caller is showing something else. If that is
-  // another tool (a builtin), keep `prev`: ✕ over there should still land on
-  // the last real chat. A real chat overwrites it on the next entry anyway.
-  if (!restore) return;
-  const p = prev;
-  prev = null;
-  if (deps) deps.restoreView(p);
 }
 
-export function toolOpen() { return openId; }
+/** Which profile is using the app (its windows are its own, on this device). */
+export function setToolProfile(profileId) { winSetProfile(profileId); }
 
-// ===================== Split view + phone quick switch =====================
+/** The tool window on screen, or null. */
+export function toolOpen() { return winVisibleId(); }
 
-let splitPref = null;        // saved "split" preference, read once
-let splitRatio = null;       // the tool's share, read once
-let splitOn = false;         // the split layout is on screen right now
-let splitNoList = false;     // ...with the thread list hidden for it (narrow windows)
-let sidelined = false;       // phone: tool parked behind the chat, frame still loaded
-let parking = false;         // parkTool() sent the phone to the Bots page: that arrival must not end the tool
-let splitRaf = 0;
+/** Does the tool window on screen hide the chat (full, or a phone sheet)? */
+export function toolCoversChat() { return winCoversChat(); }
 
-const prefOn = () => { if (splitPref === null) splitPref = readPref(); return splitPref; };
-const ratioNow = () => { if (splitRatio === null) splitRatio = readRatio(); return splitRatio; };
-
-/** Content-column widths the chat + tool pair could have: with the thread list
- *  showing and without it, worked out from the window and the grid. (Never read
- *  #chatview's own width: its inline-end padding can stretch it.) */
-function roomWidths() {
-  const app = document.querySelector('.app');
-  const side = document.querySelector('.sidebar');
-  const base = Math.floor(window.innerWidth - (side ? side.offsetWidth : 72));
-  const collapsed = !!(app && app.classList.contains('tl-collapsed'));
-  const tl = collapsed ? 0
-    : parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--threadlist-width')) || 320;
-  return { withList: base - tl, noList: base };
-}
-
-/** The width the split is laid out in right now (follows the mode on screen). */
-function contentWidth() {
-  const r = roomWidths();
-  return splitNoList ? r.noList : r.withList;
-}
-
-function wantMode() {
-  if (!openId || !deps || deps.isMobile() || !prefOn()) return null;   // cheap exits before any measuring
-  const r = roomWidths();
-  return splitMode({ pref: true, mobile: false, withList: r.withList, noList: r.noList });
-}
-
-function wantSplit() { return !!wantMode(); }
-
-/** Is the generic pane showing beside the chat? (main.js keeps the tool open
- *  when the user picks another chat while this is true.) */
-export function toolSplitActive() { return !!openId && splitOn; }
-
-/** Phone: is the tool parked behind the chat? */
-export function toolParked() { return !!openId && sidelined; }
-
-function isRtl() { return document.documentElement.getAttribute('dir') === 'rtl'; }
-
-function resetSplitDom() {
-  splitOn = false;
-  splitNoList = false;
-  clearThread();
-  document.body.classList.remove('tool-split', 'tool-split-nolist', 'tool-split-dragging');
-  const view = $('tool-view');
-  if (view) view.classList.remove('split');
-  const cv = $('chatview');
-  if (cv) cv.style.removeProperty('--tool-split-w');
-  const div = $('tool-split-divider');
-  if (div) div.hidden = true;
-}
-
-function applyGeometry() {
-  const cv = $('chatview');
-  const div = $('tool-split-divider');
-  if (!cv || !div) return false;
-  const total = contentWidth();
-  const w = widths(ratioNow(), total);
-  const range = chatRange(total);
-  if (!w || !range) return false;
-  cv.style.setProperty('--tool-split-w', `${w.tool}px`);
-  div.setAttribute('aria-valuemin', String(range.min));
-  div.setAttribute('aria-valuemax', String(range.max));
-  div.setAttribute('aria-valuenow', String(w.chat));
-  return true;
-}
-
-/** Put the pane beside the chat. The chat's bot becomes the selection again
- *  (the first time), the thread list comes back, the frame is left alone. */
-function setSplitMode() {
-  const was = splitOn;
-  const mode = wantMode() || (splitNoList ? 'nolist' : 'list');
-  splitOn = true;
-  splitNoList = mode === 'nolist';
-  const body = document.body;
-  body.classList.remove('tool-full');
-  body.classList.add('tool-split');
-  body.classList.toggle('tool-split-nolist', splitNoList);
-  const view = $('tool-view');
-  if (view) view.classList.add('split');
-  const div = $('tool-split-divider');
-  if (div) div.hidden = false;
-  if (!was) {
-    deps.restoreView(prev, { stay: true });
-    // Nothing open in the chat half (a reload): bring back this tab's thread.
-    if (!deps.state.activeThreadId && typeof deps.restoreSplitChat === 'function') {
-      deps.restoreSplitChat(readThread());
-    }
-  }
-  applyGeometry();
-  if (!was) notifyActiveThread(deps.state.activeThreadId);
-}
-
-/** Back to the full-width pane (window too narrow, or the toggle went off). */
-function enterFull() {
-  const tool = openId ? findTool(openId) : null;
-  if (splitOn) rememberPrev();   // so ✕ lands on the chat as it is now
-  resetSplitDom();
-  document.body.classList.add('tool-full');
-  deps.state.selectedBotId = openId;
-  deps.renderSidebar();
-  if (tool && deps.paintPlaceholder) deps.paintPlaceholder(toolTitle(tool), toolGlyph(tool));
-}
-
-/** Re-decide split vs full for the open pane: after a resize, a toggle, or a
- *  phone ⇄ desktop change. A no-op when nothing is open. */
-export function syncToolSplit() {
-  if (!deps || !openId) return;
-  if (sidelined) {
-    if (!deps.isMobile()) unparkTool();
-    return;
-  }
-  if (wantSplit()) setSplitMode();
-  else if (splitOn) enterFull();
-  paintSplitBtn();
-}
-
-function paintSplitBtn() {
-  const b = $('tool-split');
-  if (!b) return;
-  const phone = !!deps && deps.isMobile();
-  const label = phone ? t('tools.to_chat') : t('tools.split');
-  b.setAttribute('aria-label', label);
-  b.setAttribute('title', label);
-  const span = b.querySelector('.tool-split-label');
-  if (span) span.textContent = t('tools.to_chat');
-  if (phone) b.removeAttribute('aria-pressed');
-  else b.setAttribute('aria-pressed', prefOn() ? 'true' : 'false');
-}
-
-function paintReturnChip() {
-  const chip = $('tool-return');
-  if (!chip) return;
-  const tool = sidelined && openId ? findTool(openId) : null;
-  chip.hidden = !tool;
-  const txt = chip.querySelector('.tool-return-text');
-  const label = tool ? t('tools.back_to', { title: toolTitle(tool) }) : '';
-  if (txt) txt.textContent = label;
-  if (label) { chip.setAttribute('title', label); chip.setAttribute('aria-label', label); }
-}
-
-/** Phone: show the chat and keep the tool loaded behind it. */
-function parkTool() {
-  if (!deps || !openId || sidelined) return;
-  const st = deps.state;
-  sidelined = true;
-  const view = $('tool-view');
-  if (view) view.classList.add('hidden');
-  document.body.classList.remove('tool-full');
-  deps.restoreView(prev, { stay: true });
-  paintReturnChip();
-  // No chat to show yet: the Bots page, to pick one. That page ends a parked tool
-  // when the user goes there (closeParkedTool), but not on this way in. The view
-  // change can land later (a history pop), so the next Bots arrival is skipped once.
-  const to = !st.selectedBotId ? 'bots' : st.activeThreadId ? 'chat' : 'threads';
-  parking = to === 'bots';
-  deps.navigate(to);
-}
-
-/** Phone: bring the sidelined tool back (the frame never went away). */
-function unparkTool() {
-  if (!deps || !openId || !sidelined) return;
-  const tool = findTool(openId);
-  sidelined = false;
-  parking = false;
-  rememberPrev();
-  const view = $('tool-view');
-  if (view) view.classList.remove('hidden');
-  paintReturnChip();
-  if (wantSplit()) setSplitMode();
-  else {
-    document.body.classList.add('tool-full');
-    deps.state.selectedBotId = openId;
-    deps.renderSidebar();
-    if (tool && deps.paintPlaceholder) deps.paintPlaceholder(toolTitle(tool), toolGlyph(tool));
-  }
-  paintSplitBtn();
-  if (deps.isMobile()) deps.navigate('chat');
-}
-
-/** main.js: the phone went home (Bots page) - a sidelined tool ends there. */
-export function closeParkedTool() {
-  if (parking) { parking = false; return; }
-  if (sidelined && openId) closeTool({ restore: false });
-}
-
-function onSplitToggle() {
-  if (!deps) return;
-  if (deps.isMobile()) { parkTool(); return; }
-  splitPref = !prefOn();
-  writePref(splitPref);
-  if (splitPref && !canSplit(contentWidth()) && typeof deps.toast === 'function') {
-    deps.toast(t('tools.split_narrow'));
-  }
-  syncToolSplit();
-  paintSplitBtn();
-}
-
-function setRatio(r, { save = false } = {}) {
-  if (r == null) return;
-  splitRatio = r;
-  applyGeometry();
-  if (save) writeRatio(r);
-}
-
-function wireDivider() {
-  const div = $('tool-split-divider');
-  if (!div) return;
-  let dragId = null;
-  div.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0 || !splitOn) return;
-    e.preventDefault();
-    dragId = e.pointerId;
-    try { div.setPointerCapture(e.pointerId); } catch { /* not fatal */ }
-    document.body.classList.add('tool-split-dragging');
-  });
-  div.addEventListener('pointermove', (e) => {
-    if (dragId === null || e.pointerId !== dragId || !splitOn) return;
-    const cv = $('chatview');
-    if (!cv) return;
-    const rect = cv.getBoundingClientRect();
-    const chatPx = isRtl() ? rect.right - e.clientX : e.clientX - rect.left;
-    const total = contentWidth();
-    setRatio(ratioForChat(chatPx - DIVIDER / 2, total));
-  });
-  const end = (e) => {
-    if (dragId === null || e.pointerId !== dragId) return;
-    dragId = null;
-    try { div.releasePointerCapture(e.pointerId); } catch { /* already released */ }
-    document.body.classList.remove('tool-split-dragging');
-    writeRatio(ratioNow());
-  };
-  div.addEventListener('pointerup', end);
-  div.addEventListener('pointercancel', end);
-  div.addEventListener('keydown', (e) => {
-    if (!splitOn || e.altKey || e.ctrlKey || e.metaKey) return;
-    const next = stepRatio(e.key, { ratio: ratioNow(), total: contentWidth(), rtl: isRtl(), shift: e.shiftKey });
-    if (next == null) return;
-    e.preventDefault();
-    setRatio(next, { save: true });
-  });
-}
-
-/** main.js calls this when the chat's open thread changes. While split with an
- *  APP in the pane (same origin), the app hears about it: see the shell ⇄
- *  frame messages below. Nothing is sent to a static or url tool. */
+/** main.js calls this when the chat's open thread changes. An APP whose window
+ *  floats or docks beside the chat hears about it; nothing goes to a static or
+ *  url tool, or to a window that covers the chat or is a pill. */
 export function notifyActiveThread(threadId) {
-  if (splitOn) writeThread(threadId);   // this tab's chat half, for a reload
-  if (!splitOn || !frameLoaded || typeof threadId !== 'string' || !THREAD_ID_RE.test(threadId)) return false;
-  return postToApp({ type: 'dispatch:active-thread', threadId });
+  const id = winVisibleId();
+  const p = id ? panes.get(id) : null;
+  return p ? notifyPane(p, threadId) : false;
+}
+
+function notifyPane(p, threadId) {
+  if (winVisibleId() !== p.id || !['float', 'left', 'right'].includes(winVisibleLayout())) return false;
+  if (!p.loaded || typeof threadId !== 'string' || !THREAD_ID_RE.test(threadId)) return false;
+  return postToApp(p, { type: 'dispatch:active-thread', threadId });
 }
 
 // ===================== Apps: shell ⇄ frame messaging =====================
-// The frame of an app is unsandboxed and same-origin, so it could reach into
-// the shell directly; the contract says it does not, and the shell holds up
-// its half by acting ONLY on messages that (a) come from our own origin and
-// (b) come from the frame that is on screen right now, while it holds an app.
-// Anything else — another window, a stale frame, a static tool (opaque
-// origin), a url tool (someone else's origin) — is ignored.
+// An app's frame is unsandboxed and same-origin, so it could reach into the
+// shell directly; the contract says it does not, and the shell holds up its
+// half by acting ONLY on messages that (a) come from our own origin and (b)
+// come from the frame of a live window that holds an app. The window is found
+// by `event.source`, so a message from one tool's frame can only ever act on
+// that tool's window. Anything else — another window, a closed one, a static
+// tool (opaque origin), a url tool (someone else's origin) — is ignored.
 //
 // Shell → app messages: dispatch:theme, dispatch:lang, dispatch:frame (live
-// `app:<id>:*` frames), and — only while the pane is split beside the chat —
-//   {type:'dispatch:active-thread', threadId}   the chat half's open thread,
-// posted when split starts, on every change, and after the frame loads. An app
-// may ignore it; nothing is sent to static or url tools.
+// `app:<id>:*` frames) and dispatch:window-state to EVERY live window of that
+// app (a pill included, so its progress keeps arriving), and
+//   {type:'dispatch:active-thread', threadId}   the chat beside it,
+// only to the window on screen while it floats or docks.
 
 const THREAD_ID_RE = /^[A-Za-z0-9_.:-]{1,200}$/;
 
-function openApp() {
-  const tool = openId ? findTool(openId) : null;
-  return isApp(tool) ? tool : null;
-}
-
-/** Post to the open app's frame, if there is one. Same origin only. */
-function postToApp(msg) {
-  const frame = $('tool-frame');
-  if (!openApp() || !frame || !frame.contentWindow) return false;
-  try { frame.contentWindow.postMessage(msg, location.origin); return true; } catch { return false; }
+/** Post to an app pane's frame. Same origin only. */
+function postToApp(p, msg) {
+  const tool = findTool(p.id);
+  if (!isApp(tool) || !p.frame || !p.frame.contentWindow || !p.frame.getAttribute('src')) return false;
+  try { p.frame.contentWindow.postMessage(msg, location.origin); return true; } catch { return false; }
 }
 
 /** The shell's theme, as its runtime stamped it on <html>. */
@@ -1577,24 +1369,49 @@ function shellTheme() {
   };
 }
 
-/** Tell the open app the shell's current theme and language. main.js calls
- *  this on a language switch; the frame's 'load' and the theme runtime's
- *  'ui-theme-change' event call it too. */
-export function syncAppFrame() {
-  paintSplitBtn();     // main.js calls this on a language switch: relabel the toggle
-  paintReturnChip();
-  if (!openApp()) return;
-  postToApp(shellTheme());
-  postToApp({ type: 'dispatch:lang', lang: document.documentElement.getAttribute('lang') || 'en' });
+function syncPane(p) {
+  postToApp(p, shellTheme());
+  postToApp(p, { type: 'dispatch:lang', lang: document.documentElement.getAttribute('lang') || 'en' });
 }
 
-/** A live `app:<id>:*` WebSocket frame: hand it to that app's page when it is
- *  the one on screen. Returns true when it was posted. */
+/** Tell every live app window the shell's theme and language, and relabel the
+ *  window chrome. main.js calls this on a language switch; the theme runtime's
+ *  'ui-theme-change' event calls it too. */
+export function syncAppFrame() {
+  winRepaint();
+  for (const p of panes.values()) {
+    if (p.rec) {
+      p.refreshBtn.title = t('tools.refresh_title');
+      p.openLink.title = t('tools.open_tab');
+      p.openLink.setAttribute('aria-label', t('tools.open_tab'));
+      paintRefreshBtn(p, findTool(p.id));
+    }
+    syncPane(p);
+  }
+}
+
+/** A live `app:<id>:*` WebSocket frame: hand it to that app's window, on screen
+ *  or a pill. Returns true when it was posted. */
 export function forwardAppFrame(frame) {
-  const tool = openApp();
-  if (!tool || !frame || typeof frame.type !== 'string') return false;
-  if (!frame.type.startsWith(`app:${tool.id}:`)) return false;
-  return postToApp({ type: 'dispatch:frame', frame });
+  if (!frame || typeof frame.type !== 'string') return false;
+  let sent = false;
+  for (const p of panes.values()) {
+    const tool = findTool(p.id);
+    if (!isApp(tool) || !frame.type.startsWith(`app:${tool.id}:`)) continue;
+    sent = postToApp(p, { type: 'dispatch:frame', frame }) || sent;
+  }
+  return sent;
+}
+
+/** A pane's frame finished loading: its theme, language, saved layout, window
+ *  state and (beside the chat) the chat's thread. */
+function onPaneLoad(p) {
+  if (!p.frame || !p.frame.getAttribute('src')) return;
+  onFrameLoad(p);
+  syncPane(p);
+  pushToolState(p);
+  postWindowState(p, currentWinState(p.id));
+  notifyPane(p, deps && deps.state.activeThreadId);
 }
 
 /** 'section' or 'section#anchor' (lower case, a few safe characters, short). */
@@ -1602,11 +1419,11 @@ export const SETTINGS_TARGET_RE = /^[a-z][a-z-]{1,30}(#[a-z0-9:._-]{1,80})?$/;
 
 function onAppMessage(ev) {
   if (!deps) return;
-  const frame = $('tool-frame');
-  const tool = openApp();
-  // Both checks, always: origin says "our code", source says "the frame on
-  // screen" (not a popup it opened, not a frame left over from a close).
-  if (!tool || !frame || ev.origin !== location.origin || ev.source !== frame.contentWindow) return;
+  const p = paneBySource(ev.source);
+  const tool = p ? findTool(p.id) : null;
+  // Both checks, always: origin says "our code", source says "this window's
+  // frame" (not a popup it opened, not a frame left over from a close).
+  if (!p || !isApp(tool) || ev.origin !== location.origin) return;
   const msg = ev.data;
   if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return;
   switch (msg.type) {
@@ -1618,15 +1435,16 @@ function onAppMessage(ev) {
         // A hint is data for the app's own thread hook: small, and plain JSON.
         try { const s = JSON.stringify(msg.hint); if (s.length <= 2048) hint = JSON.parse(s); } catch { /* dropped */ }
       }
-      // rememberPrev semantics: ✕-style close, the rail goes back to the last
-      // real chat, THEN the thread opens over it.
-      // Split: the thread opens in the chat half and the pane stays put.
-      if (splitOn && typeof deps.openThreadInSplit === 'function') {
-        deps.openThreadInSplit(id, { botId: tool.bot_id || null, hint, appId: tool.id });
+      const opts = { botId: tool.bot_id || null, hint, appId: tool.id };
+      // Beside the chat (float / dock): the thread opens there and the window
+      // stays. Covering it (full, a phone sheet): the window goes to the tray.
+      if (winVisibleId() === p.id && ['float', 'left', 'right'].includes(winVisibleLayout())
+          && typeof deps.openThreadInSplit === 'function') {
+        deps.openThreadInSplit(id, opts);
         return;
       }
-      closeTool();
-      if (typeof deps.openThread === 'function') deps.openThread(id, { botId: tool.bot_id || null, hint, appId: tool.id });
+      if (winVisibleId() === p.id) winMinimize(p.id);
+      if (typeof deps.openThread === 'function') deps.openThread(id, opts);
       return;
     }
     case 'dispatch:lightbox': {
@@ -1644,21 +1462,32 @@ function onAppMessage(ev) {
       return;
     }
     case 'dispatch:close':
-      closeTool();
+      // The app asked to close itself: no "are you sure", it knows.
+      winClose(p.id, { force: true });
       return;
     case 'dispatch:toast': {
       const text = String(msg.text == null ? '' : msg.text).slice(0, 500);
       if (text) deps.toast(text, !!msg.error);
       return;
     }
-    case 'dispatch:set-title': {
-      const el_ = $('tool-title');
-      const text = String(msg.text == null ? '' : msg.text).slice(0, 120);
-      if (el_) el_.textContent = text || toolTitle(tool);
+    case 'dispatch:set-title':
+      winSetTitle(p.id, String(msg.text == null ? '' : msg.text).slice(0, 120));
       return;
-    }
     default:
   }
+}
+
+/** The window SDK (app-sdk.js `win`, or the same message from a static page):
+ *  status, badge, attention, busy, unsaved, minimize. Routed by source to that
+ *  tool's window; the origin must be one that frame can have. */
+const WINDOW_OPS = new Set(['status', 'badge', 'attention', 'busy', 'unsaved', 'minimize']);
+function onWindowMessage(ev) {
+  const msg = ev.data;
+  if (!msg || typeof msg !== 'object' || msg.type !== 'dispatch:window' || !WINDOW_OPS.has(msg.op)) return;
+  const p = paneBySource(ev.source);
+  const tool = p ? findTool(p.id) : null;
+  if (!p || !isFramed(tool) || !stateOriginOk(tool, ev.origin)) return;
+  winSetLive(p.id, msg.op, msg.op === 'attention' || msg.op === 'minimize' ? true : msg.value);
 }
 
 // ===================== Tool layout state (static / url / app frames) =====================
@@ -1675,22 +1504,16 @@ function onAppMessage(ev) {
 //
 // Stored in THIS browser's localStorage['dispatch-tool-state:<toolId>'] —
 // per viewer, per device, never sent to the server. Accepted ONLY from the
-// frame on screen (`event.source === frame.contentWindow`) of an open static,
-// url or app tool, and only with the origin that frame can have: 'null' (the
-// opaque origin of a sandboxed page) for static and url tools, the url's own
-// origin for a url tool (it has allow-same-origin), our own origin for an app.
-// A static frame's origin is opaque, so replies to it must target '*'; the
+// frame of a live window (`event.source` names the window) of a static, url or
+// app tool, and only with the origin that frame can have: 'null' (the opaque
+// origin of a sandboxed page) for static and url tools, the url's own origin
+// for a url tool (it has allow-same-origin), our own origin for an app. A
+// static frame's origin is opaque, so replies to it must target '*'; the
 // payload is the viewer's own layout, nothing else is ever posted to one.
 
 const TOOL_STATE_TYPE = 'dispatch:tool-state';
 const TOOL_STATE_PREFIX = 'dispatch-tool-state:';
 export const TOOL_STATE_MAX = 16 * 1024;
-
-/** The open tool, when it is one whose frame may keep state. */
-function stateTool() {
-  const tool = openId ? findTool(openId) : null;
-  return tool && (tool.kind === 'static' || tool.kind === 'url' || isApp(tool)) ? tool : null;
-}
 
 function urlOrigin(tool) {
   const u = parseHttpUrl(toolUrl(tool));
@@ -1742,27 +1565,26 @@ function postToolState(tool, frame, target, extra = null) {
   try { frame.contentWindow.postMessage(msg, target); return true; } catch { return false; }
 }
 
-/** Push the open tool's stored state to its frame (the frame's `load`). */
-export function pushToolState() {
-  const tool = stateTool();
-  const frame = $('tool-frame');
-  if (!tool || !frame || !frame.getAttribute('src')) return false;
-  return postToolState(tool, frame, stateTarget(tool));
+/** Push a pane's stored state to its frame (the frame's `load`). */
+export function pushToolState(p) {
+  const tool = p ? findTool(p.id) : null;
+  if (!isFramed(tool) || !p.frame || !p.frame.getAttribute('src')) return false;
+  return postToolState(tool, p.frame, stateTarget(tool));
 }
 
 function onToolStateMessage(ev) {
   if (!deps) return;
   const msg = ev.data;
   if (!msg || typeof msg !== 'object' || msg.type !== TOOL_STATE_TYPE) return;
-  const tool = stateTool();
-  const frame = $('tool-frame');
-  if (!tool || !frame || !frame.contentWindow || ev.source !== frame.contentWindow) return;
+  const p = paneBySource(ev.source);
+  const tool = p ? findTool(p.id) : null;
+  if (!p || !isFramed(tool) || !p.frame.contentWindow) return;
   if (!stateOriginOk(tool, ev.origin)) return;
   const target = stateTarget(tool, ev.origin);
-  if (msg.op === 'get') { postToolState(tool, frame, target); return; }
+  if (msg.op === 'get') { postToolState(tool, p.frame, target); return; }
   if (msg.op === 'set') {
     const ok = Object.prototype.hasOwnProperty.call(msg, 'state') && writeToolState(tool.id, msg.state);
-    postToolState(tool, frame, target, ok ? null : { ok: false });
+    postToolState(tool, p.frame, target, ok ? null : { ok: false });
   }
 }
 
@@ -1777,7 +1599,7 @@ export function hashToolId(hash = location.hash) {
 export function openFromHash() {
   const id = hashToolId();
   if (!id || !deps) return false;
-  if (openId === id) return true;
+  if (winVisibleId() === id) return true;
   const ok = openTool(id, { launch: false });
   if (!ok) deps.toast(t('tools.not_found'), true);
   return ok;
@@ -2139,7 +1961,7 @@ export async function saveToolsSettings() {
       // A builtin switched on/off changes a server feature flag — let the
       // pane probes catch up.
       if (typeof deps.onSaved === 'function') deps.onSaved();
-      if (openId && !findTool(openId)) closeTool();
+      winSyncKnown();     // a window whose tool was switched off goes
     }
     return true;
   } catch (e) {
@@ -2178,34 +2000,23 @@ export async function saveToolsSettings() {
  */
 export function wireTools(d) {
   deps = d;
-  const close = $('tool-close');
-  if (close) close.addEventListener('click', () => closeTool());
-  const back = $('tool-back');
-  if (back) back.addEventListener('click', () => { closeTool(); if (deps.isMobile()) deps.navigate('bots'); });
-  const refresh = $('tool-refresh');
-  if (refresh) refresh.addEventListener('click', () => doRefresh());
-  const splitBtn = $('tool-split');
-  if (splitBtn) splitBtn.addEventListener('click', onSplitToggle);
-  const chip = $('tool-return');
-  if (chip) chip.addEventListener('click', () => unparkTool());
-  wireDivider();
+  winSetHost(winHost);
+  wireAppWindows({
+    isMobile: d.isMobile,
+    historyPush: d.historyPush,
+    toast: d.toast,
+    announce: d.announce,
+    focusChat: d.focusChat,
+    canDragClose: d.canDragClose,
+  });
   window.addEventListener('hashchange', () => { if (hashToolId()) openFromHash(); });
-  // Apps: messages from the framed page, and the shell's theme/language
-  // handed to it once it has loaded and whenever either changes.
+  // Apps: messages from a window's frame, routed by source to that window.
   window.addEventListener('message', onAppMessage);
+  // The window SDK (status, badge, attention, busy, unsaved, minimize).
+  window.addEventListener('message', onWindowMessage);
   // Every framed tool: its saved layout, on request and once per load.
   window.addEventListener('message', onToolStateMessage);
-  const frame = $('tool-frame');
-  if (frame) {
-    frame.addEventListener('load', () => {
-      if (!frame.getAttribute('src')) return;
-      onFrameLoad();
-      if (openApp()) syncAppFrame();
-      pushToolState();
-      notifyActiveThread(deps.state.activeThreadId);
-    });
-  }
-  document.addEventListener('ui-theme-change', () => syncAppFrame());
+  document.addEventListener('ui-theme-change', () => { for (const p of panes.values()) syncPane(p); });
   // The Tools popup: its keys, and a re-layout when the viewport crosses the
   // phone breakpoint (one button ⇄ tile grid). Any resize moves the anchor,
   // so an open popup closes rather than floating somewhere stale.
@@ -2232,8 +2043,5 @@ export function wireTools(d) {
   window.addEventListener('resize', () => {
     if (menuOpen) closeToolsMenu();
     if (deps && compactRail() !== lastCompact) renderToolRail();
-    if (openId && !splitRaf) {
-      splitRaf = requestAnimationFrame(() => { splitRaf = 0; syncToolSplit(); });
-    }
   });
 }
