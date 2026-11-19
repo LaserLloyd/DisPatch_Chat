@@ -120,6 +120,7 @@
   "reset.tip": "清除已保存的表单并重新开始",
   "inflight.one": "仍有一张图片正在生成",
   "inflight.other": "仍有 {n} 张图片正在生成",
+  "window_status_making": "正在生成 {n} 张",
   "pending.running": "正在生成图片…",
   "pending.failed": "这张图片生成失败：{error}",
   "pending.retry": "重试",

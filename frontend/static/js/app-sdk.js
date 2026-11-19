@@ -15,6 +15,8 @@
 //   openThread(id, hint?) / close() / toast(text, isError?) / setTitle(text)
 //                                               asks the shell (postMessage)
 //   onMessage(fn)                               messages FROM the shell
+//   win.setStatus/setBadge/attention/setUnsaved/setBusy/minimize/onState/state
+//                                               the tool window (docs/design/app-windows.md)
 //
 // Plus a few DOM helpers re-exported from the shell's util.js (el, railIcon,
 // iconLabel, RAIL_ICONS) so an app's chrome is drawn with the same line icons
@@ -292,6 +294,7 @@ export async function ready(language) {
     document.documentElement.setAttribute('dir', pageI18n.dir());
   }
   wirePage();
+  wireWindow();
   return pageI18n;
 }
 
@@ -389,6 +392,62 @@ export function toast(text, isError = false) { return post('toast', { text: Stri
 export function setTitle(text) { return post('set-title', { text: String(text || '') }); }
 
 // ---------------------------------------------------------------------------
+// win — the tool-window SDK (docs/design/app-windows.md, section 6). Frame -> shell
+// {type:'dispatch:window', op, value}; shell -> frame {type:'dispatch:window-state',
+// state:'open'|'min', layout}. Every call is a quiet no-op when not framed.
+// ---------------------------------------------------------------------------
+
+const WIN_STATES = ['open', 'min'];
+const WIN_LAYOUTS = ['float', 'left', 'right', 'full', 'sheet'];
+const WIN_STATUS_MAX = 40;
+let winState = null;
+const winListeners = new Set();
+let winWired = false;
+
+function winOp(op, value) { return post('window', { op, value }); }
+function winCount(n) {
+  const v = Math.floor(Number(n));
+  return Number.isFinite(v) && v > 0 ? Math.min(v, 999999) : 0;
+}
+
+function wireWindow() {
+  if (winWired || typeof window === 'undefined') return;
+  winWired = true;
+  window.addEventListener('message', (ev) => {
+    if (ev.origin !== location.origin) return;
+    if (!inFrame() || ev.source !== window.parent) return;
+    const m = ev.data;
+    if (!m || typeof m !== 'object' || m.type !== 'dispatch:window-state') return;
+    if (!WIN_STATES.includes(m.state) || !WIN_LAYOUTS.includes(m.layout)) return;
+    winState = { state: m.state, layout: m.layout };
+    for (const fn of winListeners) { try { fn({ ...winState }); } catch (e) { console.error('[app-sdk] win.onState handler', e); } }
+  });
+}
+
+export const win = {
+  /** Short status on the pill and under the title (<= 40 chars; '' clears). */
+  setStatus(text) { return winOp('status', String(text == null ? '' : text).slice(0, WIN_STATUS_MAX)); },
+  /** A count on the pill (null/0 clears). */
+  setBadge(n) { return winOp('badge', n == null ? null : winCount(n)); },
+  /** A dot on the pill while minimised. */
+  attention() { return winOp('attention', true); },
+  /** Close asks first while true. */
+  setUnsaved(flag) { return winOp('unsaved', !!flag); },
+  /** Running jobs (0 = idle); Close asks first while busy. */
+  setBusy(n) { return winOp('busy', winCount(n)); },
+  /** The app's own "back to chat". */
+  minimize() { return winOp('minimize', true); },
+  /** Subscribe to {state, layout} changes; returns an unsubscribe function. */
+  onState(fn) {
+    wireWindow();
+    winListeners.add(fn);
+    return () => winListeners.delete(fn);
+  },
+  /** Last known {state, layout}, or null. */
+  state() { wireWindow(); return winState ? { ...winState } : null; },
+};
+
+// ---------------------------------------------------------------------------
 // Theme
 // ---------------------------------------------------------------------------
 
@@ -484,6 +543,9 @@ export function _resetForTest() {
   handlers.clear();
   messageWired = false;
   pageWired = false;
+  winWired = false;
+  winState = null;
+  winListeners.clear();
   themeWired = false;
   groundBySlug = null;
   profileBySlug = null;

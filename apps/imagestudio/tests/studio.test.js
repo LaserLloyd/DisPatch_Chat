@@ -50,7 +50,7 @@ async function page({ nim = false, state = STATE, generate, clear, images, sort 
   // window itself and there is nobody to post to.
   if (framed) Object.defineProperty(env.win, 'parent', { configurable: true, get: () => parentWin });
   globalThis.__ST_NO_AUTOMOUNT = true;
-  const sdk = await import('/static/js/app-sdk.js?v=7');
+  const sdk = await import('/static/js/app-sdk.js?v=8');
   sdk._resetForTest();
   await sdk.ready('en');
   const mod = await import(`/apps/imagestudio/studio.js?t=${Math.random()}`);
@@ -280,7 +280,7 @@ test('a 403 shows a locked note, never an empty studio', { skip: dom.skip }, asy
   });
   env.win.localStorage.setItem('dispatch-lang', 'en');
   globalThis.__ST_NO_AUTOMOUNT = true;
-  const sdk = await import('/static/js/app-sdk.js?v=7');
+  const sdk = await import('/static/js/app-sdk.js?v=8');
   sdk._resetForTest();
   await sdk.ready('en');
   const mod = await import(`/apps/imagestudio/studio.js?t=${Math.random()}`);
@@ -1914,4 +1914,29 @@ test('pictures the server is still making are announced', { skip: dom.skip }, as
   const line = env.doc.querySelector('.st-inflight');
   assert.equal(line.hidden, false);
   assert.equal(line.textContent, '2 pictures are still being made');
+});
+
+// ---------------------------------------------------------------- tool window (win SDK)
+
+test('the tool window hears how many pictures are being made, and a finish while minimised asks for attention', { skip: dom.skip }, async () => {
+  let live = { ...STATE, in_flight: 2 };
+  const env = await page({ state: live, extra: { 'GET /api/apps/imagestudio/state': () => [200, live] } });
+  const ops = () => env.posted.map(([m]) => m).filter((m) => m.type === 'dispatch:window');
+  assert.deepEqual(ops().filter((m) => m.op === 'busy').pop(), { type: 'dispatch:window', op: 'busy', value: 2 });
+  assert.deepEqual(ops().filter((m) => m.op === 'status').pop(), { type: 'dispatch:window', op: 'status', value: '2 making' });
+  // jsdom reports the document hidden (no polling then): show it, as a browser would.
+  Object.defineProperty(env.win.document, 'hidden', { configurable: true, get: () => false });
+  env.win.document.dispatchEvent(new env.win.Event('visibilitychange'));
+  // The shell minimises the window, then the server finishes the pictures.
+  const ev = new env.win.MessageEvent('message', {
+    data: { type: 'dispatch:window-state', state: 'min', layout: 'float' }, origin: env.win.location.origin,
+  });
+  Object.defineProperty(ev, 'source', { value: env.win.parent });
+  env.win.dispatchEvent(ev);
+  live = { ...STATE, in_flight: 0 };
+  await sleep(4400);
+  assert.equal(ops().filter((m) => m.op === 'busy').pop().value, 0);
+  assert.equal(ops().filter((m) => m.op === 'status').pop().value, '');
+  assert.ok(ops().some((m) => m.op === 'attention' && m.value === true), 'attention while minimised');
+  assert.ok(!ops().some((m) => m.op === 'unsaved'), 'the autosaved draft never claims unsaved');
 });

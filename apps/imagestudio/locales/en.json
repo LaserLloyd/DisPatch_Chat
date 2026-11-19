@@ -121,6 +121,7 @@
   "reset.tip": "Clear the saved form and start fresh",
   "inflight.one": "A picture is still being made",
   "inflight.other": "{n} pictures are still being made",
+  "window_status_making": "{n} making",
   "pending.running": "Making a picture…",
   "pending.failed": "Could not make this one: {error}",
   "pending.retry": "Retry",

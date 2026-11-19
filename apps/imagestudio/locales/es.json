@@ -122,6 +122,7 @@
   "reset.tip": "Borrar el formulario guardado y empezar de nuevo",
   "inflight.one": "Aún se está creando una imagen",
   "inflight.other": "Aún se están creando {n} imágenes",
+  "window_status_making": "{n} en curso",
   "pending.running": "Creando una imagen…",
   "pending.failed": "No se pudo crear esta: {error}",
   "pending.retry": "Reintentar",

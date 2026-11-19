@@ -125,6 +125,7 @@
   "reset.tip": "مسح النموذج المحفوظ والبدء من جديد",
   "inflight.one": "لا تزال صورة قيد الإنشاء",
   "inflight.other": "لا تزال {n} صور قيد الإنشاء",
+  "window_status_making": "{n} قيد الإنشاء",
   "pending.running": "جارٍ إنشاء صورة…",
   "pending.failed": "تعذّر إنشاء هذه الصورة: {error}",
   "pending.retry": "إعادة المحاولة",

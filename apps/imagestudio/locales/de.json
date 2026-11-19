@@ -121,6 +121,7 @@
   "reset.tip": "Das gespeicherte Formular löschen und neu beginnen",
   "inflight.one": "Ein Bild wird noch erstellt",
   "inflight.other": "{n} Bilder werden noch erstellt",
+  "window_status_making": "{n} in Arbeit",
   "pending.running": "Bild wird erstellt…",
   "pending.failed": "Dieses Bild ging schief: {error}",
   "pending.retry": "Erneut versuchen",

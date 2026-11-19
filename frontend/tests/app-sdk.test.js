@@ -263,3 +263,78 @@ test('theme(): standalone, it follows the stored palette and learns its ground',
   assert.equal(root.getAttribute('data-palette'), 'glacier', 'the shell default');
   assert.equal(root.getAttribute('data-theme'), 'amoled');
 });
+
+// ------------------------------------------------------------------ win (tool window)
+
+test('win.* posts the window ops, sanitised, at our own origin', { skip: dom.skip }, async () => {
+  const { win } = setupDom(PAGE, 'http://127.0.0.1:8765/apps/demo/');
+  const posted = [];
+  frameUnder(win, { postMessage: (m, o) => posted.push([m, o]) });
+  const sdk = await freshSdk();
+  sdk.win.setStatus('2 making');
+  sdk.win.setStatus('x'.repeat(100));
+  sdk.win.setStatus(null);
+  sdk.win.setBadge(3);
+  sdk.win.setBadge(null);
+  sdk.win.setBadge(-4);
+  sdk.win.attention();
+  sdk.win.setUnsaved(1);
+  sdk.win.setUnsaved(false);
+  sdk.win.setBusy(2.9);
+  sdk.win.setBusy('junk');
+  sdk.win.setBusy(-1);
+  sdk.win.minimize();
+  const T = 'dispatch:window';
+  assert.deepEqual(posted.map(([m]) => m), [
+    { op: 'status', value: '2 making', type: T },
+    { op: 'status', value: 'x'.repeat(40), type: T },
+    { op: 'status', value: '', type: T },
+    { op: 'badge', value: 3, type: T },
+    { op: 'badge', value: null, type: T },
+    { op: 'badge', value: 0, type: T },
+    { op: 'attention', value: true, type: T },
+    { op: 'unsaved', value: true, type: T },
+    { op: 'unsaved', value: false, type: T },
+    { op: 'busy', value: 2, type: T },
+    { op: 'busy', value: 0, type: T },
+    { op: 'busy', value: 0, type: T },
+    { op: 'minimize', value: true, type: T },
+  ]);
+  assert.ok(posted.every(([, o]) => o === 'http://127.0.0.1:8765'));
+});
+
+test('win.onState accepts only the framing shell, same origin, with a valid shape', { skip: dom.skip }, async () => {
+  const { win } = setupDom(PAGE, 'http://127.0.0.1:8765/apps/demo/');
+  frameUnder(win, { postMessage() {} });
+  const sdk = await freshSdk();
+  const seen = [];
+  const off = sdk.win.onState((s) => seen.push(s));
+  assert.equal(sdk.win.state(), null);
+  const good = { type: 'dispatch:window-state', state: 'min', layout: 'right' };
+  shellMessage(win, good, { origin: 'http://evil.example' });
+  shellMessage(win, good, { source: {} });
+  shellMessage(win, { ...good, state: 'closed' });
+  shellMessage(win, { ...good, layout: 'weird' });
+  shellMessage(win, { ...good, type: 'dispatch:other' });
+  shellMessage(win, 'junk');
+  assert.deepEqual(seen, []);
+  assert.equal(sdk.win.state(), null);
+  shellMessage(win, good);
+  assert.deepEqual(seen, [{ state: 'min', layout: 'right' }]);
+  assert.deepEqual(sdk.win.state(), { state: 'min', layout: 'right' });
+  off();
+  shellMessage(win, { ...good, state: 'open' });
+  assert.equal(seen.length, 1);
+  assert.equal(sdk.win.state().state, 'open');
+});
+
+test('win.* is a quiet no-op when not framed', { skip: dom.skip }, async () => {
+  setupDom(PAGE, 'http://127.0.0.1:8765/apps/demo/');
+  const sdk = await freshSdk();
+  assert.equal(sdk.win.setStatus('x'), false);
+  assert.equal(sdk.win.setBusy(1), false);
+  assert.equal(sdk.win.attention(), false);
+  assert.equal(sdk.win.minimize(), false);
+  assert.equal(sdk.win.state(), null);
+  assert.equal(typeof sdk.win.onState(() => {}), 'function');
+});

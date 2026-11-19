@@ -271,6 +271,18 @@ An app page imports **only** `/static/js/app-sdk.js` from the shell:
 - `openThread(threadId)`, `close()`, `toast(text)`, `setTitle(text)`: post
   `{type: 'dispatch:<name>', …}` to the parent shell, same origin only.
 - `onMessage(fn)`: messages from the shell (`dispatch:theme`, `dispatch:lang`).
+- `win`: the tool window (see `docs/design/app-windows.md`, sections 6 and 9).
+  Frame to shell `{type: 'dispatch:window', op, value}`; shell to frame
+  `{type: 'dispatch:window-state', state: 'open'|'min', layout: 'float'|'left'|'right'|'full'|'sheet'}`.
+  Every call is a quiet no-op when the page is not framed.
+  - `win.setStatus(text)`: short status on the pill and under the title (40 chars max, `''` clears).
+  - `win.setBadge(n)`: a count on the pill (`null` or 0 clears).
+  - `win.attention()`: a dot on the pill while minimised; cleared on restore.
+  - `win.setUnsaved(bool)`: Close asks first while true.
+  - `win.setBusy(n)`: running jobs (0 = idle); Close asks first while busy.
+  - `win.minimize()`: the app's own "back to chat".
+  - `win.onState(fn)`: `fn({state, layout})` on every change and once after load; returns an unsubscribe.
+  - `win.state()`: the last known `{state, layout}`, or `null`.
 
 The shell accepts messages only when `event.origin === location.origin` and
 `event.source` is the open app frame, and handles `open-thread` (closes the

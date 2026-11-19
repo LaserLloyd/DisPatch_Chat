@@ -120,6 +120,7 @@
   "reset.tip": "保存したフォームを消して最初からやり直す",
   "inflight.one": "画像を作成中です",
   "inflight.other": "{n} 枚の画像を作成中です",
+  "window_status_making": "{n}枚 作成中",
   "pending.running": "画像を作成中…",
   "pending.failed": "この画像を作成できませんでした: {error}",
   "pending.retry": "再試行",

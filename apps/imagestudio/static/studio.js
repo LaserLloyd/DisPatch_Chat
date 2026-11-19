@@ -13,8 +13,8 @@
 // fetched; the lightbox refuses too.
 
 import {
-  api, t, ready, theme, toast, lightbox, el, railIcon, RAIL_ICONS,
-} from '/static/js/app-sdk.js?v=7';
+  api, t, ready, theme, toast, lightbox, el, railIcon, RAIL_ICONS, win,
+} from '/static/js/app-sdk.js?v=8';
 
 /** A 403: this profile may not use Image Studio (4.0; 3.x sent a Safe-Mode DecoyError). */
 const refused = (e) => !!e && e.status === 403;
@@ -63,6 +63,7 @@ const S = {
   draftReady: false,        // the draft was applied: from now on the form is saved
   draftDirty: false,        // the user changed the form here: only then is a draft written
   baseline: '',             // the form's serialised defaults: a form equal to it stores no draft
+  winBusy: 0,            // the last busy count told to the tool window
   poll: { timer: null, since: 0 },   // pictures the server is still making (not started by this page)
   last: null,               // GET /last: the settings this profile last pressed Generate with
 };
@@ -310,7 +311,21 @@ function noteLast(body, count) {
 
 // ---------------------------------------------------------------- pictures still being made
 
+/** Tell the tool window how many pictures are being made (this page's jobs plus the server's
+ *  extra ones); when one finishes while the window is minimised, ask for the attention dot. */
+function syncWindow() {
+  const total = running() + (S.info ? inflightExtra(S.info, running()) : 0);
+  if (total === S.winBusy) return;
+  const prev = S.winBusy;
+  S.winBusy = total;
+  win.setBusy(total);
+  win.setStatus(total ? t('window_status_making', { n: total }) : '');
+  const st = win.state();
+  if (total < prev && st && st.state === 'min') win.attention();
+}
+
 function renderInflight() {
+  syncWindow();
   const n = S.info ? inflightExtra(S.info, running()) : 0;
   R.inflight.hidden = !n;
   R.inflight.textContent = n ? t(n === 1 ? 'inflight.one' : 'inflight.other', { n }) : '';
@@ -1434,7 +1449,7 @@ function freeSlots(running, max) {
 async function startJob(job) {
   job.state = 'running'; job.error = '';
   if (!S.pending.includes(job)) S.pending.push(job);
-  renderGrid(); refreshForm();
+  renderGrid(); refreshForm(); syncWindow();
   setStatus(t('generating_note'));
   try {
     const r = await api(`${API}/generate`, { method: 'POST', body: job.body });
@@ -1453,7 +1468,7 @@ async function startJob(job) {
     // The reason is on the job's own tile (role=alert); saying it again here showed it twice.
     setStatus('');
   } finally {
-    refreshForm();
+    refreshForm(); syncWindow();
   }
 }
 
