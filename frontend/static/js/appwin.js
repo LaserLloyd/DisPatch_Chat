@@ -660,7 +660,7 @@ function paintListToggle() {
   const head = document.querySelector('#chatview .chat-header');
   if (!head) return;
   if (!listBtn || !head.contains(listBtn)) {
-    listBtn = el('button', { type: 'button', class: 'icon-btn ghost appwin-list-btn', 'aria-expanded': 'false' });
+    listBtn = el('button', { type: 'button', class: 'icon-btn ghost appwin-list-btn', 'aria-expanded': 'false', title: t('threads.expand'), 'aria-label': t('threads.expand') });
     listBtn.append(spriteIcon('menu', 18));
     listBtn.addEventListener('click', () => {
       const on = !document.body.classList.contains('appwin-list-peek');

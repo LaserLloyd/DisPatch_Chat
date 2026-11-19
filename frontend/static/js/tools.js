@@ -642,7 +642,7 @@ function paintChatLauncher(on) {
   if (!head) return;
   let b = $('ch-tools-btn');
   if (!b) {
-    b = el('button', { type: 'button', id: 'ch-tools-btn', class: 'icon-btn ghost ch-tools-btn', 'aria-haspopup': 'menu', 'aria-controls': 'tools-menu', 'aria-expanded': 'false' });
+    b = el('button', { type: 'button', id: 'ch-tools-btn', class: 'icon-btn ghost ch-tools-btn', title: t('tools.menu_aria'), 'aria-label': t('tools.menu_aria'), 'aria-haspopup': 'menu', 'aria-controls': 'tools-menu', 'aria-expanded': 'false' });
     b.append(spriteIcon('wrench', 18));
     b.addEventListener('click', () => {
       const open = toggleToolsMenu('tools');
