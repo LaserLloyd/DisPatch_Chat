@@ -5331,3 +5331,66 @@ svg.profile-mark { display: inline-block; vertical-align: middle; overflow: hidd
 /* Settings -> System -> Network: the Unknown addresses card (js/settings_schema.js hostCheckCard,
    4.3 Fable). A .ui-setting's row spacing without being a control row. */
 .schema-host-check { padding: var(--space-3, .75rem) var(--space-4, 1rem); border-top: 1px solid var(--divider, transparent); }
+
+/* ---- 4.4: the split lock screen (js/lock-split.js, docs/design/lock-resume.md) ----
+   Main profile on top (the only identity on screen), an anonymous resume pad below.
+   Side by side on a wide screen, stacked on a phone. The pad is the 2.x themed .keypad. */
+.lock-screen.lock-mode-split { align-items: stretch; padding: 0; padding-top: env(safe-area-inset-top); }
+.lock-screen.lock-mode-split .lock-card { display: none; }
+.lock-split[hidden] { display: none; }
+.lock-split {
+  display: grid; grid-template-rows: minmax(0, 2fr) minmax(0, 3fr);
+  width: 100%; min-height: 100%;
+}
+.lks-top, .lks-bottom {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; padding: 20px 16px;
+}
+.lks-top { border-bottom: 1px solid var(--border-light); }
+.lks-main {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  min-width: 220px; min-height: 44px; padding: 20px 28px; border-radius: 18px;
+  border: 1px solid var(--border-light); background: var(--bg-secondary); color: var(--text-primary);
+  font: inherit; cursor: pointer; transition: background .12s, box-shadow .12s;
+}
+.lks-main:hover { box-shadow: 0 2px 10px var(--accent-wash); }
+.lks-main:focus-visible, .lks-others:focus-visible, .lks-field:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.lks-avatar { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; }
+.lks-avatar--text {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--on-accent); font-size: 40px; font-weight: 600;
+}
+.lks-main-name { font-size: 24px; font-weight: 600; }
+.lks-main-go { font-size: 14px; color: var(--text-secondary); }
+.lks-others {
+  min-height: 44px; padding: 8px 14px; border: 0; background: none; color: var(--accent);
+  font: inherit; font-size: 14px; cursor: pointer; text-decoration: underline;
+}
+.lks-title { font-size: 19px; font-weight: 600; margin: 0; }
+.lks-field {
+  width: 246px; min-height: 48px; padding: 8px 12px; border-radius: 12px; text-align: center;
+  font-size: 22px; letter-spacing: .2em;
+  border: 1px solid var(--border-light); background: var(--bg-secondary); color: var(--text-primary);
+}
+.lks-pad { margin: 2px 0 4px; }
+.lks-submit { width: 246px; min-height: 48px; }
+.lock-split.lks-busy { cursor: progress; }
+.lock-split.lks-busy .lks-bottom { opacity: .7; }
+@media (min-width: 900px) {
+  .lock-split { grid-template-rows: none; grid-template-columns: 1fr 1fr; }
+  .lks-top { border-bottom: 0; border-inline-end: 1px solid var(--border-light); }
+}
+@media (max-height: 620px) and (max-width: 899px) {
+  .lks-avatar { width: 56px; height: 56px; }
+  .lks-main { padding: 10px 18px; flex-direction: row; }
+  .lks-main-go { display: none; }
+  .lks-top, .lks-bottom { padding: 8px 16px; gap: 6px; }
+}
+@media (prefers-reduced-motion: reduce) { .lks-main { transition: none; } }
+
+/* Settings -> This device: Keep this device unlocked */
+.keep-unlocked-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.keep-unlocked-row input[type="checkbox"] { width: 22px; height: 22px; flex: none; }
+.keep-unlocked-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0 10px; }
+.keep-unlocked-confirm[hidden] { display: none; }
+.keep-unlocked-secret { min-height: 40px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-light); background: var(--bg-secondary); color: var(--text-primary); }

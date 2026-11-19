@@ -583,7 +583,7 @@
     "unlock_sub": "Introduce el PIN para iniciar sesión",
     "clear": "Borrar",
     "backspace": "Borrar la última cifra",
-    "remember": "Mantener la sesión iniciada en este dispositivo",
+    "remember": "Mantener la sesión iniciada y desbloqueada en este dispositivo",
     "submit": "Iniciar sesión",
     "forgot": "¿Olvidaste el PIN?",
     "cancel": "Cancelar",
@@ -2847,5 +2847,26 @@
     "all_added_note": "Todos los bots de este paquete ya están añadidos.",
     "list_aria": "Bots de {name}",
     "who_note": "Recibes tu propia copia de cada bot nuevo. Para darle uno a otro perfil, abre sus Detalles y usa Quién puede usarlo."
+  },
+  "lockr": {
+    "screen_label": "Bloqueado",
+    "go_main": "Ir al principal",
+    "choose": "Elegir un perfil",
+    "others": "Otros perfiles",
+    "resume_title": "Reanudar la sesión anterior",
+    "field_label": "PIN o contraseña de la sesión anterior",
+    "pad_label": "Teclado numérico",
+    "abc": "ABC",
+    "abc_label": "Escribir letras (para una contraseña)",
+    "resume": "Reanudar",
+    "keep_title": "Mantener este dispositivo desbloqueado",
+    "keep_hint": "Se abre directamente en tu perfil y nunca se bloquea solo. Bloquéalo tú al dejarlo. Solo para un dispositivo que usas solo tú.",
+    "keep_on": "Este dispositivo sigue desbloqueado",
+    "keep_off": "Este dispositivo vuelve a bloquearse si no se usa",
+    "keep_failed": "No se pudo cambiar este dispositivo",
+    "keep_secret": "Escribe tu PIN o contraseña para mantener este dispositivo desbloqueado",
+    "keep_confirm": "Confirmar",
+    "offer_body": "¿Abrir directamente tu perfil en este dispositivo a partir de ahora, sin PIN? Sigue desbloqueado hasta que lo bloquees. Puedes desactivarlo en Ajustes, Este dispositivo.",
+    "offer_yes": "Mantener desbloqueado"
   }
 }

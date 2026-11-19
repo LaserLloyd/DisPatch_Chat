@@ -91,9 +91,11 @@ def test_feature_off_by_default_remember_is_ignored(env):
     assert r.json()["remembered"] is False
     assert "Max-Age" not in (r.headers.get("set-cookie") or "")
     assert not auth.TRUSTED_PATH.exists()
-    # ...and a restart logs the device out, as ever.
+    # 4.4 (lock-resume.md): a restart no longer signs a device out; it stays an ordinary
+    # idle-expiring session, not a remembered one.
     _simulate_restart()
-    assert client.get("/api/auth/status").json()["authenticated"] is False
+    st = client.get("/api/auth/status").json()
+    assert st["authenticated"] is True and st["remembered"] is False
 
 
 def test_remember_config_needs_session_once_pin_set(env):
@@ -115,7 +117,8 @@ def test_unchecked_box_stays_ephemeral_even_when_enabled(env):
     r = _unlock(client, remember=False)
     assert r.json()["remembered"] is False
     _simulate_restart()
-    assert client.get("/api/auth/status").json()["authenticated"] is False
+    st = client.get("/api/auth/status").json()
+    assert st["authenticated"] is True and st["remembered"] is False and st["keep_unlocked"] is False
 
 
 # --------------------------------------------------------------------------- #
@@ -183,15 +186,22 @@ def test_sliding_window_expiry_forgets_the_device(env):
 # --------------------------------------------------------------------------- #
 
 
-def test_lock_forgets_the_device(env):
+def test_lock_holds_the_device_until_resumed(env):
+    # 4.4 (lock-resume.md): Lock HOLDS the session instead of forgetting the device. A held
+    # session is nobody, across a restart too, until the credential resumes it.
     client = env()
     auth.set_pin(PIN)
     _enable()
     _unlock(client, remember=True)
     assert client.post("/api/auth/lock").status_code == 200
-    assert auth.trusted_count() == 0
+    st = client.get("/api/auth/status").json()
+    assert st["authenticated"] is False and st["resumable"] is True
     _simulate_restart()
-    assert client.get("/api/auth/status").json()["authenticated"] is False
+    st = client.get("/api/auth/status").json()
+    assert st["authenticated"] is False and st["resumable"] is True
+    assert client.post("/api/auth/resume", json={"secret": PIN}).status_code == 200
+    st = client.get("/api/auth/status").json()
+    assert st["authenticated"] is True and st["remembered"] is True
 
 
 def test_pin_change_forgets_all_devices(env):
@@ -227,9 +237,10 @@ def test_forget_all_kills_others_demotes_caller(env):
     client.cookies.set(main.COOKIE_NAME, desk_token)
     s = client.get("/api/auth/status").json()
     assert s["authenticated"] is True and s["remembered"] is False
-    # ...which no longer survives a restart.
+    # ...which survives a restart (4.4) as an ordinary, idle-expiring session.
     _simulate_restart()
-    assert client.get("/api/auth/status").json()["authenticated"] is False
+    st = client.get("/api/auth/status").json()
+    assert st["authenticated"] is True and st["remembered"] is False
 
 
 def test_forget_devices_requires_session(env):

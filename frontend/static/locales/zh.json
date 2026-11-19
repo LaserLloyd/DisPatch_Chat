@@ -570,7 +570,7 @@
     "unlock_sub": "输入 PIN 登录",
     "clear": "清空",
     "backspace": "删除最后一位数字",
-    "remember": "让此设备保持登录",
+    "remember": "在此设备上保持登录且不锁定",
     "submit": "登录",
     "forgot": "忘记 PIN 了？",
     "cancel": "取消",
@@ -2773,5 +2773,26 @@
     "all_added_note": "这个套装里的机器人都已添加。",
     "list_aria": "{name} 中的机器人",
     "who_note": "每个新机器人你都会得到一份自己的副本。要把它给其他资料，请打开它的“详情”，使用“谁可以使用”。"
+  },
+  "lockr": {
+    "screen_label": "已锁定",
+    "go_main": "前往主页",
+    "choose": "选择一个资料",
+    "others": "其他资料",
+    "resume_title": "继续上一个会话",
+    "field_label": "上一个会话的 PIN 或密码",
+    "pad_label": "数字键盘",
+    "abc": "ABC",
+    "abc_label": "输入字母（用于密码）",
+    "resume": "继续",
+    "keep_title": "保持此设备解锁",
+    "keep_hint": "打开即进入你的资料，且不会自动锁定。离开时请自己锁定。仅适用于只有你使用的设备。",
+    "keep_on": "此设备保持解锁",
+    "keep_off": "此设备空闲时会再次锁定",
+    "keep_failed": "无法更改此设备",
+    "keep_secret": "输入你的 PIN 或密码以保持此设备解锁",
+    "keep_confirm": "确认",
+    "offer_body": "今后在此设备上无需 PIN 直接打开你的资料吗？在你锁定之前它都保持解锁。可以在设置的“此设备”中关闭。",
+    "offer_yes": "保持解锁"
   }
 }

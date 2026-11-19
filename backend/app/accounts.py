@@ -161,6 +161,13 @@ _ADDED_COLUMNS = (
     "ALTER TABLE profiles ADD COLUMN household_bots TEXT DEFAULT '\"all\"'",
     # 4.0 (migration 011_scale): the profile's own "archive chats older than N months"; NULL = off.
     "ALTER TABLE profiles ADD COLUMN archive_after_months INTEGER",
+    # 4.4 (docs/design/lock-resume.md): a session survives a restart. ``epoch`` is the
+    # profile's epoch at issue (NULL = a row written before 4.4: never re-minted unless the
+    # device is remembered); ``locked_at`` = held (locked, resumable) since; ``keep_unlocked``
+    # = this device is exempt from the idle lock.
+    "ALTER TABLE sessions ADD COLUMN epoch INTEGER",
+    "ALTER TABLE sessions ADD COLUMN locked_at TEXT",
+    "ALTER TABLE sessions ADD COLUMN keep_unlocked INTEGER NOT NULL DEFAULT 0",
 )
 
 #: Tables this module owns, in drop-safe (children first) order.
@@ -732,16 +739,40 @@ def delete_device(device_id: str) -> None:
 
 
 def record_session(token_hash: str, profile_id: str, device_id: str | None, *,
-                   persistent: bool, user_agent: str = "", expires: str | None = None) -> None:
+                   persistent: bool, user_agent: str = "", expires: str | None = None,
+                   epoch: int | None = None, keep_unlocked: bool = False) -> None:
     with _lock, connect() as con:
         if device_id:
             con.execute("INSERT OR IGNORE INTO devices (id,created,last_seen) VALUES (?,?,?)",
                         (device_id, now_iso(), now_iso()))
         con.execute(
             "INSERT OR REPLACE INTO sessions (token_hash,profile_id,device_id,created,last_seen,"
-            "expires,persistent,user_agent) VALUES (?,?,?,?,?,?,?,?)",
+            "expires,persistent,user_agent,epoch,locked_at,keep_unlocked) "
+            "VALUES (?,?,?,?,?,?,?,?,?,NULL,?)",
             (token_hash, profile_id, device_id, now_iso(), now_iso(), expires,
-             1 if persistent else 0, (user_agent or "")[:160]))
+             1 if persistent else 0, (user_agent or "")[:160], epoch,
+             1 if keep_unlocked else 0))
+
+
+def get_session_row(token_hash: str) -> dict | None:
+    """The durable record of one session (4.4: how a session survives a restart)."""
+    with connect() as con:
+        row = con.execute("SELECT * FROM sessions WHERE token_hash = ?", (token_hash,)).fetchone()
+    return dict(row) if row else None
+
+
+_SESSION_ROW_FIELDS = frozenset({"last_seen", "locked_at", "keep_unlocked", "persistent"})
+
+
+def update_session_row(token_hash: str, **fields) -> None:
+    """Patch a session row (last_seen, locked_at, keep_unlocked, persistent)."""
+    cols = [k for k in fields if k in _SESSION_ROW_FIELDS]
+    if not cols:
+        return
+    vals = [(1 if fields[k] else 0) if isinstance(fields[k], bool) else fields[k] for k in cols]
+    with _lock, connect() as con:
+        con.execute(f"UPDATE sessions SET {', '.join(c + ' = ?' for c in cols)} WHERE token_hash = ?",
+                    (*vals, token_hash))
 
 
 def drop_session(token_hash: str) -> None:
@@ -770,7 +801,7 @@ def list_sessions(profile_id: str | None = None) -> list[dict]:
             rows = con.execute("SELECT * FROM sessions ORDER BY created").fetchall()
     return [{"profile_id": r["profile_id"], "device_id": r["device_id"], "created": r["created"],
              "last_seen": r["last_seen"], "persistent": bool(r["persistent"]),
-             "user_agent": r["user_agent"]} for r in rows]
+             "user_agent": r["user_agent"], "locked": bool(r["locked_at"])} for r in rows]
 
 
 # --------------------------------------------------------------------------- #

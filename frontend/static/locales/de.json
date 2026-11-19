@@ -577,7 +577,7 @@
     "unlock_sub": "Gib die PIN ein, um dich anzumelden",
     "clear": "Leeren",
     "backspace": "Letzte Ziffer löschen",
-    "remember": "Dieses Gerät angemeldet lassen",
+    "remember": "Auf diesem Gerät angemeldet und entsperrt bleiben",
     "submit": "Anmelden",
     "forgot": "PIN vergessen?",
     "cancel": "Abbrechen",
@@ -2815,5 +2815,26 @@
     "all_added_note": "Alle Bots dieses Pakets sind schon hinzugefügt.",
     "list_aria": "Bots in {name}",
     "who_note": "Du bekommst von jedem neuen Bot eine eigene Kopie. Um einen an ein anderes Profil zu geben, öffne seine Details und nutze „Wer es nutzen kann“."
+  },
+  "lockr": {
+    "screen_label": "Gesperrt",
+    "go_main": "Zur Hauptseite",
+    "choose": "Profil auswählen",
+    "others": "Andere Profile",
+    "resume_title": "Vorherige Sitzung fortsetzen",
+    "field_label": "PIN oder Passwort der vorherigen Sitzung",
+    "pad_label": "Ziffernblock",
+    "abc": "ABC",
+    "abc_label": "Buchstaben tippen (für ein Passwort)",
+    "resume": "Fortsetzen",
+    "keep_title": "Dieses Gerät entsperrt lassen",
+    "keep_hint": "Öffnet direkt dein Profil und sperrt sich nie selbst. Sperre es selbst, wenn du gehst. Nur für ein Gerät, das nur du benutzt.",
+    "keep_on": "Dieses Gerät bleibt entsperrt",
+    "keep_off": "Dieses Gerät sperrt sich wieder, wenn es nicht benutzt wird",
+    "keep_failed": "Dieses Gerät konnte nicht geändert werden",
+    "keep_secret": "Gib deine PIN oder dein Passwort ein, damit dieses Gerät entsperrt bleibt",
+    "keep_confirm": "Bestätigen",
+    "offer_body": "Auf diesem Gerät ab jetzt direkt dein Profil öffnen, ohne PIN? Es bleibt entsperrt, bis du es sperrst. Du kannst das in den Einstellungen unter „Dieses Gerät“ abschalten.",
+    "offer_yes": "Entsperrt lassen"
   }
 }

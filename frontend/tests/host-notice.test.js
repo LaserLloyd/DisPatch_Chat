@@ -221,7 +221,14 @@ test('main.js arms the notice at every sign-in and at lock, and shows it through
   assert.match(MAIN, /armSignInNotice\(\);[^\n]*\n\s*\/\/ 3\.0: the install PIN signs in/);
   assert.match(MAIN, /if \(r && r\.profile && !state\.auth\.profile\) state\.auth\.profile = r\.profile;\n  armSignInNotice\(\);/);
   assert.match(MAIN, /armSignInNotice\(\);\n  if \(wasStarted\) await reboot\(\); else \{ await startApp\(\); showSignInNoticeWhenReady\(\); \}/);
-  assert.match(MAIN, /async function lockToTarget\(\{ reason = '' \} = \{\}\) \{\n  if \(lockBusy\) return;[^\n]*\n  lockBusy = true;\n  try \{\n    armSignInNotice\(\);/);
+  // 4.4: an idle lock the server refuses (the browser is in use elsewhere) changes nothing,
+  // so the notice is armed right after that check, before anything is torn down.
+  {
+    const lt = MAIN.slice(MAIN.indexOf('async function lockToTarget('), MAIN.indexOf('async function lockNow('));
+    const armAt = lt.indexOf('armSignInNotice();');
+    assert.ok(armAt > 0 && armAt < lt.indexOf('closeAllOverlays();'), 'armed before the teardown');
+    assert.ok(lt.indexOf("r.body.active") < armAt, 'after the idle refusal');
+  }
   assert.match(MAIN, /if \(!wizard\) showSignInNoticeWhenReady\(\);/);
   assert.match(MAIN, /onClosed: \(\) => showSignInNoticeWhenReady\(\)/);
   const fn = MAIN.slice(MAIN.indexOf('function showSignInNoticeWhenReady'), MAIN.indexOf('function showSignInNoticeWhenReady') + 900);

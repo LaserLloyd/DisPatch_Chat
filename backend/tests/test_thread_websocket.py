@@ -312,7 +312,8 @@ def test_session_live_follows_the_session(ext_env):
     with c.websocket_connect(f"/ws/voice/{tid}", headers=ORIGIN) as ws:
         ws.receive_text()
         assert _live(ws) is True
-        auth._sessions.clear()                        # idle lock / lock-now
+        for tok in list(auth._sessions):              # idle lock / lock-now (4.4: held)
+            auth.hold(tok)
         assert _live(ws) is False
 
 

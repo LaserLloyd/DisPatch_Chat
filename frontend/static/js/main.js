@@ -28,7 +28,7 @@ import {
   initLlmPanel, activateLlmPanel, repaintLlmPanel,
   firstRunCard,
 } from './llm.js?v=20';
-import { initPrivacy, privacyRow, allowsPersistentSession, wipeStudioKeys } from './privacy.js?v=23';
+import { initPrivacy, privacyRow, allowsPersistentSession, wipeStudioKeys } from './privacy.js?v=24';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
@@ -36,7 +36,7 @@ import {
   setAllowed as setQuickAllowed, setUpload as setQuickUpload, getActions as quickActionList,
 } from './quick-actions.js?v=7';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=8';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=29';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=30';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
 // DisPatch Voice add-on — mounted into the shell by the loader, through the
 // SDK's frozen shell object. With none installed, Settings → Voice explains
@@ -48,7 +48,9 @@ import {
 import { renderVoiceHeard } from './voice-heard.js?v=1';
 import {
   maybeShowSignInNotice, armSignInNotice, paintDisclosure, showLandingBanner, landingText, maybeShowPasswordCard,
+  noticeStack,
 } from './host-notice.js?v=7';
+import { renderLockSplit } from './lock-split.js?v=1';
 import { createChatDrop } from './chatdrop.js?v=4';
 // 4.0 scale round: the rail pages by cursor, a long thread is windowed, and the clean-up cards.
 import {
@@ -90,7 +92,7 @@ import {
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen, findTool, toolGlyph, registerExtTiles, isExtFeature,
   openToolsMenu, toolsMenuOpen, groupFor, extWindowRoot, closeExtWindow, showToolWindow,
-} from './tools.js?v=28';
+} from './tools.js?v=29';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp, api as appApi } from './app-sdk.js?v=8';
@@ -319,7 +321,7 @@ const dom = {};
  'lock-remember-row', 'lock-remember',
  'lock-nim-row', 'lock-nim',
  // 3.0 profiles: tiles host, rail chip + menu, setup/notice overlays, first-run card, account block
- 'lock-tiles', 'profile-chip', 'profile-menu', 'switch-profile', 'setup-screen', 'setup-card',
+ 'lock-tiles', 'lock-split', 'dev-body-device', 'profile-chip', 'profile-menu', 'switch-profile', 'setup-screen', 'setup-card',
  'firstrun-card', 'firstrun-open', 'firstrun-dismiss', 'sec-account',
  'acct-change', 'acct-change-row', 'acct-password-host', 'acct-who', 'sec-pin-form', 'sec-cancel',
  'bm-avatar-select', 'bm-avatar-style-row', 'bm-lang-row',
@@ -4594,6 +4596,12 @@ function mountLanguagePicker(section = null) {
   }
 
   if (want('account')) {
+    // 4.4: "Keep this device unlocked" heads This device (rebuilt on each open: it follows
+    // the CURRENT session).
+    document.querySelector('.keep-unlocked-wrap')?.remove();
+    const ku = keepUnlockedRow();
+    const devBody = dom['dev-body-device'];
+    if (ku && devBody) devBody.prepend(ku);
     // Pictures & privacy. No-Image Mode first — it is the one a parent reaches
     // for — then Privacy mode. nimRow is rebuilt on each open so the ratchet's
     // disabled state reflects the CURRENT session: a device that has since
@@ -8120,6 +8128,8 @@ function wireEvents() {
   wireRailLayout();
   wireTools({
     state,
+    // 4.4: use inside a tool window (its frame) is use of the app: the idle lock waits.
+    activity: () => bumpIdle(),
     // "Arrange the bar…" in the Tools & more popup (js/railmenu.js).
     arrangeRail: openRailArrange,
     openers: {
@@ -9049,6 +9059,12 @@ function applyAuthStatus(s, { keepFeatures = false } = {}) {
     configPath: s.config_path || '',
     rememberDays: s.remember_days || 0,
     remembered: !!s.remembered,
+    // 4.4 (docs/design/lock-resume.md): this device is exempt from the idle lock; this profile
+    // may turn that on; this browser holds a locked session a credential can resume (one
+    // bit: the server never says whose).
+    keepUnlocked: !!s.keep_unlocked,
+    keepUnlockedAllowed: !!s.keep_unlocked_allowed,
+    resumable: !!s.resumable,
     trustedDevices: s.trusted_devices || 0,
     // Optional subsystems this build has on. Absent for a profile that may not use
     // them, which the probes treat as "unknown" and fall back to asking.
@@ -9119,6 +9135,7 @@ async function finishSignIn(r) {
   const name = (state.auth.profile && state.auth.profile.name) || '';
   toast(name ? t('signin.welcome', { name }) : t(state.auth.remembered ? 'lock.unlocked_remembered' : 'lock.unlocked'), false, { ms: 2500 });
   showPasswordCardWhenReady();
+  maybeOfferKeepUnlocked();
 }
 
 /** Show the sign-in screen. gate: nothing behind it (the install lists its profiles and nobody is
@@ -9236,7 +9253,7 @@ function wireProfileChip() {
     items: () => {
       const items = [];
       if (state.auth.claimed && signInMode(state.auth) === 'tiles') {
-        items.push({ label: t('chip.switch'), onSelect: () => showSignInScreen({ switching: true }) });
+        items.push({ label: t('chip.switch'), onSelect: () => openSwitcher() });
       }
       // The same rule and name as the rail's lock button (paintLockButton): "Go to <default
       // profile>" when a lock lands there, and nothing while that profile is the one in use.
@@ -9339,7 +9356,7 @@ function armIdleTimer() {
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
   lastUse = Date.now();
   if (!hasLock() || !state.auth.signedIn) return;   // only while signed in (the shared landing has no session to expire)
-  if (state.auth.remembered) return;   // remembered device: no auto-lock
+  if (state.auth.keepUnlocked) return;   // "Keep this device unlocked" (4.4): no auto-lock
   const ms = Math.max(30, idleSeconds()) * 1000;
   idleTimer = setTimeout(() => lockNow('idle'), ms);
 }
@@ -9353,6 +9370,198 @@ function bumpIdle() {
   if (now - lastActiveSent >= Math.min(60000, idleSeconds() * 1000 / 3) && socket && socket.send({ type: 'active' })) {
     lastActiveSent = now;
   }
+}
+
+// ---- 4.4: held sessions, the split lock screen, "Keep this device unlocked" ----
+// docs/design/lock-resume.md. These calls go straight to fetch (not js/api.js) on purpose:
+// they are few, and api.js's 401 handler would treat a wrong resume as a session that ended.
+
+/** POST a small JSON body to an /api/auth route. Never throws: {ok, status, body}. */
+async function authPost(path, body) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const r = await fetch(path, {
+      method: 'POST', credentials: 'same-origin', signal: ctl.signal,
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+    });
+    let b = null;
+    try { b = await r.json(); } catch { /* empty */ }
+    return { ok: r.ok, status: r.status, body: b };
+  } catch {
+    return { ok: false, status: 0, body: null };
+  } finally { clearTimeout(timer); }
+}
+
+/** The browser-storage traces that would point at the profile that just locked (the
+ *  owner said exact resume is not wanted, so nothing of its place is kept): its window
+ *  layout key and the last-used character. Tool layout state and the theme are this
+ *  device's, not a profile's. */
+function forgetHeldTraces() {
+  try {
+    const drop = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('dispatch-appwin:') || k === 'dispatch-last-character')) drop.push(k);
+    }
+    for (const k of drop) localStorage.removeItem(k);
+  } catch { /* storage off */ }
+}
+
+let splitCtl = null;
+/** The split lock screen (main on top, an anonymous resume below). False when this browser
+ *  holds nothing a credential can resume. */
+function showLockSplit() {
+  if (!state.auth.resumable) return false;
+  if (signInCtl) { signInCtl.destroy(); signInCtl = null; }
+  const ls = dom['lock-screen'];
+  const host = dom['lock-split'];
+  if (!ls || !host) return false;
+  lockCtx = { gate: gateActive(), switching: false };
+  ls.classList.add('lock-mode-split');
+  ls.classList.remove('lock-mode-tiles');
+  ls.removeAttribute('aria-labelledby');
+  ls.removeAttribute('aria-describedby');
+  ls.setAttribute('aria-label', t('lockr.screen_label'));
+  host.hidden = false;
+  const main = state.auth.lockTarget === 'default_profile' && state.auth.defaultProfile ? state.auth.defaultProfile : null;
+  splitCtl = renderLockSplit(host, {
+    main,
+    resumable: true,
+    onMain: () => goToMain(),
+    onOthers: () => { hideLockSplit(); showSignInScreen({ gate: gateActive(), switching: !gateActive() }); },
+    onResume: (secret) => resumeWith(secret),
+  });
+  ls.classList.remove('hidden');
+  dismissBootVeil();
+  setTimeout(() => { if (splitCtl) splitCtl.focus(); }, 0);
+  return true;
+}
+
+function hideLockSplit() {
+  const ls = dom['lock-screen'];
+  const host = dom['lock-split'];
+  if (splitCtl) { splitCtl.destroy(); splitCtl = null; }
+  if (host) host.hidden = true;
+  if (!ls || !ls.classList.contains('lock-mode-split')) return;
+  ls.classList.remove('lock-mode-split');
+  ls.removeAttribute('aria-label');
+  ls.setAttribute('aria-labelledby', 'lock-title');
+  ls.setAttribute('aria-describedby', 'lock-sub');
+  ls.classList.add('hidden');
+  lockCtx = { gate: false, switching: false };
+}
+
+/** "Go to main": the device stays on the main profile (the held session stays resumable,
+ *  invisibly). An install with no default profile shows its profile list instead. */
+function goToMain() {
+  hideLockSplit();
+  if (gateActive()) enterGate();
+}
+
+/** Switch profile / the landing banner: while a held session exists, the split screen comes
+ *  back (that is the way back to a resume); otherwise the normal sign-in tiles. */
+function openSwitcher() {
+  if (!state.auth.signedIn && state.auth.resumable && showLockSplit()) return;
+  showSignInScreen({ switching: true });
+}
+
+async function resumeWith(secret) {
+  const r = await authPost('/api/auth/resume', { secret });
+  if (!r.ok || !(r.body && r.body.ok)) {
+    // Wrong, refused or throttled: go to main. No "try again", nothing that says whose.
+    await refreshAuthQuiet();
+    goToMain();
+    return false;
+  }
+  hideLockSplit();
+  cancelLocalWrites();
+  try { await ensureLocalStore().wipeTier(TIER_FULL); } catch { /* the main profile's tier */ }
+  await refreshAuthQuiet();
+  armSignInNotice();     // only dismisses the landing banner and any popup (it shows nothing)
+  landHome();
+  await reboot({ resumed: true });
+  armIdleTimer();
+  return true;
+}
+
+/** Settings -> This device: "Keep this device unlocked". */
+function keepUnlockedRow() {
+  const a = state.auth;
+  if (!a.signedIn || !a.keepUnlockedAllowed || !allowsPersistentSession()) return null;
+  const box = el('input', { type: 'checkbox', id: 'keep-unlocked', role: 'switch' });
+  box.checked = !!a.keepUnlocked;
+  const label = el('label', { class: 'dev-row-text', for: 'keep-unlocked' }, [
+    el('strong', { text: t('lockr.keep_title') }),
+    el('span', { class: 'dev-row-hint', text: t('lockr.keep_hint') }),
+  ]);
+  const confirm = el('div', { class: 'keep-unlocked-confirm', hidden: '' });
+  const row = el('div', { class: 'dev-row keep-unlocked-row', id: 'keep-unlocked-row' }, [label, box]);
+  const wrap = el('div', { class: 'keep-unlocked-wrap' }, [row, confirm]);
+  const done = async (r) => {
+    if (r.ok) {
+      await refreshAuthQuiet();
+      if (state.auth.keepUnlocked && idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+      else armIdleTimer();
+      toast(t(state.auth.keepUnlocked ? 'lockr.keep_on' : 'lockr.keep_off'), false, { ms: 2500 });
+    } else {
+      toast((r.body && r.body.detail) || t('lockr.keep_failed'), true);
+    }
+    box.checked = !!state.auth.keepUnlocked;
+  };
+  box.addEventListener('change', async () => {
+    confirm.hidden = true;
+    confirm.replaceChildren();
+    if (!box.checked) { await done(await authPost('/api/auth/keep-unlocked', { on: false })); return; }
+    let r = await authPost('/api/auth/keep-unlocked', { on: true });
+    if (r.ok || r.status !== 401) { await done(r); return; }
+    // Not a remembered device yet and not right after a sign-in: your PIN or password first.
+    const field = el('input', { type: 'password', class: 'keep-unlocked-secret', autocomplete: 'current-password', 'aria-label': t('lockr.keep_secret') });
+    const ok = el('button', { type: 'button', class: 'btn-primary', text: t('lockr.keep_confirm') });
+    const send = async () => {
+      const v = field.value; field.value = '';
+      r = await authPost('/api/auth/keep-unlocked', { on: true, secret: v });
+      confirm.hidden = true; confirm.replaceChildren();
+      await done(r);
+    };
+    ok.addEventListener('click', send);
+    field.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
+    confirm.append(el('span', { class: 'dev-row-hint', text: t('lockr.keep_secret') }), field, ok);
+    confirm.hidden = false;
+    box.checked = false;
+    field.focus();
+  });
+  return wrap;
+}
+
+/** Once per device, right after a sign-in: offer "Keep this device unlocked" (owner's
+ *  phone: it opens straight into his session from then on). Never for Basic, never on a
+ *  privacy device, never twice. */
+const KEEP_OFFER_KEY = 'dispatch-keep-unlocked-offered';
+function maybeOfferKeepUnlocked() {
+  const a = state.auth;
+  if (!a.signedIn || a.keepUnlocked || !a.keepUnlockedAllowed || !allowsPersistentSession()) return;
+  try { if (localStorage.getItem(KEEP_OFFER_KEY)) return; localStorage.setItem(KEEP_OFFER_KEY, '1'); } catch { return; }
+  const yes = el('button', { type: 'button', class: 'btn-primary', text: t('lockr.offer_yes') });
+  const later = el('button', { type: 'button', class: 'btn-secondary privacy-card-later', text: t('setup.not_now') });
+  const card = el('section', { class: 'privacy-card keep-unlocked-card', role: 'dialog', 'aria-modal': 'false', 'aria-labelledby': 'keep-offer-title' }, [
+    el('h2', { class: 'privacy-card-title', id: 'keep-offer-title', text: t('lockr.keep_title') }),
+    el('p', { text: t('lockr.offer_body') }),
+    el('div', { class: 'privacy-card-foot' }, [later, yes]),
+  ]);
+  const close = () => card.remove();
+  later.addEventListener('click', close);
+  card.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } });
+  yes.addEventListener('click', async () => {
+    close();
+    const r = await authPost('/api/auth/keep-unlocked', { on: true });
+    if (r.ok) {
+      await refreshAuthQuiet();
+      if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+      toast(t('lockr.keep_on'), false, { ms: 2500 });
+    } else toast(t('lockr.keep_failed'), true);
+  });
+  noticeStack().append(card);
 }
 
 // ---- Lock screen + PIN entry ----
@@ -9394,6 +9603,7 @@ function setLockScreenLabels(titleKey, subKey) {
 // lockCtx says why it is open: gate = nobody signed in and no landing profile (nothing behind
 // it, cannot be dismissed), switching = a person picking another profile.
 function showSignInOverlay() {
+  hideLockSplit();
   lockPin = '';
   renderLockDots();
   setLockError('');
@@ -9439,6 +9649,8 @@ function showSignInOverlay() {
   // race the guard's observer, which could lift the inert this function had just set.
 }
 function hideSignInOverlay({ force = false } = {}) {
+  // 4.4: Escape / the backdrop on the split lock screen = Go to main.
+  if (dom['lock-screen'].classList.contains('lock-mode-split')) { goToMain(); return; }
   // The sign-in gate has nothing behind it: Escape / the backdrop must not close it.
   if (lockCtx.gate && !force) return;
   dom['lock-screen'].classList.add('hidden');
@@ -9531,7 +9743,7 @@ function closeAllOverlays() {
 // Rebuild the app for the current mode: drop the socket + sensitive caches and
 // reconnect, so the WebSocket re-handshakes at the right access level and
 // messages are re-fetched (full or redacted accordingly).
-async function reboot() {
+async function reboot({ resumed = false } = {}) {
   state.started = false;
   cancelLocalWrites();
   if (socket) { socket.stop(); socket = null; }
@@ -9561,7 +9773,9 @@ async function reboot() {
   await startApp();
   // A sign-in (or a switch to another profile) rebuilds the app like a page load:
   // a device that first opened on the sign-in screen sees the sign-in notice here.
-  showSignInNoticeWhenReady();
+  // 4.4: NOT on a resume: unlocking your own session on this device is not a new sign-in
+  // (docs/design/lock-resume.md, "Notices on resume").
+  if (!resumed) showSignInNoticeWhenReady();
 }
 
 /** The page and the server disagree about who is using this socket (a session ended or a profile was
@@ -9587,7 +9801,11 @@ async function reconcileIdentity() {
     landHome();
     await reboot();
     // The session lapsed while the socket was down (a reconnect's hello names the shared profile).
-    if (wasSignedIn && !state.auth.signedIn) showLanding(idleFor >= idleS - 60 ? 'idle' : 'lapsed', idleS);
+    if (wasSignedIn && !state.auth.signedIn) {
+      forgetHeldTraces();
+      if (state.auth.resumable && showLockSplit()) return;   // 4.4: the split lock screen
+      showLanding(idleFor >= idleS - 60 ? 'idle' : 'lapsed', idleS);
+    }
   } finally { reconcileBusy = false; }
 }
 
@@ -9600,7 +9818,21 @@ async function lockToTarget({ reason = '' } = {}) {
   if (lockBusy) return;      // an expiring session fires several triggers at once; one is enough
   lockBusy = true;
   try {
-    armSignInNotice();   // a lock: the next landing or sign-in shows the notice again
+    // 4.4: the tab's own idle timer asks the server first. Another tab or window of this
+    // browser (or a tool window this tab could not see) may have been in use: the server
+    // knows (its idle clock) and refuses, and nothing is torn down. A manual lock is never
+    // refused; a request that fails falls through to the lock (fail closed).
+    let held = false;
+    if (reason === 'idle') {
+      const r = await authPost('/api/auth/lock', { reason: 'idle' });
+      if (r.ok && r.body && r.body.ok === false && r.body.active) {
+        if (r.body.idle_timeout_seconds) state.auth.idleTimeout = r.body.idle_timeout_seconds;
+        armIdleTimer();
+        return;
+      }
+      held = r.ok;
+    }
+    armSignInNotice();   // a lock: take down the previous session's popup and banner
     const p0 = state.auth.profile;
     const wasShared = !state.auth.signedIn && p0 && p0.shared ? { id: p0.id, name: p0.name } : null;
     const idleS = idleSeconds();   // the clock of the profile that is leaving, not the landing's
@@ -9612,7 +9844,9 @@ async function lockToTarget({ reason = '' } = {}) {
     wipeStudioKeys();
     if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
     closeAllOverlays();
-    try { await api.lock(); } catch { /* best-effort: clears the cookie/session */ }
+    // 4.4: the session is HELD (locked, resumable with its credential), not ended.
+    if (!held) await authPost('/api/auth/lock', { reason: reason || 'manual' });
+    forgetHeldTraces();
     // Ask where the server landed us. If we cannot ask, fail closed: the sign-in screen.
     if (!await refreshAuthQuiet()) { state.auth.signedIn = false; state.auth.profile = null; }
     state.auth.remembered = false;
@@ -9621,6 +9855,8 @@ async function lockToTarget({ reason = '' } = {}) {
     // bot's newest chat (4.3 Fable: a User's next message went into the shared profile's chat).
     landHome();
     await reboot();
+    // 4.4: this browser holds a session a credential can resume: the split lock screen.
+    if (state.auth.resumable && showLockSplit()) return;
     if (reason !== 'default') { showLanding(reason, idleS); return; }
     // This device was on the shared profile and the server ended that: say what happened.
     if (!wasShared) return;
@@ -9649,7 +9885,7 @@ function showLanding(reason, seconds) {
   const canSwitch = !!dom['switch-profile'] && !dom['switch-profile'].classList.contains('hidden');
   showLandingBanner({
     text: landingText(reason, { name: landed.name, seconds }),
-    onSwitch: canSwitch ? () => showSignInScreen({ switching: true }) : null,
+    onSwitch: canSwitch ? () => openSwitcher() : null,
   });
 }
 
@@ -10067,7 +10303,7 @@ function wireAuthEvents() {
 
   // Lock / logout buttons
   dom['lock-now'].addEventListener('click', () => lockNow());
-  dom['switch-profile'].addEventListener('click', () => showSignInScreen({ switching: true }));
+  dom['switch-profile'].addEventListener('click', () => openSwitcher());
   dom['bm-lock'].addEventListener('click', () => lockNow());
 
   // Settings -> Account -> Sign-in: the Change select opens one form; its own
@@ -10100,17 +10336,38 @@ function wireAuthEvents() {
   // time-boxed check. Then fail CLOSED — a check that did not succeed is
   // treated as locked, because the alternative is treating "I could not ask"
   // as "yes, still signed in".
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
-    if (!(hasLock() && state.started)) return;
+  //
+  // 4.4 (docs/design/lock-resume.md, cause c): "fail closed" means the COVER stays, not that
+  // the device signs itself out. A phone that wakes before its radio does (or while the
+  // server restarts) used to land here and POST /api/auth/lock, which ended the session
+  // and forgot the remembered device. Now only the server's answer decides; until it
+  // answers, the cover stays up and the check retries (2 s doubling to 30 s, and at once
+  // when the browser says it is online again).
+  let revalSeq = 0;
+  let revalTimer = null;
+  const revalidate = (attempt = 0) => {
+    const seq = ++revalSeq;
+    if (revalTimer) { clearTimeout(revalTimer); revalTimer = null; }
     document.body.classList.add('revalidating');
     api.authStatus()
       .then((s) => {
+        if (seq !== revalSeq) return;
+        document.body.classList.remove('revalidating');
         if (s.claimed && !s.signed_in && !s.profile) signInRequired();
         else if (state.auth.signedIn && !s.signed_in) handleLocked();
       })
-      .catch(() => { handleLocked(); })
-      .finally(() => { document.body.classList.remove('revalidating'); });
+      .catch(() => {
+        if (seq !== revalSeq) return;
+        revalTimer = setTimeout(() => revalidate(attempt + 1), Math.min(30000, 2000 * (2 ** attempt)));
+      });
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!(hasLock() && state.started)) return;
+    revalidate();
+  });
+  window.addEventListener('online', () => {
+    if (document.body.classList.contains('revalidating')) revalidate();
   });
 }
 
@@ -10331,6 +10588,15 @@ async function refreshAuthAndBoot() {
   // First run on a network install: the first Admin is created with the setup token
   // from the server log, before anything else works. Nothing to start yet.
   if (!state.auth.claimed && state.auth.setupRequired) { showSetupPage(); return; }
+  // 4.4: this browser holds a locked session (it was signed in and is locked now): the split
+  // lock screen, over the main profile (or over the profile list on a gated install).
+  if (state.auth.resumable && !state.auth.signedIn) {
+    forgetHeldTraces();
+    if (gateActive()) { closeAllOverlays(); dismissBootVeil(); showLockSplit(); return; }
+    await startApp();
+    showLockSplit();
+    return;
+  }
   // Nobody signed in and no landing profile (the install lists its profiles): the sign-in screen.
   if (gateActive()) { enterGate(); return; }
   // Otherwise the app starts: signed in, or on the shared default profile an unsigned device lands on.

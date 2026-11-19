@@ -160,7 +160,7 @@
        and fetches ui-theme/locales/<lang>.json only if asked to. -->
   <link rel="stylesheet" href="/static/ui-theme/ui-components.css" />
   <link rel="stylesheet" href="/static/theme.css?v=8" />
-  <link rel="stylesheet" href="/static/app.css?v=129" />
+  <link rel="stylesheet" href="/static/app.css?v=130" />
   <link rel="stylesheet" href="/static/dashboard.css?v=6" />
   <link rel="stylesheet" href="/static/tasks.css?v=4" />
   <link rel="stylesheet" href="/static/w5.css?v=4" />
@@ -873,7 +873,7 @@
         <!-- Recovery stays its own modal: an export/restore flow is a full screen. -->
         <section class="dev-group" data-anchor="recovery" aria-labelledby="dev-h-backup">
           <h3 class="dev-group-title" id="dev-h-backup" data-i18n="acct.device_title">This device</h3>
-          <div class="dev-group-body">
+          <div class="dev-group-body" id="dev-body-device">
             <div class="dev-row dev-row-action">
               <span class="dev-row-text"><strong data-i18n="settings.recovery">Recovery &amp; Export</strong><span class="dev-row-hint" data-i18n="settings.recovery_desc">Export every message to a file, or restore messages that did not save.</span></span>
               <button class="btn-secondary" id="open-recovery"><span class="icn" data-icon="lifering" aria-hidden="true"></span><span data-i18n="settings.recovery_open">Open</span></button>
@@ -1030,6 +1030,10 @@
        for the keypad). -->
   <div class="lock-screen hidden" id="lock-screen" role="dialog" aria-modal="true"
        aria-labelledby="lock-title" aria-describedby="lock-sub">
+    <!-- 4.4 (docs/design/lock-resume.md): the split lock screen of a browser that holds a
+         locked session (js/lock-split.js). Built only while shown; empty otherwise. It never
+         names or pictures the held profile: the main profile on top is the only identity. -->
+    <div class="lock-split" id="lock-split" hidden></div>
     <div class="lock-card">
       <div class="lock-emoji"><svg class="rail-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" width="40" height="40"><use href="/static/ui-theme/icons.svg#lock"/></svg></div>
       <h2 id="lock-title" data-i18n="lock.locked">Locked</h2>
@@ -1275,6 +1279,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=193"></script>
+  <script type="module" src="/static/js/main.js?v=194"></script>
 </body>
 </html>

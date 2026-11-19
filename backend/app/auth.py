@@ -117,9 +117,16 @@ LOCK_TARGETS = ("default_profile", "profile_list")
 # Reentrant: load() may call revoke_all() while already holding the lock.
 _lock = threading.RLock()
 
-# token -> _Session. In memory only: a server restart logs everyone out, which
-# is the safe default for a lock.
+# token -> _Session. The live set. 4.4 (docs/design/lock-resume.md): every session also has
+# a durable row (token SHA-256 only) in ``accounts.sessions``, so a restart or a deploy no
+# longer signs anybody out: an unknown cookie is re-minted from its row while the row is
+# within its idle window (or hold window) and the profile's epoch still matches.
 _sessions: dict[str, _Session] = {}
+#: 4.4: a LOCKED (held) session stays resumable with its profile's own credential this long
+#: after it locked; then it is dropped (with its remembered-device trust).
+HOLD_SECONDS = 12 * 3600
+#: 4.4: write a session's last use to its row at most this often (seconds).
+_ROW_TOUCH_MIN = 60.0
 # GLOBAL ceiling state (layer 3). Tests reset these two to zero between cases.
 _fail_count = 0
 _fail_until = 0.0
@@ -293,6 +300,19 @@ class _Session:
     profile_id: str | None = None
     device_id: str | None = None
     epoch: int = 0          # the profile's epoch at issue; a bump kills the session
+    #: 4.4: wall-clock time this session was LOCKED (held), or None. A held session is
+    #: nobody on every route; only POST /api/auth/resume with its credential un-holds it.
+    locked_at: float | None = None
+    #: 4.4: "Keep this device unlocked": exempt from the idle lock. Only a remembered
+    #: (persistent) session of a non-Basic profile can carry it.
+    keep_unlocked: bool = False
+    #: wall-clock time of the last row write of last_seen (throttle, not state)
+    row_seen: float = 0.0
+    #: wrong resume attempts against this hold (4.4: the hold is dropped at the limit)
+    resume_fails: int = 0
+    #: monotonic time a credential minted this session (0 = re-minted after a restart):
+    #: "Keep this device unlocked" right after a sign-in needs no second credential
+    issued: float = 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -517,6 +537,9 @@ def load() -> SecurityConfig:
             # plaintext-PIN path above has always cleared both; this one now
             # matches it.
             _sessions.clear()
+            # 4.4: and their durable rows, or a restart would re-mint them.
+            with contextlib.suppress(Exception):
+                accounts.drop_all_sessions()
             _wipe_trusted()
             cfg = _lockdown_config()
             _cache = (mtime, cfg)
@@ -851,6 +874,11 @@ def remembered_for(profile_id: str | None, *, session_token: str | None = None,
         return (e is not None and (wall - float(e.get("last_seen") or 0.0)) <= days * 86400
                 and (e.get("profile_id") or oid) == profile_id)
 
+    # 4.4: a HELD (locked) session never earns a throttle privilege: it would mark the held
+    # profile's tile as the one that still takes guesses (an identity oracle and a bypass).
+    if session_token and _sessions.get(session_token) is not None \
+            and _sessions[session_token].locked_at is not None:
+        session_token = None
     if session_token and bound(_trusted_store().get(_token_hash(session_token))):
         return True
     if device_id:
@@ -858,7 +886,7 @@ def remembered_for(profile_id: str | None, *, session_token: str | None = None,
             with accounts.connect() as con:
                 rows = con.execute(
                     "SELECT token_hash FROM sessions WHERE device_id = ? AND profile_id = ? "
-                    "AND persistent = 1", (device_id, profile_id)).fetchall()
+                    "AND persistent = 1 AND locked_at IS NULL", (device_id, profile_id)).fetchall()
         except Exception:
             return False
         store = _trusted_store()
@@ -940,9 +968,11 @@ def forget_all_trusted(keep_session_token: str | None = None) -> None:
         for t in [t for t, s in _sessions.items() if s.persistent]:
             if t == keep_session_token:
                 _sessions[t].persistent = False
+                _sessions[t].keep_unlocked = False
                 _sessions[t].last_seen = time.monotonic()
+                _persist_row(_sessions[t], persistent=False, keep_unlocked=False)
             else:
-                _sessions.pop(t, None)
+                _drop(t)
 
 
 # --------------------------------------------------------------------------- #
@@ -969,9 +999,93 @@ def idle_timeout_seconds(s: _Session | None) -> int:
     """The idle sign-out this session's tab should arm (4.3 Fable): the profile's own
     override, else its role's ``session_timeout_*``, else the Admin ``lock_timeout``. 0 when
     there is no idle clock: no session (the shared landing) or a remembered device."""
-    if s is None or s.persistent:
+    if s is None or _exempt(s):
         return 0
     return _session_timeout(s, load())
+
+
+def _exempt(s: _Session) -> bool:
+    """Is this session exempt from the idle lock? A remembered device that keeps itself
+    unlocked (4.4). The remember feature switched off install-wide exempts nobody."""
+    return bool(s.persistent and s.keep_unlocked and load().remember_days > 0)
+
+
+#: 4.4: the throttle subject of resume attempts (its own bucket: never a profile's).
+RESUME_SUBJECT = "resume"
+#: 4.4: wrong resume attempts after which the hold is dropped for good.
+RESUME_MAX_FAILS = 5
+#: 4.4: within this long of a sign-in, turning "Keep this device unlocked" on needs no
+#: second credential (the offer card shown right after a sign-in).
+FRESH_SIGNIN_SECONDS = 180
+
+
+def fresh_signin(s: _Session) -> bool:
+    return bool(s.issued) and (time.monotonic() - s.issued) <= FRESH_SIGNIN_SECONDS
+
+
+def idle_due(s: _Session) -> bool:
+    """May a tab's idle timer lock this session now? Not while it keeps the device unlocked,
+    and not while it was used (by any tab of the browser) within its idle window, give or take
+    the 90 s a tab may lag in reporting use."""
+    if _exempt(s):
+        return False
+    return (time.monotonic() - s.last_seen) >= max(30, _session_timeout(s, load()) - 90)
+
+
+def keep_unlocked_allowed(profile: accounts.Profile | None) -> bool:
+    """May a session of this profile keep its device unlocked? Never Basic (its limits,
+    quiet hours and budgets need the idle lock), and only while remembering is on."""
+    return (profile is not None and profile.role is not Role.BASIC
+            and load().remember_days > 0)
+
+
+def _keep_default(profile: accounts.Profile | None, persistent: bool) -> bool:
+    """A remembered device of the Owner, an Admin or a User keeps itself unlocked unless
+    turned off (today's behaviour: a remembered device never idle-locked); Basic never."""
+    return bool(persistent) and keep_unlocked_allowed(profile)
+
+
+def _iso(ts: float) -> str:
+    from datetime import UTC, datetime
+    return datetime.fromtimestamp(ts, UTC).isoformat(timespec="seconds")
+
+
+def _wall(iso: str | None) -> float | None:
+    if not iso:
+        return None
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(str(iso)).timestamp()
+    except ValueError:
+        return None
+
+
+def _held_live(s: _Session) -> bool:
+    return s.locked_at is not None and (time.time() - s.locked_at) <= HOLD_SECONDS
+
+
+def _dead(s: _Session, cfg: SecurityConfig, now: float) -> bool:
+    """Gone for good: invalid profile, a hold past its window, or idle past its idle window
+    AND the hold window (an idle session that nobody looked at is held, not dropped)."""
+    if not _session_valid(s):
+        return True
+    if s.locked_at is not None:
+        return not _held_live(s)
+    if _exempt(s) or (s.persistent and cfg.remember_days > 0):
+        return False                      # a remembered device: the trust store decides
+    return (now - s.last_seen) > _session_timeout(s, cfg) + HOLD_SECONDS
+
+
+def _persist_row(s: _Session, **fields) -> None:
+    with contextlib.suppress(Exception):
+        accounts.update_session_row(_token_hash(s.token), **fields)
+
+
+def _hold_now(s: _Session, at: float | None = None) -> None:
+    """Lock (hold) a live session. Caller holds _lock."""
+    if s.locked_at is None:
+        s.locked_at = time.time() if at is None else at
+        _persist_row(s, locked_at=_iso(s.locked_at))
 
 
 def _session_valid(s: _Session) -> bool:
@@ -1005,9 +1119,8 @@ def _make_room(profile_id: str | None, keep: str | None) -> None:
     Raises :class:`TooManySessions` when nothing of the profile may go. Caller holds _lock."""
     cfg = load()
     now = time.monotonic()
-    # Expired idle sessions are dead whatever the caps say: drop them first.
-    for t in [t for t, s in _sessions.items()
-              if not s.persistent and (now - s.last_seen) > _session_timeout(s, cfg)]:
+    # Dead sessions (a hold past its window, idle past idle + hold) go first.
+    for t in [t for t, s in _sessions.items() if _dead(s, cfg, now)]:
         revoke(t)
 
     def _evict(pool: list[tuple[str, _Session]]) -> bool:
@@ -1053,7 +1166,9 @@ def issue_session(persistent: bool = False, user_agent: str = "", *,
         _make_room(profile_id, keep_token)
         _sessions[token] = _Session(token=token, last_seen=time.monotonic(),
                                     persistent=persistent, profile_id=profile_id,
-                                    device_id=device_id, epoch=prof.epoch if prof else 0)
+                                    device_id=device_id, epoch=prof.epoch if prof else 0,
+                                    keep_unlocked=_keep_default(prof, persistent),
+                                    row_seen=time.time(), issued=time.monotonic())
         if persistent:
             store = _trusted_store()
             now = time.time()
@@ -1071,68 +1186,237 @@ def issue_session(persistent: bool = False, user_agent: str = "", *,
                 log.error("could not write %s (%s) — session stays "
                           "non-persistent", TRUSTED_PATH, e)
                 _sessions[token].persistent = False
+                _sessions[token].keep_unlocked = False
                 persistent = False
         if profile_id:
             with contextlib.suppress(Exception):
                 accounts.record_session(_token_hash(token), profile_id, device_id,
-                                        persistent=persistent, user_agent=user_agent)
+                                        persistent=persistent, user_agent=user_agent,
+                                        epoch=prof.epoch if prof else 0,
+                                        keep_unlocked=_sessions[token].keep_unlocked)
     return token
 
 
 def get_session(token: str | None) -> _Session | None:
-    """Return a live session, or None if missing/expired. Expired ones are dropped.
+    """Return the live, UNLOCKED session for a cookie, or None.
 
-    Remembered devices: a persistent session is validated against the trusted
-    store instead of the idle timeout, and an unknown token that IS in the
-    store is re-minted (that's how a cookie survives a server restart). With
-    the feature disabled (remember_days == 0 — including the fail-closed
-    lockdown config) persistent sessions are demoted to normal idle-expiring
-    ones and the store is not consulted. A session also dies with its profile
+    None also for a held (locked) session: a locked device is nobody on every route until
+    POST /api/auth/resume (see :func:`get_held`). 4.4: a session that idles past its window
+    is HELD, not dropped, and stays resumable for :data:`HOLD_SECONDS`.
+
+    Remembered devices: a persistent session is validated against the trusted store, and
+    an unknown token is re-minted from the store or from its durable row (that is how a
+    cookie survives a server restart). With the remember feature disabled
+    (remember_days == 0, including the fail-closed lockdown config) persistent sessions
+    are demoted to normal idle-expiring ones. A session also dies with its profile
     (deleted, disabled, role or credential changed)."""
+    s = _resolve(token)
+    if s is None or s.locked_at is not None:
+        return None
+    return s
+
+
+def get_held(token: str | None) -> _Session | None:
+    """The held (locked, still resumable) session behind a cookie, or None."""
+    s = _resolve(token)
+    return s if s is not None and s.locked_at is not None else None
+
+
+def _drop(token: str) -> None:
+    _sessions.pop(token, None)
+    with contextlib.suppress(Exception):
+        accounts.drop_session(_token_hash(token))
+
+
+def _resolve(token: str | None) -> _Session | None:
+    """The session behind a cookie, live or held, after every expiry rule. Caller-safe."""
     if not token:
         return None
     cfg = load()
     with _lock:
         s = _sessions.get(token)
-        if s is not None and not _session_valid(s):
-            _sessions.pop(token, None)
-            with contextlib.suppress(Exception):
-                accounts.drop_session(_token_hash(token))
-            return None
-        if s is not None and not s.persistent:
-            if (time.monotonic() - s.last_seen) > _session_timeout(s, cfg):
-                _sessions.pop(token, None)
-                with contextlib.suppress(Exception):
-                    accounts.drop_session(_token_hash(token))
+        if s is None:
+            s = _remint(token, cfg)
+            if s is None:
                 return None
-            return s
-
+        if not _session_valid(s):
+            revoke(token)                      # with its trust: never re-minted later
+            return None
         days = cfg.remember_days
-        if s is not None:                      # persistent
+        if s.persistent:
             if days <= 0:
                 s.persistent = False           # feature off → normal session
-                return s
-            if _trusted_entry(token, days) is None:
-                _sessions.pop(token, None)     # trust revoked/expired
+                s.keep_unlocked = False
+            elif _trusted_entry(token, days) is None:
+                _drop(token)                   # trust revoked/expired
+                return None
+        if s.locked_at is not None:
+            if not _held_live(s):
+                revoke(token)                  # the hold ran out: gone, with its trust
                 return None
             return s
+        if not _exempt(s):
+            idle = time.monotonic() - s.last_seen
+            limit = _session_timeout(s, cfg)
+            if idle > limit:
+                if idle > limit + HOLD_SECONDS:
+                    revoke(token)
+                    return None
+                # Idle: LOCK it (resumable with its credential), never just drop it.
+                _hold_now(s, at=time.time() - (idle - limit))
+        return s
 
-        # Unknown token (e.g. after a restart): honour it only via the store.
-        if days <= 0:
-            return None
-        entry = _trusted_entry(token, days)
-        if entry is None:
-            return None
-        pid = entry.get("profile_id") or None
+
+def _remint(token: str, cfg: SecurityConfig) -> _Session | None:
+    """An unknown cookie (after a restart): rebuild its session from the trusted store or
+    its durable row. Caller holds _lock. Never resurrects a session whose profile epoch
+    moved (a credential/role change), whose profile is gone or disabled, or whose row was
+    written before 4.4 (epoch NULL) unless it is a still-trusted remembered device."""
+    th = _token_hash(token)
+    row = None
+    with contextlib.suppress(Exception):
+        row = accounts.get_session_row(th)
+    days = cfg.remember_days
+    entry = _trusted_entry(token, days) if days > 0 else None
+    now_wall = time.time()
+    if entry is not None:
+        pid = entry.get("profile_id") or (row or {}).get("profile_id") or None
         if pid is None:
             owner = accounts.get_owner()
             pid = owner.id if owner is not None else None
         prof = accounts.get_profile(pid) if pid else None
         if pid and (prof is None or prof.disabled):
             return None
+        if row is not None and row.get("epoch") is not None and prof is not None \
+                and int(row["epoch"]) != prof.epoch:
+            return None
         s = _Session(token=token, last_seen=time.monotonic(), persistent=True,
-                     profile_id=pid, epoch=prof.epoch if prof else 0)
+                     profile_id=pid, epoch=prof.epoch if prof else 0,
+                     keep_unlocked=(bool(row["keep_unlocked"]) if row is not None
+                                    and row.get("epoch") is not None
+                                    else _keep_default(prof, True)),
+                     locked_at=_wall(row.get("locked_at")) if row is not None else None,
+                     row_seen=now_wall)
+        if s.keep_unlocked and not keep_unlocked_allowed(prof):
+            s.keep_unlocked = False
         _sessions[token] = s
+        return s
+    if row is None or row.get("persistent") or row.get("epoch") is None:
+        return None
+    prof = accounts.get_profile(row.get("profile_id"))
+    if prof is None or prof.disabled or int(row["epoch"]) != prof.epoch:
+        return None
+    seen = _wall(row.get("last_seen"))
+    if seen is None:
+        return None
+    idle = max(0.0, now_wall - seen)
+    s = _Session(token=token, last_seen=time.monotonic() - idle, persistent=False,
+                 profile_id=prof.id, device_id=row.get("device_id"), epoch=prof.epoch,
+                 locked_at=_wall(row.get("locked_at")), row_seen=now_wall)
+    if s.locked_at is None and idle > _session_timeout(s, cfg) + HOLD_SECONDS:
+        return None
+    _sessions[token] = s
+    return s
+
+
+def hold(token: str | None) -> bool:
+    """LOCK this cookie's session (manual Lock or the tab's idle lock): it identifies nobody
+    from now on and can be resumed only with its profile's credential. True if held."""
+    with _lock:
+        s = _resolve(token)
+        if s is None:
+            return False
+        _hold_now(s)
+        return True
+
+
+def unhold(token: str | None) -> _Session | None:
+    """Resume a held session (the caller verified the credential). Returns it, unlocked."""
+    with _lock:
+        s = get_held(token)
+        if s is None:
+            return None
+        s.locked_at = None
+        s.last_seen = time.monotonic()
+        s.row_seen = time.time()
+        _persist_row(s, locked_at=None, last_seen=_iso(s.row_seen))
+        return s
+
+
+def has_credential(profile: accounts.Profile | None) -> bool:
+    if profile is None:
+        return False
+    if profile.protected:
+        return load().pin_set or profile.has_password
+    return profile.has_pin or profile.has_password
+
+
+_DUMMY_HASH: str | None = None
+
+
+def _dummy_hash() -> str:
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        _DUMMY_HASH = credentials.hash_secret(secrets.token_urlsafe(16))
+    return _DUMMY_HASH
+
+
+def verify_any(profile: accounts.Profile | None, secret: str) -> bool:
+    """The resume check: the profile's PIN (the install PIN for the protected Admin) or its
+    password. One call = one attempt for the throttle. 4.4 review: it always does the SAME
+    work (one PBKDF2 and two argon2id derivations, against dummies where the profile has
+    no such secret), so the time it takes says nothing about whose session is held."""
+    secret = str(secret or "")[:256]
+    cfg = load()
+    salt = cfg.salt or "00" * 16
+    pin_cand = _hash_pin(secret, salt, cfg.iterations)
+    ok_install = bool(profile is not None and profile.protected and cfg.pin_set
+                      and cfg.pin_hash and hmac.compare_digest(pin_cand, cfg.pin_hash))
+    pin_stored = (profile.pin_hash if profile is not None and not profile.protected
+                  and profile.has_pin else None)
+    pw_stored = profile.password_hash if profile is not None and profile.has_password else None
+    ok_pin = credentials.verify_secret(secret, pin_stored or _dummy_hash()) and bool(pin_stored)
+    ok_pw = credentials.verify_secret(secret, pw_stored or _dummy_hash()) and bool(pw_stored)
+    if not secret or profile is None:
+        return False
+    if ok_pin or ok_pw:
+        # the usual rehash-on-the-way-through for an old-cost hash
+        with contextlib.suppress(Exception):
+            verify_profile_secret(profile, "pin" if ok_pin else "password", secret)
+    return ok_install or ok_pin or ok_pw
+
+
+def set_keep_unlocked(token: str | None, on: bool, user_agent: str = "") -> _Session | None:
+    """Turn "Keep this device unlocked" on or off for this cookie's live session. ON makes a
+    non-remembered session remembered too. Returns the session, or None when refused
+    (no live session, a Basic profile, or remembering is off install-wide)."""
+    with _lock:
+        s = get_session(token)
+        if s is None:
+            return None
+        prof = accounts.get_profile(s.profile_id) if s.profile_id else accounts.get_owner()
+        if not on:
+            s.keep_unlocked = False
+            _persist_row(s, keep_unlocked=False)
+            return s
+        if not keep_unlocked_allowed(prof):
+            return None
+        if not s.persistent:
+            store = _trusted_store()
+            now = time.time()
+            store[_token_hash(token)] = {"created": now, "last_seen": now,
+                                         "ua": str(user_agent)[:160],
+                                         "profile_id": s.profile_id or ""}
+            while len(store) > _MAX_TRUSTED:
+                store.pop(min(store, key=lambda h: store[h]["last_seen"]))
+            try:
+                _save_trusted()
+            except OSError:
+                store.pop(_token_hash(token), None)
+                return None
+            s.persistent = True
+        s.keep_unlocked = True
+        _persist_row(s, keep_unlocked=True, persistent=True)
         return s
 
 
@@ -1142,9 +1426,13 @@ def touch_session(token: str | None) -> None:
         return
     with _lock:
         s = _sessions.get(token)
-        if s is None:
+        if s is None or s.locked_at is not None:    # a held session is nobody's use
             return
         s.last_seen = time.monotonic()
+        wall = time.time()
+        if wall - s.row_seen >= _ROW_TOUCH_MIN:
+            s.row_seen = wall
+            _persist_row(s, last_seen=_iso(wall))
         if s.persistent:
             # Slide the day-scale window too, throttled to ~hourly writes.
             e = _trusted_store().get(_token_hash(token))
@@ -1205,13 +1493,14 @@ def purge_expired() -> int:
     cfg = load()
     now = time.monotonic()
     with _lock:
-        dead = [t for t, s in _sessions.items()
-                if not _session_valid(s)
-                or (not s.persistent and (now - s.last_seen) > _session_timeout(s, cfg))]
+        dead = [t for t, s in _sessions.items() if _dead(s, cfg, now)]
         for t in dead:
-            _sessions.pop(t, None)
-            with contextlib.suppress(Exception):
-                accounts.drop_session(_token_hash(t))
+            revoke(t)
+        # Idle sessions nobody has looked at since their window ran out: held now.
+        for s in _sessions.values():
+            if (s.locked_at is None and not _exempt(s)
+                    and (now - s.last_seen) > _session_timeout(s, cfg)):
+                _hold_now(s, at=time.time() - ((now - s.last_seen) - _session_timeout(s, cfg)))
         # Prune remembered devices that fell off their sliding window (lazy
         # backstop — get_session drops them on contact anyway).
         days = cfg.remember_days

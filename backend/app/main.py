@@ -8395,8 +8395,40 @@ async def push_unsubscribe(request: Request):
     return {"ok": True, "removed": push.unsubscribe(key)}
 
 
+def _resumable(request: Request) -> bool:
+    """4.4 (docs/design/lock-resume.md): does THIS browser hold a locked session that may be
+    resumed now? One bit and nothing else: never whose, never why not. A hold whose profile
+    has no credential is never offered (anyone could pick that profile anyway, and offering it
+    would say "no PIN"); a hold at its wrong-attempt limit, or whose resume bucket is in a
+    cooldown, is simply not offered."""
+    held = auth.get_held(request.cookies.get(COOKIE_NAME))
+    if held is None or held.resume_fails >= auth.RESUME_MAX_FAILS:
+        return False
+    prof = (accounts.get_profile(held.profile_id) if held.profile_id else accounts.get_owner())
+    if not auth.has_credential(prof):
+        return False
+    dev, ip = people_api._client_keys(request)
+    local, _glob = auth.throttle_state(dev, auth.RESUME_SUBJECT, ip)
+    return local <= 0
+
+
+def _slide_cookie(resp: JSONResponse, request: Request, sess) -> JSONResponse:
+    """4.4: a remembered device's cookie carries Max-Age = remember days from its LAST use,
+    not from its sign-in (the server-side trust already slides): regular use never cuts it
+    off on day 30."""
+    if sess is not None and sess.persistent and auth.remember_days() > 0:
+        people_api._set_cookie(resp, request, COOKIE_NAME, sess.token,
+                               auth.remember_days() * 86400)
+    return resp
+
+
 @app.get("/api/auth/status")
 async def auth_status(request: Request):
+    return _slide_cookie(JSONResponse(await _auth_status_doc(request)), request,
+                         _session_of(request))
+
+
+async def _auth_status_doc(request: Request) -> dict:
     cfg = auth.load()
     pr = policy.of(request).principal
     claimed = policy.claimed(cfg)
@@ -8452,6 +8484,12 @@ async def auth_status(request: Request):
         # but the device COUNT is only revealed to a signed-in session.
         "remember_days": cfg.remember_days,
         "remembered": bool(sess and sess.persistent),
+        # 4.4: "Keep this device unlocked" (exempt from the idle lock) and whether this
+        # profile may turn it on; "resumable" = this browser holds a locked session that a
+        # credential can resume (one bit: never whose).
+        "keep_unlocked": bool(sess and auth.idle_timeout_seconds(sess) == 0),
+        "keep_unlocked_allowed": bool(sess and auth.keep_unlocked_allowed(prof)),
+        "resumable": (not sess) and _resumable(request),
         "trusted_devices": auth.trusted_count() if authed and pr.is_admin else 0,
         # Which optional subsystems this build has switched on. The client used
         # to discover these by CALLING them and catching the 404, which works
@@ -8522,20 +8560,126 @@ async def auth_unlock(request: Request, payload: dict = Body(...)):
 
 @app.post("/api/auth/lock")
 async def auth_lock(request: Request):
-    """Lock = sign out on this device and land on the lock target (4.0, BUILD-PLAN-v2 §1.4):
-    the default profile (``lock_target: default_profile``) or the profile list. The push
-    subscription of the session being closed goes with it (a signed-out device pings nobody)."""
+    """Lock this device and land on the lock target (4.0, BUILD-PLAN-v2 §1.4): the default
+    profile (``lock_target: default_profile``) or the profile list.
+
+    4.4 (docs/design/lock-resume.md): the session is HELD, not ended: from now on it is nobody
+    on every route, and only POST /api/auth/resume with its profile's credential brings it
+    back (for auth.HOLD_SECONDS). The cookie stays so the browser can resume. The push
+    subscription goes (a locked device pings nobody). ``{"reason": "idle"}`` (a tab's idle
+    timer) is refused while the session was used inside its idle window, by another tab or
+    window of the same browser for instance, or keeps this device unlocked; a manual lock is
+    never refused."""
     old = request.cookies.get(COOKIE_NAME)
+    reason = ""
+    with contextlib.suppress(Exception):
+        body = await request.json()
+        if isinstance(body, dict):
+            reason = str(body.get("reason") or "")
+    if reason == "idle":
+        live = auth.get_session(old)
+        if live is not None and not auth.idle_due(live):
+            return JSONResponse({"ok": False, "active": True,
+                                 "idle_timeout_seconds": auth.idle_timeout_seconds(live)})
     if old:
         with contextlib.suppress(Exception):
             push.rebind(auth.device_hash(old), None, None)
-    auth.revoke(old)
+    auth.hold(old)
     cfg = auth.load()
     landed = policy.unsigned(cfg)
-    resp = JSONResponse({"ok": True, "lock_target": cfg.lock_target,
+    return JSONResponse({"ok": True, "lock_target": cfg.lock_target,
                          "landed": people_api.public_profile(landed.profile) if landed else None})
-    resp.delete_cookie(COOKIE_NAME, path="/")
-    return resp
+
+
+@app.post("/api/auth/resume")
+async def auth_resume(request: Request):
+    """4.4: resume this browser's held (locked) session with its profile's PIN or password.
+
+    The answer never names the profile before success: a wrong secret and "nothing to
+    resume" get the same 401 body, and the check always does the same work (auth.verify_any).
+    Attempts are throttled in their own bucket (device + "resume", the address bucket and the
+    global ceiling, same thresholds as a sign-in) and never in the held profile's own bucket,
+    so the lock screen cannot be used to find out whose session it is. At
+    auth.RESUME_MAX_FAILS wrong secrets the hold is dropped for good."""
+    tok = request.cookies.get(COOKIE_NAME)
+    secret = ""
+    with contextlib.suppress(Exception):
+        body = await request.json()
+        if isinstance(body, dict):
+            secret = str(body.get("secret") or "")[:256]
+    held = auth.get_held(tok)
+    prof = None
+    if held is not None:
+        prof = accounts.get_profile(held.profile_id) if held.profile_id else accounts.get_owner()
+    offer = (held is not None and prof is not None and auth.has_credential(prof)
+             and held.resume_fails < auth.RESUME_MAX_FAILS)
+    ok = people_api.guarded(request, "resume", auth.RESUME_SUBJECT,
+                            lambda: auth.verify_any(prof if offer else None, secret) and offer)
+    if isinstance(ok, JSONResponse):
+        return ok
+    if not ok:
+        if held is not None:
+            held.resume_fails += 1
+            if held.resume_fails >= auth.RESUME_MAX_FAILS:
+                auth.revoke(tok)
+        accounts.log_activity("login_failed", subject=people_api._client_keys(request)[1],
+                              detail="resume", category="audit")
+        return JSONResponse({"detail": "Incorrect PIN or password",
+                             "error": errors.envelope("incorrect_credential",
+                                                      message="Incorrect PIN or password")},
+                            status_code=401)
+    s = auth.unhold(tok)
+    if s is None:                       # it expired between the check and now
+        return JSONResponse({"detail": "Incorrect PIN or password",
+                             "error": errors.envelope("incorrect_credential",
+                                                      message="Incorrect PIN or password")},
+                            status_code=401)
+    accounts.log_activity("login", profile_id=prof.id if prof else None,
+                          subject=policy.request_quota_ip(request), detail="resume")
+    return _slide_cookie(JSONResponse({"ok": True, "resumed": True}), request, s)
+
+
+@app.post("/api/auth/keep-unlocked")
+async def auth_keep_unlocked(request: Request):
+    """4.4: "Keep this device unlocked" for the caller's own live session. ON exempts this
+    device from the idle lock and makes the session a remembered one if it was not (that
+    needs the profile's credential, through the normal throttle: a found unlocked tab must
+    not turn itself into 30 days of access; within auth.FRESH_SIGNIN_SECONDS of the sign-in
+    that minted the session it does not, which is the offer card after a sign-in). OFF never
+    needs one. Refused for Basic, for
+    the shared default profile (no session) and while remembering is off install-wide."""
+    tok = request.cookies.get(COOKIE_NAME)
+    sess = auth.get_session(tok)
+    if sess is None:
+        return JSONResponse({"detail": "Sign in first.",
+                             "error": errors.envelope("signin_required")}, status_code=401)
+    on, secret = False, ""
+    with contextlib.suppress(Exception):
+        body = await request.json()
+        if isinstance(body, dict):
+            on = body.get("on") is True
+            secret = str(body.get("secret") or "")[:256]
+    prof = accounts.get_profile(sess.profile_id) if sess.profile_id else accounts.get_owner()
+    if on and not auth.keep_unlocked_allowed(prof):
+        return JSONResponse({"detail": "This profile cannot keep a device unlocked.",
+                             "error": errors.envelope("permission_denied",
+                                                      message="This profile cannot keep a device unlocked.")},
+                            status_code=403)
+    if on and not sess.persistent and auth.has_credential(prof) and not auth.fresh_signin(sess):
+        ok = people_api.guarded(request, "unlock", prof.id if prof else "owner",
+                                lambda: prof is not None and auth.verify_any(prof, secret))
+        if isinstance(ok, JSONResponse):
+            return ok
+        if not ok:
+            return people_api._login_failed(request, prof.name if prof else "")
+    s = auth.set_keep_unlocked(tok, on, request.headers.get("user-agent") or "")
+    if s is None:
+        return JSONResponse({"detail": "Could not change this device.",
+                             "error": errors.envelope("permission_denied",
+                                                      message="Could not change this device.")},
+                            status_code=403)
+    return _slide_cookie(JSONResponse({"ok": True, "keep_unlocked": bool(s.keep_unlocked),
+                                       "remembered": bool(s.persistent)}), request, s)
 
 
 @app.post("/api/auth/remember-config")

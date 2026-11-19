@@ -252,8 +252,11 @@ def test_sessions_are_registered_and_forgotten(world, owner):
     world.login(c, profile_id=mia["id"])
     assert len(accounts.list_sessions(mia["id"])) == 1
     c.post("/api/auth/lock")
-    assert accounts.list_sessions(mia["id"]) == []
-    world.login(c, profile_id=mia["id"])
+    # 4.4: a lock HOLDS the session (resumable); its row stays, marked locked.
+    rows = accounts.list_sessions(mia["id"])
+    assert len(rows) == 1 and rows[0]["locked"]
+    world.login(c, profile_id=mia["id"])            # a new sign-in replaces the hold
+    assert len(accounts.list_sessions(mia["id"])) == 1
     assert owner.post(f"/api/people/{mia['id']}/sign-out").json()["sessions"] == 1
     assert accounts.list_sessions(mia["id"]) == []
 

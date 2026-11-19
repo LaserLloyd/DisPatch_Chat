@@ -583,7 +583,7 @@
     "unlock_sub": "Saisis le PIN pour te connecter",
     "clear": "Effacer",
     "backspace": "Effacer le dernier chiffre",
-    "remember": "Garder cet appareil connecté",
+    "remember": "Rester connecté et déverrouillé sur cet appareil",
     "submit": "Se connecter",
     "forgot": "PIN oublié ?",
     "cancel": "Annuler",
@@ -2847,5 +2847,26 @@
     "all_added_note": "Tous les bots de ce pack sont déjà ajoutés.",
     "list_aria": "Bots de {name}",
     "who_note": "Vous recevez votre propre copie de chaque nouveau bot. Pour en donner un à un autre profil, ouvrez ses Détails et utilisez Qui peut l'utiliser."
+  },
+  "lockr": {
+    "screen_label": "Verrouillé",
+    "go_main": "Aller au principal",
+    "choose": "Choisir un profil",
+    "others": "Autres profils",
+    "resume_title": "Reprendre la session précédente",
+    "field_label": "PIN ou mot de passe de la session précédente",
+    "pad_label": "Pavé numérique",
+    "abc": "ABC",
+    "abc_label": "Taper des lettres (pour un mot de passe)",
+    "resume": "Reprendre",
+    "keep_title": "Garder cet appareil déverrouillé",
+    "keep_hint": "S’ouvre directement sur votre profil et ne se verrouille jamais tout seul. Verrouillez-le vous-même en partant. Seulement pour un appareil que vous êtes seul à utiliser.",
+    "keep_on": "Cet appareil reste déverrouillé",
+    "keep_off": "Cet appareil se verrouille de nouveau s’il n’est pas utilisé",
+    "keep_failed": "Impossible de modifier cet appareil",
+    "keep_secret": "Saisissez votre PIN ou mot de passe pour garder cet appareil déverrouillé",
+    "keep_confirm": "Confirmer",
+    "offer_body": "Ouvrir désormais directement votre profil sur cet appareil, sans PIN ? Il reste déverrouillé jusqu’à ce que vous le verrouilliez. Vous pouvez le désactiver dans Réglages, Cet appareil.",
+    "offer_yes": "Garder déverrouillé"
   }
 }

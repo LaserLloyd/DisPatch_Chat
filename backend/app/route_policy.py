@@ -54,7 +54,9 @@ _r("GET", "/api/auth/me", public("who am I, what may I do - answers every caller
 _r("POST", "/api/auth/unlock", public("credential check; throttled per device, profile and address"))
 _r("POST", "/api/auth/login", public("credential check; throttled per device, profile and address"))
 _r("POST", "/api/auth/switch", public("quick profile switch; stepping up needs the target's credential"))
-_r("POST", "/api/auth/lock", public("dropping your own session needs no permission"))
+_r("POST", "/api/auth/lock", public("locking (holding) your own session needs no permission"))
+_r("POST", "/api/auth/resume", public("credential check for this browser's own held session; throttled in its own bucket, never names the profile"))
+_r("POST", "/api/auth/keep-unlocked", _R(P.USE_CHAT, note="YOUR OWN device's idle-lock exemption; turning it on for a non-remembered session needs your credential (throttled); refused for Basic"))
 _r("POST", "/api/auth/recover", public("recovery-code check; throttled"))
 _r("POST", "/api/auth/setup", public("first-run owner creation (loopback or setup token) / PIN change (session + current PIN) - decided in the handler"))
 _r("POST", "/api/image-jobs/{job_id}/callback", Requirement(

@@ -998,7 +998,14 @@ function makePane(rec) {
   p.openLink = el('a', { class: 'icon-btn ghost appwin-btn tool-open', target: '_blank', rel: 'noopener noreferrer', title: t('tools.open_tab'), 'aria-label': t('tools.open_tab') });
   p.openLink.append(spriteIcon('external-link', 18));
   rec.slot.append(p.upd, p.refreshBtn, p.openLink);
-  if (p.frame) p.frame.addEventListener('load', () => onPaneLoad(p));
+  if (p.frame) {
+    p.frame.addEventListener('load', () => onPaneLoad(p));
+    // 4.4 (docs/design/lock-resume.md): use of a tool window is use of the app. The pointer
+    // entering ANY tool's frame (a url tool, someone else's site, included) counts; what
+    // happens inside it is counted below per kind (app: its own events, static: its
+    // `dispatch:activity` message, url: focus moving into it).
+    p.frame.addEventListener('pointerenter', () => frameActivity());
+  }
   panes.set(rec.id, p);
   const tool = findTool(rec.id);
   if (tool) {
@@ -1638,6 +1645,7 @@ export function forwardAppFrame(frame) {
  *  state and (beside the chat) the chat's thread. */
 function onPaneLoad(p) {
   if (!p.frame || !p.frame.getAttribute('src')) return;
+  watchAppFrame(p);
   onFrameLoad(p);
   syncPane(p);
   pushToolState(p);
@@ -1728,6 +1736,52 @@ function onWindowMessage(ev) {
   // write under our title, hold Close behind a question or ask for attention.
   if (!p || !tool || !(isApp(tool) || tool.kind === 'static') || !stateOriginOk(tool, ev.origin)) return;
   winSetLive(p.id, msg.op, msg.op === 'attention' || msg.op === 'minimize' ? true : msg.value);
+}
+
+// ===================== Activity inside tool windows (4.4) =====================
+// The idle auto-lock listens on the shell's own window, and an iframe's keys and pointer
+// never reach it: ten minutes of typing in Image Studio looked idle and the device locked
+// under the person's fingers. Every kind of frame now reports use, throttled by the shell's
+// bumpIdle (deps.activity): nothing else is ever done with it.
+//   app     same origin, no sandbox: the shell listens on the frame's own window.
+//   static  sandboxed (opaque origin): it may post {type:'dispatch:activity'}; accepted only
+//           from the frame of a live window of a static tool, origin 'null'.
+//   url     someone else's site: only focus moving into its frame (and the pointer entering
+//           it, above). Its messages are never trusted to keep a session unlocked.
+const ACTIVITY_EVENTS = ['keydown', 'pointerdown', 'wheel', 'input', 'touchstart', 'scroll'];
+
+function frameActivity() {
+  if (deps && typeof deps.activity === 'function') deps.activity();
+}
+
+function watchAppFrame(p) {
+  const tool = findTool(p.id);
+  if (!isApp(tool) || !p.frame) return;
+  let w = null;
+  try { w = p.frame.contentWindow; void w.document; } catch { return; }   // not same-origin: skip
+  if (!w || w.__dispatchActivity) return;
+  try {
+    w.__dispatchActivity = true;
+    for (const ev of ACTIVITY_EVENTS) w.addEventListener(ev, frameActivity, { passive: true, capture: true });
+  } catch { /* a frame that went away mid-load */ }
+}
+
+function onActivityMessage(ev) {
+  const msg = ev.data;
+  if (!msg || typeof msg !== 'object' || msg.type !== 'dispatch:activity') return;
+  const p = paneBySource(ev.source);
+  const tool = p ? findTool(p.id) : null;
+  if (!p || !tool || tool.kind !== 'static' || ev.origin !== 'null') return;
+  frameActivity();
+}
+
+/** Focus moved from the shell into a tool's frame (the shell's window blurs and the
+ *  frame is the active element): a person clicked or tabbed into it. */
+function onShellBlur() {
+  setTimeout(() => {
+    const a = document.activeElement;
+    if (a && a.tagName === 'IFRAME' && [...panes.values()].some((p) => p.frame === a)) frameActivity();
+  }, 0);
 }
 
 // ===================== Tool layout state (static / url / app frames) =====================
@@ -2257,6 +2311,9 @@ export function wireTools(d) {
   window.addEventListener('message', onWindowMessage);
   // Every framed tool: its saved layout, on request and once per load.
   window.addEventListener('message', onToolStateMessage);
+  // 4.4: use inside a tool window keeps the idle lock away (see watchAppFrame).
+  window.addEventListener('message', onActivityMessage);
+  window.addEventListener('blur', onShellBlur);
   document.addEventListener('ui-theme-change', () => { for (const p of panes.values()) syncPane(p); });
   // The Tools popup: its keys, and a re-layout when the viewport crosses the
   // phone breakpoint (one button ⇄ tile grid). Any resize moves the anchor,

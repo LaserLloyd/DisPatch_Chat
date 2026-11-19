@@ -37,9 +37,14 @@ test('no decoy / Restricted / device-binding / companions code is left in the sh
 
 test('lock lands on the lock target: sign out, re-read the status, reboot (gate or shared landing)', () => {
   const fn = MAIN.slice(MAIN.indexOf('async function lockToTarget('), MAIN.indexOf('async function lockNow('));
-  assert.match(fn, /await api\.lock\(\)/);
+  // 4.4: the lock HOLDS the session (resumable), it does not end it; an idle lock asks first.
+  assert.match(fn, /await authPost\('\/api\/auth\/lock', \{ reason: reason \|\| 'manual' \}\)/);
+  assert.match(fn, /if \(r\.ok && r\.body && r\.body\.ok === false && r\.body\.active\) \{/);
+  assert.match(fn, /forgetHeldTraces\(\);/);
+  assert.match(fn, /if \(state\.auth\.resumable && showLockSplit\(\)\) return;/);
   assert.match(fn, /refreshAuthQuiet\(\)/);
   assert.match(fn, /await reboot\(\);/);
+  assert.doesNotMatch(fn, /api\.lock\(/);
   assert.match(fn, /if \(!await refreshAuthQuiet\(\)\) \{ state\.auth\.signedIn = false; state\.auth\.profile = null; \}/, 'fail closed when the status cannot be read');
   assert.match(MAIN, /const gateActive = \(\) => !!\(state\.auth\.claimed && !state\.auth\.signedIn && !state\.auth\.profile\);/);
   assert.match(MAIN, /if \(gateActive\(\)\) \{ enterGate\(\); return; \}\s+\/\/ Otherwise the app starts/);

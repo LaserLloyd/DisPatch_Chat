@@ -49,6 +49,7 @@ export const APP_KEYS = [
   'dispatch-palette',         // theme.js (Settings → Appearance → Theme)
   'dispatch-avatar-style',    // main.js (Settings → Appearance → Avatar style)
   'dispatch-lang',            // i18n.js
+  'dispatch-keep-unlocked-offered', // main.js (4.4: the one-time "Keep this device unlocked" offer was shown)
   'dispatch-pinned-settings', // pins.js (which settings are on the rail)
   // pins.js (default-on pins the user turned OFF — e.g. the 🎨 theme button).
   // Wiping it restores the shipped rail, which is what "keep nothing" means

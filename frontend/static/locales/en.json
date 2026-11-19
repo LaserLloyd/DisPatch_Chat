@@ -577,7 +577,7 @@
     "unlock_sub": "Enter the PIN to sign in",
     "clear": "Clear",
     "backspace": "Delete the last digit",
-    "remember": "Keep this device signed in",
+    "remember": "Keep this device signed in and unlocked",
     "submit": "Sign in",
     "forgot": "Forgot PIN?",
     "cancel": "Cancel",
@@ -2815,5 +2815,26 @@
     "minimized": "minimised, waiting at the bottom",
     "asleep_short": "Asleep",
     "asleep": "{name} was put to sleep to save memory. Open it to reload it."
+  },
+  "lockr": {
+    "screen_label": "Locked",
+    "go_main": "Go to main",
+    "choose": "Choose a profile",
+    "others": "Other profiles",
+    "resume_title": "Resume previous session",
+    "field_label": "PIN or password for the previous session",
+    "pad_label": "Number pad",
+    "abc": "ABC",
+    "abc_label": "Type letters (for a password)",
+    "resume": "Resume",
+    "keep_title": "Keep this device unlocked",
+    "keep_hint": "Opens straight into your profile and never locks itself. Lock it yourself when you leave it. Only for a device you alone use.",
+    "keep_on": "This device stays unlocked",
+    "keep_off": "This device locks itself again when idle",
+    "keep_failed": "Could not change this device",
+    "keep_secret": "Enter your PIN or password to keep this device unlocked",
+    "keep_confirm": "Confirm",
+    "offer_body": "Open straight into your profile on this device from now on, without a PIN? It stays unlocked until you lock it. You can turn this off in Settings, This device.",
+    "offer_yes": "Keep unlocked"
   }
 }

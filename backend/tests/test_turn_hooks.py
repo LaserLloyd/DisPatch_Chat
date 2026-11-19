@@ -759,7 +759,7 @@ def test_frames_are_redacted_the_instant_the_session_lapses(ext_env):
 
     c.portal.call(lambda: main.manager.broadcast(chunk("visible")))
     _settle(c)
-    auth._sessions.clear()                           # the session lapses
+    auth.hold(token)                                 # the session lapses (4.4: locked = held)
     c.portal.call(lambda: main.manager.broadcast(chunk("secret")))
     _settle(c)
     assert [f["text"] for f in got] == ["visible"]    # a non-safe bot's frame is dropped

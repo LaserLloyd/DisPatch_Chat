@@ -233,6 +233,10 @@ def session_response(request: Request, body: dict, profile: accounts.Profile | N
     sess = auth.get_session(token)
     remembered = bool(sess and sess.persistent)
     _rebind_push(old_token, token if remembered else None, profile)
+    # 4.4: a held (locked) session on this browser is replaced by this sign-in: only the most
+    # recently locked session is ever resumable, and its cookie is about to be overwritten.
+    if old_token and old_token != token and auth.get_held(old_token) is not None:
+        auth.revoke(old_token)
     if profile is not None:
         with contextlib.suppress(Exception):
             _claim_notices(profile.id, token)
