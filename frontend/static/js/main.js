@@ -9488,6 +9488,7 @@ async function resumeWith(secret) {
   hideLockSplit();
   cancelLocalWrites();
   try { await ensureLocalStore().wipeTier(TIER_FULL); } catch { /* the main profile's tier */ }
+  wipeStudioKeys();
   await refreshAuthQuiet();
   armSignInNotice();     // only dismisses the landing banner and any popup (it shows nothing)
   landHome();
