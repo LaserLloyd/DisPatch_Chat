@@ -7,21 +7,28 @@
 //    a new feature that is not needed for the first screen belongs behind import().
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, statSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
-import { STATIC, startupGraph, stale } from '../scripts/startup-graph.mjs';
+
+// The generator lives in frontend/scripts/, which the deploy does not copy: in an
+// installed tree (no scripts/) the generator-backed checks skip, the rest still run.
+const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'startup-graph.mjs');
+const GEN = existsSync(SCRIPT) ? await import('../scripts/startup-graph.mjs') : null;
+const STATIC = join(dirname(fileURLToPath(import.meta.url)), '..', 'static');
+const skip = GEN ? false : 'frontend/scripts/ is not in this tree';
 
 // Measured 2026-11-19 at 71 modules, 1.89 MB raw, 0.62 MB gzip (main.js included).
 // Raise only with a reason in docs/design/first-load.md.
 const BUDGET = { modules: 72, rawBytes: 1_950_000, gzipBytes: 640_000 };
 
-test('the generated version table is up to date', () => {
-  assert.deepEqual(stale(), [], 'run: node frontend/scripts/startup-graph.mjs');
+test('the generated version table is up to date', { skip }, () => {
+  assert.deepEqual(GEN.stale(), [], 'run: node frontend/scripts/startup-graph.mjs');
 });
 
-test('the startup module graph stays inside its budget', () => {
-  const files = ['/static/js/main.js', ...startupGraph().map((m) => m.path)];
+test('the startup module graph stays inside its budget', { skip }, () => {
+  const files = ['/static/js/main.js', ...GEN.startupGraph().map((m) => m.path)];
   let raw = 0;
   let gz = 0;
   for (const p of files) {
