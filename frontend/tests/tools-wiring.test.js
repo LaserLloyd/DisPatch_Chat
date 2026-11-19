@@ -214,7 +214,7 @@ test('tool tiles are bot-shaped themed tiles, not hard-coded hue blocks', () => 
 const SW = read('sw.js');
 const REPO = join(STATIC, '..', '..');
 
-test('the sw.js CACHE is local-chat-v228 (lock and resume: split lock screen, keep unlocked)', () => {
+test('the sw.js CACHE is local-chat-v229 (first-load round: deferred registration, revalidated versioned precache)', () => {
   const m = /const CACHE = '([^']+)'/.exec(SW);
   assert.ok(m, 'sw.js must declare CACHE');
   // v181: round-3 fixes (a later deep link wins over one still mounting; backups-card notes).
@@ -291,7 +291,7 @@ test('the sw.js CACHE is local-chat-v228 (lock and resume: split lock screen, ke
   // v168: ForgeUI 1.2.0 vendored whole (ui-components + locales join SHELL; dispatch-extra.css).
   // The shell is cached by PATH, so an installed client keeps all of the old
   // shell without this bump. If you bump again, bump here too.
-  assert.equal(m[1], 'local-chat-v228');
+  assert.equal(m[1], 'local-chat-v229');
 });
 
 test('js/app-sdk.js is precached; the old Job Board modules are not', () => {
