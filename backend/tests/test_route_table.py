@@ -101,7 +101,9 @@ def test_requirements_are_well_formed():
 def test_state_changing_routes_are_never_public_without_a_stated_reason():
     """The only PUBLIC mutations are the sign-in family and the rig's callback."""
     allowed = {"/api/auth/unlock", "/api/auth/login", "/api/auth/switch", "/api/auth/lock",
-               "/api/auth/recover", "/api/auth/setup", "/api/image-jobs/{job_id}/callback"}
+               "/api/auth/recover", "/api/auth/setup", "/api/image-jobs/{job_id}/callback",
+               # 4.4: a credential check for this browser's own held session (sign-in family)
+               "/api/auth/resume"}
     for (m, t), req in route_policy.declared().items():
         if req.public and m in ("POST", "PUT", "PATCH", "DELETE"):
             assert t in allowed, f"{m} {t} is PUBLIC; if that is right, add it to this allow-list"

@@ -1098,7 +1098,7 @@ def _db_retry(fn, *args, **kw) -> bool:
         try:
             fn(*args, **kw)
             return True
-        except Exception as e:  # noqa: BLE001 - sqlite busy / locked / io
+        except Exception as e:  # sqlite busy / locked / io
             if i == 2:
                 log.error("session row write failed (%s): %s", getattr(fn, "__name__", "?"), e)
             else:
