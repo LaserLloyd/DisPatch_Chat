@@ -59,7 +59,7 @@
          viewer, and the server refuses its routes to everyone else. -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
-    script-src 'self' 'sha256-fOcZiNX5zINBrez16W209dN/kABWeXQFS78UGnrDO4U=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-smnZXf5LCCUarhFqEYhDX9TJKEB5PkNgBpsrJo4mgW8=' 'sha256-VAUuBszPljObHfD22v+D5EbKZ+vMiGgF9gykTACmWKs=';
+    script-src 'self' 'sha256-fOcZiNX5zINBrez16W209dN/kABWeXQFS78UGnrDO4U=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-smnZXf5LCCUarhFqEYhDX9TJKEB5PkNgBpsrJo4mgW8=' 'sha256-eM5N2jbMhnGWO7vBpdZ0hu363EPK8NZfVEEGiJO5bfs=';
     style-src 'self';
     img-src 'self' data: blob:;
     media-src 'self' blob:;
@@ -1244,6 +1244,8 @@
         })();
       };
       whenBooted(() => {
+      // Privacy mode may have been switched on while the app was booting.
+      try { if (localStorage.getItem('dispatch-privacy') === '1') return; } catch (e) {}
       // scope '/' — the worker file lives under /static/ but must control the
       // document at /. Paired with the Service-Worker-Allowed: / response header
       // the backend sends for /static/sw.js. Without both, the SW registered but

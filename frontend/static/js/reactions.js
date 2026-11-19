@@ -32,6 +32,8 @@ const R = {
   canGenerate: false,
   pool: { remaining: 0 },     // rotating one-shot batch
   reactionBots: [],           // bot ids allowed to carry reactions
+  gen: 0,                     // bumped by resetReactions: an older fetch's answer is dropped
+  fetched: false,             // the pack (and the tuned overlay settings) arrived for this profile
   queue: [],              // pending events, oldest first
   active: null,           // { event, hideTimer, startedAt, node }
   seen: new Set(),        // event_ids already shown (WS resend / double-tab guard)
@@ -65,9 +67,13 @@ export function initReactions(next) {
 export async function loadReactions(force = false) {
   if (R.loaded && !force) return R;
   if (R.loading) return R.loading;
+  // A fetch still in flight when the profile changes (resetReactions) must not land on
+  // the next profile: its answer is the previous profile's pack.
+  const gen = R.gen;
   R.loading = (async () => {
     try {
       const r = await api.reactions();
+      if (gen !== R.gen) return R;
       R.items = r.reactions || [];
       R.settings = r.settings || R.settings;
       R.canManage = !!r.can_manage;
@@ -78,10 +84,9 @@ export async function loadReactions(force = false) {
       R.fetched = true;
     } catch {
       // A locked/offline client just gets an empty pack.
-      R.items = [];
-      R.loaded = true;
+      if (gen === R.gen) { R.items = []; R.loaded = true; }
     } finally {
-      R.loading = null;
+      if (gen === R.gen) R.loading = null;
     }
     return R;
   })();
@@ -90,6 +95,8 @@ export async function loadReactions(force = false) {
 
 // Called on sign-in and sign-out: the visible pack can differ per profile.
 export function resetReactions() {
+  R.gen += 1;
+  R.loading = null;
   R.loaded = false;
   R.fetched = false;
   R.items = [];

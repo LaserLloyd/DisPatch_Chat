@@ -2,7 +2,7 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v229';  // v229: first-load round (docs/design/first-load.md) - the worker registers after boot instead of during parsing, precaches each versioned file at the exact ?v= URL the page used (an HTTP-cache hit, not a second download; generated VERSIONS table, frontend/scripts/startup-graph.mjs) and unversioned files with no-cache (a 304 when unchanged) instead of cache: 'reload', answers a file at the version it precached from its own cache with no network, and never writes another version under that path; the reaction pack is no longer fetched at every start (main.js?v=194->195, reactions.js?v=32->33), index.html (deferred registration, CSP hash).
+const CACHE = 'local-chat-v229';  // v229: first-load round (docs/design/first-load.md) - the worker registers after boot instead of during parsing, precaches each versioned file at the exact ?v= URL the page used (generated VERSIONS table, frontend/scripts/startup-graph.mjs), every entry revalidated with no-cache (a 304 when the page just fetched it) instead of cache: 'reload' on bare paths (a second full download), answers a file at the version it precached from its own cache with no network, and never writes another version under that path; the reaction pack is no longer fetched at every start (main.js?v=194->195, reactions.js?v=32->33), index.html (deferred registration, CSP hash).
 // v228: lock and resume (docs/design/lock-resume.md) - a lock HOLDS the session and a browser that holds one gets the split lock screen (main profile on top, an anonymous Resume previous session pad below; new js/lock-split.js joins SHELL), Settings -> This device gains Keep this device unlocked (+ a one-time offer after a sign-in), a phone waking offline keeps its cover and retries instead of signing out, use inside a tool window (app frames, static tools' dispatch:activity, focus into a url frame) re-arms the idle lock (tools.js?v=28->29, privacy.js?v=23->24 wipes the offer flag and its importer pins.js?v=29->30, their importer main.js?v=193->194), app.css?v=129->130, index.html, locales lockr.* + lock.remember.
 // v227: Image Studio keeps its form on the server per profile (no draft stays in the browser after a switch, lock or sign-out) and paid picture providers have a daily spend cap with an 80% notice and today's use in Settings (studio.js?v=31->32, studio-logic.js?v=15->16, privacy.js?v=22->23 and importer pins.js?v=28->29, integrations.js?v=9->10 and importers llm.js?v=19->20, plugins.js?v=27->28, main.js?v=192->193, index.html, locales spend.*, integrations.spend_*). v226: tool windows fix round - the built-in panes (Harness, StudioForge, Mail, Clients) and every add-on pane live in tool windows too (one per add-on, its tools as tabs); pills keep first-open order, scroll sideways on a phone and close only by an upward drag or the X; a phone sheet sits on a solid tray strip with the tab bar hidden; floats, full windows and sheets stop above the tray wherever it is; a dock without room for the thread list gets a Show chat list button; a phone chat header gets a Tools button; finished-while-minimised tints the pill and survives a reload; unloaded pills say Asleep and typed text is spared (5 live pages on a desktop); a requested size wins up to a margin; below 1600 px a tool that named no layout docks (appwin-state.js?v=1->2 and its importer appwin.js?v=1->2 and its importer tools.js?v=27->28 and its importer main.js?v=191->192, app.css?v=128->129, index.html, locales win.asleep*).
 // v225: tool windows - every app / static / url tool opens in a window that floats, docks left or right beside the chat (draggable divider), fills the screen or (phone) is a sheet; Back to chat turns it into a pill in a tray above the composer and keeps its page alive (new js/appwin.js + js/appwin-state.js join SHELL, js/toolsplit.js leaves it; tools.js?v=26->27, app-sdk.js?v=7->8 (the win SDK) and importers ext-sdk.js?v=26->27, main.js, Image Studio studio.js?v=30->31, Job Board board.js / thread.js; privacy.js?v=21->22 (dispatch-appwin: keys wiped) and importers pins.js?v=27->28, main.js?v=190->191, app.css?v=127->128, index.html, locales win.*).
@@ -542,24 +542,22 @@ const VERSIONS = {
 
 // Where the install step fetches a SHELL entry from, and how.
 //
-// A versioned file is fetched at the EXACT URL the page uses (`main.js?v=194`), with the
-// default cache mode: those URLs are immutable (the server says so, and the ?v= moves
-// whenever the bytes do), so the copy the page itself just downloaded is reused from the
-// HTTP cache instead of crossing the network a second time. That second download used to
-// be most of the bytes of a first visit and of the first open after every deploy, on the
-// same slow link the page was booting over.
+// A versioned file is fetched at the EXACT URL the page uses (`main.js?v=194`): the copy
+// the page itself just downloaded sits in the HTTP cache under that URL, so this costs a
+// 304, not a second download. That second download used to be most of the bytes of a
+// first visit and of the first open after every deploy, on the same slow link the page
+// was booting over (cache: 'reload' on bare paths, which the page never uses).
 //
-// An unversioned file (locales, the theme folder, icons, '/') is fetched with
-// cache: 'no-cache': always revalidated with the server, never trusted from the HTTP
-// cache (a phone that heuristically cached the old pufferfish icon-192.png under its
-// bare URL put it straight back into every new CACHE, v204), but a file that did not
-// change costs a 304, not its whole body.
+// Every entry is fetched with cache: 'no-cache', i.e. REVALIDATED with the server and
+// never trusted blindly from the HTTP cache: a copy picked up while a deploy was half
+// written (or an old file answered under a new ?v=) is replaced here instead of being
+// pinned into the worker for the life of this CACHE, and a phone that heuristically
+// cached the old pufferfish icon-192.png under its bare URL cannot put it back (v204).
 //
-// Either way the entry is STORED under its bare pathname, the key the fetch handler
-// reads and writes.
+// The entry is STORED under its bare pathname, the key the fetch handler reads.
 function precacheRequest(path) {
   const v = VERSIONS[path];
-  return v ? new Request(`${path}?v=${v}`) : new Request(path, { cache: 'no-cache' });
+  return new Request(v ? `${path}?v=${v}` : path, { cache: 'no-cache' });
 }
 
 self.addEventListener('install', (e) => {

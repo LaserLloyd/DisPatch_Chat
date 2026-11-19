@@ -48,10 +48,10 @@ test('index.html does not modulepreload the whole graph (measured: slower warm o
   assert.ok(n <= 3, `${n} modulepreload links`);
 });
 
-test('the worker precaches versioned files at their page URL and never with cache: reload', () => {
+test('the worker precaches at the page URL, revalidated, never with cache: reload', () => {
   const sw = readFileSync(join(STATIC, 'sw.js'), 'utf8');
-  assert.match(sw, /new Request\(`\$\{path\}\?v=\$\{v\}`\)/);
-  assert.match(sw, /new Request\(path, \{ cache: 'no-cache' \}\)/);
+  // The page's own URL (a 304 against the copy it just fetched), always revalidated.
+  assert.match(sw, /new Request\(v \? `\$\{path\}\?v=\$\{v\}` : path, \{ cache: 'no-cache' \}\)/);
   assert.doesNotMatch(sw, /\{ cache: 'reload' \}/);
   // Stored under the bare path: the key the fetch handler reads for the offline fallback.
   assert.match(sw, /c\.put\(path, res\)/);
@@ -63,4 +63,6 @@ test('the worker registers after boot, not during parsing', () => {
   const j = html.indexOf('whenBooted(() => {');
   assert.ok(j > 0 && j < i, 'register() must run inside whenBooted()');
   assert.match(html, /window\.__bootDone \|\| Date\.now\(\) - t0 > 20000/);
+  // Privacy mode switched on during boot still keeps the worker out.
+  assert.ok(html.indexOf("localStorage.getItem('dispatch-privacy') === '1') return;") > j);
 });
