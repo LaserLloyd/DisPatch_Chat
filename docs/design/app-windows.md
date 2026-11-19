@@ -105,7 +105,9 @@ restores the one that exists). States:
   Swiping the handle/title down ≥ 96 px minimises (the ⌄ button is the tap
   alternative). The phone's **Back** minimises the sheet (Android bubble rule).
 * Opening a tool from the phone's Tools sheet never changes the page underneath
-  (Bots / threads / a chat), so Back to chat lands where the user was.
+  (Bots / threads / a chat). The **⌄ Back to chat** button means it: when a chat
+  is open it comes up under the pill (headless check found the label lying
+  when the tool was opened from the bot list). The system Back only steps back.
 
 ### The pill tray
 
@@ -234,7 +236,8 @@ every other app message. Text is drawn with `textContent`.
 Existing messages keep working: `dispatch:close` (closes, no confirm — the app
 asked), `dispatch:set-title`, `dispatch:open-thread` (opens the thread in the chat
 and **minimises** the window on a phone or when Full; beside a float/dock the
-window stays), `dispatch:lightbox`, `dispatch:toast`, `dispatch:open-settings`,
+window stays; obeyed only from the window on screen — a pill cannot switch the
+chat unasked), `dispatch:lightbox`, `dispatch:toast`, `dispatch:open-settings`,
 `dispatch:tool-state`. `dispatch:active-thread` now goes to the visible window
 when it is floating or docked (it went to the split pane before).
 
