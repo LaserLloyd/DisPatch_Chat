@@ -29,8 +29,8 @@ import {
   activeModel, isH3Model, keepBrowsePicks, modelCaps, modelPromptMax, modelsNote, refreshSummary,
   stepIndex, wheelShouldChain, canScroll, INNER_SCROLLPORTS,
   draftKey, serializeDraft, parseDraft, resolveDraft, inflightExtra, pollShouldContinue, INFLIGHT_POLL_MS,
-  lastToDraft, lastDiffers, lastPreview,
-} from './studio-logic.js?v=15';
+  lastToDraft, lastDiffers, lastPreview, spendNotice, spendAmount,
+} from './studio-logic.js?v=16';
 import { installExpiredImages } from '/static/js/media-expired.js?v=1';
 
 export const API = '/api/apps/imagestudio';
@@ -62,6 +62,8 @@ const S = {
   profileKey: '',           // GET /state profile_key: the draft is read and written under it, only once /state answered
   draftReady: false,        // the draft was applied: from now on the form is saved
   draftDirty: false,        // the user changed the form here: only then is a draft written
+  draftBusy: false,         // a draft request is in flight (one at a time; the newest form wins)
+  draftWant: null,          // {body|null, leaving}: the newest form still to send (null body = drop the draft)
   baseline: '',             // the form's serialised defaults: a form equal to it stores no draft
   winBusy: 0,            // the last busy count told to the tool window
   poll: { timer: null, since: 0 },   // pictures the server is still making (not started by this page)
@@ -73,10 +75,14 @@ const SORT_LABELS = { oldest: 'sort.oldest', newest: 'sort.newest' };
 const SORT_KEY = 'dispatch-imagestudio-sort';
 // Which Buzz pays for a Civitai picture on this device (privacy.js APP_KEYS wipes it too).
 const PAY_KEY = 'dispatch-imagestudio-pay';
-// The form on this device, one key per profile (privacy.js APP_KEY_PREFIXES wipes the family).
+// The form lives on the SERVER, per profile (GET/PUT/DELETE /draft). This prefix is only the
+// OLD per-device copy: it is migrated to the server once and then deleted, and every other
+// profile's copy is deleted on sight (privacy.js APP_KEY_PREFIXES wipes the family too).
 // Form values only: never a picture, a data: URL or the reference image.
 const DRAFT_PREFIX = 'dispatch-imagestudio-draft:';
-const DRAFT_SAVE_MS = 400;
+const DRAFT_SAVE_MS = 900;      // typing is saved to the server this long after the last edit
+const DRAFT_RETRY_MS = 6000;    // a failed save is tried again this long after, doubling each time
+const DRAFT_RETRIES = 5;
 // "Not now" on the Reload-last bar, per profile, on this device: the dismissed record's time.
 // The bar comes back once a newer generation exists (its time differs). privacy.js
 // APP_KEY_PREFIXES wipes the family.
@@ -179,31 +185,104 @@ function draftForm() {
 }
 
 let draftTimer = null;
+let draftRetry = null;
 function scheduleDraftSave() {
   if (!S.draftReady) return;
   clearTimeout(draftTimer);
   draftTimer = setTimeout(saveDraftNow, DRAFT_SAVE_MS);
 }
 
-/** Write the form (or drop the draft when the form is just the defaults). Never throws. */
-function saveDraftNow() {
+/** Send the form to the server (or ask it to drop the draft when the form is just the defaults).
+ *  Never throws. `leaving`: the page is going away, so the request is sent with keepalive. */
+function saveDraftNow(arg) {
+  const leaving = !!(arg && arg.leaving);
   clearTimeout(draftTimer);
   // Nothing the user did yet: keep what is stored. A draft that could not be put
   // back in full (its provider is off for now) must not be cut down or wiped by a
   // page that merely opened.
   if (!S.draftReady || !S.draftDirty || !R.prompt) return;
-  const key = draftKey(DRAFT_PREFIX, S.profileKey);
-  if (!key) return;
+  if (!draftKey(DRAFT_PREFIX, S.profileKey)) return;
   const text = serializeDraft(draftForm(), S.info ? S.info.prompt_max : PROMPT_MAX);
-  try {
-    if (!text || text === S.baseline) localStorage.removeItem(DRAFT_PREFIX + S.profileKey);
-    else localStorage.setItem(DRAFT_PREFIX + S.profileKey, text);
-  } catch { /* private window / quota: the form just is not remembered */ }
+  S.draftWant = { body: !text || text === S.baseline ? null : JSON.parse(text), leaving };
+  if (!S.draftBusy || leaving) flushDraft();
 }
 
-function loadDraft() {
-  if (!draftKey(DRAFT_PREFIX, S.profileKey)) return null;
-  try { return parseDraft(localStorage.getItem(DRAFT_PREFIX + S.profileKey)); } catch { return null; }
+/** One request at a time, always carrying the newest form. A failed one keeps the form wanted
+ *  and tries again; what is on screen is never touched. */
+async function flushDraft() {
+  const want = S.draftWant;
+  if (!want) return;
+  S.draftWant = null;
+  S.draftBusy = true;
+  clearTimeout(draftRetry);
+  let failed = false;
+  try {
+    if (want.leaving) {
+      fetch(`${API}/draft`, {
+        method: want.body ? 'PUT' : 'DELETE', credentials: 'same-origin', keepalive: true,
+        headers: want.body ? { 'Content-Type': 'application/json', Accept: 'application/json' } : { Accept: 'application/json' },
+        body: want.body ? JSON.stringify(want.body) : undefined,
+      }).catch(() => {});
+    } else {
+      await api(`${API}/draft`, want.body ? { method: 'PUT', body: want.body } : { method: 'DELETE' });
+    }
+    S.draftFails = 0;
+  } catch (e) {
+    // Worth another try: the network dropped, the server is busy or erred. A refusal or an old
+    // server without the route is not.
+    const st = e && e.status;
+    failed = !st || st === 429 || st >= 500;
+    if (failed && !S.draftWant) S.draftWant = want;       // keep the same form wanted
+    S.draftFails = failed ? (S.draftFails || 0) + 1 : 0;
+  } finally {
+    S.draftBusy = false;
+  }
+  if (S.draftWant) {
+    if (!failed) flushDraft();
+    else if (S.draftFails <= DRAFT_RETRIES) draftRetry = setTimeout(flushDraft, DRAFT_RETRY_MS * (2 ** (S.draftFails - 1)));
+    // after the last try it waits for the next edit or leaving the page
+  }
+}
+
+/** The saved form from the server: {ok, draft}. ok is false when the server could not be asked. */
+async function loadDraft() {
+  try {
+    const r = await api(`${API}/draft`);
+    return { ok: true, draft: parseDraft(JSON.stringify((r && r.draft) || null)) };
+  } catch { return { ok: false, draft: null }; }
+}
+
+/** Store a draft on the server; true when it took. */
+async function putDraft(draft) {
+  try { await api(`${API}/draft`, { method: 'PUT', body: draft }); return true; } catch { return false; }
+}
+
+/** Every localStorage key of this app's old per-device draft family. */
+function localDraftKeys() {
+  const keys = [];
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith(DRAFT_PREFIX) || k.startsWith(LAST_DISMISS_PREFIX))) keys.push(k);
+    }
+  } catch { /* storage off: nothing is kept here */ }
+  return keys;
+}
+
+/** Settle the browser's old copy: another profile's draft (or "Not now" mark) is deleted unread; this
+ *  profile's own draft is returned (text, or '') and deleted once `drop` says the server has it. */
+function takeLocalDraft(drop) {
+  let mine = '';
+  const own = DRAFT_PREFIX + S.profileKey;
+  for (const k of localDraftKeys()) {
+    try {
+      if (k === own) {
+        mine = localStorage.getItem(k) || '';
+        if (drop(mine)) localStorage.removeItem(k);
+      } else if (k !== LAST_DISMISS_PREFIX + S.profileKey) localStorage.removeItem(k);
+    } catch { /* leave it */ }
+  }
+  return mine;
 }
 
 /** Put a saved draft back on the form. Pieces that no longer fit are dropped, the rest
@@ -232,7 +311,6 @@ function resetForm() {
   S.draftReady = false;
   S.draftDirty = false;
   clearTimeout(draftTimer);
-  try { localStorage.removeItem(DRAFT_PREFIX + S.profileKey); } catch { /* nothing stored */ }
   if (S.info && S.info.default) R.provider.value = S.info.default;
   setModelValue('');
   clearStaleModel(provider());
@@ -243,6 +321,8 @@ function resetForm() {
   S.draftReady = true;
   refreshForm();
   S.baseline = serializeDraft(draftForm(), S.info ? S.info.prompt_max : PROMPT_MAX);
+  S.draftDirty = true;          // the cleared form is the edit: the server drops the draft now
+  saveDraftNow();
   R.prompt.focus();
 }
 
@@ -428,6 +508,7 @@ function refreshForm() {
   renderPickerList();
   R.est.hidden = !(p && p.estimate) || !S.estText;
   R.est.textContent = S.estText;
+  renderSpend(p);
   const civ = isCivitai() && !!p.configured;
   R.payRow.hidden = !civ;
   R.browseBtn.hidden = !civ;
@@ -1472,6 +1553,16 @@ async function startJob(job) {
   }
 }
 
+/** The "80% of today's limit" line, shown only for a paid provider whose counter is that high. */
+function renderSpend(p) {
+  const n = isMetered(p) ? spendNotice(S.info && S.info.spend, p && p.id) : null;
+  R.spend.hidden = !n;
+  if (!n) { R.spend.textContent = ''; return; }
+  const what = t(n.unit === 'usd' ? 'spend.what_usd' : n.unit === 'buzz' ? 'spend.what_buzz' : 'spend.what_pictures');
+  R.spend.textContent = t(n.who === 'profile' ? 'spend.near_profile' : 'spend.near_install',
+    { pct: n.pct, what, used: spendAmount(n.unit, n.used, t), cap: spendAmount(n.unit, n.cap, t) });
+}
+
 async function reloadState(rebuildProviders = true) {
   S.info = await api(`${API}/state`);
   if (rebuildProviders) renderProviders();
@@ -1587,6 +1678,7 @@ function build(root) {
   R.cost = el('p', { class: 'st-cost', hidden: '' });
   R.h3Hint = el('p', { class: 'st-muted st-h3hint', hidden: '', text: t('models.h3_hint') });
   R.est = el('p', { class: 'st-cost st-estimate', role: 'status', hidden: '' });
+  R.spend = el('p', { class: 'st-cost st-spend', role: 'status', hidden: '' });
   R.status = el('p', { class: 'st-status', role: 'status', 'aria-live': 'polite' });
   R.today = el('span', { class: 'st-today' });
   // No provider yet: say so, and (for a profile that may change it) open the
@@ -1614,7 +1706,7 @@ function build(root) {
     R.two,
     R.payRow,
     // The Generate bar is the LAST thing in the form: nothing scrolls under it.
-    R.optimizerRow, R.seedRow, R.refBox, R.h3Hint, R.cost, R.est, R.buzzRow, R.inflight, R.goBar,
+    R.optimizerRow, R.seedRow, R.refBox, R.h3Hint, R.cost, R.est, R.spend, R.buzzRow, R.inflight, R.goBar,
   ]);
   R.controls.append(R.none, R.form, R.status);
   R.sort = el('select', { id: 'st-sort', class: 'st-sort' }, SORTS.map((v) => el('option', { value: v, text: t(SORT_LABELS[v]) })));
@@ -1667,9 +1759,9 @@ function build(root) {
     // prompt - never opening the Recent list or a click on empty space.
     if (tgt && tgt.closest && tgt.closest('button[data-name], button.st-recent')) userEdit();
   });
-  window.addEventListener('pagehide', saveDraftNow);
+  window.addEventListener('pagehide', () => saveDraftNow({ leaving: true }));
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { saveDraftNow(); stopPolling(); S.poll.since = 0; }
+    if (document.hidden) { saveDraftNow({ leaving: true }); stopPolling(); S.poll.since = 0; }
     else if (S.info && inflightExtra(S.info, running())) startPolling();
   });
   // Shift/Ctrl/Cmd+Enter = the Generate button, and only while it is enabled.
@@ -1796,7 +1888,22 @@ export async function mount(root = document.getElementById('st-root')) {
     // is the draft read (never before, never on a 403).
     S.profileKey = (S.info && S.info.profile_key) || '';
     S.baseline = serializeDraft(draftForm(), S.info.prompt_max);
-    const draft = S.info.default ? loadDraft() : null;
+    let draft = null;
+    if (S.info.default && draftKey(DRAFT_PREFIX, S.profileKey)) {
+      const got = await loadDraft();
+      draft = got.draft;
+      // The old per-device copy: moved to the server once (when the server has none), then deleted.
+      // If the server cannot be reached the copy stays and is used, so nothing is lost.
+      const local = takeLocalDraft((text) => {
+        if (!got.ok) return false;
+        return !!got.draft || !parseDraft(text);
+      });
+      const mine = parseDraft(local);
+      if (mine && !got.draft) {
+        draft = mine;                       // on screen either way; deleted only once the server holds it
+        if (got.ok && await putDraft(mine)) takeLocalDraft(() => true);
+      }
+    } else takeLocalDraft(() => false);
     if (draft) applyDraft(draft);
     S.draftReady = !!draftKey(DRAFT_PREFIX, S.profileKey);
     loadLast();

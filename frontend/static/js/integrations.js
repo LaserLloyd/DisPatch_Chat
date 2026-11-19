@@ -220,6 +220,7 @@ export async function mountImageSection(host, deps = {}) {
   // The Owner's list of the people who may use the image server (drawn only for
   // the Owner; the route itself refuses everybody else).
   const serverAccess = el('div', { class: 'sec-field img-server-access', id: 'img-server-access', hidden: '' });
+  const spendUsage = el('div', { class: 'sec-field img-spend', id: 'img-spend', hidden: '' });
   const apiFields = el('div', { class: 'img-api-fields', id: 'img-api-fields' }, [
     field(t('llm.base_url'), base),
     field(t('llm.model'), model, el('span', {}, [modelNote, refreshModels])),
@@ -343,10 +344,57 @@ export async function mountImageSection(host, deps = {}) {
     field(t('integrations.img_provider'), sel, status),
     apiFields,
     serverAccess,
+    spendUsage,
     el('div', { class: 'llm-test-row' }, [test, save, result]),
     preview,
   ]));
   mountServerAccess(serverAccess);
+  mountSpendUsage(spendUsage);
+}
+
+// --------------------------------------------------------------------------- //
+// Today's picture spending against the daily limits (Owner / Admins)
+// --------------------------------------------------------------------------- //
+
+const SPEND_WHAT = { usd: 'integrations.spend_usd', buzz: 'integrations.spend_buzz',
+  'pictures:openai': 'integrations.spend_openai', 'pictures:xai': 'integrations.spend_xai' };
+
+/** An amount in a counter's own unit: $0.04, 1,200 Buzz, 30 pictures. */
+export function spendAmountText(unit, value) {
+  const n = Number(value) || 0;
+  if (unit === 'usd') return `$${n.toFixed(2)}`;
+  const txt = Math.round(n).toLocaleString('en-US');
+  return t(unit === 'buzz' ? 'integrations.spend_buzz_unit' : 'integrations.spend_pictures_unit', { n: txt });
+}
+
+/** One row per counter that has been used today or has a limit worth showing. */
+export function spendRows(doc) {
+  const rows = [];
+  const add = (who, lines) => {
+    for (const ln of lines || []) {
+      if (!SPEND_WHAT[ln.unit] || !(ln.used > 0)) continue;
+      rows.push(t('integrations.spend_row', {
+        who, what: t(SPEND_WHAT[ln.unit]), used: spendAmountText(ln.unit, ln.used),
+        cap: ln.cap > 0 ? spendAmountText(ln.unit, ln.cap) : t('integrations.spend_unlimited') }));
+    }
+  };
+  add(t('integrations.spend_everyone'), doc && doc.install);
+  for (const p of (doc && doc.profiles) || []) add(p.name || '?', p.lines);
+  return rows;
+}
+
+async function mountSpendUsage(host) {
+  if (!host) return;
+  let doc;
+  try { doc = await json('/api/image-spend'); } catch { return; }     // a page that may not see it draws nothing
+  const rows = spendRows(doc);
+  host.replaceChildren(
+    el('h4', { class: 'dev-group-title', text: t('integrations.spend_title') }),
+    note(t('integrations.spend_hint')),
+    rows.length ? el('ul', { class: 'sec-list', id: 'img-spend-list' }, rows.map((r) => el('li', { text: r })))
+      : note(t('integrations.spend_none')),
+  );
+  host.hidden = false;
 }
 
 // --------------------------------------------------------------------------- //

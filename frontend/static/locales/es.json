@@ -1366,7 +1366,19 @@
     "img_models_list": "Modelos de la lista del proveedor, actualizado {when}.",
     "img_models_docs": "Modelos de la documentación del proveedor, revisado {when}.",
     "img_models_docs_nodate": "Modelos de la documentación del proveedor.",
-    "img_models_never": "todavía no"
+    "img_models_never": "todavía no",
+    "spend_title": "Gasto en imágenes de hoy",
+    "spend_hint": "Cuenta contra los límites diarios de arriba, por perfil y para todos. Se renueva a medianoche.",
+    "spend_everyone": "Todos",
+    "spend_none": "Aún no se ha gastado nada hoy.",
+    "spend_unlimited": "sin límite",
+    "spend_usd": "Imágenes de MiniMax",
+    "spend_buzz": "Buzz de Civitai",
+    "spend_openai": "Imágenes de OpenAI",
+    "spend_xai": "Imágenes de xAI Grok",
+    "spend_row": "{who}: {what} {used} de {cap}",
+    "spend_buzz_unit": "{n} Buzz",
+    "spend_pictures_unit": "{n} imágenes"
   },
   "lightbox": {
     "previous": "Imagen anterior (más antigua)",

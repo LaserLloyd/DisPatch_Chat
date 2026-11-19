@@ -1313,7 +1313,19 @@
     "img_models_list": "プロバイダーの一覧より（{when} 更新）。",
     "img_models_docs": "プロバイダーのドキュメントより（{when} 確認）。",
     "img_models_docs_nodate": "プロバイダのドキュメントにあるモデルです。",
-    "img_models_never": "未確認"
+    "img_models_never": "未確認",
+    "spend_title": "今日の画像の支出",
+    "spend_hint": "上の1日の上限に、プロフィールごと・全員分で数えます。午前0時にリセットされます。",
+    "spend_everyone": "全員",
+    "spend_none": "今日はまだ使っていません。",
+    "spend_unlimited": "上限なし",
+    "spend_usd": "MiniMaxの画像",
+    "spend_buzz": "Civitai Buzz",
+    "spend_openai": "OpenAIの画像",
+    "spend_xai": "xAI Grokの画像",
+    "spend_row": "{who}:{what} {cap}のうち{used}",
+    "spend_buzz_unit": "{n} Buzz",
+    "spend_pictures_unit": "{n}枚"
   },
   "lightbox": {
     "previous": "前の(古い)画像",

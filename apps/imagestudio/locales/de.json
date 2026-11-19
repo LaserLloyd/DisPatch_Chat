@@ -197,5 +197,12 @@
   "last.not_now": "Nicht jetzt",
   "last.reload_short": "Letzte laden",
   "last.reload_tip": "Die Einstellungen deiner letzten Generierung zurückholen",
-  "last.region": "Deine letzte Generierung"
+  "last.region": "Deine letzte Generierung",
+  "spend.near_profile": "Du hast {pct} % deines Tageslimits für {what} verbraucht ({used} von {cap}). Es beginnt um Mitternacht neu.",
+  "spend.near_install": "Der Haushalt hat {pct} % des heutigen Limits für {what} verbraucht ({used} von {cap}). Es beginnt um Mitternacht neu.",
+  "spend.what_usd": "Bildausgaben",
+  "spend.what_buzz": "Civitai-Buzz",
+  "spend.what_pictures": "Bilder",
+  "spend.amount_buzz": "{n} Buzz",
+  "spend.amount_pictures": "{n} Bilder"
 }

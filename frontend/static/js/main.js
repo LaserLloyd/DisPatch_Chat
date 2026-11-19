@@ -27,8 +27,8 @@ import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from '
 import {
   initLlmPanel, activateLlmPanel, repaintLlmPanel,
   firstRunCard,
-} from './llm.js?v=19';
-import { initPrivacy, privacyRow, allowsPersistentSession } from './privacy.js?v=22';
+} from './llm.js?v=20';
+import { initPrivacy, privacyRow, allowsPersistentSession, wipeStudioKeys } from './privacy.js?v=23';
 import {
   loadActions as loadQuickActions, currentAction as currentQuickAction,
   clearComposerAction as clearQuickAction, welcomeChips as quickWelcomeChips, actionTagEl,
@@ -36,7 +36,7 @@ import {
   setAllowed as setQuickAllowed, setUpload as setQuickUpload, getActions as quickActionList,
 } from './quick-actions.js?v=7';
 import { initNim, nimEnabled, setNim, canDisableNim, shouldDropMessage, nimRow, setMinimalAvatars } from './nim.js?v=8';
-import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=28';
+import { renderPinnedRail, pinToggle, isPinned } from './pins.js?v=29';
 // Extensions (docs/extensions.md): installed add-ons — voice chat is the
 // DisPatch Voice add-on — mounted into the shell by the loader, through the
 // SDK's frozen shell object. With none installed, Settings → Voice explains
@@ -59,7 +59,7 @@ import { renderOidcCard, linkButtonFor as oidcLinkButtonFor, defaultRequest as o
 import { installExpiredImages } from './media-expired.js?v=1';
 import { activeLayout, applyLayout, moveItem, saveLayout, wireRailDrag, openArrangeDialog } from './railmenu.js?v=5';
 import { renderVoiceAbsent, voiceState } from './voice-absent.js?v=23';
-import { mountPluginsSettings } from './plugins.js?v=27';
+import { mountPluginsSettings } from './plugins.js?v=28';
 import { addBotRow } from './bots-edit.js?v=8';
 // 3.0 (W5): connections, the schema-driven settings page, character details + starter packs, the
 // first-run wizard. Their REST calls live in w5-api.js (api.js is imported at one ?v= by too many
@@ -9107,6 +9107,7 @@ async function finishSignIn(r) {
   // does the same on a lock.
   cancelLocalWrites();
   try { await ensureLocalStore().wipeTier(TIER_FULL); } catch { /* best effort */ }
+  wipeStudioKeys();
   hideSignInOverlay({ force: true });
   hideSetup();
   await refreshAuthQuiet();
@@ -9141,6 +9142,7 @@ function signInRequired() {
   cancelLocalWrites();
   (async () => {
     try { await ensureLocalStore().wipeTier(TIER_FULL); } catch { /* best effort */ }
+    wipeStudioKeys();
     if (!await refreshAuthQuiet()) { state.auth.claimed = true; state.auth.signedIn = false; state.auth.profile = null; }
     await reboot();
   })().finally(() => { gateBusy = false; });
@@ -9578,6 +9580,7 @@ async function reconcileIdentity() {
     if (profileKey() === before && !gateActive()) { applyAuthChrome(); return; }
     cancelLocalWrites();
     try { await ensureLocalStore().wipeTier(TIER_FULL); } catch { /* best effort */ }
+    wipeStudioKeys();
     armSignInNotice();
     // Another profile is in charge now: start on Home. A kept selection "vanished" from the new
     // roster and the first bot's newest chat opened with the composer ready (4.3 Fable).
@@ -9606,6 +9609,7 @@ async function lockToTarget({ reason = '' } = {}) {
     // The profile's local cache goes with its session: drafts, queued sends and cached rows must
     // stop existing on a device somebody else is about to use.
     try { await ensureLocalStore().wipeTier(TIER_FULL); } catch { /* best effort */ }
+    wipeStudioKeys();
     if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
     closeAllOverlays();
     try { await api.lock(); } catch { /* best-effort: clears the cookie/session */ }
@@ -10216,6 +10220,7 @@ async function startApp() {
   // disk indefinitely. Same promise as a lock: a device nobody is signed in on keeps none of it.
   if (hasLock() && !state.auth.signedIn) {
     try { await ensureLocalStore().wipeTier(TIER_FULL); } catch { /* best effort */ }
+    wipeStudioKeys();
   }
   // BEFORE the socket: restored outbox frames have to be in pendingSends by the
   // time the first 'open' fires, so the ordinary replay path sends them and

@@ -196,5 +196,12 @@
   "last.not_now": "今はしない",
   "last.reload_short": "前回を読み込む",
   "last.reload_tip": "前回の生成の設定を元に戻します",
-  "last.region": "前回の生成"
+  "last.region": "前回の生成",
+  "spend.near_profile": "{what}の1日の上限の{pct}%を使いました({cap}のうち{used})。上限は午前0時にリセットされます。",
+  "spend.near_install": "家全体で今日の{what}の上限の{pct}%を使いました({cap}のうち{used})。上限は午前0時にリセットされます。",
+  "spend.what_usd": "画像の支出",
+  "spend.what_buzz": "Civitai Buzz",
+  "spend.what_pictures": "画像",
+  "spend.amount_buzz": "{n} Buzz",
+  "spend.amount_pictures": "{n}枚"
 }

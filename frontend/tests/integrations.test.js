@@ -103,6 +103,20 @@ test('image status line says where pictures come from', { skip: dom.skip }, asyn
   assert.match(mod.imageStatusText({ presets, image_server: false, config: { provider: '' } }), /off/);
 });
 
+test('today\'s picture spending reads in the counter\'s own unit, names each profile and says when there is no limit', { skip: dom.skip }, async () => {
+  const { mod } = await setup();
+  const rows = mod.spendRows({
+    install: [{ unit: 'usd', used: 1.5, cap: 10 }, { unit: 'buzz', used: 0, cap: 10000 }],
+    profiles: [{ name: 'Ada', lines: [{ unit: 'pictures:openai', used: 12, cap: 0 }, { unit: 'usd', used: 0.04, cap: 5 }] }],
+  });
+  assert.deepEqual(rows, [
+    'Everyone: MiniMax pictures $1.50 of $10.00',
+    'Ada: OpenAI pictures 12 pictures of no limit',
+    'Ada: MiniMax pictures $0.04 of $5.00',
+  ]);
+  assert.deepEqual(mod.spendRows(null), []);
+});
+
 test('one-key setup posts the key once and paints the checklist', { skip: dom.skip }, async () => {
   const { mod } = await setup({
     'GET /api/llm/quicksetup': () => [200, { plans: [{ id: 'minimax', label: 'MiniMax', chat_model: 'MiniMax-M3', images: true, embeddings: false, docs: '' }] }],

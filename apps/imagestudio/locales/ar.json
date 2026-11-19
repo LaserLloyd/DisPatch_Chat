@@ -201,5 +201,12 @@
   "last.not_now": "ليس الآن",
   "last.reload_short": "استعادة الأخيرة",
   "last.reload_tip": "إرجاع إعدادات آخر عملية إنشاء",
-  "last.region": "آخر عملية إنشاء لك"
+  "last.region": "آخر عملية إنشاء لك",
+  "spend.near_profile": "استخدمت {pct}٪ من حدّك اليومي لـ{what} ({used} من {cap}). يبدأ من جديد عند منتصف الليل.",
+  "spend.near_install": "استخدمت الأسرة {pct}٪ من حدّ اليوم لـ{what} ({used} من {cap}). يبدأ من جديد عند منتصف الليل.",
+  "spend.what_usd": "الإنفاق على الصور",
+  "spend.what_buzz": "عملة Buzz في Civitai",
+  "spend.what_pictures": "الصور",
+  "spend.amount_buzz": "{n} Buzz",
+  "spend.amount_pictures": "{n} صورة"
 }

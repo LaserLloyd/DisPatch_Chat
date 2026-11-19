@@ -196,5 +196,12 @@
   "last.not_now": "暂不",
   "last.reload_short": "载入上次",
   "last.reload_tip": "恢复你上次生成时的设置",
-  "last.region": "你上次的生成"
+  "last.region": "你上次的生成",
+  "spend.near_profile": "你已用掉每日{what}上限的 {pct}%({cap}中的{used})。午夜重新计算。",
+  "spend.near_install": "全家今天已用掉{what}上限的 {pct}%({cap}中的{used})。午夜重新计算。",
+  "spend.what_usd": "图片支出",
+  "spend.what_buzz": "Civitai Buzz",
+  "spend.what_pictures": "图片",
+  "spend.amount_buzz": "{n} Buzz",
+  "spend.amount_pictures": "{n} 张"
 }

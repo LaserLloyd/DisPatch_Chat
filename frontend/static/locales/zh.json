@@ -1313,7 +1313,19 @@
     "img_models_list": "模型来自服务商的列表，{when} 更新。",
     "img_models_docs": "模型来自服务商的文档，{when} 核对。",
     "img_models_docs_nodate": "模型来自服务商文档。",
-    "img_models_never": "尚未"
+    "img_models_never": "尚未",
+    "spend_title": "今日图片支出",
+    "spend_hint": "计入上方的每日上限,按个人资料和全家分别计算。午夜重新计算。",
+    "spend_everyone": "所有人",
+    "spend_none": "今天还没有支出。",
+    "spend_unlimited": "无上限",
+    "spend_usd": "MiniMax 图片",
+    "spend_buzz": "Civitai Buzz",
+    "spend_openai": "OpenAI 图片",
+    "spend_xai": "xAI Grok 图片",
+    "spend_row": "{who}:{what} {used} / {cap}",
+    "spend_buzz_unit": "{n} Buzz",
+    "spend_pictures_unit": "{n} 张"
   },
   "lightbox": {
     "previous": "上一张(较早)图片",

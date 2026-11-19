@@ -1448,7 +1448,19 @@
     "img_models_list": "نماذج من قائمة المزوّد، حُدِّثت {when}.",
     "img_models_docs": "نماذج من وثائق المزوّد، روجعت {when}.",
     "img_models_docs_nodate": "نماذج من وثائق المزوّد.",
-    "img_models_never": "بعد"
+    "img_models_never": "بعد",
+    "spend_title": "الإنفاق على الصور اليوم",
+    "spend_hint": "يُحتسب ضمن الحدود اليومية أعلاه، لكل ملف شخصي وللجميع. يبدأ من جديد عند منتصف الليل.",
+    "spend_everyone": "الجميع",
+    "spend_none": "لم يُنفق شيء اليوم.",
+    "spend_unlimited": "بلا حد",
+    "spend_usd": "صور MiniMax",
+    "spend_buzz": "عملة Buzz في Civitai",
+    "spend_openai": "صور OpenAI",
+    "spend_xai": "صور xAI Grok",
+    "spend_row": "{who}: {what} {used} من {cap}",
+    "spend_buzz_unit": "{n} Buzz",
+    "spend_pictures_unit": "{n} صورة"
   },
   "lightbox": {
     "previous": "الصورة السابقة (الأقدم)",

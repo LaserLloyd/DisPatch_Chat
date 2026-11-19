@@ -1317,7 +1317,19 @@
     "img_models_list": "Models from the provider's list, updated {when}.",
     "img_models_docs": "Models from the provider's docs, checked {when}.",
     "img_models_docs_nodate": "Models from the provider's docs.",
-    "img_models_never": "not yet"
+    "img_models_never": "not yet",
+    "spend_title": "Today's picture spending",
+    "spend_hint": "Counted against the daily limits above, per profile and for everyone. It starts again at midnight.",
+    "spend_everyone": "Everyone",
+    "spend_none": "Nothing spent yet today.",
+    "spend_unlimited": "no limit",
+    "spend_usd": "MiniMax pictures",
+    "spend_buzz": "Civitai Buzz",
+    "spend_openai": "OpenAI pictures",
+    "spend_xai": "xAI Grok pictures",
+    "spend_row": "{who}: {what} {used} of {cap}",
+    "spend_buzz_unit": "{n} Buzz",
+    "spend_pictures_unit": "{n} pictures"
   },
   "lightbox": {
     "previous": "Previous (older) image",

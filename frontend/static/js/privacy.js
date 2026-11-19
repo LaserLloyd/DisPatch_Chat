@@ -85,9 +85,8 @@ export const APP_KEYS = [
 // `setItem(SOMETHING_PREFIX + …)` writer against this list.
 export const APP_KEY_PREFIXES = [
   'dispatch-tool-state:',     // tools.js (per-tool layout state bridge)
-  // apps/imagestudio studio.js: the Image Studio form (prompt, provider, model, settings),
-  // one key per profile. Form values only - never a picture or the reference image.
-  'dispatch-imagestudio-draft:',
+  // The Image Studio form lives on the server now (nothing writes `dispatch-imagestudio-draft:`
+  // any more); an old per-profile copy is deleted by the page and by wipeStudioKeys().
   // apps/imagestudio studio.js: "Not now" on the Reload last generation bar (a timestamp), per profile.
   'dispatch-imagestudio-last-dismissed:',
   // js/appwin-state.js: which tool windows a profile has open or minimised, and
@@ -116,6 +115,26 @@ async function purgeServiceWorker() {
       await Promise.all(regs.map((r) => r.unregister()));
     }
   } catch { /* best effort: a browser that refuses is not a reason to fail */ }
+}
+
+/** Image Studio's old per-device form (and its "Not now" marks) is one key per profile; the form
+ *  now lives on the server. A different person is about to use this browser (sign-in, lock,
+ *  profile change, sign-out), so none of those keys may outlive the session. */
+export function wipeStudioKeys() {
+  try {
+    const drop = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('dispatch-imagestudio-draft:') || k.startsWith('dispatch-imagestudio-last-dismissed:'))) drop.push(k);
+    }
+    for (const k of drop) localStorage.removeItem(k);
+  } catch { /* storage disabled entirely: nothing to wipe */ }
+  try {
+    for (let i = sessionStorage.length - 1; i >= 0; i -= 1) {
+      const k = sessionStorage.key(i);
+      if (k && k.startsWith('dispatch-imagestudio-')) sessionStorage.removeItem(k);
+    }
+  } catch { /* nothing */ }
 }
 
 function wipeAppKeys() {

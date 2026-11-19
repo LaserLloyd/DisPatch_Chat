@@ -1340,7 +1340,19 @@
     "img_models_list": "Modelle aus der Liste des Anbieters, aktualisiert {when}.",
     "img_models_docs": "Modelle aus der Dokumentation des Anbieters, geprüft {when}.",
     "img_models_docs_nodate": "Modelle aus der Dokumentation des Anbieters.",
-    "img_models_never": "noch nie"
+    "img_models_never": "noch nie",
+    "spend_title": "Bildausgaben heute",
+    "spend_hint": "Wird auf die Tageslimits oben angerechnet, je Profil und für alle. Es beginnt um Mitternacht neu.",
+    "spend_everyone": "Alle",
+    "spend_none": "Heute noch nichts ausgegeben.",
+    "spend_unlimited": "kein Limit",
+    "spend_usd": "MiniMax-Bilder",
+    "spend_buzz": "Civitai-Buzz",
+    "spend_openai": "OpenAI-Bilder",
+    "spend_xai": "xAI-Grok-Bilder",
+    "spend_row": "{who}: {what} {used} von {cap}",
+    "spend_buzz_unit": "{n} Buzz",
+    "spend_pictures_unit": "{n} Bilder"
   },
   "lightbox": {
     "previous": "Vorheriges (älteres) Bild",

@@ -198,5 +198,12 @@
   "last.not_now": "Agora não",
   "last.reload_short": "Recuperar a última",
   "last.reload_tip": "Repor as definições da sua última geração",
-  "last.region": "A sua última geração"
+  "last.region": "A sua última geração",
+  "spend.near_profile": "Você usou {pct}% do seu limite diário de {what} ({used} de {cap}). Ele recomeça à meia-noite.",
+  "spend.near_install": "A casa usou {pct}% do limite de hoje de {what} ({used} de {cap}). Ele recomeça à meia-noite.",
+  "spend.what_usd": "gasto com imagens",
+  "spend.what_buzz": "Buzz do Civitai",
+  "spend.what_pictures": "imagens",
+  "spend.amount_buzz": "{n} Buzz",
+  "spend.amount_pictures": "{n} imagens"
 }

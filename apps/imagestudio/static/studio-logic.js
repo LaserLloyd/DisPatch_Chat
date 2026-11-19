@@ -589,3 +589,29 @@ export function lastPreview(last, max = 90) {
   const p = String((last && last.prompt) || '').replace(/\s+/g, ' ').trim();
   return p.length > max ? `${p.slice(0, max - 1)}…` : p;
 }
+
+
+// ---------------------------------------------------------------- the daily spend notice
+
+/** Which spend counter each paid provider draws on (the server's units). */
+const SPEND_UNIT = { minimax: 'usd', civitai: 'buzz', openai: 'pictures:openai', xai: 'pictures:xai' };
+
+/** The one-line "80% of today's limit" notice for the chosen provider, or null: the profile's own
+ *  counter first, then the household's. `spend` is GET /state `spend`. */
+export function spendNotice(spend, providerId) {
+  const unit = SPEND_UNIT[providerId];
+  if (!spend || !unit) return null;
+  for (const [who, rows] of [['profile', spend.lines], ['install', spend.install]]) {
+    const ln = (Array.isArray(rows) ? rows : []).find((r) => r && r.unit === unit && r.cap > 0 && r.near);
+    if (ln) return { who, unit, pct: Math.floor(ln.share * 100), used: ln.used, cap: ln.cap };
+  }
+  return null;
+}
+
+/** An amount in the counter's own unit: $0.04, 1,200 Buzz or 30 pictures. */
+export function spendAmount(unit, value, t) {
+  const n = Number(value) || 0;
+  if (unit === 'usd') return `$${n.toFixed(2)}`;
+  if (unit === 'buzz') return t('spend.amount_buzz', { n: Math.round(n).toLocaleString('en-US') });
+  return t('spend.amount_pictures', { n: Math.round(n).toLocaleString('en-US') });
+}

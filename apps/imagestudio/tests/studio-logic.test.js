@@ -489,3 +489,25 @@ test('last generation: record -> draft, differs, preview', async () => {
   assert.equal(lastPreview(last), 'a lighthouse at dusk');
   assert.equal(lastPreview({ prompt: 'x'.repeat(200) }).length, 90);
 });
+
+// ---- the daily spend notice -----------------------------------------------------
+import { spendNotice, spendAmount } from '../static/studio-logic.js';
+
+test('spendNotice: the profile counter first, then the household; only for the provider\'s own unit and from 80%', () => {
+  const near = { unit: 'usd', cap: 5, used: 4.2, share: 0.84, near: true };
+  const calm = { unit: 'usd', cap: 5, used: 1, share: 0.2, near: false };
+  assert.deepEqual(spendNotice({ lines: [near], install: [calm] }, 'minimax'), { who: 'profile', unit: 'usd', pct: 84, used: 4.2, cap: 5 });
+  assert.equal(spendNotice({ lines: [calm], install: [near] }, 'minimax').who, 'install');
+  assert.equal(spendNotice({ lines: [calm], install: [calm] }, 'minimax'), null);
+  assert.equal(spendNotice({ lines: [near], install: [] }, 'openai'), null);
+  assert.equal(spendNotice({ lines: [near], install: [] }, 'workflows'), null, 'the image server has no counter');
+  assert.equal(spendNotice(null, 'minimax'), null);
+  assert.equal(spendNotice({ lines: [{ ...near, cap: 0 }], install: [] }, 'minimax'), null, 'no limit, no notice');
+});
+
+test('spendAmount: dollars, Buzz and pictures', () => {
+  const t = (k, p) => (k === 'spend.amount_buzz' ? `${p.n} Buzz` : `${p.n} pictures`);
+  assert.equal(spendAmount('usd', 0.035, t), '$0.04');
+  assert.equal(spendAmount('buzz', 1200, t), '1,200 Buzz');
+  assert.equal(spendAmount('pictures:openai', 30, t), '30 pictures');
+});

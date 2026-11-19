@@ -38,6 +38,9 @@ async function page({ nim = false, state = STATE, generate, clear, images, sort 
     'GET /api/apps/imagestudio/images': images || (() => [200, { images: ROWS }]),
     'POST /api/apps/imagestudio/generate': generate || (() => [200, { images: [], asked: 1 }]),
     'POST /api/apps/imagestudio/clear': clear || (() => [404, { detail: 'no' }]),
+    'GET /api/apps/imagestudio/draft': () => [200, { draft: null }],
+    'PUT /api/apps/imagestudio/draft': () => [200, { ok: true }],
+    'DELETE /api/apps/imagestudio/draft': () => [200, { ok: true }],
     ...extra,
   });
   env.win.localStorage.setItem('dispatch-lang', 'en');
@@ -1751,15 +1754,24 @@ test('the count line is silent while the workflow list is loading', { skip: dom.
 });
 
 
-// ---- the form is remembered on this device (one draft per profile) -----------
+// ---- the form is remembered on the SERVER (one draft per profile) -----------
 
 const PK_A = 'a1b2c3d4e5f60718';
 const PK_B = '0011223344556677';
 const DKEY = (k) => `dispatch-imagestudio-draft:${k}`;
-const DRAFT = JSON.stringify({ v: 1, provider: 'minimax', model: 'image-01-live', prompt: 'a red fox', ratio: '16:9', seed: '42', n: 3, optimizer: true });
+const DRAFT_OBJ = { v: 1, provider: 'minimax', model: 'image-01-live', prompt: 'a red fox', ratio: '16:9', seed: '42', n: 3, optimizer: true };
+const DRAFT = JSON.stringify(DRAFT_OBJ);
+const draftRoute = (draft) => ({ 'GET /api/apps/imagestudio/draft': () => [200, { draft }] });
+const dcalls = (env, method) => env.calls.filter((c) => c.key === `${method} /api/apps/imagestudio/draft`);
+const typeIn = (env, text) => {
+  const box = env.doc.getElementById('st-prompt');
+  box.value = text;
+  box.dispatchEvent(new env.win.Event('input', { bubbles: true }));
+};
+const leave = async (env) => { env.win.dispatchEvent(new env.win.Event('pagehide')); await flush(); };
 
-test('a saved draft restores provider, model, prompt, ratio, count, seed and optimizer; nothing generates', { skip: dom.skip }, async () => {
-  const env = await page({ state: { ...STATE, profile_key: PK_A }, store: { [DKEY(PK_A)]: DRAFT } });
+test('a server draft restores provider, model, prompt, ratio, count, seed and optimizer; nothing generates', { skip: dom.skip }, async () => {
+  const env = await page({ state: { ...STATE, profile_key: PK_A }, extra: draftRoute(DRAFT_OBJ) });
   const { doc } = env;
   assert.equal(doc.getElementById('st-provider').value, 'minimax');
   assert.equal(modelControl(doc).value, 'image-01-live');
@@ -1769,49 +1781,103 @@ test('a saved draft restores provider, model, prompt, ratio, count, seed and opt
   assert.equal(doc.getElementById('st-seed').value, '42');
   assert.equal(doc.getElementById('st-optimizer').checked, true);
   assert.equal(gens(env).length, 0);
+  assert.equal(dcalls(env, 'PUT').length, 0, 'opening the page writes nothing');
 });
 
-test('another profile on the same device starts with an empty form', { skip: dom.skip }, async () => {
-  const { doc } = await page({ state: { ...STATE, profile_key: PK_B }, store: { [DKEY(PK_A)]: DRAFT } });
-  assert.equal(doc.getElementById('st-prompt').value, '');
-  assert.equal(doc.getElementById('st-ratio').value, '1:1');
+test('another profile starts with an empty form, and nobody leaves a draft in the browser for it to read', { skip: dom.skip }, async () => {
+  const env = await page({ state: { ...STATE, profile_key: PK_B }, store: { [DKEY(PK_A)]: DRAFT, [`dispatch-imagestudio-last-dismissed:${PK_A}`]: '5' } });
+  assert.equal(env.doc.getElementById('st-prompt').value, '');
+  assert.equal(env.doc.getElementById('st-ratio').value, '1:1');
+  assert.equal(env.win.localStorage.getItem(DKEY(PK_A)), null, 'the other profile\'s old copy is deleted unread');
+  assert.equal(env.win.localStorage.getItem(`dispatch-imagestudio-last-dismissed:${PK_A}`), null);
+  assert.equal(dcalls(env, 'PUT').length, 0, 'and it is never sent to the server under this profile');
 });
 
 test('an invalid provider is dropped, the prompt still restores', { skip: dom.skip }, async () => {
-  const bad = JSON.stringify({ v: 1, provider: 'xai', model: 'nope', prompt: 'keep me', ratio: '1:1', seed: '', n: 1, optimizer: false });
-  const { doc } = await page({ state: { ...STATE, profile_key: PK_A }, store: { [DKEY(PK_A)]: bad } });
+  const bad = { v: 1, provider: 'xai', model: 'nope', prompt: 'keep me', ratio: '1:1', seed: '', n: 1, optimizer: false };
+  const { doc } = await page({ state: { ...STATE, profile_key: PK_A }, extra: draftRoute(bad) });
   assert.equal(doc.getElementById('st-provider').value, 'minimax', 'the unusable provider falls back to the default');
   assert.equal(doc.getElementById('st-prompt').value, 'keep me');
 });
 
-test('a draft that could not be put back in full is kept as stored until the user edits', { skip: dom.skip }, async () => {
-  const bad = JSON.stringify({ v: 1, provider: 'xai', model: 'grok-pic', prompt: 'keep me', ratio: '1:1', seed: '', n: 1, optimizer: false });
-  const env = await page({ state: { ...STATE, profile_key: PK_A }, store: { [DKEY(PK_A)]: bad } });
-  const { doc, win } = env;
-  win.dispatchEvent(new win.Event('pagehide'));
-  assert.equal(win.localStorage.getItem(DKEY(PK_A)), bad, 'opening and leaving the page keeps the stored provider and model');
-  const box = doc.getElementById('st-prompt');
-  box.value = 'keep me, edited';
-  box.dispatchEvent(new win.Event('input', { bubbles: true }));
-  win.dispatchEvent(new win.Event('pagehide'));
-  assert.equal(JSON.parse(win.localStorage.getItem(DKEY(PK_A))).prompt, 'keep me, edited', 'an edit saves the form as it is');
+test('a draft that could not be put back in full is not rewritten until the user edits', { skip: dom.skip }, async () => {
+  const bad = { v: 1, provider: 'xai', model: 'grok-pic', prompt: 'keep me', ratio: '1:1', seed: '', n: 1, optimizer: false };
+  const env = await page({ state: { ...STATE, profile_key: PK_A }, extra: draftRoute(bad) });
+  await leave(env);
+  assert.equal(dcalls(env, 'PUT').length + dcalls(env, 'DELETE').length, 0, 'opening and leaving the page changes nothing');
+  typeIn(env, 'keep me, edited');
+  await leave(env);
+  const puts = dcalls(env, 'PUT');
+  assert.equal(puts.length, 1);
+  assert.equal(puts[0].body.prompt, 'keep me, edited', 'an edit saves the form as it is');
 });
 
-test('typing saves under the profile key, the Reset button clears it and the form', { skip: dom.skip }, async () => {
+test('typing is saved to the server after a pause, in one request, and leaving saves at once', { skip: dom.skip }, async () => {
   const env = await page({ state: { ...STATE, profile_key: PK_A } });
-  const { doc, win } = env;
-  const box = doc.getElementById('st-prompt');
-  box.value = 'a blue whale';
-  box.dispatchEvent(new win.Event('input', { bubbles: true }));
-  win.dispatchEvent(new win.Event('pagehide'));
-  const saved = JSON.parse(win.localStorage.getItem(DKEY(PK_A)));
-  assert.equal(saved.prompt, 'a blue whale');
-  assert.deepEqual(Object.keys(saved).sort(), ['model', 'n', 'optimizer', 'prompt', 'provider', 'ratio', 'seed', 'v']);
-  assert.equal(win.localStorage.getItem(DKEY(PK_B)), null);
+  for (const text of ['a', 'a b', 'a blue', 'a blue whale']) typeIn(env, text);
+  assert.equal(dcalls(env, 'PUT').length, 0, 'not on every keystroke');
+  await sleep(1100);
+  await flush();
+  const puts = dcalls(env, 'PUT');
+  assert.equal(puts.length, 1, 'one request for the whole burst');
+  assert.equal(puts[0].body.prompt, 'a blue whale');
+  assert.deepEqual(Object.keys(puts[0].body).sort(), ['model', 'n', 'optimizer', 'prompt', 'provider', 'ratio', 'seed', 'v']);
+  typeIn(env, 'a blue whale, deep');
+  await leave(env);
+  assert.equal(dcalls(env, 'PUT').at(-1).body.prompt, 'a blue whale, deep');
+  assert.equal(env.win.localStorage.getItem(DKEY(PK_A)), null, 'nothing is written to the browser');
+});
+
+test('Reset clears the form and drops the server draft', { skip: dom.skip }, async () => {
+  const env = await page({ state: { ...STATE, profile_key: PK_A }, extra: draftRoute(DRAFT_OBJ) });
+  const { doc } = env;
   doc.getElementById('st-reset').click();
-  assert.equal(box.value, '');
-  assert.equal(win.localStorage.getItem(DKEY(PK_A)), null, 'the draft is gone');
-  assert.equal(doc.activeElement, box, 'the focus lands on the prompt');
+  await flush();
+  assert.equal(doc.getElementById('st-prompt').value, '');
+  assert.equal(dcalls(env, 'DELETE').length, 1, 'the draft is gone on the server');
+  assert.equal(doc.activeElement, doc.getElementById('st-prompt'), 'the focus lands on the prompt');
+});
+
+test('an old draft in this browser moves to the server once and is then deleted', { skip: dom.skip }, async () => {
+  const env = await page({ state: { ...STATE, profile_key: PK_A }, store: { [DKEY(PK_A)]: DRAFT, [DKEY(PK_B)]: DRAFT } });
+  await flush();
+  assert.equal(env.doc.getElementById('st-prompt').value, 'a red fox', 'the form is as it was left');
+  const puts = dcalls(env, 'PUT');
+  assert.equal(puts.length, 1);
+  assert.equal(puts[0].body.prompt, 'a red fox');
+  assert.equal(env.win.localStorage.getItem(DKEY(PK_A)), null, 'deleted after the move');
+  assert.equal(env.win.localStorage.getItem(DKEY(PK_B)), null, 'another profile\'s copy is deleted unread');
+});
+
+test('when the server already has a draft the old browser copy is just deleted', { skip: dom.skip }, async () => {
+  const env = await page({ state: { ...STATE, profile_key: PK_A }, store: { [DKEY(PK_A)]: DRAFT },
+    extra: draftRoute({ ...DRAFT_OBJ, prompt: 'the server one' }) });
+  assert.equal(env.doc.getElementById('st-prompt').value, 'the server one');
+  assert.equal(dcalls(env, 'PUT').length, 0);
+  assert.equal(env.win.localStorage.getItem(DKEY(PK_A)), null);
+});
+
+test('when the server cannot be asked the old browser copy is kept and used, never lost', { skip: dom.skip }, async () => {
+  const env = await page({ state: { ...STATE, profile_key: PK_A }, store: { [DKEY(PK_A)]: DRAFT },
+    extra: { 'GET /api/apps/imagestudio/draft': () => [503, { detail: 'down' }] } });
+  assert.equal(env.doc.getElementById('st-prompt').value, 'a red fox');
+  assert.equal(env.win.localStorage.getItem(DKEY(PK_A)), DRAFT, 'kept for next time');
+});
+
+test('a failed save never touches what is on screen, and the next edit sends the newest form', { skip: dom.skip }, async () => {
+  let n = 0;
+  const env = await page({ state: { ...STATE, profile_key: PK_A },
+    extra: { 'PUT /api/apps/imagestudio/draft': () => { n += 1; return n === 1 ? [503, { detail: 'down' }] : [200, { ok: true }]; } } });
+  typeIn(env, 'first words');
+  await leave(env);                                   // the first (failing) request
+  await flush();
+  assert.equal(env.doc.getElementById('st-prompt').value, 'first words', 'the form is as typed');
+  typeIn(env, 'first words and more');
+  await leave(env);
+  await flush();
+  const puts = dcalls(env, 'PUT');
+  assert.equal(puts.at(-1).body.prompt, 'first words and more', 'the newest form went out');
+  assert.equal(env.doc.getElementById('st-prompt').value, 'first words and more');
 });
 
 // ---- Reload last generation (GET /last, the server's per-profile record) -----
@@ -1839,7 +1905,8 @@ test('Reload last generation: the bar shows when the form differs, Reload fills 
   assert.equal(doc.getElementById('st-optimizer').checked, true);
   assert.equal(bar.hidden, true, 'the bar goes once the form matches');
   assert.equal(gens(env).length, 0);
-  assert.equal(JSON.parse(env.win.localStorage.getItem(DKEY(PK_A))).prompt, 'a red fox in the snow', 'and it is the saved draft now');
+  await flush();
+  assert.equal(dcalls(env, 'PUT').at(-1).body.prompt, 'a red fox in the snow', 'and it is the saved draft now');
 });
 
 test('Reload last: typing after a Reload never brings the bar back over the prompt', { skip: dom.skip }, async () => {
@@ -1881,8 +1948,8 @@ test('Reload last: Not now hides the bar; the button beside Reset still reloads'
 });
 
 test('Reload last: no bar when the restored form already is the last generation, none without a record', { skip: dom.skip }, async () => {
-  const same = JSON.stringify({ v: 1, provider: 'minimax', model: 'image-01-live', prompt: 'a red fox in the snow', ratio: '16:9', seed: '42', n: 3, optimizer: true });
-  const a = await page({ state: { ...STATE, profile_key: PK_A }, store: { [DKEY(PK_A)]: same }, extra: lastRoute(LAST) });
+  const same = { v: 1, provider: 'minimax', model: 'image-01-live', prompt: 'a red fox in the snow', ratio: '16:9', seed: '42', n: 3, optimizer: true };
+  const a = await page({ state: { ...STATE, profile_key: PK_A }, extra: { ...lastRoute(LAST), ...draftRoute(same) } });
   await flush();
   assert.equal(a.doc.getElementById('st-lastbar').hidden, true);
   const b = await page({ state: { ...STATE, profile_key: PK_B }, extra: lastRoute(null) });
@@ -1909,6 +1976,7 @@ test('Generate makes this form the last generation (no bar after it), and the fa
 test('a 403 from /state reads and writes no draft', { skip: dom.skip }, async () => {
   const env = await page({ extra: { 'GET /api/apps/imagestudio/state': () => [403, { detail: 'no' }] }, store: { [DKEY(PK_A)]: DRAFT } });
   assert.equal(env.win.localStorage.getItem(DKEY(PK_A)), DRAFT, 'untouched');
+  assert.equal(env.calls.filter((c) => /\/draft$/.test(c.url)).length, 0, 'the server draft is not even asked for');
   assert.ok(env.doc.querySelector('.st-locked'), 'the page shows the locked note');
   assert.equal(env.doc.getElementById('st-prompt'), null);
 });
@@ -1943,4 +2011,37 @@ test('the tool window hears how many pictures are being made, and a finish while
   assert.equal(ops().filter((m) => m.op === 'status').pop().value, '');
   assert.ok(ops().some((m) => m.op === 'attention' && m.value === true), 'attention while minimised');
   assert.ok(!ops().some((m) => m.op === 'unsaved'), 'the autosaved draft never claims unsaved');
+});
+
+// ---- the daily spend notice ----------------------------------------------------
+
+const NEAR = { unit: 'usd', cap: 5, used: 4.2, share: 0.84, near: true };
+const CALM = { unit: 'usd', cap: 5, used: 0.5, share: 0.1, near: false };
+
+test('a paid provider near its daily cap shows a one-line notice with the amounts and the midnight reset', { skip: dom.skip }, async () => {
+  const { doc } = await page({ state: { ...STATE, spend: { lines: [NEAR], install: [CALM], notice: 'x' } } });
+  const line = doc.querySelector('.st-spend');
+  assert.equal(line.hidden, false);
+  assert.match(line.textContent, /84%/);
+  assert.match(line.textContent, /\$4\.20 of \$5\.00/);
+  assert.match(line.textContent, /midnight/);
+});
+
+test('no notice below 80%, none for a provider with no counter of its own', { skip: dom.skip }, async () => {
+  const a = await page({ state: { ...STATE, spend: { lines: [CALM], install: [CALM], notice: '' } } });
+  assert.equal(a.doc.querySelector('.st-spend').hidden, true);
+  const b = await page({ state: { ...STATE, spend: { lines: [NEAR], install: [] }, default: 'openai' } });
+  assert.equal(b.doc.querySelector('.st-spend').hidden, true, 'OpenAI counts pictures, not dollars');
+});
+
+test('a refused generate (the cap) shows the server\'s sentence on the job and keeps the form', { skip: dom.skip }, async () => {
+  const msg = "Today's limit on picture spending for this profile is $5.00 a day. It starts again at midnight.";
+  const env = await page({ state: { ...STATE, profile_key: PK_A }, generate: () => [429, { detail: msg }] });
+  const { doc, win } = env;
+  typeIn(env, 'keep this prompt');
+  doc.getElementById('st-generate').click();
+  await flush();
+  assert.equal(doc.getElementById('st-prompt').value, 'keep this prompt', 'the form is not lost');
+  assert.match(doc.body.textContent, /starts again at midnight/);
+  assert.ok(win);
 });
