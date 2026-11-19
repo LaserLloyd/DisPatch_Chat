@@ -62,6 +62,8 @@ const S = {
   profileKey: '',           // GET /state profile_key: the draft is read and written under it, only once /state answered
   draftReady: false,        // the draft was applied: from now on the form is saved
   draftDirty: false,        // the user changed the form here: only then is a draft written
+  draftEdits: 0,            // counts the user's edits: a save only clears `draftDirty` if nothing changed meanwhile
+  draftRev: 0,              // the number sent with every save: the server ignores one older than what it holds
   draftBusy: false,         // a draft request is in flight (one at a time; the newest form wins)
   draftWant: null,          // {body|null, leaving}: the newest form still to send (null body = drop the draft)
   baseline: '',             // the form's serialised defaults: a form equal to it stores no draft
@@ -192,6 +194,12 @@ function scheduleDraftSave() {
   draftTimer = setTimeout(saveDraftNow, DRAFT_SAVE_MS);
 }
 
+/** The user changed the form (or cleared it): the next save is due. */
+function markDirty() {
+  S.draftDirty = true;
+  S.draftEdits += 1;
+}
+
 /** Send the form to the server (or ask it to drop the draft when the form is just the defaults).
  *  Never throws. `leaving`: the page is going away, so the request is sent with keepalive. */
 function saveDraftNow(arg) {
@@ -203,8 +211,38 @@ function saveDraftNow(arg) {
   if (!S.draftReady || !S.draftDirty || !R.prompt) return;
   if (!draftKey(DRAFT_PREFIX, S.profileKey)) return;
   const text = serializeDraft(draftForm(), S.info ? S.info.prompt_max : PROMPT_MAX);
-  S.draftWant = { body: !text || text === S.baseline ? null : JSON.parse(text), leaving };
+  S.draftRev = Math.max(Date.now(), S.draftRev + 1);
+  S.draftWant = { body: !text || text === S.baseline ? null : JSON.parse(text), leaving, rev: S.draftRev, edits: S.draftEdits };
   if (!S.draftBusy || leaving) flushDraft();
+}
+
+const draftUrl = (rev, withRev) => `${API}/draft?pk=${encodeURIComponent(S.profileKey)}${withRev ? `&rev=${rev}` : ''}`;
+// A form the server has not confirmed yet is also kept for this tab (cleared on a sign-out, lock or
+// switch by the shell, and at once when the server takes it), so a reload while it is down loses nothing.
+const PENDING_PREFIX = 'dispatch-imagestudio-pending:';
+function keepPending(body, rev) {
+  try {
+    if (body) sessionStorage.setItem(PENDING_PREFIX + S.profileKey, JSON.stringify({ rev, d: body }));
+    else sessionStorage.removeItem(PENDING_PREFIX + S.profileKey);
+  } catch { /* storage off: the form is on screen and retried */ }
+}
+/** This tab's unconfirmed form {draft, rev}, or null; another profile's is deleted unread. */
+function takePending() {
+  let mine = null;
+  try {
+    const own = PENDING_PREFIX + S.profileKey;
+    for (let i = sessionStorage.length - 1; i >= 0; i -= 1) {
+      const k = sessionStorage.key(i);
+      if (!k || !k.startsWith(PENDING_PREFIX)) continue;
+      if (k === own) {
+        let o = null;
+        try { o = JSON.parse(sessionStorage.getItem(k)); } catch { /* junk */ }
+        const d = o && parseDraft(JSON.stringify(o.d));
+        if (d) mine = { draft: d, rev: Number(o.rev) || 0 };
+      } else sessionStorage.removeItem(k);
+    }
+  } catch { /* nothing kept */ }
+  return mine;
 }
 
 /** One request at a time, always carrying the newest form. A failed one keeps the form wanted
@@ -218,21 +256,36 @@ async function flushDraft() {
   let failed = false;
   try {
     if (want.leaving) {
-      fetch(`${API}/draft`, {
+      keepPending(want.body, want.rev);
+      fetch(draftUrl(want.rev, !want.body), {
         method: want.body ? 'PUT' : 'DELETE', credentials: 'same-origin', keepalive: true,
         headers: want.body ? { 'Content-Type': 'application/json', Accept: 'application/json' } : { Accept: 'application/json' },
-        body: want.body ? JSON.stringify(want.body) : undefined,
+        body: want.body ? JSON.stringify({ ...want.body, rev: want.rev }) : undefined,
+      }).then((r) => {
+        // The page may stay alive (a hidden tab): a refusal still stops it, a success settles it.
+        if (r.status === 409) { S.draftReady = false; S.draftWant = null; keepPending(null, 0); }
+        else if (r.ok && S.draftEdits === want.edits) { keepPending(null, 0); S.draftDirty = false; }
       }).catch(() => {});
     } else {
-      await api(`${API}/draft`, want.body ? { method: 'PUT', body: want.body } : { method: 'DELETE' });
+      await api(draftUrl(want.rev, !want.body), want.body
+        ? { method: 'PUT', body: { ...want.body, rev: want.rev } } : { method: 'DELETE' });
+      keepPending(null, 0);                               // the server holds it now
+      if (S.draftEdits === want.edits) S.draftDirty = false;
     }
     S.draftFails = 0;
   } catch (e) {
-    // Worth another try: the network dropped, the server is busy or erred. A refusal or an old
-    // server without the route is not.
     const st = e && e.status;
-    failed = !st || st === 429 || st >= 500;
-    if (failed && !S.draftWant) S.draftWant = want;       // keep the same form wanted
+    if (st === 409) {
+      // This page belongs to another profile now (the session changed under an open tab): stop
+      // saving, so its form can never land in the new profile's draft.
+      S.draftReady = false; S.draftWant = null; keepPending(null, 0);
+    } else {
+      // Worth another try: the network dropped, the server is busy or erred. A refusal or an old
+      // server without the route is not.
+      failed = !st || st === 429 || st >= 500;
+      if (failed) keepPending(want.body, want.rev);
+      if (failed && !S.draftWant) S.draftWant = want;       // keep the same form wanted
+    }
     S.draftFails = failed ? (S.draftFails || 0) + 1 : 0;
   } finally {
     S.draftBusy = false;
@@ -248,13 +301,17 @@ async function flushDraft() {
 async function loadDraft() {
   try {
     const r = await api(`${API}/draft`);
-    return { ok: true, draft: parseDraft(JSON.stringify((r && r.draft) || null)) };
-  } catch { return { ok: false, draft: null }; }
+    return { ok: true, draft: parseDraft(JSON.stringify((r && r.draft) || null)), rev: Number(r && r.draft && r.draft.rev) || 0 };
+  } catch { return { ok: false, draft: null, rev: 0 }; }
 }
 
 /** Store a draft on the server; true when it took. */
 async function putDraft(draft) {
-  try { await api(`${API}/draft`, { method: 'PUT', body: draft }); return true; } catch { return false; }
+  try {
+    S.draftRev = Math.max(Date.now(), S.draftRev + 1);
+    await api(draftUrl(S.draftRev, false), { method: 'PUT', body: { ...draft, rev: S.draftRev } });
+    return true;
+  } catch { return false; }
 }
 
 /** Every localStorage key of this app's old per-device draft family. */
@@ -321,7 +378,7 @@ function resetForm() {
   S.draftReady = true;
   refreshForm();
   S.baseline = serializeDraft(draftForm(), S.info ? S.info.prompt_max : PROMPT_MAX);
-  S.draftDirty = true;          // the cleared form is the edit: the server drops the draft now
+  markDirty();                  // the cleared form is the edit: the server drops the draft now
   saveDraftNow();
   R.prompt.focus();
 }
@@ -365,7 +422,7 @@ function reloadLast() {
     R.pay.value = S.last.currency;
     R.pay.dispatchEvent(new Event('change', { bubbles: true }));
   }
-  S.draftDirty = true;
+  markDirty();
   saveDraftNow();
   R.lastBar.hidden = true;
   renderLast();
@@ -1749,7 +1806,7 @@ function build(root) {
   }, { passive: false });
   R.prompt.addEventListener('input', refreshForm);
   // The form is saved on every change (debounced) and at once when the page is left.
-  const userEdit = () => { S.draftDirty = true; scheduleDraftSave(); };
+  const userEdit = () => { markDirty(); scheduleDraftSave(); };
   R.form.addEventListener('input', userEdit);
   R.form.addEventListener('change', userEdit);
   // A workflow tile, a listed model or a recent prompt is picked by a click, not an input.
@@ -1889,9 +1946,11 @@ export async function mount(root = document.getElementById('st-root')) {
     S.profileKey = (S.info && S.info.profile_key) || '';
     S.baseline = serializeDraft(draftForm(), S.info.prompt_max);
     let draft = null;
+    let serverRev = 0;
     if (S.info.default && draftKey(DRAFT_PREFIX, S.profileKey)) {
       const got = await loadDraft();
       draft = got.draft;
+      serverRev = got.rev;
       // The old per-device copy: moved to the server once (when the server has none), then deleted.
       // If the server cannot be reached the copy stays and is used, so nothing is lost.
       const local = takeLocalDraft((text) => {
@@ -1904,8 +1963,12 @@ export async function mount(root = document.getElementById('st-root')) {
         if (got.ok && await putDraft(mine)) takeLocalDraft(() => true);
       }
     } else takeLocalDraft(() => false);
+    const pending = takePending();           // a save the server never confirmed, if newer than its copy
+    const usePending = !!pending && pending.rev > serverRev;
+    if (usePending) draft = pending.draft;
     if (draft) applyDraft(draft);
     S.draftReady = !!draftKey(DRAFT_PREFIX, S.profileKey);
+    if (usePending && S.draftReady) { markDirty(); scheduleDraftSave(); }
     loadLast();
     if (inflightExtra(S.info, running())) startPolling();
   } catch (e) {

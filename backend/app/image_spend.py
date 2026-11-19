@@ -54,8 +54,8 @@ MINIMAX_USD = {"image-01": 0.0035, "image-01-live": 0.0035,
                "MiniMax-H3-Image": 0.02, "MiniMax-H3-Image-Highspeed": 0.04}
 #: An unlisted MiniMax model counts at the dearest known price.
 MINIMAX_USD_DEFAULT = 0.04
-#: Civitai's own estimate is asked for first; when it cannot be had, this many Buzz a picture.
-BUZZ_FALLBACK = 30
+#: Civitai's own estimate is asked for first; when it cannot be had, this (deliberately high) many Buzz a picture.
+BUZZ_FALLBACK = 60
 #: Providers counted in pictures (billed per image, no price known here).
 COUNTED_PROVIDERS = ("openai", "xai")
 
@@ -227,6 +227,8 @@ def reserve(owner: str | None, cost: Cost | None) -> Reservation | None:
         return None
     day = today()
     scope = _scope_of(owner)
+    # The caps live in the same database file: read them BEFORE this transaction takes its write lock.
+    limits = {"profile": cap("profile", cost.unit), "install": cap("install", cost.unit)}
     with _lock, _connect() as con:
         con.execute("BEGIN IMMEDIATE")
         try:
@@ -236,7 +238,7 @@ def reserve(owner: str | None, cost: Cost | None) -> Reservation | None:
                                   (day, sc, cost.unit)).fetchone()
                 used[sc] = float(row["amount"]) if row else 0.0
             for kind, sc in (("profile", scope), ("install", INSTALL)):
-                limit = cap(kind, cost.unit)
+                limit = limits[kind]
                 if limit > 0 and used[sc] + cost.amount > limit + 1e-9:
                     who = "for this profile" if kind == "profile" else "for the whole household"
                     con.execute("ROLLBACK")
@@ -261,7 +263,7 @@ def reserve(owner: str | None, cost: Cost | None) -> Reservation | None:
             raise
     notice = ""
     for kind, sc in (("profile", scope), ("install", INSTALL)):
-        limit = cap(kind, cost.unit)
+        limit = limits[kind]
         after = used[sc] + cost.amount
         if limit > 0 and after + 1e-9 >= NOTICE_AT * limit:
             who = "this profile's" if kind == "profile" else "the household's"

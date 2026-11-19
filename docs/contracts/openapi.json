@@ -4138,6 +4138,13 @@
             "title": "Ratio",
             "type": "string"
           },
+          "rev": {
+            "default": 0,
+            "maximum": 9007199254740992.0,
+            "minimum": 0.0,
+            "title": "Rev",
+            "type": "integer"
+          },
           "seed": {
             "default": "",
             "maxLength": 12,
@@ -5533,6 +5540,31 @@
     "/api/apps/imagestudio/draft": {
       "delete": {
         "operationId": "draft_delete_api_apps_imagestudio_draft_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "pk",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 16,
+              "title": "Pk",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rev",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 9007199254740992,
+              "minimum": 0,
+              "title": "Rev",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -5541,6 +5573,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Draft Delete"
@@ -5562,6 +5604,19 @@
       },
       "put": {
         "operationId": "draft_put_api_apps_imagestudio_draft_put",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "pk",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 16,
+              "title": "Pk",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {

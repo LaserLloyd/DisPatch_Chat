@@ -540,6 +540,14 @@ def prompt_max(shape: str, model: str = "") -> int:
     return PROMPT_MAX_BY_SHAPE.get(shape, image_jobs.MAX_API_PROMPT_CHARS)
 
 
+def _unbilled(err: image_jobs.ImageJobError) -> image_jobs.ImageJobError:
+    """Mark an error the provider answered to the SUBMIT itself (an HTTP error status): nothing was
+    made, so the daily spend cap gives the reservation back. Any other failure (a timeout, a lost
+    download, a poll, a cancel) may already have been billed and keeps its share counted."""
+    err.unbilled = True
+    return err
+
+
 def _error_from_status(r: httpx.Response, label: str) -> image_jobs.ImageJobError:
     msg = ""
     with contextlib.suppress(Exception):
@@ -690,7 +698,7 @@ async def generate_batch(res: Resolved, spec: image_jobs.ImageSpec, *, n: int = 
                 r = await client.post(f"{res.base_url}/images/generations",
                                       json=body, headers=headers)
                 if r.status_code >= 400:
-                    raise _h3_error(r, label)
+                    raise _unbilled(_h3_error(r, label))
                 items = _h3_items(r.json(), label)
             elif res.preset.shape == "civitai":
                 blobs = await _civitai_batch(client, res, spec, n, seed, currency)
@@ -709,7 +717,7 @@ async def generate_batch(res: Resolved, spec: image_jobs.ImageSpec, *, n: int = 
                 r = await client.post(f"{res.base_url}/image_generation",
                                       json=body, headers=headers)
                 if r.status_code >= 400:
-                    raise _error_from_status(r, label)
+                    raise _unbilled(_error_from_status(r, label))
                 items = _minimax_items(r.json(), label)
             else:
                 body = {"model": res.model, "prompt": spec.prompt, "n": n}
@@ -721,7 +729,7 @@ async def generate_batch(res: Resolved, spec: image_jobs.ImageSpec, *, n: int = 
                 r = await client.post(f"{res.base_url}/images/generations",
                                       json=body, headers=headers)
                 if r.status_code >= 400:
-                    raise _error_from_status(r, label)
+                    raise _unbilled(_error_from_status(r, label))
                 items = _openai_items(r.json(), label)
             for item in items:
                 blobs.append(await _download(client, item) if isinstance(item, str)
@@ -981,7 +989,7 @@ async def _civitai_batch(client: httpx.AsyncClient, res: Resolved,
         client, f"{base}/v2/consumer/workflows?wait={CIVITAI_SUBMIT_WAIT_S}",
         body, headers, label)
     if r.status_code >= 400:
-        raise _error_from_status(r, label)
+        raise _unbilled(_error_from_status(r, label))
     wf = r.json()
     if not isinstance(wf, dict):
         raise image_jobs.ImageJobError(f"{label} sent a reply that is not JSON")
@@ -1368,6 +1376,8 @@ class ApiImages:
                 run.error = "cancelled"
             raise
         except image_jobs.ImageJobError as e:
+            if held is not None and getattr(e, "unbilled", False):
+                held.release()          # the provider refused the request: nothing was bought
             if run is not None:
                 run.error = e.message
             self._last_error = e.message
@@ -1378,7 +1388,7 @@ class ApiImages:
                 run.error = f"internal error ({type(e).__name__})"
         finally:
             if held is not None:
-                held.release()          # no-op once committed: only a failed / cancelled picture gives back
+                held.commit()           # anything else (a timeout, a cancel) may already be billed: stays counted
             if run is not None:
                 run.finished = time.monotonic()
 

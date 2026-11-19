@@ -306,9 +306,33 @@ def test_draft_round_trip_and_reset(world, monkeypatch):
     assert owner.get(BASE + "/draft").json() == {"draft": None}
     assert owner.put(BASE + "/draft", json=DRAFT).status_code == 200
     got = owner.get(BASE + "/draft").json()["draft"]
-    assert got == DRAFT
+    assert {k: v for k, v in got.items() if k != "rev"} == DRAFT
     assert owner.delete(BASE + "/draft").status_code == 200
     assert owner.get(BASE + "/draft").json() == {"draft": None}
+
+
+def test_a_stale_save_cannot_overwrite_a_newer_one_or_a_reset(world, monkeypatch):
+    owner, _ = _server_world(world, monkeypatch)
+    assert owner.put(BASE + "/draft", json={**DRAFT, "prompt": "newer", "rev": 200}).status_code == 200
+    assert owner.put(BASE + "/draft", json={**DRAFT, "prompt": "older", "rev": 100}).status_code == 200
+    assert owner.get(BASE + "/draft").json()["draft"]["prompt"] == "newer", "the older save lost"
+    assert owner.delete(BASE + "/draft", params={"rev": 300}).status_code == 200
+    assert owner.put(BASE + "/draft", json={**DRAFT, "prompt": "crossed", "rev": 250}).status_code == 200
+    assert owner.get(BASE + "/draft").json() == {"draft": None}, "a save that crossed a Reset does not bring the form back"
+    assert owner.put(BASE + "/draft", json={**DRAFT, "prompt": "after", "rev": 400}).status_code == 200
+    assert owner.get(BASE + "/draft").json()["draft"]["prompt"] == "after"
+
+
+def test_a_page_left_open_across_a_profile_switch_cannot_write_the_new_profiles_draft(world, monkeypatch):
+    owner, ada = _server_world(world, monkeypatch)
+    ada_key = ada.get(BASE + "/state").json()["profile_key"]
+    owner_key = owner.get(BASE + "/state").json()["profile_key"]
+    assert ada_key != owner_key
+    # the page that believes it is the Owner's, now talking with Ada's session
+    assert ada.put(BASE + "/draft", params={"pk": owner_key}, json=DRAFT).status_code == 409
+    assert ada.delete(BASE + "/draft", params={"pk": owner_key}).status_code == 409
+    assert ada.get(BASE + "/draft").json() == {"draft": None}
+    assert ada.put(BASE + "/draft", params={"pk": ada_key}, json=DRAFT).status_code == 200
 
 
 def test_one_profile_never_reads_or_writes_another_profiles_draft(world, monkeypatch):
@@ -453,3 +477,22 @@ def test_chat_pictures_from_an_api_provider_share_the_cap(env, fake, monkeypatch
         await be._runs[again.job_id].task
 
     asyncio.run(go())
+
+
+def test_a_timeout_after_the_call_keeps_the_reservation_but_a_refusal_gives_it_back(env, fake, monkeypatch):
+    from app import image_spend
+    image_spend.reset_for_tests()
+    _caps(profile_usd_per_day=0.05, install_usd_per_day=0)
+    c = _unlocked(env)
+
+    def timeout(req):
+        raise httpx.ReadTimeout("slow", request=req)
+
+    monkeypatch.setattr(image_providers, "transport", httpx.MockTransport(timeout))
+    assert _gen(c, model="MiniMax-H3-Image", n=1).status_code == 502
+    used = next(ln for ln in c.get(BASE + "/state").json()["spend"]["lines"] if ln["unit"] == "usd")["used"]
+    assert used == pytest.approx(0.02), "the provider may have billed a call that timed out: it stays counted"
+    monkeypatch.setattr(image_providers, "transport", httpx.MockTransport(lambda r: httpx.Response(401, json={})))
+    assert _gen(c, model="MiniMax-H3-Image", n=1).status_code == 502
+    used = next(ln for ln in c.get(BASE + "/state").json()["spend"]["lines"] if ln["unit"] == "usd")["used"]
+    assert used == pytest.approx(0.02), "a refused request bought nothing: its share went back"

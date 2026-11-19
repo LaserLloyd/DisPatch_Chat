@@ -318,7 +318,7 @@ def _draft_path(owner: str | None) -> Path:
     return _dir() / "draft.json"
 
 
-def _read_draft(owner: str | None) -> dict | None:
+def _read_raw_draft(owner: str | None) -> dict | None:
     try:
         data = json.loads(_draft_path(owner).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -326,6 +326,11 @@ def _read_draft(owner: str | None) -> dict | None:
     if not isinstance(data, dict) or data.get("v") != DRAFT_VERSION:
         return None
     return data
+
+
+def _read_draft(owner: str | None) -> dict | None:
+    data = _read_raw_draft(owner)
+    return None if data is None or data.get("empty") else data
 
 
 def _clean_draft(raw: "DraftIn") -> dict | None:
@@ -340,21 +345,36 @@ def _clean_draft(raw: "DraftIn") -> dict | None:
     return d if len(json.dumps(d, ensure_ascii=False).encode("utf-8")) <= DRAFT_MAX_BYTES else None
 
 
-def _write_draft(owner: str | None, record: dict) -> None:
+def _write_draft(owner: str | None, record: dict | None, rev: int) -> bool:
+    """Store ``record`` (None = drop the draft, kept as a tombstone) unless a NEWER save already
+    landed: saves can cross on the way (a page leaving sends its last one at once), and the older
+    one must not win. ``rev`` is the page's own increasing number (0 = unnumbered, always applies)."""
     with _PROMPTS_LOCK:
+        old = _read_raw_draft(owner)
+        if rev and old and int(old.get("rev") or 0) > rev:
+            return False
+        out = {"v": DRAFT_VERSION, "rev": rev, "empty": True} if record is None else {**record, "rev": rev}
         dest = _draft_path(owner)
         tmp = dest.with_name(f"{dest.name}.{uuid.uuid4().hex}.tmp")
         try:
             tmp.parent.mkdir(parents=True, exist_ok=True)
-            tmp.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+            tmp.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
             os.replace(tmp, dest)
         finally:
             tmp.unlink(missing_ok=True)
+        return True
 
 
-def _drop_draft(owner: str | None) -> None:
-    with _PROMPTS_LOCK:
-        _draft_path(owner).unlink(missing_ok=True)
+def _draft_owner(request: Request, pk: str = "") -> str | None:
+    """The profile whose draft this request may touch: the session's own, never a parameter. A page
+    that names the profile it believes it is (``pk``, the key /state gave it) is refused when the
+    session is another profile's now (a tab left open across a profile switch)."""
+    owner = _owner_of(request)
+    if owner and not _PID_RE.match(owner):
+        raise HTTPException(403, "This profile cannot keep a saved form")
+    if pk and pk != _profile_key(owner):
+        raise HTTPException(409, "You are signed in as someone else now; this page's form was not saved")
+    return owner
 
 
 def _remember_prompt(prompt: str, owner: str | None) -> None:
@@ -606,6 +626,7 @@ class DraftIn(BaseModel):
     seed: str = Field(default="", max_length=12)
     n: int = Field(default=1, ge=1, le=20)
     optimizer: bool = False
+    rev: int = Field(default=0, ge=0, le=2**53)
 
 
 #: "Delete by age": how far back from NOW (the server's clock) each scope reaches.
@@ -1049,22 +1070,29 @@ def build(ctx):
     @router.get("/draft", dependencies=op)
     async def draft_get(request: Request):
         """The caller's own saved form (null when there is none)."""
-        return {"draft": await asyncio.to_thread(_read_draft, _owner_of(request))}
+        return {"draft": await asyncio.to_thread(_read_draft, _draft_owner(request))}
 
     @router.put("/draft", dependencies=op)
-    async def draft_put(body: DraftIn, request: Request):
+    async def draft_put(body: DraftIn, request: Request, pk: str = Query("", max_length=16)):
+        owner = _draft_owner(request, pk)
         record = _clean_draft(body)
         if record is None:
             raise HTTPException(413, "The form is too large to keep")
+        record.pop("rev", None)
         try:
-            await asyncio.to_thread(_write_draft, _owner_of(request), record)
+            await asyncio.to_thread(_write_draft, owner, record, body.rev)
         except OSError:
             raise HTTPException(503, "The form could not be saved just now") from None
         return {"ok": True}
 
     @router.delete("/draft", dependencies=op)
-    async def draft_delete(request: Request):
-        await asyncio.to_thread(_drop_draft, _owner_of(request))
+    async def draft_delete(request: Request, pk: str = Query("", max_length=16),
+                           rev: int = Query(0, ge=0, le=2**53)):
+        owner = _draft_owner(request, pk)
+        try:
+            await asyncio.to_thread(_write_draft, owner, None, rev)
+        except OSError:
+            raise HTTPException(503, "The form could not be saved just now") from None
         return {"ok": True}
 
     @router.post("/models/refresh", dependencies=op)
@@ -1121,7 +1149,7 @@ def build(ctx):
         held = None
         try:
             # The daily spend cap: reserved BEFORE any provider call (a refusal buys nothing and is
-            # not the "last generation"); given back below when the job fails.
+            # not the "last generation"); given back below only when the provider refuses the request.
             try:
                 held = await _reserve_spend(pid, res, spec, n, currency, owner)
             except image_spend.SpendRefused as e:
@@ -1134,6 +1162,8 @@ def build(ctx):
                     optimizer=bool(body.optimizer and caps["optimizer"]),
                     reference=reference, currency=currency)
             except image_jobs.ImageJobError as e:
+                if held is not None and getattr(e, "unbilled", False):
+                    held.release()      # the provider refused the request itself: nothing was bought
                 raise HTTPException(502, e.message) from None
             if held is not None:
                 held.adjust(held.amount * len(blobs) / max(1, n))   # a short batch costs less
@@ -1142,11 +1172,9 @@ def build(ctx):
                 _store, blobs, prompt, pid, res.model, ratio,
                 body.seed if caps["seed"] else None,
                 bool(body.optimizer and caps["optimizer"]), wants_ref, owner, currency)
-        except BaseException:
-            if held is not None:
-                held.release()          # no-op once committed
-            raise
         finally:
+            # Any other failure (a timeout, a lost download, a cancel) may already have been billed by
+            # the provider, so the reservation stays counted.
             _free_slot(owner)
         out = {"images": [_public_row(r) for r in rows], "asked": n}
         if held is not None and held.notice:

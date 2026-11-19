@@ -30,7 +30,7 @@ const ROWS = [
   { id: ID('b'), url: `/media/${ID('b')}.jpg`, prompt: 'second', provider: 'minimax', model: 'image-01', ratio: '16:9', seed: 5 },
 ];
 
-async function page({ nim = false, state = STATE, generate, clear, images, sort = 'oldest', pay = null, extra = {}, framed = true, store = {} } = {}) {
+async function page({ nim = false, state = STATE, generate, clear, images, sort = 'oldest', pay = null, extra = {}, framed = true, store = {}, session = {} } = {}) {
   const posted = [];
   const env = setupDom(PAGE, PAGE_URL, {
     'GET /apps/imagestudio/locales/en.json': () => [200, EN],
@@ -48,6 +48,8 @@ async function page({ nim = false, state = STATE, generate, clear, images, sort 
   if (pay !== null) env.win.localStorage.setItem('dispatch-imagestudio-pay', pay);
   if (nim) env.win.localStorage.setItem('dispatch-nim', '1');
   for (const [k, v] of Object.entries(store)) env.win.localStorage.setItem(k, v);
+  Object.defineProperty(globalThis, 'sessionStorage', { value: env.win.sessionStorage, configurable: true, writable: true });
+  for (const [k, v] of Object.entries(session)) env.win.sessionStorage.setItem(k, v);
   const parentWin = { postMessage: (m, o) => posted.push([m, o]) };
   // Framed by the shell: the page posts to it. On its own, window.parent is the
   // window itself and there is nobody to post to.
@@ -1761,8 +1763,8 @@ const PK_B = '0011223344556677';
 const DKEY = (k) => `dispatch-imagestudio-draft:${k}`;
 const DRAFT_OBJ = { v: 1, provider: 'minimax', model: 'image-01-live', prompt: 'a red fox', ratio: '16:9', seed: '42', n: 3, optimizer: true };
 const DRAFT = JSON.stringify(DRAFT_OBJ);
-const draftRoute = (draft) => ({ 'GET /api/apps/imagestudio/draft': () => [200, { draft }] });
-const dcalls = (env, method) => env.calls.filter((c) => c.key === `${method} /api/apps/imagestudio/draft`);
+const draftRoute = (draft, rev = 0) => ({ 'GET /api/apps/imagestudio/draft': () => [200, { draft: draft && { ...draft, rev } }] });
+const dcalls = (env, method) => env.calls.filter((c) => c.method === method && c.url.split('?')[0] === '/api/apps/imagestudio/draft');
 const typeIn = (env, text) => {
   const box = env.doc.getElementById('st-prompt');
   box.value = text;
@@ -1821,7 +1823,7 @@ test('typing is saved to the server after a pause, in one request, and leaving s
   const puts = dcalls(env, 'PUT');
   assert.equal(puts.length, 1, 'one request for the whole burst');
   assert.equal(puts[0].body.prompt, 'a blue whale');
-  assert.deepEqual(Object.keys(puts[0].body).sort(), ['model', 'n', 'optimizer', 'prompt', 'provider', 'ratio', 'seed', 'v']);
+  assert.deepEqual(Object.keys(puts[0].body).sort(), ['model', 'n', 'optimizer', 'prompt', 'provider', 'ratio', 'rev', 'seed', 'v']);
   typeIn(env, 'a blue whale, deep');
   await leave(env);
   assert.equal(dcalls(env, 'PUT').at(-1).body.prompt, 'a blue whale, deep');
@@ -2044,4 +2046,50 @@ test('a refused generate (the cap) shows the server\'s sentence on the job and k
   assert.equal(doc.getElementById('st-prompt').value, 'keep this prompt', 'the form is not lost');
   assert.match(doc.body.textContent, /starts again at midnight/);
   assert.ok(win);
+});
+
+// ---- the draft is only ever written for the profile the page belongs to, and survives a down server -------
+
+test('every save names the profile the page belongs to, with an increasing number', { skip: dom.skip }, async () => {
+  const env = await page({ state: { ...STATE, profile_key: PK_A } });
+  typeIn(env, 'one');
+  await leave(env);
+  typeIn(env, 'one two');
+  await leave(env);
+  const puts = dcalls(env, 'PUT');
+  assert.ok(puts.length >= 2);
+  assert.ok(puts.every((c) => c.url.includes(`pk=${PK_A}`)));
+  assert.ok(puts[1].body.rev > puts[0].body.rev, 'the later save carries the higher number');
+});
+
+test('a 409 (the session is another profile\'s now) stops all saving from this page', { skip: dom.skip }, async () => {
+  const env = await page({ state: { ...STATE, profile_key: PK_A },
+    extra: { 'PUT /api/apps/imagestudio/draft': () => [409, { detail: 'someone else' }] } });
+  typeIn(env, 'first');
+  await leave(env);
+  await flush();
+  const n = dcalls(env, 'PUT').length;
+  typeIn(env, 'first and second');
+  await leave(env);
+  await flush();
+  assert.equal(dcalls(env, 'PUT').length, n, 'no further request after the refusal');
+  assert.equal(env.doc.getElementById('st-prompt').value, 'first and second', 'the form on screen is untouched');
+});
+
+test('a form the server never confirmed comes back after a reload and is sent again', { skip: dom.skip }, async () => {
+  const pend = JSON.stringify({ rev: 50, d: { ...DRAFT_OBJ, prompt: 'unsaved words' } });
+  const env = await page({ state: { ...STATE, profile_key: PK_A }, session: { [`dispatch-imagestudio-pending:${PK_A}`]: pend },
+    extra: draftRoute({ ...DRAFT_OBJ, prompt: 'older on the server' }, 10) });
+  assert.equal(env.doc.getElementById('st-prompt').value, 'unsaved words');
+  await leave(env);
+  assert.equal(dcalls(env, 'PUT').at(-1).body.prompt, 'unsaved words');
+});
+
+test('an unconfirmed form older than the server\'s copy is dropped, and another profile\'s is deleted unread', { skip: dom.skip }, async () => {
+  const env = await page({ state: { ...STATE, profile_key: PK_A }, session: {
+    [`dispatch-imagestudio-pending:${PK_A}`]: JSON.stringify({ rev: 5, d: { ...DRAFT_OBJ, prompt: 'stale local' } }),
+    [`dispatch-imagestudio-pending:${PK_B}`]: JSON.stringify({ rev: 99, d: { ...DRAFT_OBJ, prompt: 'someone else' } }) },
+  extra: draftRoute({ ...DRAFT_OBJ, prompt: 'newer on the server' }, 90) });
+  assert.equal(env.doc.getElementById('st-prompt').value, 'newer on the server');
+  assert.equal(env.win.sessionStorage.getItem(`dispatch-imagestudio-pending:${PK_B}`), null);
 });
