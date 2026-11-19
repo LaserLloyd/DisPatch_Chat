@@ -254,6 +254,21 @@ def test_idle_lock_is_refused_while_the_session_is_in_use(world, owner):
     assert _st(c)["signed_in"] is False
 
 
+def test_background_polling_does_not_block_the_idle_lock_but_real_use_does(world, owner):
+    mia = _mia(world, owner)
+    c = world.client()
+    world.login(c, profile_id=mia["id"], pin="1357")
+    s = _sess(mia["id"])
+    s.issued -= 10 ** 5                          # signed in long ago, no use reported since
+    c.get("/api/threads")                        # a page's own polling: not use
+    assert auth.idle_due(s) is True
+    auth.note_user_activity(s.token)             # another tab's "active" frame
+    r = c.post("/api/auth/lock", json={"reason": "idle"})
+    assert r.json()["ok"] is False and r.json()["active"] is True
+    s.user_seen -= 10 ** 5
+    assert c.post("/api/auth/lock", json={"reason": "idle"}).json()["ok"] is True
+
+
 # ----------------------------------------------------------------- keep this device unlocked
 
 

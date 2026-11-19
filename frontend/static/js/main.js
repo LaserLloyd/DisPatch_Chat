@@ -9469,7 +9469,10 @@ function goToMain() {
 
 /** Switch profile / the landing banner: while a held session exists, the split screen comes
  *  back (that is the way back to a resume); otherwise the normal sign-in tiles. */
-function openSwitcher() {
+async function openSwitcher() {
+  // Re-read the one bit first: a hold whose short throttle cooldown has passed is offered
+  // again, and one that expired or was dropped is not (the cached answer may be minutes old).
+  if (!state.auth.signedIn) await refreshAuthQuiet();
   if (!state.auth.signedIn && state.auth.resumable && showLockSplit()) return;
   showSignInScreen({ switching: true });
 }

@@ -313,6 +313,10 @@ class _Session:
     #: monotonic time a credential minted this session (0 = re-minted after a restart):
     #: "Keep this device unlocked" right after a sign-in needs no second credential
     issued: float = 0.0
+    #: monotonic time of the last GENUINE use reported by a tab (the socket's "active" /
+    #: "send" frames). Unlike last_seen, a page's own background polling never moves it, so
+    #: it can tell "another tab is in use" from "a tab is open" (idle_due). 0 = unknown.
+    user_seen: float = 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -1029,7 +1033,18 @@ def idle_due(s: _Session) -> bool:
     the 90 s a tab may lag in reporting use."""
     if _exempt(s):
         return False
-    return (time.monotonic() - s.last_seen) >= max(30, _session_timeout(s, load()) - 90)
+    used = s.user_seen or s.issued or 0.0
+    return (time.monotonic() - used) >= max(30, _session_timeout(s, load()) - 90)
+
+
+def note_user_activity(token: str | None) -> None:
+    """A tab reported genuine use (keys, pointer, a sent message) over its socket."""
+    if not token:
+        return
+    with _lock:
+        s = _sessions.get(token)
+        if s is not None and s.locked_at is None:
+            s.user_seen = time.monotonic()
 
 
 def keep_unlocked_allowed(profile: accounts.Profile | None) -> bool:

@@ -14549,6 +14549,8 @@ async def websocket_endpoint(ws: WebSocket):
                     manager.set_principal(ws, principal)
                 if mtype != "ping":
                     auth.touch_session(session.token)
+                if mtype in ("active", "send"):
+                    auth.note_user_activity(session.token)   # 4.4: genuine use (idle_due)
             elif principal.kind == "open" and policy.claimed():
                 # A token-less open connection (opened before the install was
                 # claimed) and an owner exists now - make the client reconnect.

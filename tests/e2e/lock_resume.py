@@ -113,10 +113,12 @@ class Dev:
         # The landing banner / profile chip: openSwitcher(). Use the function the buttons call.
         if pg.locator("#switch-profile:visible").count():
             pg.locator("#switch-profile").click()
-        else:
+        elif pg.locator("#profile-chip:visible").count():
             pg.locator("#profile-chip").click()
             pg.wait_for_timeout(200)
             pg.get_by_role("menuitem").filter(has_text=re.compile("Switch|profile", re.I)).first.click()
+        else:
+            pg.locator("#switch-profile").dispatch_event("click")
         pg.wait_for_timeout(500)
 
     def lock(self):
@@ -125,10 +127,13 @@ class Dev:
             pg.locator("#lock-now").click()
         elif pg.locator("#bm-lock:visible").count():
             pg.locator("#bm-lock").click()
-        else:
+        elif pg.locator("#profile-chip:visible").count():
             pg.locator("#profile-chip").click()
             pg.wait_for_timeout(200)
-            pg.get_by_role("menuitem").filter(has_text=re.compile("Lock", re.I)).first.click()
+            pg.get_by_role("menuitem").filter(has_text=re.compile("Lock|Sign out", re.I)).first.click()
+        else:
+            # Phone: the Lock / Sign out button lives in the settings sheet.
+            pg.locator("#bm-lock").dispatch_event("click")
         pg.wait_for_timeout(2000)
 
     def split_shown(self) -> bool:
@@ -200,7 +205,7 @@ def run(args) -> int:
         chrome = find_headless_shell()
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, **({"executable_path": chrome} if chrome else {}))
-            for phone in (False, True):
+            for phone in [w == "phone" for w in args.widths.split(",")]:
                 W = "phone" if phone else "desktop"
                 # ---- first sign-in shows notices; lock -> split, no leaks; pad resumes, no notices
                 d = Dev(browser, s.base, seed, phone=phone)
@@ -326,8 +331,8 @@ def run(args) -> int:
                     check(f"{W}: keep-unlocked: reopen -> straight in", d.signed_in_as("Owner")
                           and d.page.locator("#lock-screen.hidden").count() == 1)
                     # turn it off in Settings -> This device
-                    d.page.evaluate("() => { location.hash = '#settings/device'; }")
-                    d.page.wait_for_timeout(1500)
+                    d.page.goto(s.base + "/#settings/account")
+                    d.page.wait_for_timeout(2500)
                     box = d.page.locator("#keep-unlocked")
                     present = box.count() == 1
                     if present:
@@ -336,7 +341,7 @@ def run(args) -> int:
                         d.page.wait_for_timeout(1500)
                     st = d.status()
                     check(f"{W}: Settings -> This device turns keep-unlocked off", present and st.get("keep_unlocked") is False)
-                    d.page.keyboard.press("Escape"); d.page.wait_for_timeout(300)
+                    d.page.goto(s.base + "/"); d.page.wait_for_timeout(1500)
                     d.page.wait_for_timeout((IDLE + 25) * 1000)
                     check(f"{W}: keep-unlocked off: idle lock applies (split shown)", d.split_shown() and not d.signed_in_as("Owner"))
                     d.pad(seed["profiles"]["Owner"]["pin"])
@@ -352,8 +357,8 @@ def run(args) -> int:
                     b.dismiss()
                     st = b.status()
                     r = b.page.evaluate("() => fetch('/api/auth/keep-unlocked', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({on:true})}).then(r => r.status)")
-                    b.page.evaluate("() => { location.hash = '#settings/device'; }")
-                    b.page.wait_for_timeout(1500)
+                    b.page.goto(s.base + "/#settings/account")
+                    b.page.wait_for_timeout(2500)
                     check(f"{W}: Restricted profile cannot turn keep-unlocked on",
                           st.get("keep_unlocked") is False and st.get("keep_unlocked_allowed") is False and r == 403
                           and b.page.locator("#keep-unlocked").count() == 0, f"status={r}")
@@ -405,4 +410,5 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=18861)
     ap.add_argument("--data", default="/var/tmp/dp-lock-scratch")
+    ap.add_argument("--widths", default="desktop,phone")
     sys.exit(run(ap.parse_args()))
