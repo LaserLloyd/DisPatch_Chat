@@ -108,6 +108,23 @@ test('the group remembers the tab you were on; a tab id resolves to its group', 
   assert.deepEqual(opened, ['voice-lab'], 'coming back lands on that tab');
 });
 
+test('the add-on going away closes its group window', { skip: dom.skip }, async () => {
+  const dispose = mod.registerExtTiles('gone-addon', [
+    { id: 'gone-one', feature: 'gone_one', nameKey: 'x', open: () => {} },
+    { id: 'gone-two', feature: 'gone_two', nameKey: 'x', open: () => {} },
+  ]);
+  ROWS.push(
+    { id: 'gone-one', title: 'G1', icon: '', kind: 'builtin', enabled: true, builtin_feature: 'gone_one', available: true, owner: 'gone-addon', owner_title: 'Gone' },
+    { id: 'gone-two', title: 'G2', icon: '', kind: 'builtin', enabled: true, builtin_feature: 'gone_two', available: true, owner: 'gone-addon', owner_title: 'Gone' });
+  await mod.loadTools();
+  mod.openTool('gone-one');
+  assert.ok(winIds().includes('group:gone-addon'));
+  mod.closeExtWindow('gone-one', 'gone-addon');
+  dispose();
+  assert.ok(!winIds().includes('group:gone-addon'));
+  ROWS.splice(-2, 2);
+});
+
 test('one enabled tool is not folded (a one-tab strip is noise)', { skip: dom.skip }, async () => {
   mod.registerExtTiles('quiet-addon', [
     { id: 'quiet-one', feature: 'quiet_one', nameKey: 'x', open: () => {} },

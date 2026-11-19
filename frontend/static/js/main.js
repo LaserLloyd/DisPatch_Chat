@@ -89,7 +89,7 @@ import {
   toolCoversChat, closeAllTools, setToolProfile, notifyActiveThread,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen, findTool, toolGlyph, registerExtTiles, isExtFeature,
-  openToolsMenu, toolsMenuOpen, groupFor, extWindowRoot, closeExtWindow,
+  openToolsMenu, toolsMenuOpen, groupFor, extWindowRoot, closeExtWindow, showToolWindow,
 } from './tools.js?v=28';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
@@ -6211,6 +6211,8 @@ function closeToolPanes(except) {
 /** `win`: the pane is drawn inside its tool window (tools.js adapter): only the
  *  pane itself is shown; the chat, its selection and the thread list stay. */
 function openHarnessView({ win = false } = {}) {
+  // Already in its window: the full pane would stack on it (tool-full stuck).
+  if (!win && winPanes.has('harness')) { showToolWindow(HARNESS_ID); return; }
   if (!state.harnessEnabled) return;
   if (win) winPanes.add('harness');
   else {
@@ -6893,6 +6895,8 @@ function renderStudioForgeSessionPanel() {
 }
 
 function openStudioForgeView({ win = false } = {}) {
+  // Already in its window: the full pane would stack on it (tool-full stuck).
+  if (!win && winPanes.has('studioforge')) { showToolWindow(STUDIOFORGE_ID); return; }
   if (!state.studioforgeEnabled) return;
   if (win) winPanes.add('studioforge');
   else {
@@ -7043,6 +7047,8 @@ function renderMailSessionPanel() {
 }
 
 function openMailView({ win = false } = {}) {
+  // Already in its window: the full pane would stack on it (tool-full stuck).
+  if (!win && winPanes.has('mail')) { showToolWindow(MAIL_ID); return; }
   if (!state.mailEnabled) return;
   if (win) winPanes.add('mail');
   else {
@@ -7181,6 +7187,8 @@ function renderClientsSessionPanel() {
 }
 
 function openClientsPanel({ win = false } = {}) {
+  // Already in its window: the full pane would stack on it (tool-full stuck).
+  if (!win && winPanes.has('practice')) { showToolWindow(CLIENTS_ID); return; }
   if (!state.clientsEnabled) return;
   if (win) winPanes.add('practice');
   else {
@@ -8689,10 +8697,11 @@ function registerTools(owner, tiles) {
   ids.forEach((id) => extTileIds.add(id));
   renderToolRail();
   return () => {
+    // Windows first, while the tiles still say which window is the add-on's.
+    ids.forEach((id) => closeExtWindow(id, owner));
     dispose();
     ids.forEach((id) => extTileIds.delete(id));
     if (extToolOpen && ids.includes(extToolOpen.id)) leaveToolPanes();
-    ids.forEach((id) => closeExtWindow(id));
     renderToolRail();
   };
 }

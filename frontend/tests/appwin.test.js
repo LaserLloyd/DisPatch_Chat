@@ -635,3 +635,26 @@ test('B: a phone chat header has a Tools button that opens the tools sheet', { s
   assert.equal(doc.getElementById('tools-menu').hidden, false);
   assert.ok(doc.querySelector('#tools-menu [data-tool="benchmark"]'));
 });
+
+test('review: a built-in window restored before its probe answered loads once the probe says yes', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  const calls = [];
+  let on = false;
+  const view = () => win.document.getElementById('harness-view');
+  mod.wireTools({
+    state: { selectedBotId: 'main', activeThreadId: 't-1' },
+    openers: { harness: () => calls.push('legacy') },
+    panes: { harness: { el: view, show: () => calls.push('show'), hide: () => calls.push('hide') } },
+    closeToolPanes: () => {}, restoreView: () => {}, builtinOn: () => on, builtinDot: () => '',
+    renderSidebar: () => {}, isMobile: () => false, groupState: () => '', navigate: () => {}, toast: () => {},
+    isBotId: () => false, historyPush: () => () => {}, announce: () => {}, focusChat: () => {}, canDragClose: () => true,
+  });
+  win.localStorage.setItem('dispatch-appwin:v1:p1', JSON.stringify({ v: 1, wins: [{ id: 'deepseek-harness', state: 'open', order: 1 }], open: 'deepseek-harness', prefs: {}, seq: 1 }));
+  mod.setToolProfile('p1');
+  await mod.loadTools();
+  assert.deepEqual(calls, [], 'probe not in yet: nothing shown, not marked loaded');
+  on = true;
+  mod.renderToolRail();               // what main does when a probe lands
+  assert.deepEqual(calls, ['show']);
+});

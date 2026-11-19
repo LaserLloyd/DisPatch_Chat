@@ -58,7 +58,7 @@ import {
   closeAll as winCloseAll, setProfile as winSetProfile, syncKnown as winSyncKnown, setLive as winSetLive,
   setTitle as winSetTitle, visibleId as winVisibleId, visibleLayout as winVisibleLayout,
   coversChat as winCoversChat, repaintAll as winRepaint, isMinimized as winIsMinimized, wireAppWindows, afterHistory as winAfterHistory,
-  recordFor as winRecord, windowIds as winIds,
+  recordFor as winRecord, windowIds as winIds, retryLoad as winRetryLoad,
 } from './appwin.js?v=2';
 
 // Builtin ids are the pseudo-bot ids main.js has always used, in rail order.
@@ -113,7 +113,7 @@ export function registerExtTiles(owner, tiles) {
     added.push(b);
   }
   indexBuiltins();
-  if (deps) { renderToolRail(); if (toolsLoaded) winSyncKnown(); }
+  if (deps) { renderToolRail(); if (toolsLoaded) winSyncKnown(); winRetryLoad(); }
   return () => {
     for (const b of added) {
       const i = BUILTINS.indexOf(b);
@@ -613,6 +613,9 @@ export function renderToolRail() {
   const empty = !entries.length && !bots.length && !extra;
   host.hidden = empty;
   paintChatLauncher(!empty && mode === 'tools');
+  // A window restored before its pane's probe answered loads now (the rail is
+  // repainted whenever a probe lands).
+  winRetryLoad();
   if (empty) { closeToolsMenu(); return; }
   host.append(menuButton(entries, bots, mode));
   // A menu opened in the other layout (or for rows that are gone) closes;
@@ -1253,9 +1256,14 @@ function builtinFor(id) {
 }
 
 /** The window an add-on tool's pane lives in: its group's, else its own. */
-function winIdFor(id) {
-  const g = groupFor(id);
-  return g ? g.id : id;
+/** One rule with windowedIds(): an add-on tool lives in its group's window
+ *  when the server lists two or more of that owner's tools, else its own. */
+function winIdFor(id, owner = null) {
+  const b = builtinFor(id);
+  const row = findTool(id);
+  const own = owner || (b && b.owner) || (row && row.owner) || null;
+  if (own && windowedIds().includes(GROUP_PREFIX + own)) return GROUP_PREFIX + own;
+  return id;
 }
 
 /** Server rows that can be windows: framed tools, then enabled + available
@@ -1304,18 +1312,29 @@ function mountBuiltin(rec) {
   rec.body.append(rec.extBox);
 }
 
+/** false = not ready (the feature's probe has not said yes, or the add-on's
+ *  tiles are not registered yet): appwin tries again on retryLoad(). */
 function loadBuiltin(rec) {
-  if (rec.pane) { rec.pane.show(); return; }
-  if (!rec.extRoot || openingExt) return;
+  if (rec.pane) {
+    const b = builtinFor(rec.id);
+    if (b && deps && typeof deps.builtinOn === 'function' && !deps.builtinOn(b.feature)) return false;
+    rec.pane.show();
+    return true;
+  }
+  if (!rec.extRoot) return false;
+  if (openingExt) return true;
   let tabId = rec.id;
   if (isGroupId(rec.id)) {
     const g = groupMeta(rec.id);
-    if (!g || !g.tabs.length) return;
+    if (!g || !g.tabs.length) return false;
     const want = groupTab.get(g.owner);
     tabId = (g.tabs.find((x) => x.id === want) || g.tabs[0]).id;
   }
   const b = builtinFor(tabId);
-  if (b && typeof b.open === 'function') { rec.tab = tabId; b.open(tabId); }
+  if (!b || typeof b.open !== 'function') return false;
+  rec.tab = tabId;
+  b.open(tabId);
+  return true;
 }
 
 function unloadBuiltin(rec) {
@@ -1362,10 +1381,14 @@ export function extWindowRoot(id) {
   return rec.extRoot;
 }
 
+/** main.js: bring back the window a pane already lives in (never a full pane). */
+export function showToolWindow(id) { return winOpen(winIdFor(id)); }
+
 /** Close the window an add-on tool lives in (its dispose, or its tile went). */
-export function closeExtWindow(id) {
-  const wid = winIdFor(id);
-  for (const x of new Set([wid, id])) if (winRecord(x)) winClose(x, { force: true });
+export function closeExtWindow(id, owner = null) {
+  const ids = new Set([winIdFor(id, owner), id]);
+  if (owner) ids.add(GROUP_PREFIX + owner);
+  for (const x of ids) if (winRecord(x)) winClose(x, { force: true });
 }
 
 /** Text typed into a page (or a built-in pane) that an unload would lose.
@@ -1391,7 +1414,7 @@ const winHost = {
     // layout_auto (a sibling of the row's window block): the tool named no layout.
     const window = tool.window ? { ...tool.window, layout_auto: tool.layout_auto === true } : null;
     if (isFramed(tool)) return { title: toolTitle(tool), glyph: () => toolGlyph(tool), window };
-    if (tool.kind === 'builtin' && tool.available !== false) {
+    if (tool.kind === 'builtin' && tool.available !== false && windowedIds().includes(id)) {
       return { title: toolTitle(tool), glyph: () => toolGlyph(tool), window };
     }
     return null;
@@ -1400,7 +1423,7 @@ const winHost = {
   mount: (rec) => { if (isFramed(findTool(rec.id))) makePane(rec); else mountBuiltin(rec); },
   load(rec) {
     const p = panes.get(rec.id);
-    if (!p) { loadBuiltin(rec); return; }
+    if (!p) return loadBuiltin(rec);
     const tool = findTool(rec.id);
     if (!tool) return;
     hideError(p);

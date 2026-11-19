@@ -102,6 +102,8 @@ export function openWindow(id) {
   if (!host || !host.info(id)) return false;
   model = S.openWin(model, id);
   if (!S.find(model, id)) return false;
+  // The window cap may have dropped the oldest pill: its record goes with it.
+  for (const r of [...recs.values()]) if (!S.find(model, r.id)) destroyRec(r);
   ensureRec(id);
   touch(id);
   apply({ focus: id });
@@ -208,6 +210,14 @@ export function setTitle(id, text) {
   r.customTitle = String(text || '').slice(0, 120);
   paintBar(r);
   paintTray();
+}
+
+/** The window on screen is not loaded yet (its host was not ready): try again.
+ *  The host calls this when what it was waiting for arrived. */
+export function retryLoad() {
+  const r = model.open ? recs.get(model.open) : null;
+  if (!r || r.loaded || applying) return;
+  apply({ save: false, quiet: true });
 }
 
 /** Re-measure and re-place everything (resize, a language switch, the chat
@@ -447,7 +457,13 @@ function prefs(r) { return S.prefsFor(model, r.id, r.opts, env()); }
 /** Did the owner (or a migrated default) choose this tool's layout? */
 function chosen(r) { const p = model.prefs[r.id]; return !!((p && p.layout) || (model.def && model.def.layout)); }
 
-function apply({ focus = null, focusPill = null, focusChat = false, focusAfterClose = false, focusNear = -1, save = true, quiet = false } = {}) {
+let applying = false;
+function apply(opts = {}) {
+  applying = true;
+  try { applyNow(opts); } finally { applying = false; }
+}
+
+function applyNow({ focus = null, focusPill = null, focusChat = false, focusAfterClose = false, focusNear = -1, save = true, quiet = false } = {}) {
   ensureLayer();
   const phone = mobile();
   const open = model.open ? recs.get(model.open) : null;
@@ -472,7 +488,9 @@ function apply({ focus = null, focusPill = null, focusChat = false, focusAfterCl
   // (busy, unsaved, typed text), then the most recent. An unloaded pill says so.
   for (const r of recs.values()) {
     const w = S.find(model, r.id);
-    if (w && w.state === 'open' && !r.loaded) { r.loaded = true; r.asleep = false; host.load(r); }
+    // A host that is not ready yet (a built-in pane before its probe answered,
+    // an add-on before its tiles registered) says false: tried again by retryLoad().
+    if (w && w.state === 'open' && !r.loaded) { r.loaded = true; r.asleep = false; if (host.load(r) === false) r.loaded = false; }
     if (w && w.state === 'min' && r.loaded && r.opts.keep_alive === false) unloadRec(r, { asleep: true });
   }
   const cap = phone ? MAX_LIVE_PHONE : MAX_LIVE;
