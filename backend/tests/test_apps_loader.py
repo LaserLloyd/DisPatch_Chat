@@ -770,9 +770,12 @@ def test_manifest_window_refusals(tmp_path, win):
 
 
 def test_manifest_window_default_min_against_small_width(tmp_path):
-    # width 320 < default min_width 360 is refused (min_width must not exceed width)
+    # width 320 < the DEFAULT min_width 360: the default follows the size the
+    # author gave; only an author's own min_width must fit their width.
+    m = _parse(tmp_path, {"id": "a", "window": {"width": 320}}, name="a")
+    assert m.window["width"] == 320 and m.window["min_width"] == 320
     with pytest.raises(apps_loader.ManifestError):
-        _parse(tmp_path, {"id": "a", "window": {"width": 320}}, name="a")
+        _parse(tmp_path, {"id": "b", "window": {"width": 320, "min_width": 400}}, name="b")
 
 
 def test_api_tools_app_row_carries_window_and_put_roundtrips(env):

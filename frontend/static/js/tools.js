@@ -961,7 +961,7 @@ function makePane(rec) {
   };
   // The tool's own buttons in the window's bar: "Updated …", Refresh, Open in a new tab.
   p.upd = el('span', { class: 'appwin-updated muted', 'aria-live': 'polite' });
-  p.refreshBtn = el('button', { type: 'button', class: 'btn-secondary tool-refresh hidden', title: t('tools.refresh_title') });
+  p.refreshBtn = el('button', { type: 'button', class: 'btn-secondary tool-refresh hidden', title: t('tools.refresh_title'), 'aria-label': t('tools.refresh') });
   p.refreshBtn.append(spriteIcon('refresh-cw', 14), el('span', { class: 'tool-refresh-label', text: t('tools.refresh') }));
   p.refreshBtn.addEventListener('click', () => doRefresh(p));
   p.openLink = el('a', { class: 'icon-btn ghost appwin-btn tool-open', target: '_blank', rel: 'noopener noreferrer', title: t('tools.open_tab'), 'aria-label': t('tools.open_tab') });
