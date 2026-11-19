@@ -2367,12 +2367,21 @@ body.appwin-dragging .appwin-handle { cursor: grabbing; }
 .appwin-title { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .appwin-status { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .appwin-status[hidden] { display: none; }
-.appwin-slot { display: flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; }
+/* Narrow (a dock): the tool's own status and buttons give way before the title. */
+.appwin-handle { min-width: min(8.5em, 38%); }
+.appwin-slot { display: flex; align-items: center; gap: 4px; flex: 0 4 auto; min-width: 0; overflow: hidden; }
 .appwin-updated { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 16em; }
 .appwin-updated:empty { display: none; }
 .appwin-btn { flex: 0 0 auto; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; }
 .appwin-btn[hidden], .appwin-slot .hidden { display: none; }
-.appwin-min { width: auto; padding-inline: 10px; gap: 6px; font-size: 13px; border-radius: 8px; }
+/* "Back to chat" is THE button of the bar: filled, and well clear of ✕. */
+.appwin-min.icon-btn.ghost, .appwin-min {
+  width: auto; padding-inline: 10px 12px; gap: 6px; font-size: 13px; font-weight: 600; border-radius: 8px;
+  background: var(--accent); color: var(--on-accent); opacity: 1;
+}
+.appwin-min.icon-btn.ghost:hover, .appwin-min:hover { background: var(--accent-hover); color: var(--on-accent); }
+.appwin-min:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+.appwin-close { margin-inline-start: 10px; }
 .appwin-min-label { white-space: nowrap; }
 .appwin-body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .appwin-body > .tool-body { flex: 1 1 auto; display: flex; min-height: 0; }
@@ -2420,7 +2429,22 @@ body.appwin-dragging .appwin iframe { pointer-events: none; }
   body.appwin-dock-nolist .app,
   body.appwin-dock-nolist .app.tl-collapsed { grid-template-columns: var(--sidebar-width) 1fr; }
   body.appwin-dock-nolist .threadlist { display: none; }
+  /* ...and comes back over the chat from the header's "Show chat list". */
+  body.appwin-dock-nolist.appwin-list-peek .threadlist {
+    display: flex; flex-direction: column; position: fixed; top: 0; bottom: 0; z-index: 58;
+    inset-inline-start: var(--sidebar-width); width: min(var(--threadlist-width, 320px), 80vw);
+    box-shadow: 0 0 30px rgba(0,0,0,.35);
+  }
 }
+.appwin-list-btn[hidden] { display: none; }
+/* The phone's way to the tools from a chat (js/tools.js paintChatLauncher). */
+.ch-tools-btn { display: none; }
+@media (max-width: 768px) { .ch-tools-btn:not([hidden]) { display: inline-flex; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; } }
+@media (max-width: 768px) { .appwin-list-btn { display: none; } }
+/* A built-in pane living in a window: the window's bar is its header now. */
+.appwin-body > .terminal-view { position: absolute; inset: 0; z-index: auto; }
+.appwin-body > .terminal-view .terminal-head .back-btn { display: none; }
+.appwin-body > .appwin-ext { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; overflow: auto; background: var(--bg-tertiary); }
 .appwin-divider { position: fixed; z-index: 56; cursor: col-resize; touch-action: none; background: transparent; }
 .appwin-divider[hidden] { display: none; }
 .appwin-divider::before {
@@ -2429,17 +2453,32 @@ body.appwin-dragging .appwin iframe { pointer-events: none; }
 }
 .appwin-divider:hover::before, .appwin-divider:focus-visible::before, body.appwin-dragging .appwin-divider::before { background: var(--accent); }
 .appwin-divider:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-/* The tray of minimised tools: right above the composer (js measures it). */
-.appwin-tray {
-  position: fixed; z-index: 57; display: flex; gap: 8px; align-items: center;
-  overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; padding: 2px; pointer-events: none;
-}
+/* The tray of minimised tools: right above the composer (js measures it). The
+   tray box itself lets clicks through; its row of pills scrolls sideways. */
+.appwin-tray { position: fixed; z-index: 57; display: flex; pointer-events: none; }
 .appwin-tray[hidden], .appwin-tray.kbd-hidden { display: none; }
+.appwin-tray-row {
+  pointer-events: auto; display: flex; gap: 8px; align-items: center; max-width: 100%; min-width: 0;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding: 4px 2px 6px;
+  overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch;
+}
+.appwin-tray-row::-webkit-scrollbar { display: none; }
+/* More pills off an edge: that edge fades. */
+.appwin-tray.fade-end .appwin-tray-row { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }
+.appwin-tray.fade-start .appwin-tray-row { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent); }
+.appwin-tray.fade-start.fade-end .appwin-tray-row { -webkit-mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent); }
+[dir="rtl"] .appwin-tray.fade-end:not(.fade-start) .appwin-tray-row { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent); }
+[dir="rtl"] .appwin-tray.fade-start:not(.fade-end) .appwin-tray-row { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }
 .appwin-pill {
   pointer-events: auto; flex: 0 0 auto; display: inline-flex; align-items: stretch; max-width: 280px;
   border-radius: 999px; background: var(--bg-secondary); border: 1px solid var(--border-strong);
-  box-shadow: 0 4px 14px rgba(0,0,0,.25); touch-action: none; transition: transform .12s, background .12s;
+  box-shadow: 0 4px 14px rgba(0,0,0,.25); touch-action: pan-x; transition: transform .12s, background .12s;
 }
+/* Finished while minimised: the whole pill says so (kept until it is shown). */
+.appwin-pill.attention { background: color-mix(in srgb, var(--accent) 24%, var(--bg-secondary)); border-color: var(--accent); }
+/* Unloaded past the live limit: asleep, it reloads when opened. */
+.appwin-pill.asleep { border-style: dashed; box-shadow: none; }
+.appwin-pill.asleep .appwin-pill-icon { opacity: .55; filter: grayscale(1); }
 .appwin-pill.dragging { transition: none; z-index: 1; }
 .appwin-pill.armed { background: var(--danger, #c0392b); color: #fff; border-color: transparent; }
 .appwin-pill-main {
@@ -2454,7 +2493,6 @@ body.appwin-dragging .appwin iframe { pointer-events: none; }
 .appwin-pill-status { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .appwin-pill.armed .appwin-pill-status { color: inherit; }
 .appwin-pill-badge { min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: var(--bg-primary); font-size: 11px; font-weight: 700; text-align: center; line-height: 18px; }
-.appwin-pill-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
 .appwin-pill.busy .appwin-pill-icon { animation: appwin-pulse 1.6s ease-in-out infinite; }
 @keyframes appwin-pulse { 50% { opacity: .55; } }
 .appwin-pill-x {
@@ -2496,6 +2534,14 @@ body.appwin-has-pills .messages::after { content: ""; display: block; flex: 0 0 
   .appwin-min { width: auto; }
   .appwin-updated, .appwin .tool-open { display: none; }
   .appwin-tray { z-index: 93; }
+  /* Under a sheet the tray is a solid strip at the very bottom, where the tab
+     bar was (the tabs hide): nothing behind the sheet can be reached. */
+  .appwin-tray.strip {
+    pointer-events: auto; background: var(--bg-secondary); border-top: 1px solid var(--border-strong);
+    padding: 2px 8px env(safe-area-inset-bottom, 0px); box-sizing: border-box;
+  }
+  body.appwin-sheet .mobile-tabs { visibility: hidden; pointer-events: none; }
+  .appwin-close { margin-inline-start: 14px; }
   .appwin-pill-main { min-height: 44px; }
   .appwin-pill-x { width: 44px; min-height: 44px; }
   .appwin-pill { max-width: 70vw; }

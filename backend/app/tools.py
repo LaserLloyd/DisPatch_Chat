@@ -157,12 +157,12 @@ _ALLOWED_KEYS = {
 #: when they still say what the package says, and refused when they do not —
 #: a title is changed in app.yaml, not through this API.
 _APP_MIRROR_KEYS = ("title", "icon", "order", "has_refresh", "bot_id",
-                    "thread_hook", "entry", "hook_version", "mounted", "window")
+                    "thread_hook", "entry", "hook_version", "mounted", "window", "layout_auto")
 _REFRESH_KEYS = {"argv", "cwd", "timeout_s"}
 #: Keys GET /api/tools adds that are not part of the manifest. PUT drops them so
 #: the Settings tab can send back the rows it was given.
 _OUTPUT_ONLY_KEYS = {"has_refresh", "builtin_feature", "available",
-                     "open_url", "open_remote_url", "owner", "owner_title"}
+                     "open_url", "open_remote_url", "owner", "owner_title", "layout_auto"}
 
 #: Env names ending in these are never handed to a refresh process.
 _SCRUB_SUFFIXES = ("_KEY", "_TOKEN", "_SECRET", "_PIN", "_PASSWORD", "_PASSWD")
@@ -489,7 +489,11 @@ def validate_tools(rows: list, check_fs: bool | Collection[int] = True, *,
         safe = _check_bool(row, "safe", False, i)
         open_ = _check_open(row, kind, tid, i)
         try:
-            window = tuple(sorted(non_default(parse_window(row.get("window"))).items()))
+            parsed = parse_window(row.get("window"))
+            given = non_default(parsed)
+            if isinstance(row.get("window"), dict) and "layout" in row["window"]:
+                given["layout"] = parsed["layout"]      # named by the author: kept, even "float"
+            window = tuple(sorted(given.items()))
         except ValueError as e:
             raise ToolValidationError(i, "window", str(e)) from None
 
@@ -966,10 +970,20 @@ def _member_visible(t: Tool) -> bool:
 # Output shaping
 # --------------------------------------------------------------------------- #
 
+def window_fields(window: dict, *, layout_set: bool) -> dict:
+    """The ``window`` block of an /api/tools row, and ``layout_auto`` (the tool did
+    not name a layout: the shell picks). Every row that can be on screen honours
+    it: apps, pages and the built-in panes all open in a tool window;
+    an ``open: window`` tool uses one whenever it is not launched in a tab (a
+    restore after a reload, or no address from this browser)."""
+    return {"window": window, "layout_auto": not layout_set}
+
+
 def _out_operator(t: Tool) -> dict:
     d = {"id": t.id, "title": t.title, "icon": t.icon, "kind": t.kind,
          "enabled": t.enabled, "has_refresh": t.refresh is not None,
-         "open": t.open, "window": t.window_out}
+         "open": t.open,
+         **window_fields(t.window_out, layout_set="layout" in dict(t.window))}
     if t.kind == "static":
         d["root"] = t.root
         d["entry"] = t.entry
@@ -984,7 +998,7 @@ def _out_operator(t: Tool) -> dict:
 def _out_limited(t: Tool) -> dict:
     d = {"id": t.id, "title": t.title, "icon": t.icon, "kind": t.kind,
          "enabled": t.enabled, "has_refresh": False, "open": t.open,
-         "window": t.window_out}
+         **window_fields(t.window_out, layout_set="layout" in dict(t.window))}
     if t.kind == "static":
         d["entry"] = t.entry
     else:
@@ -1002,7 +1016,8 @@ def _builtin_row(tid: str) -> dict:
             "enabled": builtin_switch(tid),
             "has_refresh": False, "builtin_feature": feat,
             "available": _builtin_available(tid),
-            "open": builtin_open(tid), "window": default_window()}
+            "open": builtin_open(tid),
+            **window_fields(default_window(), layout_set=False)}
     owner = _EXT_OWNER.get(tid)
     if owner:
         # Which ADD-ON registered this builtin, and what it is called. The rail
@@ -1033,7 +1048,8 @@ def _app_row(la) -> dict:
     d = {"id": m.id, "title": m.title, "icon": m.icon, "kind": "app",
          # The manifest SWITCH, like a builtin row (never a resolved value).
          "enabled": _app_enabled(m.id), "order": m.order,
-         "has_refresh": False, "window": dict(m.window)}
+         "has_refresh": False,
+         **window_fields(dict(m.window), layout_set=getattr(m, "window_layout_set", False))}
     if m.bot is not None:
         d["bot_id"] = m.bot.id
     d["thread_hook"] = f"/apps/{m.id}/thread.js" if m.thread_hook else None
@@ -1290,8 +1306,13 @@ def api_tools_put(request: Request, payload: dict = Body(...)):
         # row sent back without it keeps what the file holds (inert data, round-tripped).
         if "safe" not in row and stored is not None and stored.safe:
             row["safe"] = True
-        if "window" not in row and stored is not None and stored.window:
-            row["window"] = dict(stored.window)
+        if stored is not None and ("window" not in row or row.get("window") == stored.window_out):
+            # Sent back as GET gave it (or not at all): the file's own block stays
+            # exactly, so a round trip never turns a picked default into a choice.
+            if stored.window:
+                row["window"] = dict(stored.window)
+            else:
+                row.pop("window", None)
         # The UI can never introduce or change a refresh argv: sent = must equal
         # what the file already holds; omitted/null = keep what the file holds.
         if row.get("refresh") is not None:

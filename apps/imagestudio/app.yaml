@@ -14,7 +14,6 @@ permission: use_images
 env: []
 # Window options (docs/design/app-windows.md): Image Studio needs room.
 window:
-  layout: float
   width: 1100
   height: 800
   min_width: 400

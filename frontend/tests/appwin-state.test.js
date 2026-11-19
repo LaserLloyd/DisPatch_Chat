@@ -44,19 +44,50 @@ test('opening a tool that already has a window restores it - never a second copy
   assert.equal(W.pills(m).length, 0);
 });
 
-test('minimise = a pill at the end of the tray; restore takes it out', () => {
+test('pills keep FIRST-OPEN order (stable targets), whatever order they were minimised in', () => {
   let m = W.openWin(W.empty(), 'a');
-  m = W.minimize(m, 'a');
-  m = W.openWin(m, 'b');
-  m = W.minimize(m, 'b');
+  m = W.openWin(m, 'b');            // a -> pill
+  m = W.openWin(m, 'c');            // b -> pill
+  m = W.minimize(m, 'c');
   assert.equal(m.open, null);
-  assert.deepEqual(W.pills(m).map((w) => w.id), ['a', 'b']);
+  assert.deepEqual(W.pills(m).map((w) => w.id), ['a', 'b', 'c']);
   m = W.restore(m, 'a');
-  assert.deepEqual(W.pills(m).map((w) => w.id), ['b']);
+  assert.deepEqual(W.pills(m).map((w) => w.id), ['b', 'c']);
   assert.equal(m.open, 'a');
-  // Restoring b now puts a back at the END of the tray.
-  m = W.restore(m, 'b');
-  assert.deepEqual(W.pills(m).map((w) => w.id), ['a']);
+  // a minimised last still goes back to ITS place, first.
+  m = W.minimize(m, 'a');
+  assert.deepEqual(W.pills(m).map((w) => w.id), ['a', 'b', 'c']);
+  // closed and opened again: a new window, at the end.
+  m = W.openWin(W.closeWin(m, 'a'), 'a');
+  m = W.minimize(m, 'a');
+  assert.deepEqual(W.pills(m).map((w) => w.id), ['b', 'c', 'a']);
+  // the order survives storage
+  assert.deepEqual(W.pills(W.parse(W.serialize(m))).map((w) => w.id), ['b', 'c', 'a']);
+});
+
+test('attention: set on a pill, kept through storage, cleared when the tool is next shown', () => {
+  let m = W.openWin(W.empty(), 'a');
+  m = W.openWin(m, 'b');
+  m = W.setAttention(m, 'a', true);
+  assert.equal(W.find(m, 'a').att, true);
+  assert.equal(W.setAttention(m, 'b', true), m, 'the window on screen is never flagged');
+  const back = W.parse(W.serialize(m));
+  assert.equal(W.find(back, 'a').att, true, 'survives a reload');
+  assert.equal(W.find(W.openWin(back, 'a'), 'a').att, undefined, 'shown = seen');
+});
+
+test('default layout: below 1600 px of content a tool that did not ask docks at the inline end; a remembered choice always wins', () => {
+  const auto = W.windowOptions({ layout_auto: true });
+  const asked = W.windowOptions({ layout: 'float' });
+  const m = W.empty();
+  assert.equal(W.prefsFor(m, 'a', auto, { contentW: 1368 }).layout, 'right');
+  assert.equal(W.prefsFor(m, 'a', auto, { contentW: 1368, rtl: true }).layout, 'left');
+  assert.equal(W.prefsFor(m, 'a', auto, { contentW: 1800 }).layout, 'float');
+  assert.equal(W.prefsFor(m, 'a', asked, { contentW: 1368 }).layout, 'float', 'a tool that asked keeps its layout');
+  assert.equal(W.prefsFor(m, 'a', W.windowOptions({ layout_auto: true, dockable: false }), { contentW: 1000 }).layout, 'float');
+  const chosen = W.setLayout(m, 'a', 'float');
+  assert.equal(W.prefsFor(chosen, 'a', auto, { contentW: 1368 }).layout, 'float', 'the owner chose float: it stays');
+  assert.equal(W.prefsFor(m, 'a', auto).layout, 'float', 'no width known: the plain default');
 });
 
 test('close removes the window but keeps its remembered layout', () => {
@@ -66,6 +97,13 @@ test('close removes the window but keeps its remembered layout', () => {
   assert.equal(m.wins.length, 0);
   assert.equal(m.open, null);
   assert.equal(W.prefsFor(m, 'a').layout, 'left');
+});
+
+test('an add-on group window id is a window id', () => {
+  const m = W.openWin(W.empty(), 'group:dispatch-voice');
+  assert.equal(m.open, 'group:dispatch-voice');
+  assert.equal(W.find(W.parse(W.serialize(m)), 'group:dispatch-voice').state, 'open');
+  assert.equal(W.openWin(W.empty(), 'group:Bad Id').open, null);
 });
 
 test('a bad id never becomes a window', () => {
@@ -111,6 +149,8 @@ test('windowOptions fills defaults and ignores junk', () => {
   assert.equal(o.keep_alive, false);
   assert.equal(o.dockable, true);
   assert.equal(W.windowOptions({ min_width: 10 }).min_width, 360);
+  assert.equal(W.windowOptions({ layout_auto: true }).auto, true);
+  assert.equal(W.windowOptions({ layout: 'full' }).auto, false);
 });
 
 test('effectiveLayout: phone = sheet; a dock that does not fit shows full', () => {
@@ -135,14 +175,19 @@ test('clampRect keeps a float on screen and no smaller than its minimum', () => 
   assert.deepEqual(W.clampRect(null, b, o), W.initialRect(o, b));
 });
 
-test('initialRect: at most 60% wide and 760 tall, never under the minimum, at the inline end', () => {
+test('initialRect: a size the tool asked for wins up to a margin; with none, 60% wide and 760 tall; never under the minimum; at the inline end', () => {
   const o = W.windowOptions({ width: 1100, height: 800, min_width: 400, min_height: 360 });
-  assert.deepEqual(W.initialRect(o, { w: 1500, h: 900 }), { x: 1500 - 900 - 16, y: 16, w: 900, h: 760 });
-  assert.deepEqual(W.initialRect(o, { w: 1500, h: 900 }, { rtl: true }), { x: 16, y: 16, w: 900, h: 760 });
+  assert.deepEqual(W.initialRect(o, { w: 1500, h: 900 }), { x: 1500 - 1100 - 16, y: 16, w: 1100, h: 800 });
+  assert.deepEqual(W.initialRect(o, { w: 1500, h: 900 }, { rtl: true }), { x: 16, y: 16, w: 1100, h: 800 });
+  // bigger than the area: the area less a margin each side
+  assert.deepEqual(W.initialRect(o, { w: 1000, h: 700 }), { x: 16, y: 16, w: 1000 - 32, h: 700 - 32 });
+  // no size asked: 60 % of the width (at most DEFAULT_W) and at most 760 tall
+  const d = W.initialRect(W.windowOptions({}), { w: 1500, h: 900 });
+  assert.deepEqual([d.w, d.h], [900, 760]);
   const small = W.windowOptions({ width: 500, height: 400 });
   assert.deepEqual(W.initialRect(small, { w: 1500, h: 900 }), { x: 1500 - 500 - 16, y: 16, w: 500, h: 400 });
   // A narrow area: the minimum wins over the 60 % rule.
-  const n = W.initialRect(o, { w: 600, h: 500 });
+  const n = W.initialRect(W.windowOptions({ min_width: 400, min_height: 360 }), { w: 600, h: 500 });
   assert.equal(n.w, 400);
   assert.ok(n.x >= 0 && n.x + n.w <= 600 && n.y + n.h <= 500);
 });

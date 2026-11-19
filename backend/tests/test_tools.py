@@ -1217,9 +1217,13 @@ def test_window_not_allowed_on_builtin_or_app_rows(tools_env):
 
 
 def test_window_to_manifest_omits_defaults(tools_env):
+    t = tools.validate_tools([_static(window={"keep_alive": True})], check_fs=False)[0]
+    assert "window" not in t.to_manifest()           # a default is never written
+    # ...but a layout the author NAMED is a choice, even "float": it is kept, so
+    # the shell does not pick one for them (layout_auto).
     t = tools.validate_tools([_static(window={"layout": "float", "keep_alive": True})],
                              check_fs=False)[0]
-    assert "window" not in t.to_manifest()           # a default is never written
+    assert t.to_manifest()["window"] == {"layout": "float"}
     t = tools.validate_tools([_static(window={"width": 800, "dockable": False, "min_width": 360})],
                              check_fs=False)[0]
     assert t.to_manifest()["window"] == {"dockable": False, "width": 800}
@@ -1234,6 +1238,11 @@ def test_api_tools_rows_emit_window(tools_env):
     assert rows["bench"]["window"] == {**_WIN_DEFAULTS, "layout": "right", "width": 800}
     assert rows["ext"]["window"] == _WIN_DEFAULTS
     assert rows["mail-panel"]["window"] == _WIN_DEFAULTS      # builtin: defaults
+    # layout_auto: the tool named no layout, so the shell picks (docked beside
+    # the chat on a narrow screen). A named one, even the default, is the tool's.
+    assert rows["bench"]["layout_auto"] is False
+    assert rows["ext"]["layout_auto"] is True
+    assert rows["mail-panel"]["layout_auto"] is True
 
 
 def test_put_roundtrips_window(tools_env):
@@ -1247,6 +1256,8 @@ def test_put_roundtrips_window(tools_env):
     assert tools.get_tool("bench").window_out == {**_WIN_DEFAULTS, "layout": "full",
                                                   "height": 700, "keep_alive": False}
     assert tools.get_tool("ext").window == ()
+    # A row sent back exactly as GET gave it never turns the picked default into a choice.
+    assert c.get("/api/tools").json()["tools"][[x["id"] for x in rows].index("ext")]["layout_auto"] is True
     assert "window" not in (config.DATA_DIR / "tools.yaml").read_text().split("id: ext")[1]
     # A row sent without `window` keeps what the file holds.
     row = {k: v for k, v in next(x for x in rows if x["id"] == "bench").items() if k != "window"}

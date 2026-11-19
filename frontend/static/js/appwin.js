@@ -21,13 +21,15 @@
 
 import { t } from './i18n.js?v=5';
 import { el, spriteIcon } from './util.js?v=23';
-import * as S from './appwin-state.js?v=1';
+import * as S from './appwin-state.js?v=2';
 
-/** Frames kept alive at once (the open one + the most recently used pills). */
-export const MAX_LIVE = 3;
-/** A pill dragged this far up (or sideways) closes on release. */
+/** Frames kept alive at once (the open one + the most recently used pills):
+ *  a phone has less memory to spare than a desktop. */
+export const MAX_LIVE = 5;
+export const MAX_LIVE_PHONE = 3;
+/** A pill dragged this far UP closes on release. Sideways never closes: on a
+ *  phone that is how the row scrolls. */
 export const CLOSE_DRAG_Y = 64;
-export const CLOSE_DRAG_X = 120;
 /** A sheet swiped down this far minimises. */
 export const SHEET_SWIPE = 96;
 
@@ -39,6 +41,7 @@ let firstSync = true;
 const recs = new Map();        // id -> window record (DOM + live state)
 let layer = null;
 let tray = null;
+let trayRow = null;
 let divider = null;
 let preview = null;
 let confirmDlg = null;
@@ -98,17 +101,19 @@ export function recordFor(id) { return recs.get(id) || null; }
 export function openWindow(id) {
   if (!host || !host.info(id)) return false;
   model = S.openWin(model, id);
+  if (!S.find(model, id)) return false;
   ensureRec(id);
   touch(id);
   apply({ focus: id });
   return true;
 }
 
-/** Back to chat. */
-export function minimizeWindow(id = model.open) {
+/** Back to chat. `toChat`: a pointer or touch did it, so the composer gets the
+ *  focus (typing goes where the eyes are); the keyboard keeps it on the pill. */
+export function minimizeWindow(id = model.open, { toChat = false } = {}) {
   if (!id || !S.find(model, id)) return false;
   model = S.minimize(model, id);
-  apply({ focusPill: id });
+  apply(toChat ? { focusChat: true } : { focusPill: id });
   return true;
 }
 
@@ -185,8 +190,10 @@ export function setLive(id, op, value) {
   else if (op === 'unsaved') L.unsaved = value === true;
   else if (op === 'attention') {
     if (model.open === id) return true;    // on screen: nothing to flag
-    if (!L.attention && deps && typeof deps.announce === 'function') deps.announce(t('win.finished', { name: r.title }));
-    L.attention = true;
+    const w = S.find(model, id);
+    if (w && !w.att && deps && typeof deps.announce === 'function') deps.announce(t('win.finished', { name: r.title }));
+    model = S.setAttention(model, id, true);
+    if (profileId) S.save(profileId, model);
   } else if (op === 'minimize') { minimizeWindow(id); return true; }
   else return false;
   paintBar(r);
@@ -229,8 +236,9 @@ function ensureRec(id) {
     title: info.title,
     glyph: info.glyph,
     opts: S.windowOptions(info.window),
-    live: { status: '', badge: 0, busy: 0, unsaved: false, attention: false },
+    live: { status: '', badge: 0, busy: 0, unsaved: false },
     customTitle: '',
+    asleep: false,
     loaded: false,
     used: 0,
     eff: null,
@@ -250,11 +258,18 @@ function destroyRec(r) {
 
 /** A page's frame goes (past the live cap, or keep_alive: false): what it
  *  said about itself goes with it, or its pill would say "2 making" forever. */
-function unloadRec(r) {
+function unloadRec(r, { asleep = false } = {}) {
   r.loaded = false;
   r.sent = '';
-  r.live = { status: '', badge: 0, busy: 0, unsaved: false, attention: false };
+  r.asleep = asleep;
+  r.live = { status: '', badge: 0, busy: 0, unsaved: false };
   host.unload(r);
+}
+
+/** Has the page work the owner would lose (busy, unsaved, or typed text)? */
+function hasWork(r) {
+  if (r.live.busy > 0 || r.live.unsaved) return true;
+  try { return !!(host && typeof host.typed === 'function' && host.typed(r)); } catch { return false; }
 }
 
 // The sheet's history entry, and calls waiting for its pop to land.
@@ -288,6 +303,9 @@ function ensureLayer() {
   tray.setAttribute('role', 'toolbar');
   tray.hidden = true;
   tray.addEventListener('keydown', onTrayKey);
+  // The pills live in a row that scrolls sideways (a phone fits two or three).
+  trayRow = tray.querySelector('.appwin-tray-row') || tray.appendChild(el('div', { class: 'appwin-tray-row' }));
+  trayRow.addEventListener('scroll', paintFade, { passive: true });
   divider = $('appwin-divider') || document.body.appendChild(el('div', { id: 'appwin-divider', class: 'appwin-divider' }));
   divider.setAttribute('role', 'separator');
   divider.setAttribute('aria-orientation', 'vertical');
@@ -306,12 +324,14 @@ function iconBtn(cls, icon, label) {
 
 function buildWindow(r) {
   ensureLayer();
-  const titleId = `appwin-title-${r.id}`;
+  const titleId = `appwin-title-${cssSafe(r.id)}`;
+  const descId = `appwin-desc-${cssSafe(r.id)}`;
   const win = el('section', { class: 'appwin', role: 'dialog', 'aria-labelledby': titleId, dataset: { tool: r.id } });
   win.hidden = true;
   const bar = el('header', { class: 'appwin-bar' });
   const grip = el('div', { class: 'appwin-grip', 'aria-hidden': 'true' });
-  const handle = el('button', { type: 'button', class: 'appwin-handle' });
+  const handle = el('button', { type: 'button', class: 'appwin-handle', 'aria-describedby': descId });
+  const desc = el('span', { class: 'sr-only', id: descId });
   const icon = el('span', { class: 'appwin-icon', 'aria-hidden': 'true' });
   const text = el('span', { class: 'appwin-titles' });
   const title = el('span', { class: 'appwin-title', id: titleId });
@@ -326,20 +346,21 @@ function buildWindow(r) {
   const minLabel = el('span', { class: 'appwin-min-label' });
   minBtn.append(minLabel);
   const closeBtn = iconBtn('appwin-close', spriteIcon('x', 18), '');
-  bar.append(grip, handle, slot, layoutBtn, minBtn, closeBtn);
+  bar.append(grip, handle, desc, slot, layoutBtn, minBtn, closeBtn);
   const body = el('div', { class: 'appwin-body' });
   win.append(bar, body);
   for (const [dir, cls] of [['e', 'appwin-rs-e'], ['w', 'appwin-rs-w'], ['s', 'appwin-rs-s'], ['se', 'appwin-rs-se'], ['sw', 'appwin-rs-sw']]) {
     win.append(el('div', { class: `appwin-rs ${cls}`, dataset: { dir }, 'aria-hidden': 'true' }));
   }
   layer.append(win);
-  Object.assign(r, { el: win, bar, handle, icon, titleEl: title, statusEl: status, slot, layoutBtn, minBtn, minLabel, closeBtn, body });
+  Object.assign(r, { el: win, bar, handle, desc, icon, titleEl: title, statusEl: status, slot, layoutBtn, minBtn, minLabel, closeBtn, body });
 
   // "Back to chat" means it: on a phone opened from the bot list, the chat
   // that was open comes up under the pill (system Back only steps back).
-  minBtn.addEventListener('click', () => {
+  minBtn.addEventListener('click', (e) => {
     if (mobile() && deps && typeof deps.backToChat === 'function') { try { deps.backToChat(); } catch { /* the pill still comes */ } }
-    minimizeWindow(r.id);
+    // detail > 0 = a pointer or a touch (Enter / Space on the button report 0).
+    minimizeWindow(r.id, { toChat: e.detail > 0 });
   });
   closeBtn.addEventListener('click', () => closeWindow(r.id));
   layoutBtn.addEventListener('click', () => toggleLayoutMenu(r));
@@ -377,7 +398,9 @@ function paintChrome(r) {
   r.layoutBtn.setAttribute('aria-label', lay);
   r.layoutBtn.setAttribute('title', lay);
   r.layoutBtn.hidden = phone;
-  r.handle.setAttribute('aria-label', phone ? name : t('win.move', { name }));
+  // The NAME is the label; how to move it is the description (desktop only).
+  r.handle.setAttribute('aria-label', name);
+  r.desc.textContent = phone ? '' : t('win.move', { name });
   r.icon.replaceChildren(r.glyph ? r.glyph() : '');
 }
 
@@ -418,7 +441,13 @@ function clearDock() {
   if (divider) divider.hidden = true;
 }
 
-function apply({ focus = null, focusPill = null, focusAfterClose = false, focusNear = -1, save = true, quiet = false } = {}) {
+/** What the layout default may depend on: the width beside the rail. */
+function env() { return { contentW: mobile() ? null : contentArea().width, rtl: isRtl() }; }
+function prefs(r) { return S.prefsFor(model, r.id, r.opts, env()); }
+/** Did the owner (or a migrated default) choose this tool's layout? */
+function chosen(r) { const p = model.prefs[r.id]; return !!((p && p.layout) || (model.def && model.def.layout)); }
+
+function apply({ focus = null, focusPill = null, focusChat = false, focusAfterClose = false, focusNear = -1, save = true, quiet = false } = {}) {
   ensureLayer();
   const phone = mobile();
   const open = model.open ? recs.get(model.open) : null;
@@ -428,31 +457,44 @@ function apply({ focus = null, focusPill = null, focusAfterClose = false, focusN
     const w = S.find(model, r.id);
     const visible = !!w && w.state === 'open';
     if (!visible) { r.eff = null; continue; }
-    const p = S.prefsFor(model, r.id, r.opts);
+    let layout = prefs(r).layout;
     let can = true;
-    if (!phone && S.DOCKS.includes(p.layout)) {
+    if (!phone && S.DOCKS.includes(layout)) {
       dock = S.dockMode(dockRoom(), r.opts);
       can = !!dock;
+      // A dock nobody chose that does not fit: a float, never a full cover.
+      if (!can && !chosen(r)) { layout = 'float'; can = true; dock = null; }
     }
-    r.eff = S.effectiveLayout(p.layout, { mobile: phone, canDock: can, dockable: r.opts.dockable });
+    r.eff = S.effectiveLayout(layout, { mobile: phone, canDock: can, dockable: r.opts.dockable });
   }
-  // 2. live frames: the open one loads; past MAX_LIVE the least recently used pill unloads
+  // 2. live frames: the open one loads; past the cap the least recently used
+  // pill unloads. Kept first: the open one, then pages with work in hand
+  // (busy, unsaved, typed text), then the most recent. An unloaded pill says so.
   for (const r of recs.values()) {
     const w = S.find(model, r.id);
-    if (w && w.state === 'open' && !r.loaded) { r.loaded = true; host.load(r); }
-    if (w && w.state === 'min' && r.loaded && r.opts.keep_alive === false) unloadRec(r);
+    if (w && w.state === 'open' && !r.loaded) { r.loaded = true; r.asleep = false; host.load(r); }
+    if (w && w.state === 'min' && r.loaded && r.opts.keep_alive === false) unloadRec(r, { asleep: true });
   }
-  // Keep the open one, then pages with work in hand, then the most recent.
-  const keep = (r) => (model.open === r.id ? 2 : (r.live.busy > 0 || r.live.unsaved ? 1 : 0));
-  const live = [...recs.values()].filter((r) => r.loaded).sort((a, b) => (keep(b) - keep(a)) || (b.used - a.used));
-  for (const r of live.slice(MAX_LIVE)) {
-    if (model.open === r.id) continue;
-    unloadRec(r);
+  const cap = phone ? MAX_LIVE_PHONE : MAX_LIVE;
+  const loaded = [...recs.values()].filter((r) => r.loaded);
+  if (loaded.length > cap) {
+    const keep = (r) => (model.open === r.id ? 2 : (hasWork(r) ? 1 : 0));
+    const live = loaded.map((r) => [r, keep(r)]).sort((a, b) => (b[1] - a[1]) || (b[0].used - a[0].used)).map((x) => x[0]);
+    for (const r of live.slice(cap)) {
+      if (model.open === r.id) continue;
+      unloadRec(r, { asleep: true });
+    }
   }
-  // 3. the tray first (a float stops above it)
+  // 3. what covers the chat decides where the tray goes; the tray goes first
+  // (a float, a full window and a sheet all stop above it)
+  const cover = !!open && (open.eff === 'full' || open.eff === 'sheet');
+  document.body.classList.toggle('appwin-open', !!open);
+  document.body.classList.toggle('appwin-covers', cover);
+  document.body.classList.toggle('appwin-sheet', !!open && open.eff === 'sheet');
   paintTray();
-  // 4. place the window on screen
   clearDock();
+  placeTray();
+  // 4. place the window on screen
   for (const r of recs.values()) {
     r.el.hidden = !r.eff;
     r.el.dataset.layout = r.eff || 'min';
@@ -460,9 +502,9 @@ function apply({ focus = null, focusPill = null, focusAfterClose = false, focusN
     if (r.eff) { place(r, dock); paintLayoutBtn(r); }
     if (!r.eff && r.menu) closeLayoutMenu(r, false);
   }
-  document.body.classList.toggle('appwin-open', !!open);
-  document.body.classList.toggle('appwin-covers', !!open && (open.eff === 'full' || open.eff === 'sheet'));
+  // a dock moved the chat column: the tray follows it
   placeTray();
+  paintListToggle();
   // 5. phone Back minimises a sheet: ONE history entry while any sheet is up.
   // A sheet replacing another takes the entry over (a pop then a push would
   // race: history.back() lands later and would take the new sheet down).
@@ -479,11 +521,10 @@ function apply({ focus = null, focusPill = null, focusAfterClose = false, focusN
     if (willPop) holdHistory();
     pop();
   }
-  // 6. tell each frame its state when it changed; clear attention on screen
+  // 6. tell each frame its state when it changed
   for (const r of recs.values()) {
     const w = S.find(model, r.id);
     if (!w) continue;
-    if (w.state === 'open' && r.live.attention) { r.live.attention = false; paintTray(); }
     const key = `${w.state}|${r.eff || ''}`;
     if (key !== r.sent && r.loaded) { r.sent = key; host.stateChanged(r, { state: w.state, layout: r.eff || 'min' }); }
   }
@@ -491,14 +532,16 @@ function apply({ focus = null, focusPill = null, focusAfterClose = false, focusN
   if (focus && recs.get(focus) && !quiet) {
     const r = recs.get(focus);
     try { r.handle.focus({ preventScroll: true }); } catch { /* not fatal */ }
+  } else if (focusChat) {
+    if (deps && typeof deps.focusChat === 'function') deps.focusChat();
   } else if (focusPill) {
     const b = tray.querySelector(`.appwin-pill[data-tool="${cssId(focusPill)}"] .appwin-pill-main`);
-    if (b) b.focus({ preventScroll: true });
+    if (b) focusTrayItem(b);
   } else if (focusAfterClose) {
     const pills = tray.querySelectorAll('.appwin-pill-main');
-    if (focusNear >= 0 && pills.length) pills[Math.min(focusNear, pills.length - 1)].focus({ preventScroll: true });
+    if (focusNear >= 0 && pills.length) focusTrayItem(pills[Math.min(focusNear, pills.length - 1)]);
     else if (open) open.handle.focus({ preventScroll: true });
-    else if (pills.length) pills[pills.length - 1].focus({ preventScroll: true });
+    else if (pills.length) focusTrayItem(pills[pills.length - 1]);
     else if (deps && typeof deps.focusChat === 'function') deps.focusChat();
   }
   if (save && profileId) S.save(profileId, model);
@@ -507,6 +550,8 @@ function apply({ focus = null, focusPill = null, focusAfterClose = false, focusN
     if (host && typeof host.visibleChanged === 'function') host.visibleChanged(model.open);
   }
 }
+
+function cssSafe(id) { return String(id).replace(/[^A-Za-z0-9_-]/g, '_'); }
 
 function cssId(id) { return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id; }
 
@@ -519,39 +564,49 @@ function setBox(elm, { left, top, width, height }) {
 
 function clearBox(elm) { for (const k of ['left', 'top', 'width', 'height', 'bottom', 'right']) elm.style.removeProperty(k); }
 
-/** Bounds a float may use: the content area, its bottom stopping above the tray. */
+/** How much of the viewport's bottom the tray takes (its top edge and a gap),
+ *  0 when no pill shows. */
+function trayReserve() {
+  if (!tray || tray.hidden || tray.classList.contains('kbd-hidden')) return 0;
+  const tr = tray.getBoundingClientRect();
+  if (!tr.height) return 0;
+  return Math.max(0, window.innerHeight - tr.top + 8);
+}
+
+/** Bounds a float may use: the content area, its bottom stopping above the tray
+ *  WHEREVER the tray is (above the composer, or at the bottom edge). */
 function floatBounds() {
   const a = contentArea();
-  const trayH = tray && !tray.hidden ? tray.offsetHeight + 8 : 0;
-  return { left: a.left, top: a.top, w: a.width, h: Math.max(0, a.height - trayH) };
+  const bottom = Math.min(a.top + a.height, window.innerHeight - trayReserve());
+  return { left: a.left, top: a.top, w: a.width, h: Math.max(0, bottom - a.top) };
 }
 
 function place(r, dock) {
   const e = r.eff;
   clearBox(r.el);
   if (e === 'sheet') {
-    // CSS owns the sheet; it stops above the tray when pills are showing.
-    r.el.style.setProperty('--appwin-tray-h', `${tray && !tray.hidden ? tray.offsetHeight + 14 : 0}px`);
+    // CSS owns the sheet; its bottom is the top of the tray strip under it.
+    const tr = tray && !tray.hidden && !tray.classList.contains('kbd-hidden') ? tray.getBoundingClientRect() : null;
+    r.el.style.setProperty('--appwin-tray-h', `${tr && tr.height ? Math.max(0, Math.round(window.innerHeight - tr.top)) : 0}px`);
     return;
   }
   if (e === 'float') {
     const b = floatBounds();
-    const p = S.prefsFor(model, r.id, r.opts);
+    const p = prefs(r);
     const rect = S.clampRect(p.rect || S.initialRect(r.opts, b, { rtl: isRtl() }), b, r.opts);
     setBox(r.el, { left: b.left + rect.x, top: b.top + rect.y, width: rect.w, height: rect.h });
     return;
   }
   if (e === 'full') {
-    const a = contentArea();
-    const trayH = tray && !tray.hidden ? tray.offsetHeight + 8 : 0;
-    setBox(r.el, { left: a.left, top: a.top, width: a.width, height: a.height - trayH });
+    const b = floatBounds();
+    setBox(r.el, { left: b.left, top: b.top, width: b.w, height: b.h });
     return;
   }
   // dock
   const side = e;
   const room = dockRoom();
   const total = dock === 'nolist' ? room.noList : room.withList;
-  const p = S.prefsFor(model, r.id, r.opts);
+  const p = prefs(r);
   const w = S.dockWidths(p.ratio, total, r.opts);
   if (!w) return;
   const body = document.body;
@@ -572,8 +627,49 @@ function place(r, dock) {
   divider.setAttribute('aria-valuemax', String(range.max));
   divider.setAttribute('aria-valuenow', String(w.chat));
   divider.setAttribute('aria-label', t('tools.divider'));
-  divider.setAttribute('aria-controls', `appwin-title-${r.id}`);
+  divider.setAttribute('aria-controls', `appwin-title-${cssSafe(r.id)}`);
   divider._total = total;
+}
+
+// ===================== the chat list beside a dock =====================
+
+/** A dock that pushed the thread list away leaves a "Show chat list" button in
+ *  the chat header: the list comes back over the chat until a chat is picked. */
+let listBtn = null;
+function paintListToggle() {
+  const nolist = document.body.classList.contains('appwin-dock-nolist') && !mobile();
+  if (!nolist) document.body.classList.remove('appwin-list-peek');
+  const head = document.querySelector('#chatview .chat-header');
+  if (!head) return;
+  if (!listBtn || !head.contains(listBtn)) {
+    listBtn = el('button', { type: 'button', class: 'icon-btn ghost appwin-list-btn', 'aria-expanded': 'false' });
+    listBtn.append(spriteIcon('menu', 18));
+    listBtn.addEventListener('click', () => {
+      const on = !document.body.classList.contains('appwin-list-peek');
+      document.body.classList.toggle('appwin-list-peek', on);
+      listBtn.setAttribute('aria-expanded', String(on));
+      if (on) { const first = document.querySelector('.threadlist button, .threadlist [tabindex="0"]'); if (first) first.focus({ preventScroll: true }); }
+    });
+    const back = $('back-btn');
+    if (back && back.parentElement === head) back.after(listBtn); else head.prepend(listBtn);
+    const tl = document.querySelector('.threadlist');
+    if (tl) {
+      // Picking a chat (or Escape) puts the list away again.
+      tl.addEventListener('click', (e) => {
+        if (document.body.classList.contains('appwin-list-peek') && e.target.closest('.thread-item, [data-thread], [data-id]')) closeListPeek(false);
+      });
+      tl.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.body.classList.contains('appwin-list-peek')) { e.preventDefault(); closeListPeek(true); } });
+    }
+  }
+  const label = t('threads.expand');
+  listBtn.setAttribute('aria-label', label);
+  listBtn.setAttribute('title', label);
+  listBtn.hidden = !nolist;
+  listBtn.setAttribute('aria-expanded', String(document.body.classList.contains('appwin-list-peek')));
+}
+function closeListPeek(refocus) {
+  document.body.classList.remove('appwin-list-peek');
+  if (listBtn) { listBtn.setAttribute('aria-expanded', 'false'); if (refocus) listBtn.focus({ preventScroll: true }); }
 }
 
 // ===================== the pill tray =====================
@@ -582,31 +678,60 @@ function paintTray() {
   if (!tray) return;
   const list = S.pills(model).map((w) => recs.get(w.id)).filter(Boolean);
   tray.setAttribute('aria-label', t('win.tray'));
-  const focusedId = document.activeElement && tray.contains(document.activeElement)
-    ? document.activeElement.closest('.appwin-pill')?.dataset.tool : null;
-  const focusedX = !!(document.activeElement && document.activeElement.classList.contains('appwin-pill-x'));
-  tray.textContent = '';
-  for (const r of list) tray.append(pillFor(r));
+  const ae = document.activeElement;
+  const focusedId = ae && tray.contains(ae) ? ae.closest('.appwin-pill')?.dataset.tool : null;
+  const focusedX = !!(ae && ae.classList.contains('appwin-pill-x'));
+  // Roving tab stop: the tray is ONE stop; which item holds it survives a repaint.
+  const stopId = tray._stop || null;
+  const scroll = trayRow ? trayRow.scrollLeft : 0;
+  trayRow.textContent = '';
+  for (const r of list) trayRow.append(pillFor(r));
   tray.hidden = !list.length;
   document.body.classList.toggle('appwin-has-pills', !!list.length);
+  const items = trayItems();
+  const keep = (stopId && items.find((b) => itemKey(b) === stopId)) || items[0];
+  for (const b of items) b.tabIndex = b === keep ? 0 : -1;
+  trayRow.scrollLeft = scroll;
+  paintFade();
   if (focusedId) {
-    const p = tray.querySelector(`.appwin-pill[data-tool="${cssId(focusedId)}"] ${focusedX ? '.appwin-pill-x' : '.appwin-pill-main'}`);
-    if (p) p.focus({ preventScroll: true });
+    const p = trayRow.querySelector(`.appwin-pill[data-tool="${cssId(focusedId)}"] ${focusedX ? '.appwin-pill-x' : '.appwin-pill-main'}`);
+    if (p) focusTrayItem(p);
   }
+}
+
+function trayItems() { return trayRow ? [...trayRow.querySelectorAll('.appwin-pill-main, .appwin-pill-x')] : []; }
+function itemKey(b) { const w = b.closest('.appwin-pill'); return w ? `${w.dataset.tool}|${b.classList.contains('appwin-pill-x') ? 'x' : 'm'}` : ''; }
+function focusTrayItem(b) {
+  for (const x of trayItems()) x.tabIndex = x === b ? 0 : -1;
+  tray._stop = itemKey(b);
+  b.focus({ preventScroll: false });
+}
+
+/** A fade on an edge that hides more pills (the row scrolls sideways). */
+function paintFade() {
+  if (!trayRow) return;
+  const max = trayRow.scrollWidth - trayRow.clientWidth;
+  const pos = Math.abs(trayRow.scrollLeft);    // RTL scrolls negative
+  tray.classList.toggle('fade-start', max > 1 && pos > 1);
+  tray.classList.toggle('fade-end', max > 1 && pos < max - 1);
 }
 
 function pillFor(r) {
   const L = r.live;
   const name = displayTitle(r);
-  const wrap = el('div', { class: 'appwin-pill' + (L.attention ? ' attention' : '') + (L.busy ? ' busy' : ''), dataset: { tool: r.id } });
-  const label = L.status ? t('win.pill_status', { name, status: L.status }) : name;
-  const main = el('button', { type: 'button', class: 'appwin-pill-main', 'aria-label': t('win.restore', { name: label }), title: t('win.restore', { name: label }), 'aria-keyshortcuts': 'Delete' });
+  const w = S.find(model, r.id);
+  const att = !!(w && w.att);
+  const wrap = el('div', { class: 'appwin-pill' + (att ? ' attention' : '') + (L.busy ? ' busy' : '') + (r.asleep ? ' asleep' : ''), dataset: { tool: r.id } });
+  let label = L.status ? t('win.pill_status', { name, status: L.status }) : name;
+  if (att) label = t('win.finished', { name: label });
+  const tip = r.asleep ? t('win.asleep', { name }) : t('win.restore', { name: label });
+  const main = el('button', { type: 'button', class: 'appwin-pill-main', 'aria-label': tip, title: tip, 'aria-keyshortcuts': 'Delete' });
   const ic = el('span', { class: 'appwin-pill-icon', 'aria-hidden': 'true' });
   ic.append(r.glyph ? r.glyph() : '');
   main.append(ic, el('span', { class: 'appwin-pill-name', text: name }));
-  if (L.status) main.append(el('span', { class: 'appwin-pill-status muted', text: L.status }));
+  if (r.asleep) main.append(el('span', { class: 'appwin-pill-status muted', text: t('win.asleep_short'), 'aria-hidden': 'true' }));
+  else if (L.status) main.append(el('span', { class: 'appwin-pill-status muted', text: L.status }));
   if (L.badge) main.append(el('span', { class: 'appwin-pill-badge', text: String(L.badge), 'aria-hidden': 'true' }));
-  if (L.attention) main.append(el('span', { class: 'appwin-pill-dot', 'aria-hidden': 'true' }));
   main.addEventListener('click', (e) => {
     if (wrap.dataset.dragged === '1') { e.preventDefault(); return; }
     openWindow(r.id);
@@ -621,20 +746,24 @@ function pillFor(r) {
 
 /** The tray sits right above the composer when a chat is showing it, else above
  *  the phone's bottom tabs, else at the bottom edge. A covering window (full,
- *  sheet) has the tray at the bottom of the content area instead. On a phone it
- *  hides while the on-screen keyboard is up. */
+ *  sheet) has the tray at the bottom of the content area instead; on a phone
+ *  under a sheet it is a solid strip at the very bottom that takes the tab
+ *  bar's place (the tabs hide: nothing behind it can be tapped). On a phone
+ *  it hides while the on-screen keyboard is up. */
 function placeTray() {
   if (!tray) return;
   const phone = mobile();
   const vv = window.visualViewport;
   const kbd = phone && vv && vv.height < window.innerHeight * 0.75;
   tray.classList.toggle('kbd-hidden', !!kbd);
+  const cover = document.body.classList.contains('appwin-covers');
+  const strip = phone && document.body.classList.contains('appwin-sheet');
+  tray.classList.toggle('strip', strip);
   if (tray.hidden) { setTrayVar(0); return; }
   const a = contentArea();
-  const cover = document.body.classList.contains('appwin-covers');
   let bottom = 8;
   let left = a.left + 8; let width = a.width - 16;
-  if (!cover) {
+  if (strip) { bottom = 0; left = 0; width = window.innerWidth; } else if (!cover) {
     const comp = $('composer');
     const cv = $('chatview');
     const compOn = comp && comp.offsetParent !== null && comp.getBoundingClientRect().height > 0;
@@ -656,15 +785,26 @@ function placeTray() {
   tray.style.bottom = `${Math.max(0, Math.round(bottom))}px`;
   tray.style.left = `${Math.round(left)}px`;
   tray.style.width = `${Math.max(0, Math.round(width))}px`;
+  paintFade();
   setTrayVar(kbd || cover ? 0 : tray.offsetHeight + 6);
 }
 
-/** The message list keeps its last message clear of the tray. */
-function setTrayVar(px) { document.documentElement.style.setProperty('--appwin-tray-space', `${px}px`); }
+/** The message list keeps its last message clear of the tray, and a chat that
+ *  was scrolled to the bottom stays there when the tray appears or grows. */
+function setTrayVar(px) {
+  const root = document.documentElement;
+  const prev = root.style.getPropertyValue('--appwin-tray-space');
+  const next = `${px}px`;
+  if (prev === next) return;
+  const m = $('messages');
+  const pinned = !!m && m.scrollHeight - m.scrollTop - m.clientHeight < 48;
+  root.style.setProperty('--appwin-tray-space', next);
+  if (pinned) m.scrollTop = m.scrollHeight;
+}
 
 function onTrayKey(e) {
-  const pills = [...tray.querySelectorAll('.appwin-pill-main')];
-  const i = pills.indexOf(document.activeElement);
+  const items = trayItems();
+  const i = items.indexOf(document.activeElement);
   const wrap = document.activeElement && document.activeElement.closest('.appwin-pill');
   if ((e.key === 'Delete' || e.key === 'Backspace') && wrap) {
     e.preventDefault();
@@ -675,32 +815,39 @@ function onTrayKey(e) {
   const fwd = isRtl() ? 'ArrowLeft' : 'ArrowRight';
   const back = isRtl() ? 'ArrowRight' : 'ArrowLeft';
   let j = null;
-  if (e.key === fwd) j = Math.min(pills.length - 1, i + 1);
+  if (e.key === fwd) j = Math.min(items.length - 1, i + 1);
   else if (e.key === back) j = Math.max(0, i - 1);
   else if (e.key === 'Home') j = 0;
-  else if (e.key === 'End') j = pills.length - 1;
+  else if (e.key === 'End') j = items.length - 1;
   if (j === null) return;
   e.preventDefault();
-  pills[j].focus();
+  focusTrayItem(items[j]);
 }
 
-/** Drag a pill up (or well sideways) and let go to close it. The ✕ beside it is
- *  the one-tap way (WCAG 2.5.7); a profile that may not drag-close (a Basic
- *  profile: a child's phone) only has the ✕. */
+/** Drag a pill UP and let go to close it. A sideways move is the row scrolling
+ *  (touch-action: pan-x) and never closes. The ✕ beside it is the one-tap way
+ *  (WCAG 2.5.7); a profile that may not drag-close (a Basic profile: a child's
+ *  phone) only has the ✕. */
 function wirePillDrag(r, wrap, main) {
   let start = null;
   main.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || (deps && typeof deps.canDragClose === 'function' && !deps.canDragClose())) return;
-    start = { x: e.clientX, y: e.clientY, id: e.pointerId, moved: false, armed: false };
+    start = { x: e.clientX, y: e.clientY, id: e.pointerId, moved: false, armed: false, side: false };
     wrap.dataset.dragged = '';
   });
   main.addEventListener('pointermove', (e) => {
-    if (!start || e.pointerId !== start.id) return;
+    if (!start || e.pointerId !== start.id || start.side) return;
     const dx = e.clientX - start.x; const dy = e.clientY - start.y;
     if (!start.moved && Math.hypot(dx, dy) < 8) return;
-    if (!start.moved) { start.moved = true; try { main.setPointerCapture(e.pointerId); } catch { /* not fatal */ } wrap.classList.add('dragging'); }
-    wrap.style.transform = `translate(${dx}px, ${Math.min(0, dy)}px)`;
-    const armed = dy <= -CLOSE_DRAG_Y || Math.abs(dx) >= CLOSE_DRAG_X;
+    if (!start.moved) {
+      // Mostly sideways: the row's own scroll, not a close drag.
+      if (Math.abs(dx) > Math.abs(dy) || dy > 0) { start.side = true; return; }
+      start.moved = true;
+      try { main.setPointerCapture(e.pointerId); } catch { /* not fatal */ }
+      wrap.classList.add('dragging');
+    }
+    wrap.style.transform = `translateY(${Math.min(0, dy)}px)`;
+    const armed = dy <= -CLOSE_DRAG_Y;
     if (armed !== start.armed) {
       start.armed = armed;
       wrap.classList.toggle('armed', armed);
@@ -714,9 +861,11 @@ function wirePillDrag(r, wrap, main) {
     try { main.releasePointerCapture(e.pointerId); } catch { /* released */ }
     wrap.classList.remove('dragging', 'armed');
     wrap.style.transform = '';
-    if (s.moved) {
+    if (s.moved || s.side) {
       wrap.dataset.dragged = '1';
       setTimeout(() => { wrap.dataset.dragged = ''; }, 0);
+    }
+    if (s.moved) {
       if (s.armed && e.type === 'pointerup') closeWindow(r.id).then((gone) => { if (!gone) paintTray(); });
       else paintTray();
     }
@@ -730,7 +879,7 @@ function wirePillDrag(r, wrap, main) {
 function toggleLayoutMenu(r) {
   if (r.menu) { closeLayoutMenu(r, true); return; }
   const menu = el('div', { class: 'appwin-menu', role: 'menu', 'aria-label': t('win.layout') });
-  const cur = S.prefsFor(model, r.id, r.opts).layout;
+  const cur = prefs(r).layout;
   for (const lay of S.LAYOUTS) {
     if (S.DOCKS.includes(lay) && !r.opts.dockable) continue;
     const item = el('button', { type: 'button', class: 'appwin-menu-item', role: 'menuitemradio', 'aria-checked': lay === cur ? 'true' : 'false', tabindex: '-1', dataset: { layout: lay } });
@@ -773,7 +922,7 @@ function chooseLayout(r, lay) {
 }
 
 function paintLayoutBtn(r) {
-  const lay = S.prefsFor(model, r.id, r.opts).layout;
+  const lay = prefs(r).layout;
   r.layoutBtn.replaceChildren(lineIcon(ICONS[lay] || ICONS.float, 18));
 }
 
@@ -789,6 +938,9 @@ function wireMove(r) {
     if (e.button !== 0 || mobile() || !r.eff) return;
     const box = r.el.getBoundingClientRect();
     dragging = { r, id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: e.clientX - box.left, oy: e.clientY - box.top, moved: false, zone: null };
+    // Capture now: a quick first move can leave the 40 px bar before the
+    // threshold is crossed, and the drag must still follow the pointer.
+    try { r.handle.setPointerCapture(e.pointerId); } catch { /* not fatal */ }
   });
   r.handle.addEventListener('pointermove', (e) => {
     const d = dragging;
@@ -796,12 +948,11 @@ function wireMove(r) {
     if (!d.moved) {
       if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 6) return;
       d.moved = true;
-      try { r.handle.setPointerCapture(e.pointerId); } catch { /* not fatal */ }
       startDragUi();
       if (r.eff !== 'float') {
         // Pulled out of a dock / full: a float under the pointer, its remembered size.
         const b = floatBounds();
-        const p = S.prefsFor(model, r.id, r.opts);
+        const p = prefs(r);
         const size = S.clampRect(p.rect || S.initialRect(r.opts, b, { rtl: isRtl() }), b, r.opts);
         d.ox = Math.min(size.w - 40, Math.max(40, size.w / 2));
         d.oy = 16;
@@ -811,7 +962,7 @@ function wireMove(r) {
       }
     }
     const b = floatBounds();
-    const p = S.prefsFor(model, r.id, r.opts);
+    const p = prefs(r);
     const cur = S.clampRect(p.rect, b, r.opts);
     const rect = S.clampRect({ ...cur, x: e.clientX - b.left - d.ox, y: e.clientY - b.top - d.oy }, b, r.opts);
     setBox(r.el, { left: b.left + rect.x, top: b.top + rect.y, width: rect.w, height: rect.h });
@@ -844,7 +995,7 @@ function showPreview(zone, r) {
     const mode = S.dockMode(room, r.opts);
     if (!mode) { setBox(preview, { left: a.left, top: a.top, width: a.width, height: a.height }); }
     else {
-      const w = S.dockWidths(S.prefsFor(model, r.id, r.opts).ratio, mode === 'nolist' ? room.noList : room.withList, r.opts);
+      const w = S.dockWidths(prefs(r).ratio, mode === 'nolist' ? room.noList : room.withList, r.opts);
       const left = zone === 'left' ? (mode === 'nolist' || isRtl() ? a.left : a.left + (room.noList - room.withList)) : a.left + a.width - w.tool;
       setBox(preview, { left, top: a.top, width: w.tool, height: a.height });
     }
@@ -858,7 +1009,7 @@ function wireResize(r) {
       if (e.button !== 0 || r.eff !== 'float') return;
       e.preventDefault();
       const b = floatBounds();
-      const start = S.clampRect(S.prefsFor(model, r.id, r.opts).rect || S.initialRect(r.opts, b, { rtl: isRtl() }), b, r.opts);
+      const start = S.clampRect(prefs(r).rect || S.initialRect(r.opts, b, { rtl: isRtl() }), b, r.opts);
       const dir = h.dataset.dir;
       const s = { id: e.pointerId, x: e.clientX, y: e.clientY, start, dir, rect: start };
       try { h.setPointerCapture(e.pointerId); } catch { /* not fatal */ }
@@ -903,7 +1054,7 @@ function onHandleKey(r, e) {
   }
   if (r.eff !== 'float' || e.ctrlKey || e.metaKey) return;
   const b = floatBounds();
-  const cur = S.clampRect(S.prefsFor(model, r.id, r.opts).rect || S.initialRect(r.opts, b, { rtl: isRtl() }), b, r.opts);
+  const cur = S.clampRect(prefs(r).rect || S.initialRect(r.opts, b, { rtl: isRtl() }), b, r.opts);
   const next = S.keyRect(e.key, cur, b, r.opts, { shift: e.shiftKey, alt: e.altKey });
   if (!next) return;
   e.preventDefault();
@@ -972,7 +1123,7 @@ function wireDivider() {
   divider.addEventListener('keydown', (e) => {
     const r = rec();
     if (!r || e.altKey || e.ctrlKey || e.metaKey) return;
-    const next = S.stepDock(e.key, { ratio: S.prefsFor(model, r.id, r.opts).ratio, total: divider._total, side: divider.dataset.side, shift: e.shiftKey, opts: r.opts });
+    const next = S.stepDock(e.key, { ratio: prefs(r).ratio, total: divider._total, side: divider.dataset.side, shift: e.shiftKey, opts: r.opts });
     if (next == null) return;
     e.preventDefault();
     model = S.setRatio(model, r.id, next);
@@ -1034,7 +1185,7 @@ export function wireAppWindows(d) {
   for (const r of recs.values()) { try { r.el.remove(); } catch { /* gone with its document */ } }
   recs.clear();
   model = S.empty(); profileId = undefined; firstSync = true; lastVisible = null;
-  layer = tray = divider = preview = confirmDlg = null;
+  layer = tray = trayRow = divider = preview = confirmDlg = null; listBtn = null;
   sheetPop = null; histWaiters = null;
   deps = d;
   ensureLayer();
@@ -1051,7 +1202,7 @@ export function _resetForTest() {
   for (const r of [...recs.values()]) { try { r.el.remove(); } catch { /* */ } }
   recs.clear();
   model = S.empty(); profileId = undefined; firstSync = true; deps = null; host = null;
-  layer = tray = divider = preview = confirmDlg = null; lastVisible = null;
+  layer = tray = trayRow = divider = preview = confirmDlg = null; lastVisible = null; listBtn = null;
   sheetPop = null; histWaiters = null;
 }
 export function _model() { return model; }

@@ -89,8 +89,8 @@ import {
   toolCoversChat, closeAllTools, setToolProfile, notifyActiveThread,
   appForBot, forwardAppFrame, syncAppFrame, setParkedBots, paintToolsGroupDot,
   onHost, toolOpen, findTool, toolGlyph, registerExtTiles, isExtFeature,
-  openToolsMenu, toolsMenuOpen, groupFor,
-} from './tools.js?v=27';
+  openToolsMenu, toolsMenuOpen, groupFor, extWindowRoot, closeExtWindow,
+} from './tools.js?v=28';
 // The app SDK (docs/design/2026-09-25-apps.md). main.js uses one thing from
 // it: forApp(id), the bound {api, t} an app's thread hook is mounted with.
 import { forApp, api as appApi } from './app-sdk.js?v=8';
@@ -826,8 +826,14 @@ window.addEventListener('popstate', (e) => {
 function anyToolPaneOpen() {
   // A tool WINDOW (js/appwin.js) is not a pane: its phone sheet owns its own
   // history entry, so Back minimises it there and never lands here.
-  return harnessOpen || studioforgeOpen || mailOpen || clientsOpen;
+  return (harnessOpen && !winPanes.has('harness')) || (studioforgeOpen && !winPanes.has('studioforge'))
+    || (mailOpen && !winPanes.has('mail')) || (clientsOpen && !winPanes.has('practice'));
 }
+
+/** Built-in panes living in a tool WINDOW (js/appwin.js via tools.js): the
+ *  feature names. Such a pane is the window's: closeToolPanes leaves it alone,
+ *  it never takes the chat's selection, the thread list or `tool-full`. */
+const winPanes = new Set();
 
 /** Leave whatever tool pane is up for the Bots page (the phone's ‹ on every
  *  tool, and hardware Back). The pane is torn down — a hidden frame keeps its
@@ -6195,24 +6201,27 @@ function renderHarnessSessionPanel() {
  */
 function closeToolPanes(except) {
   if (except !== 'tool') closeTool({ restore: false });
-  if (harnessOpen && except !== 'harness') closeHarnessView();
-  if (studioforgeOpen && except !== 'studioforge') closeStudioForgeView();
-  if (mailOpen && except !== 'mail') closeMailView();
-  if (clientsOpen && except !== 'clients') closeClientsView();
+  if (harnessOpen && except !== 'harness' && !winPanes.has('harness')) closeHarnessView();
+  if (studioforgeOpen && except !== 'studioforge' && !winPanes.has('studioforge')) closeStudioForgeView();
+  if (mailOpen && except !== 'mail' && !winPanes.has('mail')) closeMailView();
+  if (clientsOpen && except !== 'clients' && !winPanes.has('practice')) closeClientsView();
   if (extToolOpen && except !== 'exttool') closeExtToolView();
 }
 
-function openHarnessView() {
+/** `win`: the pane is drawn inside its tool window (tools.js adapter): only the
+ *  pane itself is shown; the chat, its selection and the thread list stay. */
+function openHarnessView({ win = false } = {}) {
   if (!state.harnessEnabled) return;
-  closeToolPanes('harness');
-  rememberPrev();   // before the selection changes: ✕ in a later tool lands here
-  state.selectedBotId = HARNESS_ID;
+  if (win) winPanes.add('harness');
+  else {
+    closeToolPanes('harness');
+    rememberPrev();   // before the selection changes: ✕ in a later tool lands here
+    state.selectedBotId = HARNESS_ID;
+  }
   harnessOpen = true;
-  renderSidebar();
-  renderHarnessSessionPanel();
+  if (!win) { renderSidebar(); renderHarnessSessionPanel(); }
   dom['harness-view'].classList.remove('hidden');
-  document.body.classList.add('tool-full');
-  if (isMobile()) navigate('chat');
+  if (!win) { document.body.classList.add('tool-full'); if (isMobile()) navigate('chat'); }
   renderHarness();
   // Fresh facts on open (the WS only carries deltas).
   api.harnessStatus().then(applyHarnessStatus).catch(() => {});
@@ -6220,7 +6229,7 @@ function openHarnessView() {
 
 function closeHarnessView() {
   harnessOpen = false;
-  document.body.classList.remove('tool-full');
+  if (!winPanes.delete('harness')) document.body.classList.remove('tool-full');
   dom['harness-view'].classList.add('hidden');
   // Unload the frame: a hidden iframe keeps dsh's websocket + HMR stream alive.
   if (dom['harness-frame']) { dom['harness-frame'].classList.add('hidden'); dom['harness-frame'].removeAttribute('src'); }
@@ -6883,17 +6892,18 @@ function renderStudioForgeSessionPanel() {
   ]));
 }
 
-function openStudioForgeView() {
+function openStudioForgeView({ win = false } = {}) {
   if (!state.studioforgeEnabled) return;
-  closeToolPanes('studioforge');
-  rememberPrev();   // before the selection changes: ✕ in a later tool lands here
-  state.selectedBotId = STUDIOFORGE_ID;
+  if (win) winPanes.add('studioforge');
+  else {
+    closeToolPanes('studioforge');
+    rememberPrev();   // before the selection changes: ✕ in a later tool lands here
+    state.selectedBotId = STUDIOFORGE_ID;
+  }
   studioforgeOpen = true;
-  renderSidebar();
-  renderStudioForgeSessionPanel();
+  if (!win) { renderSidebar(); renderStudioForgeSessionPanel(); }
   dom['studioforge-view'].classList.remove('hidden');
-  document.body.classList.add('tool-full');
-  if (isMobile()) navigate('chat');
+  if (!win) { document.body.classList.add('tool-full'); if (isMobile()) navigate('chat'); }
   renderStudioForge();
   api.studioforgeStatus().then((st) => {
     applyStudioForgeStatus(st);
@@ -6903,7 +6913,7 @@ function openStudioForgeView() {
 
 function closeStudioForgeView() {
   studioforgeOpen = false;
-  document.body.classList.remove('tool-full');
+  if (!winPanes.delete('studioforge')) document.body.classList.remove('tool-full');
   dom['studioforge-view'].classList.add('hidden');
   // Unload the frame: the panel holds a live socket.io telemetry stream, and a
   // hidden iframe would keep it (and the rig's per-view session) alive.
@@ -7032,23 +7042,24 @@ function renderMailSessionPanel() {
   ]));
 }
 
-function openMailView() {
+function openMailView({ win = false } = {}) {
   if (!state.mailEnabled) return;
-  closeToolPanes('mail');
-  rememberPrev();   // before the selection changes: ✕ in a later tool lands here
-  state.selectedBotId = MAIL_ID;
+  if (win) winPanes.add('mail');
+  else {
+    closeToolPanes('mail');
+    rememberPrev();   // before the selection changes: ✕ in a later tool lands here
+    state.selectedBotId = MAIL_ID;
+  }
   mailOpen = true;
-  renderSidebar();
-  renderMailSessionPanel();
+  if (!win) { renderSidebar(); renderMailSessionPanel(); }
   dom['mail-view'].classList.remove('hidden');
-  document.body.classList.add('tool-full');
-  if (isMobile()) navigate('chat');
+  if (!win) { document.body.classList.add('tool-full'); if (isMobile()) navigate('chat'); }
   renderMail();
 }
 
 function closeMailView() {
   mailOpen = false;
-  document.body.classList.remove('tool-full');
+  if (!winPanes.delete('mail')) document.body.classList.remove('tool-full');
   dom['mail-view'].classList.add('hidden');
   const f = dom['mail-frame'];
   if (f) { f.classList.add('hidden'); f.removeAttribute('src'); }
@@ -7169,24 +7180,25 @@ function renderClientsSessionPanel() {
   ]));
 }
 
-function openClientsPanel() {
+function openClientsPanel({ win = false } = {}) {
   if (!state.clientsEnabled) return;
-  closeToolPanes('clients');
-  rememberPrev();   // before the selection changes: ✕ in a later tool lands here
-  state.selectedBotId = CLIENTS_ID;
+  if (win) winPanes.add('practice');
+  else {
+    closeToolPanes('clients');
+    rememberPrev();   // before the selection changes: ✕ in a later tool lands here
+    state.selectedBotId = CLIENTS_ID;
+  }
   clientsOpen = true;
-  renderSidebar();
-  renderClientsSessionPanel();
+  if (!win) { renderSidebar(); renderClientsSessionPanel(); }
   dom['clients-view'].classList.remove('hidden');
-  document.body.classList.add('tool-full');
-  if (isMobile()) navigate('chat');
+  if (!win) { document.body.classList.add('tool-full'); if (isMobile()) navigate('chat'); }
   initClients(dom['clients-root'], dom['clients-job-strip']);
   showClientsTab('overview');
 }
 
 function closeClientsView() {
   clientsOpen = false;
-  document.body.classList.remove('tool-full');
+  if (!winPanes.delete('practice')) document.body.classList.remove('tool-full');
   dom['clients-view'].classList.add('hidden');
   // Hiding the view is not stopping it: the job poll reschedules itself, so
   // without this it kept polling the practice box for the rest of the session
@@ -7202,7 +7214,8 @@ function wireClientsView() {
   window.addEventListener('clients:open-thread', (ev) => {
     const threadId = ev && ev.detail && ev.detail.threadId;
     if (!threadId) return;
-    closeClientsView();
+    // In a window: it goes to the tray and the chat opens beside / under it.
+    if (winPanes.has('practice')) closeTool({ restore: false }); else closeClientsView();
     openThread(threadId);
   });
 }
@@ -8107,6 +8120,14 @@ function wireEvents() {
       mail: openMailView,
       practice: openClientsPanel,
     },
+    // The same four panes inside a tool window (tools.js moves the view into
+    // the window's body; show/hide never touch the chat or its selection).
+    panes: {
+      harness: { el: () => dom['harness-view'], show: () => openHarnessView({ win: true }), hide: () => { if (harnessOpen) closeHarnessView(); } },
+      studioforge: { el: () => dom['studioforge-view'], show: () => openStudioForgeView({ win: true }), hide: () => { if (studioforgeOpen) closeStudioForgeView(); } },
+      mail: { el: () => dom['mail-view'], show: () => openMailView({ win: true }), hide: () => { if (mailOpen) closeMailView(); } },
+      practice: { el: () => dom['clients-view'], show: () => openClientsPanel({ win: true }), hide: () => { if (clientsOpen) closeClientsView(); } },
+    },
     // An app pane asked for one of its threads (open-thread postMessage).
     openThread: openThreadFromApp,
     // An app's window beside the chat: its thread opens in the chat, the window stays.
@@ -8671,12 +8692,29 @@ function registerTools(owner, tiles) {
     dispose();
     ids.forEach((id) => extTileIds.delete(id));
     if (extToolOpen && ids.includes(extToolOpen.id)) leaveToolPanes();
+    ids.forEach((id) => closeExtWindow(id));
     renderToolRail();
   };
 }
 
 function openToolPane(owner, { id, title, subtitle, iconPaths, render, onClose } = {}) {
   if (typeof render !== 'function') return () => {};
+  // A registered tool's pane lives in its tool window (one per add-on: its
+  // tools are tabs in it), like every other tool. The legacy full pane below
+  // stays only for a pane with no tool row behind it.
+  const winRoot = extWindowRoot(String(id || ''));
+  if (winRoot) {
+    const entry = { id: String(id || ''), owner, title, subtitle, iconPaths, render,
+                    onClose: typeof onClose === 'function' ? onClose : null };
+    const prior = winRoot._entry;
+    winRoot._entry = entry;
+    if (prior && prior !== entry && prior.onClose) { try { prior.onClose(); } catch (e) { console.warn('[ext] tool pane onClose failed', e); } }
+    winRoot.scrollTop = 0;
+    winRoot.replaceChildren();
+    try { render(winRoot); } catch (e) { console.warn('[ext] tool pane render failed', e); }
+    paintExtToolTabs(winRoot.parentElement, entry, winRoot);
+    return () => { if (winRoot._entry === entry) closeExtWindow(entry.id); };
+  }
   closeToolPanes('exttool');
   rememberPrev();   // before the selection changes: ✕ in a later tool lands here
   // `onClose` (optional, amendment T7a-2): told whenever the shell closes the
@@ -8713,7 +8751,7 @@ function openToolPane(owner, { id, title, subtitle, iconPaths, render, onClose }
  *  own opener), so every gate, permission and onClose hook stays exactly as it
  *  was. No group → nothing drawn, which is every core builtin.
  */
-function paintExtToolTabs(host, entry) {
+function paintExtToolTabs(host, entry, root = dom['ext-tool-root']) {
   if (!host) return;
   const old = host.querySelector('.ext-tool-tabs');
   const g = groupFor(entry.id);
@@ -8741,7 +8779,7 @@ function paintExtToolTabs(host, entry) {
     const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
     if (next && next.id !== activeId) openTool(next.id, { launch: false });
   };
-  if (!old) host.insertBefore(strip, dom['ext-tool-root']);
+  if (!old) host.insertBefore(strip, root);
 }
 
 function extToolGlyph(entry) {
@@ -10783,7 +10821,7 @@ function reRenderForLocale() {
   repaintQuickActions();
   // And an open app page gets the new language (and theme) posted to it.
   syncAppFrame();
-  if (harnessOpen) { renderHarnessSessionPanel(); renderHarness(); }
+  if (harnessOpen) { if (!winPanes.has('harness')) renderHarnessSessionPanel(); renderHarness(); }
   const open = (id) => dom[id] && !dom[id].classList.contains('hidden');
   // Settings repaints per TAB: only the visible pane's renderer has anything to
   // put back, and running the others would fetch for a screen nobody is on.

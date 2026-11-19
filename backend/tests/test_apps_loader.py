@@ -745,6 +745,9 @@ _WIN_DEFAULTS = {"layout": "float", "min_width": 360, "min_height": 320,
 
 def test_manifest_window_defaults_when_absent(tmp_path):
     assert _parse(tmp_path, {"id": "plain"}).window == _WIN_DEFAULTS
+    assert _parse(tmp_path, {"id": "plain2"}).window_layout_set is False
+    assert _parse(tmp_path, {"id": "named", "window": {"layout": "float"}}).window_layout_set is True
+    assert _parse(tmp_path, {"id": "sized", "window": {"width": 900}}).window_layout_set is False
 
 
 def test_manifest_window_valid_block_fills_defaults(tmp_path):

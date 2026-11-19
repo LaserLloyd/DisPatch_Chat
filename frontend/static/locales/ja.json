@@ -1185,7 +1185,9 @@
     "close_anyway": "閉じる",
     "finished": "{name}に新しい更新があります",
     "narrow": "ここには固定できる幅がありません。ウィンドウが広くなるまで全画面で表示します。",
-    "minimized": "最小化されて下で待機中"
+    "minimized": "最小化されて下で待機中",
+    "asleep_short": "スリープ中",
+    "asleep": "{name} はメモリ節約のためスリープしました。開くと再読み込みします。"
   },
   "advisor": {
     "card_title": "{agent}に任せますか?",

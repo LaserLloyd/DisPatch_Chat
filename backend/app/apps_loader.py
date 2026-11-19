@@ -151,6 +151,9 @@ class Manifest:
     permission: str = "use_tools"
     #: Window options (normalized, defaults filled; width/height only when declared).
     window: dict = field(default_factory=default_window)
+    #: True when the manifest named ``window.layout`` itself (else the shell picks:
+    #: docked beside the chat on a narrow screen, a float on a wide one).
+    window_layout_set: bool = False
 
     @property
     def static_dir(self) -> Path:
@@ -261,7 +264,8 @@ def parse_manifest(doc: Any, app_dir: Path, source: str) -> Manifest:
     return Manifest(id=app_id, title=title, icon=icon, safe=safe, order=order,
                     legacy_prefix=legacy, bot=bot, thread_hook=thread_hook,
                     env=tuple(dict.fromkeys(env)), dir=app_dir, source=source,
-                    permission=permission, window=window)
+                    permission=permission, window=window,
+                    window_layout_set=isinstance(doc.get("window"), dict) and "layout" in doc["window"])
 
 
 def _read_manifest(app_dir: Path, source: str) -> Manifest | None:

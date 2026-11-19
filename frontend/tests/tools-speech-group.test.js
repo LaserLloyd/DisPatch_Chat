@@ -46,6 +46,8 @@ globalThis.fetch = async () => ({
 });
 
 const mod = await import(`../static/js/tools.js?v=grp${Date.now()}`);
+// The SAME window manager instance tools.js imports (same URL, same module).
+const { windowIds: winIds, closeWindow: closeWin } = await import('../static/js/appwin.js?v=2');
 const opened = [];
 
 function wire() {
@@ -95,7 +97,13 @@ test('the group remembers the tab you were on; a tab id resolves to its group', 
   opened.length = 0;
   mod.openTool('voice-lab');
   assert.deepEqual(opened, ['voice-lab'], 'a tab opens its own tool');
+  // ONE window for the add-on: its tabs switch inside it.
+  assert.deepEqual(winIds(), ['group:dispatch-voice']);
   opened.length = 0;
+  mod.openTool('group:dispatch-voice');
+  assert.deepEqual(opened, [], 'the window already shows that tab: nothing re-renders');
+  // Closed and opened again: it comes back on the tab you were on.
+  await closeWin('group:dispatch-voice', { force: true });
   mod.openTool('group:dispatch-voice');
   assert.deepEqual(opened, ['voice-lab'], 'coming back lands on that tab');
 });

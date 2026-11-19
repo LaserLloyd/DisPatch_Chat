@@ -2800,6 +2800,8 @@
     "close_anyway": "Close",
     "finished": "{name} has something new",
     "narrow": "Not enough room to dock here. It fills the screen until the window is wider.",
-    "minimized": "minimised, waiting at the bottom"
+    "minimized": "minimised, waiting at the bottom",
+    "asleep_short": "Asleep",
+    "asleep": "{name} was put to sleep to save memory. Open it to reload it."
   }
 }

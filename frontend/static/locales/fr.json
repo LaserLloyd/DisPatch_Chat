@@ -1236,7 +1236,9 @@
     "close_anyway": "Fermer",
     "finished": "{name} a du nouveau",
     "narrow": "Pas assez de place pour ancrer ici. L’outil occupe tout l’écran tant que la fenêtre n’est pas plus large.",
-    "minimized": "réduit, en attente en bas"
+    "minimized": "réduit, en attente en bas",
+    "asleep_short": "En veille",
+    "asleep": "{name} a été mis en veille pour économiser la mémoire. Ouvrez-le pour le recharger."
   },
   "advisor": {
     "card_title": "Confier ceci à {agent} ?",

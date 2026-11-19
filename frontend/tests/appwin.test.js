@@ -482,3 +482,156 @@ test('review: an offline boot (network error on /api/tools) never drops the save
   const kept = JSON.parse(win.localStorage.getItem('dispatch-appwin:v1:p1'));
   assert.deepEqual(kept.wins.map((w) => w.id), ['benchmark'], 'still saved for when the list comes back');
 });
+
+// ---------- fix round (hands-on review) ----------
+
+const pointer = (win, target, type, x, y, id = 1) => {
+  const ev = new win.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 });
+  Object.defineProperty(ev, 'pointerId', { value: id });
+  target.dispatchEvent(ev);
+};
+
+test('fix 10: pills keep first-open order whatever order they were minimised in', { skip: dom.skip }, async () => {
+  const { mod, doc } = await ready({ mobile: false });
+  mod.openTool('benchmark');
+  mod.openTool('family-page');
+  mod.openTool('rig-panel');
+  inWin(doc, 'rig-panel', '.appwin-min').click();
+  assert.deepEqual(pills(doc).map((p) => p.dataset.tool), ['benchmark', 'family-page', 'rig-panel']);
+  pillOf(doc, 'benchmark').querySelector('.appwin-pill-main').click();
+  inWin(doc, 'benchmark', '.appwin-min').click();
+  assert.deepEqual(pills(doc).map((p) => p.dataset.tool), ['benchmark', 'family-page', 'rig-panel'], 'back in its own place');
+});
+
+test('fix 1: a sideways drag on a pill never closes it; an upward one does', { skip: dom.skip }, async () => {
+  const { mod, doc, win } = await ready();
+  mod.openTool('benchmark');
+  inWin(doc, 'benchmark', '.appwin-min').click();
+  let main = pillOf(doc, 'benchmark').querySelector('.appwin-pill-main');
+  pointer(win, main, 'pointerdown', 100, 500);
+  pointer(win, main, 'pointermove', 300, 505);
+  assert.equal(pillOf(doc, 'benchmark').classList.contains('armed'), false, 'sideways never arms');
+  pointer(win, main, 'pointerup', 300, 505);
+  await tick();
+  assert.ok(pillOf(doc, 'benchmark'), 'still there');
+  main = pillOf(doc, 'benchmark').querySelector('.appwin-pill-main');
+  pointer(win, main, 'pointerdown', 100, 500, 2);
+  pointer(win, main, 'pointermove', 102, 420, 2);
+  assert.equal(pillOf(doc, 'benchmark').classList.contains('armed'), true);
+  pointer(win, main, 'pointerup', 102, 420, 2);
+  await tick(); await tick();
+  assert.equal(pillOf(doc, 'benchmark'), null, 'an upward drag closes');
+  assert.ok(doc.querySelector('#appwin-tray .appwin-tray-row'), 'pills live in a scrolling row');
+});
+
+test('fix 2: a phone sheet hides the tab bar behind a solid tray strip', { skip: dom.skip }, async () => {
+  const { mod, doc } = await ready();
+  mod.openTool('benchmark');
+  inWin(doc, 'benchmark', '.appwin-min').click();
+  mod.openTool('family-page');
+  assert.ok(doc.body.classList.contains('appwin-sheet'));
+  assert.ok(doc.getElementById('appwin-tray').classList.contains('strip'));
+  inWin(doc, 'family-page', '.appwin-min').click();
+  assert.equal(doc.body.classList.contains('appwin-sheet'), false);
+  assert.equal(doc.getElementById('appwin-tray').classList.contains('strip'), false);
+});
+
+test('fix 7: Back to chat by pointer focuses the chat; by keyboard the pill', { skip: dom.skip }, async () => {
+  const { mod, doc, win, rec } = await ready({ mobile: false });
+  mod.openTool('benchmark');
+  inWin(doc, 'benchmark', '.appwin-min').dispatchEvent(new win.MouseEvent('click', { bubbles: true, detail: 1 }));
+  assert.equal(rec.focusedChat, 1, 'a pointer minimise hands focus to the composer');
+  mod.openTool('benchmark');
+  key(win, inWin(doc, 'benchmark', '.appwin-handle'), 'Escape');
+  assert.equal(doc.activeElement, pillOf(doc, 'benchmark').querySelector('.appwin-pill-main'));
+});
+
+test('fix 12: finished while minimised tints the pill, survives a reload, clears when shown', { skip: dom.skip }, async () => {
+  const { mod, doc, win } = await ready({ mobile: false });
+  mod.setToolProfile('p1');
+  mod.openTool('benchmark');
+  mod.openTool('family-page');           // benchmark -> pill
+  windowMsg(win, 'benchmark', 'attention', true, { origin: 'null' });
+  assert.ok(pillOf(doc, 'benchmark').classList.contains('attention'));
+  assert.equal(pillOf(doc, 'benchmark').querySelector('.appwin-pill-dot'), null, 'the whole pill, not a dot');
+  const saved = JSON.parse(win.localStorage.getItem('dispatch-appwin:v1:p1'));
+  assert.equal(saved.wins.find((w) => w.id === 'benchmark').att, true, 'kept for a reload');
+  pillOf(doc, 'benchmark').querySelector('.appwin-pill-main').click();
+  inWin(doc, 'benchmark', '.appwin-min').click();
+  assert.equal(pillOf(doc, 'benchmark').classList.contains('attention'), false, 'shown = seen');
+});
+
+test('fix 14: the move handle is labelled by the name; the how-to is its description; the tray is one tab stop', { skip: dom.skip }, async () => {
+  const { mod, doc } = await ready({ mobile: false });
+  mod.openTool('benchmark');
+  const h = inWin(doc, 'benchmark', '.appwin-handle');
+  assert.equal(h.getAttribute('aria-label'), 'Benchmark Board');
+  const d = doc.getElementById(h.getAttribute('aria-describedby'));
+  assert.ok(d.textContent && d.textContent !== h.getAttribute('aria-label'), 'a how-to sentence, not the name');
+  mod.openTool('family-page');
+  inWin(doc, 'family-page', '.appwin-min').click();
+  const stops = [...doc.querySelectorAll('#appwin-tray button')].filter((b) => b.tabIndex === 0);
+  assert.equal(stops.length, 1, 'roving tabindex: one stop for the whole tray');
+});
+
+test('fix 15: past the live limit a pill is unloaded and says it is asleep; typed text is spared', { skip: dom.skip }, async () => {
+  const { mod, doc, win } = await ready();       // phone: 3 live
+  routes['GET /api/tools'] = () => [200, { ...FIXTURE, tools: [...FIXTURE.tools,
+    { id: 'extra-a', title: 'Extra A', icon: 'A', kind: 'static', enabled: true, entry: 'index.html', has_refresh: false },
+    { id: 'extra-b', title: 'Extra B', icon: 'B', kind: 'static', enabled: true, entry: 'index.html', has_refresh: false }] }];
+  await mod.loadTools();
+  mod.openTool('benchmark');
+  // something typed in benchmark's own document (a same-origin page)
+  const fdoc = frameOf(doc, 'benchmark').contentDocument;
+  if (fdoc && fdoc.body) { const ta = fdoc.createElement('textarea'); ta.value = 'half a note'; fdoc.body.append(ta); }
+  for (const id of ['family-page', 'rig-panel', 'extra-a', 'extra-b']) mod.openTool(id);
+  inWin(doc, 'extra-b', '.appwin-min').click();
+  const asleep = pills(doc).filter((p) => p.classList.contains('asleep')).map((p) => p.dataset.tool);
+  assert.ok(asleep.length >= 1, 'something went to sleep');
+  if (fdoc && fdoc.body) assert.ok(!asleep.includes('benchmark'), 'the page with typed text was spared');
+  const p = pillOf(doc, asleep[0]).querySelector('.appwin-pill-main');
+  assert.match(p.getAttribute('aria-label'), /sleep/i);
+  void win;
+});
+
+test('A: a core built-in pane opens in a window (its view moves in), minimises to a pill and goes home on close', { skip: dom.skip }, async () => {
+  const win = setup();
+  const mod = await freshTools();
+  const calls = [];
+  const view = () => win.document.getElementById('harness-view');
+  const home = view().parentElement;
+  const { rec } = wire(mod, { mobile: false });
+  void rec;
+  // main.js's adapter
+  mod.wireTools({
+    state: { selectedBotId: 'main', activeThreadId: 't-1' },
+    openers: { harness: () => calls.push('legacy') },
+    panes: { harness: { el: view, show: () => { calls.push('show'); view().classList.remove('hidden'); }, hide: () => { calls.push('hide'); view().classList.add('hidden'); } } },
+    closeToolPanes: () => {}, restoreView: () => {}, builtinOn: () => true, builtinDot: () => '',
+    renderSidebar: () => {}, isMobile: () => false, groupState: () => '', navigate: () => {}, toast: () => {},
+    isBotId: () => false, historyPush: () => () => {}, announce: () => {}, focusChat: () => {}, canDragClose: () => true,
+  });
+  await mod.loadTools();
+  assert.equal(mod.openTool('deepseek-harness'), true);
+  const w = winEl(win.document, 'deepseek-harness');
+  assert.ok(w && !w.hidden, 'a tool window');
+  assert.ok(w.contains(view()), 'the pane lives in it');
+  assert.deepEqual(calls, ['show'], 'shown in place: no full pane, no selection change');
+  inWin(win.document, 'deepseek-harness', '.appwin-min').click();
+  assert.ok(pillOf(win.document, 'deepseek-harness'), 'a pill like any tool');
+  pillOf(win.document, 'deepseek-harness').querySelector('.appwin-pill-x').click();
+  await tick();
+  assert.equal(view().parentElement, home, 'back where it came from');
+  assert.ok(view().classList.contains('hidden'));
+  assert.deepEqual(calls, ['show', 'hide']);
+});
+
+test('B: a phone chat header has a Tools button that opens the tools sheet', { skip: dom.skip }, async () => {
+  const { doc } = await ready();
+  const b = doc.getElementById('ch-tools-btn');
+  assert.ok(b && !b.hidden, 'present on the chat header');
+  assert.ok(b.closest('.chat-header'));
+  b.click();
+  assert.equal(doc.getElementById('tools-menu').hidden, false);
+  assert.ok(doc.querySelector('#tools-menu [data-tool="benchmark"]'));
+});

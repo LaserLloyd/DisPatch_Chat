@@ -1185,7 +1185,9 @@
     "close_anyway": "关闭",
     "finished": "{name}有新内容",
     "narrow": "这里空间不够,无法停靠。窗口变宽之前会全屏显示。",
-    "minimized": "已最小化,在底部等候"
+    "minimized": "已最小化,在底部等候",
+    "asleep_short": "已休眠",
+    "asleep": "{name} 已休眠以节省内存。打开即可重新加载。"
   },
   "advisor": {
     "card_title": "把这个交给 {agent} 吗?",

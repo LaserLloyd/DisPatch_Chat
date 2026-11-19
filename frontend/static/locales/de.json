@@ -1211,7 +1211,9 @@
     "close_anyway": "Schließen",
     "finished": "{name} hat etwas Neues",
     "narrow": "Hier ist nicht genug Platz zum Andocken. Das Fenster füllt den Bildschirm, bis das Fenster breiter ist.",
-    "minimized": "minimiert, wartet unten"
+    "minimized": "minimiert, wartet unten",
+    "asleep_short": "Schläft",
+    "asleep": "{name} wurde schlafen gelegt, um Speicher zu sparen. Öffnen lädt es neu."
   },
   "advisor": {
     "card_title": "An {agent} übergeben?",

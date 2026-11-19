@@ -5,11 +5,12 @@
 // it is node-tested (tests/appwin-state.test.js); js/appwin.js draws it.
 //
 // model = {
-//   wins:  [{id, state: 'open'|'min', order}],   live windows, at most ONE open
+//   wins:  [{id, state: 'open'|'min', order, att?}], live windows, at most ONE open;
+//          order = first-open order (pills never reshuffle); att = finished while a pill
 //   open:  id | null,                             the one on screen
 //   prefs: {id: {layout, rect?, ratio?}},         per tool, kept after a close
 //   def:   {layout, ratio} | null,                default for a tool with no prefs
-//   seq:   n,                                     minimise counter (pill order)
+//   seq:   n,                                     open counter (pill order)
 // }
 // Status, badge, attention and unsaved are live-only and live in js/appwin.js.
 
@@ -28,10 +29,14 @@ export const FLOOR_W = 240;           // never smaller than this whatever a mani
 export const FLOOR_H = 200;
 
 export const OPTION_DEFAULTS = Object.freeze({
-  layout: 'float', min_width: 360, min_height: 320, dockable: true, keep_alive: true,
+  layout: 'float', min_width: 360, min_height: 320, dockable: true, keep_alive: true, auto: false,
 });
+/** Below this content width a tool that did not ask for a layout opens docked at
+ *  the inline end: a float there covers most of the chat. */
+export const WIDE = 1600;
 
-const ID_RE = /^[a-z0-9-]{1,40}$/;
+// A tool id, or an add-on's group window ("group:<owner>").
+const ID_RE = /^(group:)?[a-z0-9-]{1,40}$/;
 const PROFILE_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const SPLIT_KEY = 'dispatch-tool-split';
 const SPLIT_RATIO_KEY = 'dispatch-tool-split-ratio';
@@ -52,6 +57,8 @@ export function windowOptions(raw) {
   const hh = int(w.height, 240, 2160); if (hh !== null) o.height = hh;
   if (typeof w.dockable === 'boolean') o.dockable = w.dockable;
   if (typeof w.keep_alive === 'boolean') o.keep_alive = w.keep_alive;
+  // The server says whether the tool named a layout itself (layout_auto).
+  o.auto = w.layout_auto === true;
   if (!o.dockable && DOCKS.includes(o.layout)) o.layout = 'float';
   return o;
 }
@@ -60,19 +67,28 @@ export function empty() { return { wins: [], open: null, prefs: {}, def: null, s
 
 export function find(model, id) { return model.wins.find((w) => w.id === id) || null; }
 
-/** Minimised windows in pill order (oldest minimise first). */
+/** Minimised windows in pill order (first opened first: stable targets). */
 export function pills(model) {
   return model.wins.filter((w) => w.state === 'min').sort((a, b) => a.order - b.order);
 }
 
-/** The remembered (or default) layout settings for a tool. */
-export function prefsFor(model, id, opts = OPTION_DEFAULTS) {
+/** The remembered (or default) layout settings for a tool. `env.contentW` (the
+ *  width beside the rail) picks the default of a tool that did not ask for one:
+ *  docked at the inline end below WIDE, a float above. */
+export function prefsFor(model, id, opts = OPTION_DEFAULTS, env = {}) {
   const p = model.prefs[id];
   const o = opts || OPTION_DEFAULTS;
-  let layout = (p && p.layout) || (model.def && model.def.layout) || o.layout || 'float';
+  let layout = (p && p.layout) || (model.def && model.def.layout) || defaultLayout(o, env);
   if (!o.dockable && DOCKS.includes(layout)) layout = 'float';
   const ratio = p && num(p.ratio) !== null ? p.ratio : (model.def && num(model.def.ratio) !== null ? model.def.ratio : 0.5);
   return { layout, rect: p && p.rect ? { ...p.rect } : null, ratio };
+}
+
+export function defaultLayout(opts, { contentW = null, rtl = false } = {}) {
+  const o = opts || OPTION_DEFAULTS;
+  const w = num(contentW);
+  if (o.auto && o.dockable !== false && w !== null && w > 0 && w < WIDE) return rtl ? 'left' : 'right';
+  return o.layout || 'float';
 }
 
 function withPrefs(model, id, patch) {
@@ -81,13 +97,8 @@ function withPrefs(model, id, patch) {
 }
 
 function minimiseOthers(model, keep) {
-  let seq = model.seq;
-  const wins = model.wins.map((w) => {
-    if (w.id === keep || w.state !== 'open') return w;
-    seq += 1;
-    return { ...w, state: 'min', order: seq };
-  });
-  return { ...model, wins, seq };
+  const wins = model.wins.map((w) => (w.id === keep || w.state !== 'open' ? w : { ...w, state: 'min' }));
+  return { ...model, wins };
 }
 
 /** Open a tool's window, or bring back the one it already has. Whatever else
@@ -96,30 +107,37 @@ export function openWin(model, id) {
   if (!ID_RE.test(String(id || ''))) return model;
   let m = minimiseOthers(model, id);
   if (find(m, id)) {
-    m = { ...m, wins: m.wins.map((w) => (w.id === id ? { ...w, state: 'open' } : w)) };
+    m = { ...m, wins: m.wins.map((w) => { if (w.id !== id) return w; const { att, ...rest } = w; void att; return { ...rest, state: 'open' }; }) };
   } else {
     if (m.wins.length >= MAX_WINS) {
       // The oldest pill gives way (a cap so storage stays small).
       const oldest = pills(m)[0];
       if (oldest) m = { ...m, wins: m.wins.filter((w) => w.id !== oldest.id) };
     }
-    m = { ...m, wins: [...m.wins, { id, state: 'open', order: 0 }] };
+    const seq = m.seq + 1;
+    m = { ...m, seq, wins: [...m.wins, { id, state: 'open', order: seq }] };
   }
   return { ...m, open: id };
 }
 
 export const restore = openWin;
 
-/** Back to chat: the window becomes a pill at the end of the tray. */
+/** Back to chat: the window becomes a pill, in its first-open place. */
 export function minimize(model, id) {
   const w = find(model, id);
   if (!w || w.state === 'min') return model;
-  const seq = model.seq + 1;
   return {
-    ...model, seq,
-    wins: model.wins.map((x) => (x.id === id ? { ...x, state: 'min', order: seq } : x)),
+    ...model,
+    wins: model.wins.map((x) => (x.id === id ? { ...x, state: 'min' } : x)),
     open: model.open === id ? null : model.open,
   };
+}
+
+/** A pill's "finished while you were away" mark (kept until it is shown). */
+export function setAttention(model, id, on) {
+  const w = find(model, id);
+  if (!w || (on && w.state !== 'min') || !!w.att === !!on) return model;
+  return { ...model, wins: model.wins.map((x) => { if (x.id !== id) return x; const { att, ...rest } = x; void att; return on ? { ...rest, att: true } : rest; }) };
 }
 
 /** Close: the window goes; its remembered layout stays for next time. */
@@ -179,9 +197,10 @@ export function clampRect(rect, bounds, opts = OPTION_DEFAULTS) {
   return { x, y, w, h };
 }
 
-/** A tool's first float: its own size, but never more than 60 % of the area's
- *  width (the chat beside it stays usable) or 760 px tall, and never under its
- *  minimum; placed at the inline-end side, a margin in from the edges. */
+/** A tool's first float. A size the tool asked for (manifest width/height) wins,
+ *  up to the area less MARGIN on each side; with none, 60 % of the area's width
+ *  (at most DEFAULT_W) and at most 760 px tall. Never under its minimum; placed
+ *  at the inline-end side, a margin in from the edges. */
 export const FIRST_SHARE = 0.6;
 export const FIRST_MAX_H = 760;
 export const MARGIN = 16;
@@ -189,8 +208,11 @@ export function initialRect(opts, bounds, { rtl = false } = {}) {
   const bw = Math.max(0, Math.floor(num(bounds && bounds.w) || 0));
   const bh = Math.max(0, Math.floor(num(bounds && bounds.h) || 0));
   const o = opts || OPTION_DEFAULTS;
-  const w = Math.min(bw, Math.max(o.min_width || 0, Math.min(Math.floor(bw * FIRST_SHARE), o.width || DEFAULT_W)));
-  const h = Math.min(bh, Math.max(o.min_height || 0, Math.min(Math.floor(bh - 2 * MARGIN), FIRST_MAX_H, o.height || DEFAULT_H)));
+  const room = (n) => Math.max(0, n - 2 * MARGIN);
+  const wantW = o.width ? Math.min(o.width, room(bw)) : Math.min(Math.floor(bw * FIRST_SHARE), DEFAULT_W);
+  const wantH = o.height ? Math.min(o.height, room(bh)) : Math.min(room(bh), FIRST_MAX_H, DEFAULT_H);
+  const w = Math.min(bw, Math.max(o.min_width || 0, wantW));
+  const h = Math.min(bh, Math.max(o.min_height || 0, wantH));
   const x = rtl ? Math.min(MARGIN, bw - w) : Math.max(0, bw - w - MARGIN);
   const y = Math.max(0, Math.min(MARGIN, bh - h));
   return { x: Math.max(0, x), y, w, h };
@@ -249,7 +271,7 @@ export function serialize(model) {
   }
   return JSON.stringify({
     v: VERSION,
-    wins: model.wins.map((w) => ({ id: w.id, state: w.state, order: w.order })),
+    wins: model.wins.map((w) => (w.att ? { id: w.id, state: w.state, order: w.order, att: true } : { id: w.id, state: w.state, order: w.order })),
     open: model.open,
     prefs,
     def: model.def,
@@ -271,16 +293,15 @@ export function parse(raw) {
       if (!w || !ID_RE.test(String(w.id)) || seen.has(w.id)) continue;
       if (w.state !== 'open' && w.state !== 'min') continue;
       seen.add(w.id);
-      m.wins.push({ id: w.id, state: w.state, order: int(w.order, 0, 1e9) ?? 0 });
+      const one = { id: w.id, state: w.state, order: int(w.order, 0, 1e9) ?? 0 };
+      if (w.att === true && w.state === 'min') one.att = true;
+      m.wins.push(one);
     }
   }
   // At most one open, and `open` must name it.
   const open = typeof d.open === 'string' && m.wins.some((w) => w.id === d.open && w.state === 'open') ? d.open : null;
   let seq = int(d.seq, 0, 1e9) ?? 0;
-  m.wins = m.wins.map((w) => {
-    if (w.state === 'open' && w.id !== open) { seq += 1; return { ...w, state: 'min', order: seq }; }
-    return w;
-  });
+  m.wins = m.wins.map((w) => (w.state === 'open' && w.id !== open ? { ...w, state: 'min' } : w));
   m.open = open;
   m.seq = Math.max(seq, ...m.wins.map((w) => w.order), 0);
   if (d.prefs && typeof d.prefs === 'object' && !Array.isArray(d.prefs)) {

@@ -1236,7 +1236,9 @@
     "close_anyway": "Fechar",
     "finished": "{name} tem novidades",
     "narrow": "Não há espaço suficiente para fixar aqui. Ocupa o ecrã todo até a janela ficar mais larga.",
-    "minimized": "minimizada, à espera em baixo"
+    "minimized": "minimizada, à espera em baixo",
+    "asleep_short": "Em repouso",
+    "asleep": "{name} foi colocado em repouso para poupar memória. Abra para recarregar."
   },
   "advisor": {
     "card_title": "Passar isto para {agent}?",

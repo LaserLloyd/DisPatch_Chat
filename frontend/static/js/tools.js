@@ -58,7 +58,8 @@ import {
   closeAll as winCloseAll, setProfile as winSetProfile, syncKnown as winSyncKnown, setLive as winSetLive,
   setTitle as winSetTitle, visibleId as winVisibleId, visibleLayout as winVisibleLayout,
   coversChat as winCoversChat, repaintAll as winRepaint, isMinimized as winIsMinimized, wireAppWindows, afterHistory as winAfterHistory,
-} from './appwin.js?v=1';
+  recordFor as winRecord, windowIds as winIds,
+} from './appwin.js?v=2';
 
 // Builtin ids are the pseudo-bot ids main.js has always used, in rail order.
 // `icon` names a RAIL_ICONS entry: a builtin tile is chrome, so it is drawn in
@@ -112,7 +113,7 @@ export function registerExtTiles(owner, tiles) {
     added.push(b);
   }
   indexBuiltins();
-  if (deps) renderToolRail();
+  if (deps) { renderToolRail(); if (toolsLoaded) winSyncKnown(); }
   return () => {
     for (const b of added) {
       const i = BUILTINS.indexOf(b);
@@ -611,6 +612,7 @@ export function renderToolRail() {
   const mode = entries.length || extra ? 'tools' : 'bots';
   const empty = !entries.length && !bots.length && !extra;
   host.hidden = empty;
+  paintChatLauncher(!empty && mode === 'tools');
   if (empty) { closeToolsMenu(); return; }
   host.append(menuButton(entries, bots, mode));
   // A menu opened in the other layout (or for rows that are gone) closes;
@@ -626,6 +628,30 @@ export function renderToolRail() {
     const again = host.querySelector(`[data-tool="${CSS.escape ? CSS.escape(focused) : focused}"]`);
     if (again) again.focus({ preventScroll: true });
   }
+}
+
+/** Phone: the chat screen's own way to the tools (one tap to the list). The
+ *  rail's Tools button lives on the Bots page; this one sits in the chat
+ *  header and opens the same menu as a bottom sheet. CSS shows it on a phone
+ *  only. */
+function paintChatLauncher(on) {
+  const head = document.querySelector('#chatview .chat-header');
+  if (!head) return;
+  let b = $('ch-tools-btn');
+  if (!b) {
+    b = el('button', { type: 'button', id: 'ch-tools-btn', class: 'icon-btn ghost ch-tools-btn', 'aria-haspopup': 'menu', 'aria-controls': 'tools-menu', 'aria-expanded': 'false' });
+    b.append(spriteIcon('wrench', 18));
+    b.addEventListener('click', () => {
+      const open = toggleToolsMenu('tools');
+      b.setAttribute('aria-expanded', String(!!open));
+    });
+    const info = head.querySelector('.ch-info');
+    if (info) info.after(b); else head.append(b);
+  }
+  const label = t('tools.menu_aria');
+  b.setAttribute('aria-label', label);
+  b.setAttribute('title', label);
+  b.hidden = !on;
 }
 
 /** main.js: repaint just the rail button's worst-of dot (a service changed). */
@@ -805,6 +831,8 @@ export function closeToolsMenu({ focusButton = false } = {}) {
   if (menu) { menu.hidden = true; menu.classList.remove('tools-sheet'); }
   if (typeof document !== 'undefined') document.body.classList.remove('tools-sheet-open');
   const btn = $('tools-menu-btn');
+  const chatBtn = $('ch-tools-btn');
+  if (chatBtn) chatBtn.setAttribute('aria-expanded', 'false');
   if (btn) {
     btn.setAttribute('aria-expanded', 'false');
     if (wasOpen && focusButton) btn.focus({ preventScroll: true });
@@ -1205,29 +1233,186 @@ export function rememberPrev() {
   prev = { botId: st.selectedBotId, threadId: st.activeThreadId };
 }
 
+// ---------- built-in panes in windows ----------
+//
+// ONE window system: the four core panes (Harness, StudioForge, Mail, Clients)
+// and every add-on pane live in a tool window too, with the same bar, pill,
+// layouts and persistence. A core pane's view element moves into the window's
+// body (it holds no live frame while it is unloaded, so the move reloads
+// nothing) and main.js shows / hides it without touching the chat. An add-on
+// gets one window per ADD-ON: its tools are tabs inside it (the window id is
+// the group's id when it has two or more tools).
+
+let openingExt = false;
+
+/** The builtin (b) behind a window id, or null. */
+function builtinFor(id) {
+  if (isGroupId(id)) return null;
+  const tool = findTool(id);
+  return BUILTIN_BY_ID.get(id) || (tool && tool.kind === 'builtin' ? builtinOf(tool) : null);
+}
+
+/** The window an add-on tool's pane lives in: its group's, else its own. */
+function winIdFor(id) {
+  const g = groupFor(id);
+  return g ? g.id : id;
+}
+
+/** Server rows that can be windows: framed tools, then enabled + available
+ *  builtins (an add-on with two or more becomes one group window). From the
+ *  rows, not the probes or the registered tiles: a reload restores the pills
+ *  before either has answered. */
+function windowedIds() {
+  const list = allTools();
+  const out = list.filter((x) => isFramed(x) && x.enabled !== false).map((x) => x.id);
+  const byOwner = new Map();
+  for (const x of list) {
+    if (x.kind !== 'builtin' || x.enabled === false || x.available === false) continue;
+    if (x.owner) { if (!byOwner.has(x.owner)) byOwner.set(x.owner, []); byOwner.get(x.owner).push(x.id); } else out.push(x.id);
+  }
+  for (const [owner, ids] of byOwner) out.push(...(ids.length >= 2 ? [GROUP_PREFIX + owner] : ids));
+  return out;
+}
+
+function groupInfo(id) {
+  const g = groupMeta(id);
+  if (g) return { title: g.title, glyph: () => toolGlyph(g) };
+  const owner = String(id).slice(GROUP_PREFIX.length);
+  const row = allTools().find((x) => x.owner === owner);
+  if (!row) return null;
+  const title = SPEECH_RE.test(String(row.owner_title || '') + ' ' + owner) ? t('tools.speech') : (row.owner_title || owner);
+  return { title, glyph: () => toolGlyph(row) };
+}
+
+function mountBuiltin(rec) {
+  const b = builtinFor(rec.id);
+  const pane = b && !b.owner && deps && deps.panes ? deps.panes[b.feature] : null;
+  if (pane) {
+    const view = pane.el();
+    if (view) {
+      rec.pane = pane;
+      rec.paneHome = { parent: view.parentNode, next: view.nextSibling };
+      view.classList.add('hidden');
+      rec.body.append(view);
+    }
+    return;
+  }
+  // An add-on (one tool or a group): a box for its tabs and its root.
+  rec.extBox = el('div', { class: 'appwin-ext ext-tool-body' });
+  rec.extRoot = el('div', { class: 'ext-tool-root' });
+  rec.extBox.append(rec.extRoot);
+  rec.body.append(rec.extBox);
+}
+
+function loadBuiltin(rec) {
+  if (rec.pane) { rec.pane.show(); return; }
+  if (!rec.extRoot || openingExt) return;
+  let tabId = rec.id;
+  if (isGroupId(rec.id)) {
+    const g = groupMeta(rec.id);
+    if (!g || !g.tabs.length) return;
+    const want = groupTab.get(g.owner);
+    tabId = (g.tabs.find((x) => x.id === want) || g.tabs[0]).id;
+  }
+  const b = builtinFor(tabId);
+  if (b && typeof b.open === 'function') { rec.tab = tabId; b.open(tabId); }
+}
+
+function unloadBuiltin(rec) {
+  if (rec.pane) { rec.pane.hide(); return; }
+  if (!rec.extRoot) return;
+  const entry = rec.extRoot._entry;
+  rec.extRoot._entry = null;
+  rec.extRoot.replaceChildren();
+  const strip = rec.extBox && rec.extBox.querySelector('.ext-tool-tabs');
+  if (strip) strip.remove();
+  rec.tab = null;
+  if (entry && entry.onClose) { try { entry.onClose(); } catch (e) { console.warn('[ext] tool pane onClose failed', e); } }
+}
+
+function destroyBuiltin(rec) {
+  unloadBuiltin(rec);
+  const view = rec.pane && rec.pane.el();
+  if (view && rec.paneHome && rec.paneHome.parent) {
+    view.classList.add('hidden');
+    rec.paneHome.parent.insertBefore(view, rec.paneHome.next && rec.paneHome.next.parentNode === rec.paneHome.parent ? rec.paneHome.next : null);
+  }
+}
+
+/** main.js openToolPane: the root an add-on tool's pane renders into — its
+ *  window's (opened now when it has none) — or null for a pane with no tool
+ *  row behind it (the legacy full pane). */
+export function extWindowRoot(id) {
+  if (!id || !findTool(id) || isFramed(findTool(id))) return null;
+  const wid = winIdFor(id);
+  let rec = winRecord(wid);
+  if (!rec || !rec.loaded) {
+    // An add-on opened its pane itself: open the window WITHOUT calling its
+    // opener again (this call is the opener's).
+    openingExt = true;
+    let ok = false;
+    try { ok = winOpen(wid); } finally { openingExt = false; }
+    if (!ok) return null;
+    rec = winRecord(wid);
+  } else if (winVisibleId() !== wid) winOpen(wid);
+  if (!rec || !rec.extRoot) return null;
+  const b = builtinFor(id);
+  if (b && b.owner) groupTab.set(b.owner, b.id);
+  rec.tab = id;
+  return rec.extRoot;
+}
+
+/** Close the window an add-on tool lives in (its dispose, or its tile went). */
+export function closeExtWindow(id) {
+  const wid = winIdFor(id);
+  for (const x of new Set([wid, id])) if (winRecord(x)) winClose(x, { force: true });
+}
+
+/** Text typed into a page (or a built-in pane) that an unload would lose.
+ *  Only what this document can see: a sandboxed cross-origin frame tells us
+ *  through the SDK's `unsaved` instead. */
+function typedIn(rec) {
+  const has = (root) => !!root && [...root.querySelectorAll('textarea, input:not([type]), input[type="text"], input[type="search"], input[type="email"], input[type="url"], [contenteditable="true"]')]
+    .some((x) => String(x.isContentEditable ? x.textContent : x.value || '').trim());
+  if (has(rec.body)) return true;
+  const p = panes.get(rec.id);
+  let doc = null;
+  try { doc = p && p.frame ? p.frame.contentDocument : null; } catch { doc = null; }
+  return has(doc);
+}
+
 /** The window manager's view of the tools (js/appwin.js host contract). */
 const winHost = {
   ready: () => toolsLoaded,
   info(id) {
+    if (isGroupId(id)) return windowedIds().includes(id) ? groupInfo(id) : null;
     const tool = findTool(id);
-    if (!isFramed(tool) || tool.enabled === false) return null;
-    return { title: toolTitle(tool), glyph: () => toolGlyph(tool), window: tool.window || null };
+    if (!tool || tool.enabled === false) return null;
+    // layout_auto (a sibling of the row's window block): the tool named no layout.
+    const window = tool.window ? { ...tool.window, layout_auto: tool.layout_auto === true } : null;
+    if (isFramed(tool)) return { title: toolTitle(tool), glyph: () => toolGlyph(tool), window };
+    if (tool.kind === 'builtin' && tool.available !== false) {
+      return { title: toolTitle(tool), glyph: () => toolGlyph(tool), window };
+    }
+    return null;
   },
-  knownIds: () => allTools().filter((x) => isFramed(x) && x.enabled !== false).map((x) => x.id),
-  mount: (rec) => { makePane(rec); },
+  knownIds: () => windowedIds(),
+  mount: (rec) => { if (isFramed(findTool(rec.id))) makePane(rec); else mountBuiltin(rec); },
   load(rec) {
     const p = panes.get(rec.id);
+    if (!p) { loadBuiltin(rec); return; }
     const tool = findTool(rec.id);
-    if (!p || !tool) return;
+    if (!tool) return;
     hideError(p);
     loadFrame(p, tool);
     refreshStatus(p, tool);
   },
-  unload(rec) { const p = panes.get(rec.id); if (p) unloadPane(p); },
+  unload(rec) { const p = panes.get(rec.id); if (p) unloadPane(p); else unloadBuiltin(rec); },
   destroy(rec) {
     const p = panes.get(rec.id);
-    if (p) { unloadPane(p); panes.delete(rec.id); }
+    if (p) { unloadPane(p); panes.delete(rec.id); } else destroyBuiltin(rec);
   },
+  typed: (rec) => typedIn(rec),
   stateChanged(rec, s) {
     const p = panes.get(rec.id);
     if (p) postWindowState(p, s);
@@ -1284,7 +1469,21 @@ export function openTool(id, { launch = true } = {}) {
     // the pane, whose notes explain why.
     if (tool && openMode(tool) === 'window' && deps.builtinOn(b.feature)
         && launch && launchWindow(tool)) return true;
-    opener();
+    // Its tool window (one system for every tool). A pane already showing in
+    // that window only needs its tab switched.
+    // (A core pane needs main.js's adapter; without one it keeps its full pane.)
+    if (!b.owner && !(deps.panes && deps.panes[b.feature])) { opener(); return true; }
+    const wid = b.owner ? winIdFor(b.id) : b.id;
+    const rec = winRecord(wid);
+    const wasLoaded = !!(rec && rec.loaded);
+    if (typeof deps.closeToolPanes === 'function') deps.closeToolPanes('tool');
+    if (isToolId(st.selectedBotId) && typeof deps.restoreView === 'function') {
+      const p = prev;
+      prev = null;
+      deps.restoreView(p, { stay: true });
+    }
+    if (!winOpen(wid)) { opener(); return true; }   // no row for it (an old backend): the full pane
+    if (wasLoaded && b.owner && rec.tab !== b.id) { rec.tab = b.id; opener(); }
     return true;
   }
   if (!isFramed(tool) || tool.enabled === false) return false;

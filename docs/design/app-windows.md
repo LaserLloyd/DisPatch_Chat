@@ -49,7 +49,14 @@ restores the one that exists). States:
 * **Minimising never unloads the page** (its frame stays in the DOM, hidden), so a
   half-typed prompt, a running picture job or a scrolled list is exactly as left.
   A tool may opt out (`keep_alive: false`) — it is unloaded on minimise and
-  reloaded on restore; the pill stays.
+  reloaded on restore; the pill stays. **Warning for authors:** `keep_alive: false`
+  loses anything typed and not saved the moment the window is minimised.
+* **Live pages are capped** (5 on a desktop, 3 on a phone). Past the cap the least
+  recently used pill is unloaded; pages that are busy, have unsaved work or have
+  text typed into them (what the shell can see: a same-origin page or a built-in
+  pane) are spared first. An unloaded pill is drawn dashed and says **Asleep**
+  ("…was put to sleep to save memory. Open it to reload it.") — never a silent
+  loss.
 * **Close** unloads the page. If the tool declared unsaved work, Close asks first.
 * After a **reload**, windows come back as they were (layout, size, position); the
   one that was open loads at once; minimised ones come back as pills and load when
@@ -94,7 +101,16 @@ restores the one that exists). States:
   narrow for both → the window is shown Full until there is room again (the dock
   choice is remembered). Physical left/right, so the labels mean what they say in
   right-to-left languages too.
-* **Full**: covers the thread list and chat; the rail stays.
+* **Full**: covers the thread list and chat; the rail stays. Its bottom (like a
+  float's) stops above the pill tray wherever the tray is.
+* **Default layout** for a tool that named none (`layout_auto` on its
+  `/api/tools` row): below 1600 px of content width it opens docked at the
+  inline end (a float there covers most of the chat); wider, a float. If that dock
+  does not fit, a float — never a full cover nobody chose. A layout the owner
+  picked (or the tool named) always wins.
+* **Chat list beside a dock:** when the thread list steps aside for a dock, the
+  chat header shows a **Show chat list** button; the list comes back over the chat
+  until a chat is picked (or Esc).
 * The chat under a float or beside a dock is fully usable — non-modal.
 
 ### Phone (narrow layout)
@@ -106,6 +122,11 @@ restores the one that exists). States:
 * Bar: grab handle, icon, title/status, **⌄ Back to chat**, ✕ Close (44 px each).
   Swiping the handle/title down ≥ 96 px minimises (the ⌄ button is the tap
   alternative). The phone's **Back** minimises the sheet (Android bubble rule).
+* **Under a sheet the tray is a solid strip at the very bottom** and the bottom
+  tabs hide: the sheet ends where the strip begins, and nothing behind either can
+  be tapped (a hands-on review tapped New chat through the gap).
+* **Launcher from a chat:** the chat header has a Tools button (phone only) that
+  opens the same Tools sheet, so a tool is one tap away from the chat screen.
 * Opening a tool from the phone's Tools sheet never changes the page underneath
   (Bots / threads / a chat). The **⌄ Back to chat** button means it: when a chat
   is open it comes up under the pill (headless check found the label lying
@@ -113,24 +134,32 @@ restores the one that exists). States:
 
 ### The pill tray
 
-* One pill per minimised window, in the order they were minimised (newest at the
-  end): icon, name, status (e.g. "2 making"), a dot when the tool asked for
-  attention while minimised, and a visible ✕.
+* One pill per minimised window, in the order the windows were **first opened**
+  (stable targets: a pill never moves because another was minimised): icon, name,
+  status (e.g. "2 making"), and a visible ✕. A tool that asked for attention
+  while minimised **tints its whole pill**; the mark is saved with the window and
+  survives a reload until the tool is next shown.
 * Placement: a fixed row at the bottom of the chat column, **directly above the
   composer** when one is showing, else above the phone's bottom tabs, else at the
   bottom edge; safe-area insets respected. The message list gets matching bottom
   padding, so no message hides under it. On a phone the tray hides while the
   on-screen keyboard is up (visualViewport) and returns when it closes.
-* Tap a pill = restore. ✕ = close. Drag a pill up/away past a threshold → it turns
-  into "Release to close" → release closes (unsaved → confirm). Keyboard: pills are
-  a toolbar (arrow keys move between pills, Enter restores, Delete closes).
-* A tray with more pills than fit scrolls sideways.
+* Tap a pill = restore. ✕ = close. Drag a pill **up** past 64 px → it turns into
+  "Let go to close" → release closes (unsaved → confirm). A sideways move is the
+  row scrolling and never closes. Keyboard: the tray is a toolbar with one tab
+  stop (roving tabindex over every pill and its ✕; arrows, Home, End; Enter
+  restores, Delete closes).
+* A tray with more pills than fit scrolls sideways; an edge with more pills off it
+  fades.
 
 ### Focus, Esc, keyboard
 
-* Opening/restoring focuses the window's title bar (screen readers hear "Image
-  Studio, dialog"). Minimising returns focus to that tool's pill; closing to the
-  previous pill, else the chat composer, else the rail.
+* Opening/restoring focuses the window's title bar, labelled by the tool's NAME
+  (screen readers hear "Image Studio"); how to move it is its description
+  (`aria-describedby`). Minimising by keyboard (Esc, Enter on Back to chat)
+  returns focus to that tool's pill; by pointer or touch, to the composer (typing
+  goes where the eyes are). Closing goes to the previous pill, else the chat
+  composer, else the rail.
 * **Esc** with focus on the window chrome minimises (never closes). Esc inside a
   tool's page belongs to the page.
 * Move handle (focused title): arrows move a float by 24 px (Shift: 96); with
@@ -148,11 +177,18 @@ restores the one that exists). States:
 
 ### Built-in panes
 
-The four built-in panes (Harness, StudioForge, Emails, Clients) and an add-on's
-native pane (voice tools) are DOM owned by `main.js`, not framed pages; they keep
-their full-pane behaviour in v1. Opening one **minimises** the visible tool
-window instead of closing it, so switching still works. Hosting them in windows is
-a follow-up (an adapter that reparents the view into a window body once).
+ONE system: the four built-in panes (Harness, StudioForge, Emails, Clients) and
+every add-on pane (the voice tools) open in tool windows too — the same bar, pill,
+minimise, float / dock / full and persistence. The adapter (`tools.js`) moves a
+core pane's view element into its window's body when the window is created (no
+live frame is inside it at that moment, so nothing reloads) and back when the
+window is closed; `main.js` shows and hides the pane without touching the chat's
+selection, the thread list or `tool-full`. The pane's own ‹ back button is hidden
+in a window (the bar's Back to chat does that job). An add-on gets ONE window per
+add-on (`group:<owner>` when it registered two or more tools): its tools are tabs
+inside it, and `shell.tools.openPane` renders into that window. A pane with no
+tool row behind it (an add-on calling `openPane` for something it never
+registered) keeps the old full pane.
 
 ## 4. Roles
 
@@ -206,13 +242,17 @@ chat the usual way.
 
 ```yaml
 window:
-  layout: float        # float | left | right | full — first-open layout on desktop (default float)
-  width: 1040          # first-open float size, px (clamped to the screen)
+  layout: float        # float | left | right | full — first-open layout on desktop
+                       # (omit it and the shell picks: docked beside the chat under
+                       # 1600 px of content width, a float above)
+  width: 1040          # first-open float size, px: honoured up to the content area
+                       # less a 16 px margin each side (no other cap)
   height: 760
   min_width: 360       # smallest the window may be resized to (default 360, 240..1600)
   min_height: 320      # (default 320, 200..1200)
   dockable: true       # may dock left/right (default true)
-  keep_alive: true     # stays loaded while minimised (default true)
+  keep_alive: true     # stays loaded while minimised (default true). false loses
+                       # anything typed and not saved on every minimise.
 ```
 
 All keys optional; a tool with none behaves sensibly. Unknown keys are refused at
@@ -299,17 +339,21 @@ Folded in (these override the sections above where they differ):
    so it never claims `unsaved`.
 6. **Basic (Restricted) profiles:** no drag-to-close on pills (✕ only, confirm
    when busy). Targets ≥ 44 px on phones for everyone.
-7. **At most 3 live frames.** Restoring/opening a fourth unloads the least
+7. **At most 3 live frames** (raised to 5 on a desktop in the fix round; see
+   section 3). Restoring/opening a fourth unloads the least
    recently used minimised one; its pill stays and it reloads on restore.
 8. **After a reload:** desktop reopens the window that was open; a phone brings
    every window back as a pill (a sheet over the chat at boot is a surprise).
 9. **No saved window state without a profile id** (no `shared` key).
 10. **First float:** at most 60 % of the content width (never under the tool's
-    minimum) and ≤ 760 px tall, at the inline-end side, its bottom above the pill
+    minimum) and ≤ 760 px tall (fix round: a size the tool ASKED for now wins, up
+    to the area less a margin; the 60 % / 760 rule is only the no-size default), at the inline-end side, its bottom above the pill
     tray; the tray is drawn above a float.
 11. **Alt+Shift+M dropped** (Option+Shift+M types a character on a Mac). **F6**
     cycles focus between the visible window and the chat.
-12. **New-tab tools** (`open: window`) never get a window or a pill.
+12. **New-tab tools** (`open: window`) never get a window or a pill when they
+    launch in a tab; when they cannot (a restore after a reload, no address from
+    this browser) they use their tool window like any other.
 13. **Screen readers:** the tray is a labelled toolbar; pill status text is not a
     live region; "finished while minimised" is announced once, politely.
 14. The split view module, its test, the phone return chip and the chat-half
@@ -319,7 +363,5 @@ Kept against the review:
 * **"Back to chat" on the phone keeps the owner's wording** (the review suggested
   "Minimise"). It minimises and, when a chat is open underneath, shows that chat.
 * **Built-in panes** (Harness, StudioForge, Emails, Clients) were asked to become
-  window bodies in v1. They are DOM with their own openers, selection and
-  full-pane rules in `main.js`; v1 makes them minimise the visible tool window
-  instead of closing it, and hosting them in windows is the next step (section 3,
-  "Built-in panes"). Done in this round only if the core lands with time to spare.
+  window bodies in v1; they were deferred, and the hands-on review's fix round did
+  it (section 3, "Built-in panes").
