@@ -4514,9 +4514,15 @@ async def _advance_image_job_locked(job: dict) -> None:
                          job["id"], ready.reason, ready.detail or "—")
                 return
             try:
+                extra: dict = {}
+                if spec.backend == "api":
+                    # The API provider is metered: its daily cap is per profile, so say whose
+                    # thread asked (the picture's owner).
+                    th = await db.get_thread(job["thread_id"])
+                    extra["owner"] = ownership.effective_owner(th.owner_profile_id) if th is not None else None
                 res = await forge.enqueue(
                     spec, callback_url=_image_job_callback_url(job["id"]),
-                    callback_token=job.get("callback_token") or "")
+                    callback_token=job.get("callback_token") or "", **extra)
             except image_jobs.ImageJobError as e:
                 if not e.uncertain:
                     raise
@@ -14936,6 +14942,7 @@ from . import (  # noqa: E402  (one line per router)
     backup_api,
     characters_api,
     connections_api,
+    image_spend_api,
     invariants_api,
     kits_api,
     settings_api,
@@ -14943,6 +14950,7 @@ from . import (  # noqa: E402  (one line per router)
 )
 
 app.include_router(settings_api.router)
+app.include_router(image_spend_api.router)   # today's picture spending vs the daily caps (Settings)
 app.include_router(connections_api.router)
 app.include_router(characters_api.router)
 app.include_router(kits_api.router)       # 4.1 managed bots (route_policy.py declares each)

@@ -671,6 +671,7 @@ def wipe_profile_content(profile_id: str) -> dict[str, int]:
         prompts = Path(config.DATA_DIR) / "apps-data" / "imagestudio" / f"prompts-{profile_id}.json"
         _unlink(prompts)
         _unlink(Path(config.DATA_DIR) / "apps-data" / "imagestudio" / f"last-{profile_id}.json")
+        _unlink(Path(config.DATA_DIR) / "apps-data" / "imagestudio" / f"draft-{profile_id}.json")
         if profile_id == ownership.protected_admin_id():
             _unlink(Path(config.DATA_DIR) / "apps-data" / "imagestudio" / "prompts.json")
             _unlink(Path(config.DATA_DIR) / "apps-data" / "imagestudio" / "last.json")

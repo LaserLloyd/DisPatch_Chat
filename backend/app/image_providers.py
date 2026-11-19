@@ -74,7 +74,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import yaml
 
-from . import config, image_jobs, llm_api, secret_store
+from . import config, image_jobs, image_spend, llm_api, secret_store
 
 log = logging.getLogger("local-chat.image_providers")
 
@@ -1336,22 +1336,32 @@ class ApiImages:
         return image_jobs.RigReadiness(checked_at=time.monotonic())
 
     async def enqueue(self, spec: image_jobs.ImageSpec, *, callback_url: str = "",
-                      callback_token: str = "") -> image_jobs.EnqueueResult:
+                      callback_token: str = "", owner: str | None = None) -> image_jobs.EnqueueResult:
         res = resolve()            # a config mistake fails the job, visibly
         self._gc()
+        # The daily spend cap (image_spend.py), reserved BEFORE the provider is called and given
+        # back by _run when the picture fails; a refusal fails the job with the cap named.
+        try:
+            held = await asyncio.to_thread(
+                image_spend.reserve, owner, image_spend.cost_of(res.preset.id, res.model, 1))
+        except image_spend.SpendRefused as e:
+            raise image_jobs.ImageJobError(e.message, code="spend_cap") from None
         rid = f"api-{uuid.uuid4().hex[:16]}"
         run = _Run(task=None, started=time.monotonic())
         self._runs[rid] = run
-        run.task = asyncio.ensure_future(self._run(rid, res, spec))
+        run.task = asyncio.ensure_future(self._run(rid, res, spec, held))
         return image_jobs.EnqueueResult(job_id=rid)
 
-    async def _run(self, rid: str, res: Resolved, spec: image_jobs.ImageSpec) -> None:
+    async def _run(self, rid: str, res: Resolved, spec: image_jobs.ImageSpec,
+                   held: image_spend.Reservation | None = None) -> None:
         run = self._runs.get(rid)
         try:
             self.generations += 1
             data = await generate(res, spec)
             if run is not None:
                 run.data = data
+            if held is not None:
+                held.commit()
             self._last_ok, self._last_error = time.monotonic(), ""
         except asyncio.CancelledError:
             if run is not None:
@@ -1367,6 +1377,8 @@ class ApiImages:
             if run is not None:
                 run.error = f"internal error ({type(e).__name__})"
         finally:
+            if held is not None:
+                held.release()          # no-op once committed: only a failed / cancelled picture gives back
             if run is not None:
                 run.finished = time.monotonic()
 

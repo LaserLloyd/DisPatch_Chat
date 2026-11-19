@@ -293,3 +293,163 @@ def test_a_refused_generate_does_not_replace_the_last_generation(world, monkeypa
     assert owner.post(f"{BASE}/generate", json={"prompt": "refused", "provider": "workflows",
                                                 "model": "wf-b", "ratio": "1:1", "n": 1}).status_code == 429
     assert owner.get(BASE + "/last").json()["last"]["prompt"] == "kept"
+
+
+# ---- the form draft: GET/PUT/DELETE /draft, per profile ---------------------- #
+
+DRAFT = {"v": 1, "provider": "minimax", "model": "image-01", "prompt": "a lighthouse", "ratio": "3:2",
+         "seed": "7", "n": 2, "optimizer": True}
+
+
+def test_draft_round_trip_and_reset(world, monkeypatch):
+    owner, _ = _server_world(world, monkeypatch)
+    assert owner.get(BASE + "/draft").json() == {"draft": None}
+    assert owner.put(BASE + "/draft", json=DRAFT).status_code == 200
+    got = owner.get(BASE + "/draft").json()["draft"]
+    assert got == DRAFT
+    assert owner.delete(BASE + "/draft").status_code == 200
+    assert owner.get(BASE + "/draft").json() == {"draft": None}
+
+
+def test_one_profile_never_reads_or_writes_another_profiles_draft(world, monkeypatch):
+    owner, ada = _server_world(world, monkeypatch)
+    assert owner.put(BASE + "/draft", json=DRAFT).status_code == 200
+    assert ada.get(BASE + "/draft").json() == {"draft": None}
+    assert ada.put(BASE + "/draft", json={**DRAFT, "prompt": "ada's"},
+                   params={"owner": "x", "profile_id": "y"}).status_code == 200
+    assert ada.get(BASE + "/draft").json()["draft"]["prompt"] == "ada's"
+    assert owner.get(BASE + "/draft").json()["draft"]["prompt"] == "a lighthouse"
+    assert ada.delete(BASE + "/draft").status_code == 200
+    assert owner.get(BASE + "/draft").json()["draft"]["prompt"] == "a lighthouse"
+
+
+def test_draft_needs_a_signed_in_profile_and_drops_data_urls(world, monkeypatch):
+    owner, _ = _server_world(world, monkeypatch)
+    anon = world.client()
+    for call in (lambda: anon.get(BASE + "/draft"), lambda: anon.put(BASE + "/draft", json=DRAFT),
+                 lambda: anon.delete(BASE + "/draft")):
+        assert call().status_code in (401, 403)
+    owner.put(BASE + "/draft", json={**DRAFT, "model": "data:image/png;base64,AAAA", "extra": "ignored"})
+    got = owner.get(BASE + "/draft").json()["draft"]
+    assert got["model"] == "" and "extra" not in got
+
+
+def test_draft_is_bounded(world, monkeypatch):
+    owner, _ = _server_world(world, monkeypatch)
+    assert owner.put(BASE + "/draft", json={**DRAFT, "prompt": "x" * 50_000}).status_code == 422
+    assert owner.put(BASE + "/draft", json={**DRAFT, "n": 99}).status_code == 422
+
+
+# ---- the daily spend cap on a paid provider ---------------------------------- #
+
+def _caps(**kw):
+    settings_store.set_many({f"connections.image_spend.{k}": v for k, v in kw.items()})
+
+
+def test_paid_job_over_the_cap_is_refused_before_any_provider_call(env, fake):
+    from app import image_spend
+    image_spend.reset_for_tests()
+    _caps(profile_usd_per_day=0.05, install_usd_per_day=0)
+    c = _unlocked(env)
+    ok = _gen(c, model="MiniMax-H3-Image", n=2)                       # $0.04 of $0.05
+    assert ok.status_code == 200, ok.text
+    sent = len(fake.requests)
+    r = _gen(c, model="MiniMax-H3-Image", n=1)                        # $0.06 > $0.05
+    assert r.status_code == 429, r.text
+    assert "$0.05" in r.json()["detail"] and "midnight" in r.json()["detail"]
+    assert len(fake.requests) == sent, "no provider call was made for the refused job"
+    assert c.get(BASE + "/last").json()["last"]["n"] == 2, "a refused job is not the last generation"
+    st = c.get(BASE + "/state").json()["spend"]
+    line = next(ln for ln in st["lines"] if ln["unit"] == "usd")
+    assert line["used"] == pytest.approx(0.04) and line["cap"] == 0.05
+
+
+def test_a_failed_paid_job_gives_its_reservation_back(env, fake, monkeypatch):
+    from app import image_spend
+    image_spend.reset_for_tests()
+    _caps(profile_usd_per_day=0.05, install_usd_per_day=0)
+    c = _unlocked(env)
+    monkeypatch.setattr(image_providers, "transport", httpx.MockTransport(lambda req: httpx.Response(500, json={})))
+    assert _gen(c, model="MiniMax-H3-Image", n=2).status_code == 502
+    st = c.get(BASE + "/state").json()["spend"]
+    assert next(ln for ln in st["lines"] if ln["unit"] == "usd")["used"] == 0
+    monkeypatch.setattr(image_providers, "transport", httpx.MockTransport(fake))
+    assert _gen(c, model="MiniMax-H3-Image", n=2).status_code == 200      # the whole cap is free again
+
+
+def test_eighty_percent_notice_rides_the_response_and_state(env, fake):
+    from app import image_spend
+    image_spend.reset_for_tests()
+    _caps(profile_usd_per_day=0.05, install_usd_per_day=0)
+    c = _unlocked(env)
+    assert "spend_notice" not in _gen(c, model="MiniMax-H3-Image", n=1).json()
+    r = _gen(c, model="MiniMax-H3-Image", n=1).json()                 # $0.04 = 80%
+    assert r["spend_notice"].startswith("80%")
+    assert c.get(BASE + "/state").json()["spend"]["notice"].startswith("80%")
+
+
+def test_the_image_server_and_a_custom_host_are_never_counted(world, monkeypatch):
+    from app import image_spend
+    image_spend.reset_for_tests()
+    _caps(profile_usd_per_day=0.0001, install_usd_per_day=0.0001, profile_pictures_per_day=1)
+    owner, _ = _server_world(world, monkeypatch)
+    for _ in range(3):
+        assert owner.post(f"{BASE}/generate", json={"prompt": "free", "provider": "workflows",
+                                                    "model": "wf-a", "ratio": "1:1", "n": 1}).status_code == 200
+    assert next(ln for ln in owner.get(BASE + "/state").json()["spend"]["lines"] if ln["unit"] == "usd")["used"] == 0
+
+
+def test_parallel_paid_jobs_cannot_overshoot(env, fake):
+    import threading
+
+    from app import image_spend
+    image_spend.reset_for_tests()
+    _caps(profile_usd_per_day=0.10, install_usd_per_day=0)
+    c = _unlocked(env)
+    codes = []
+
+    def go():
+        codes.append(_gen(c, model="MiniMax-H3-Image", n=1).status_code)
+
+    ts = [threading.Thread(target=go) for _ in range(9)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert codes.count(200) == 5 and codes.count(429) == 4, codes     # $0.02 each, $0.10 cap
+    assert len(fake.requests) == 5
+
+
+def test_spend_overview_is_for_admins_only(world, monkeypatch):
+    owner, ada = _server_world(world, monkeypatch)
+    assert owner.get("/api/image-spend").status_code == 200
+    body = owner.get("/api/image-spend").json()
+    assert {"day", "resets_at", "install", "profiles"} <= set(body)
+    anon = world.client()
+    assert anon.get("/api/image-spend").status_code in (401, 403)
+
+
+def test_chat_pictures_from_an_api_provider_share_the_cap(env, fake, monkeypatch):
+    import asyncio
+
+    from app import image_spend
+    image_spend.reset_for_tests()
+    _caps(profile_usd_per_day=0.006, install_usd_per_day=0)           # image-01 is $0.0035: one fits
+    spec = image_jobs.ImageSpec(prompt="a chat picture", ratio="1:1", backend="api")
+
+    async def go():
+        be = image_providers.ApiImages()
+        first = await be.enqueue(spec, owner="p1")
+        await be._runs[first.job_id].task
+        before = len(fake.requests)
+        with pytest.raises(image_jobs.ImageJobError) as e:
+            await be.enqueue(spec, owner="p1")
+        assert "midnight" in e.value.message and len(fake.requests) == before
+        await be.enqueue(spec, owner="p2")                            # another profile's own cap
+        # a failing picture gives its share back
+        monkeypatch.setattr(image_providers, "transport", httpx.MockTransport(lambda r: httpx.Response(500, json={})))
+        _caps(profile_usd_per_day=0.004)
+        bad = await be.enqueue(spec, owner="p3")
+        await be._runs[bad.job_id].task
+        again = await be.enqueue(spec, owner="p3")
+        await be._runs[again.job_id].task
+
+    asyncio.run(go())

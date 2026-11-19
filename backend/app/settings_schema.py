@@ -388,6 +388,30 @@ _CORE: tuple[SettingDef, ...] = (
     _d("connections.image_access.server_profiles", "list", [], "Who else can use the image server",
        "The Owner can always use the image server in Image Studio. Nobody else can until you tick their name here. A Basic profile and the shared sign-in profile cannot be ticked.",
        "connections", section="Who may make pictures"),
+    # Daily spend caps for PAID picture providers (image_spend.py). 0 = no limit. The rig's own image
+    # server and a custom host are never counted. Reserved before a provider call, per profile and
+    # for the whole install; the day resets at this computer's midnight.
+    _d("connections.image_spend.profile_usd_per_day", "number", 5.0, "Picture spending per profile, per day",
+       "The most one profile may spend a day on MiniMax pictures (list price: about $0.0035 for image-01, "
+       "$0.02 for H3 Image, $0.04 for H3 Highspeed). A request that would pass it is refused before anything "
+       "is bought. 0 means no limit. Starts again at midnight.", "connections", section="Picture spending limits",
+       min=0, max=100000, unit="US dollars"),
+    _d("connections.image_spend.install_usd_per_day", "number", 10.0, "Picture spending for everyone, per day",
+       "The most the whole household may spend a day on MiniMax pictures. 0 means no limit.",
+       "connections", section="Picture spending limits", min=0, max=100000, unit="US dollars"),
+    _d("connections.image_spend.profile_buzz_per_day", "integer", 5000, "Civitai Buzz per profile, per day",
+       "The most Buzz one profile may use a day (Civitai's own price for each picture). 0 means no limit.",
+       "connections", section="Picture spending limits", min=0, max=10000000, unit="Buzz"),
+    _d("connections.image_spend.install_buzz_per_day", "integer", 10000, "Civitai Buzz for everyone, per day",
+       "The most Buzz the whole household may use a day. 0 means no limit.",
+       "connections", section="Picture spending limits", min=0, max=10000000, unit="Buzz"),
+    _d("connections.image_spend.profile_pictures_per_day", "integer", 150, "Pictures per profile, per day, for OpenAI and xAI",
+       "OpenAI and xAI Grok bill per picture and DisPatch does not know their price, so their pictures are counted "
+       "(each provider on its own). 0 means no limit.",
+       "connections", section="Picture spending limits", min=0, max=100000, unit="pictures"),
+    _d("connections.image_spend.install_pictures_per_day", "integer", 300, "Pictures for everyone, per day, for OpenAI and xAI",
+       "The most pictures the whole household may make a day with each of OpenAI and xAI Grok. 0 means no limit.",
+       "connections", section="Picture spending limits", min=0, max=100000, unit="pictures"),
     _d("connections.image_civitai_key", "secret", None, "Civitai API key",
        "The key Image Studio uses for Civitai. Create one on your Civitai account page. DisPatch keeps it "
        "but never shows it again.", "connections", section="Civitai", env="CIVITAI_API_KEY",
@@ -546,6 +570,7 @@ UI_SECTIONS: tuple[tuple[str, str], ...] = (
     ("connections.default", "connections#list"),
     ("connections.image_jobs", "connections#images"),
     ("connections.image_access", "connections#images"),
+    ("connections.image_spend", "connections#images"),
     ("connections.image_civitai_key", "connections#images"),
     ("connections.studioforge_", "plugins#tool:studioforge"),
     ("connections.", "connections"),

@@ -79,7 +79,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from app import accounts, image_access, image_guard, image_jobs, image_providers, model_catalog
+from app import accounts, image_access, image_guard, image_jobs, image_providers, image_spend, model_catalog
 from app.config import SETTINGS
 
 log = logging.getLogger("local-chat.app.imagestudio")
@@ -302,6 +302,61 @@ def _remember_last(body: "GenerateIn", prompt: str, provider: str, ratio: str, o
         logging.getLogger("local-chat.imagestudio").warning("could not save the last generation", exc_info=True)
 
 
+# ---- the form draft: what the Studio form held when the profile last left it ---------- #
+# One small file per profile (``draft-<profile id>.json``; ``draft.json`` without an owner),
+# read and written only for the session's own profile: no parameter can name another's.
+# Form values only: never a picture, the reference image or a data: URL. It used to live in the
+# browser's localStorage, where another profile on a shared device could read it.
+
+DRAFT_VERSION = 1
+DRAFT_MAX_BYTES = 32768
+
+
+def _draft_path(owner: str | None) -> Path:
+    if owner and _PID_RE.match(owner):
+        return _dir() / f"draft-{owner}.json"
+    return _dir() / "draft.json"
+
+
+def _read_draft(owner: str | None) -> dict | None:
+    try:
+        data = json.loads(_draft_path(owner).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("v") != DRAFT_VERSION:
+        return None
+    return data
+
+
+def _clean_draft(raw: "DraftIn") -> dict | None:
+    """The record to store, or None when it cannot fit the byte cap."""
+    def txt(v: str, n: int) -> str:
+        v = v[:n]
+        return "" if v.lstrip().lower().startswith("data:") else v
+
+    d = {"v": DRAFT_VERSION, "provider": txt(raw.provider, 64), "model": txt(raw.model, 200),
+         "prompt": txt(raw.prompt, PROMPT_MAX), "ratio": txt(raw.ratio, 16), "seed": txt(raw.seed, 12),
+         "n": raw.n, "optimizer": bool(raw.optimizer)}
+    return d if len(json.dumps(d, ensure_ascii=False).encode("utf-8")) <= DRAFT_MAX_BYTES else None
+
+
+def _write_draft(owner: str | None, record: dict) -> None:
+    with _PROMPTS_LOCK:
+        dest = _draft_path(owner)
+        tmp = dest.with_name(f"{dest.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            tmp.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, dest)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+
+def _drop_draft(owner: str | None) -> None:
+    with _PROMPTS_LOCK:
+        _draft_path(owner).unlink(missing_ok=True)
+
+
 def _remember_prompt(prompt: str, owner: str | None) -> None:
     """Put ``prompt`` first in the owner's recent list. Parallel jobs run this on worker threads:
     the read-modify-write holds a lock and each write has its own temp name, and a failure is
@@ -319,6 +374,20 @@ def _remember_prompt(prompt: str, owner: str | None) -> None:
                 tmp.unlink(missing_ok=True)
     except OSError:
         logging.getLogger("local-chat.imagestudio").warning("could not save the recent prompts", exc_info=True)
+
+
+async def _reserve_spend(pid: str, res, spec, n: int, currency: str | None, owner: str | None):
+    """Reserve the daily-cap share of ``n`` pictures from ``pid`` (None for a free provider)."""
+    buzz = None
+    if pid == "civitai":
+        # Civitai prices the picture itself: ask (free, short), else a flat per-picture figure.
+        try:
+            buzz = await asyncio.wait_for(
+                image_providers.estimate_civitai(res, spec, n=n, currency=currency), 10.0)
+        except Exception:                      # any failure: the fallback figure counts
+            buzz = None
+    cost = image_spend.cost_of(pid, res.model, n, buzz_total=buzz)
+    return await asyncio.to_thread(image_spend.reserve, owner, cost)
 
 
 def _today() -> str:
@@ -525,6 +594,18 @@ class GenerateIn(BaseModel):
     # The form's whole count when the page splits it into one job per picture (the image
     # server): recorded as the last generation's count. Never changes what this job makes.
     count: int | None = Field(default=None, ge=1, le=20)
+
+
+class DraftIn(BaseModel):
+    """The Studio form as the page keeps it. Every field is bounded; unknown fields are dropped."""
+    v: int = 1
+    provider: str = Field(default="", max_length=64)
+    model: str = Field(default="", max_length=200)
+    prompt: str = Field(default="", max_length=PROMPT_MAX + 400)
+    ratio: str = Field(default="1:1", max_length=16)
+    seed: str = Field(default="", max_length=12)
+    n: int = Field(default=1, ge=1, le=20)
+    optimizer: bool = False
 
 
 #: "Delete by age": how far back from NOW (the server's clock) each scope reaches.
@@ -944,6 +1025,9 @@ def build(ctx):
             "busy": bool(_inflight),
             "in_flight": _inflight.get(_owner_of(request) or "", 0), "max_in_flight": MAX_PER_PROFILE,
             "profile_key": _profile_key(_owner_of(request)),
+            # Today's use against the daily caps for paid providers (this profile's own; the
+            # notice is non-empty from 80% of a cap).
+            "spend": await asyncio.to_thread(image_spend.usage_for, _owner_of(request)),
             # "Clear from here down" is offered only to a profile that may delete.
             "can_clear": policy.of(request).can("manage_history"),
             # The empty state's "Set up image generation" opens Settings -> AI & Connections;
@@ -961,6 +1045,27 @@ def build(ctx):
         """The caller's own last generation settings (null when there is none). Keyed by the
         caller's profile: no parameter can name another profile's."""
         return {"last": await asyncio.to_thread(_read_last, _owner_of(request))}
+
+    @router.get("/draft", dependencies=op)
+    async def draft_get(request: Request):
+        """The caller's own saved form (null when there is none)."""
+        return {"draft": await asyncio.to_thread(_read_draft, _owner_of(request))}
+
+    @router.put("/draft", dependencies=op)
+    async def draft_put(body: DraftIn, request: Request):
+        record = _clean_draft(body)
+        if record is None:
+            raise HTTPException(413, "The form is too large to keep")
+        try:
+            await asyncio.to_thread(_write_draft, _owner_of(request), record)
+        except OSError:
+            raise HTTPException(503, "The form could not be saved just now") from None
+        return {"ok": True}
+
+    @router.delete("/draft", dependencies=op)
+    async def draft_delete(request: Request):
+        await asyncio.to_thread(_drop_draft, _owner_of(request))
+        return {"ok": True}
 
     @router.post("/models/refresh", dependencies=op)
     async def models_refresh(request: Request):
@@ -1009,12 +1114,19 @@ def build(ctx):
             raise HTTPException(422, "This provider does not take a reference image")
         reference = _reference_data_url(body.reference, request) if wants_ref else None
         owner = _owner_of(request)
+        spec = image_jobs.ImageSpec(prompt=prompt, ratio=ratio, backend="api")
         refusal = _take_slot(owner)
         if refusal:
             raise HTTPException(429, refusal)
-        await asyncio.to_thread(_remember_last, body, prompt, pid, ratio, owner)   # admitted
+        held = None
         try:
-            spec = image_jobs.ImageSpec(prompt=prompt, ratio=ratio, backend="api")
+            # The daily spend cap: reserved BEFORE any provider call (a refusal buys nothing and is
+            # not the "last generation"); given back below when the job fails.
+            try:
+                held = await _reserve_spend(pid, res, spec, n, currency, owner)
+            except image_spend.SpendRefused as e:
+                raise HTTPException(429, e.message) from None
+            await asyncio.to_thread(_remember_last, body, prompt, pid, ratio, owner)   # admitted
             try:
                 blobs = await image_providers.generate_batch(
                     res, spec, n=n,
@@ -1023,13 +1135,23 @@ def build(ctx):
                     reference=reference, currency=currency)
             except image_jobs.ImageJobError as e:
                 raise HTTPException(502, e.message) from None
+            if held is not None:
+                held.adjust(held.amount * len(blobs) / max(1, n))   # a short batch costs less
+                held.commit()
             rows = await asyncio.to_thread(
                 _store, blobs, prompt, pid, res.model, ratio,
                 body.seed if caps["seed"] else None,
                 bool(body.optimizer and caps["optimizer"]), wants_ref, owner, currency)
+        except BaseException:
+            if held is not None:
+                held.release()          # no-op once committed
+            raise
         finally:
             _free_slot(owner)
-        return {"images": [_public_row(r) for r in rows], "asked": n}
+        out = {"images": [_public_row(r) for r in rows], "asked": n}
+        if held is not None and held.notice:
+            out["spend_notice"] = held.notice
+        return out
 
     @router.post("/estimate", dependencies=op)
     async def estimate(body: GenerateIn, request: Request):

@@ -1685,22 +1685,6 @@
         "title": "DiscoverIn",
         "type": "object"
       },
-      "DraftIn": {
-        "additionalProperties": false,
-        "properties": {
-          "description": {
-            "maxLength": 1000,
-            "minLength": 1,
-            "title": "Description",
-            "type": "string"
-          }
-        },
-        "required": [
-          "description"
-        ],
-        "title": "DraftIn",
-        "type": "object"
-      },
       "FamilyIn": {
         "properties": {
           "people": {
@@ -4065,6 +4049,22 @@
         "title": "RestoreIn",
         "type": "object"
       },
+      "app__bot_builder_api__DraftIn": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "title": "DraftIn",
+        "type": "object"
+      },
       "app__maintenance_api__RestoreIn": {
         "additionalProperties": false,
         "properties": {
@@ -4097,6 +4097,60 @@
           }
         },
         "title": "RestoreIn",
+        "type": "object"
+      },
+      "dispatch_app_imagestudio__DraftIn": {
+        "description": "The Studio form as the page keeps it. Every field is bounded; unknown fields are dropped.",
+        "properties": {
+          "model": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Model",
+            "type": "string"
+          },
+          "n": {
+            "default": 1,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "N",
+            "type": "integer"
+          },
+          "optimizer": {
+            "default": false,
+            "title": "Optimizer",
+            "type": "boolean"
+          },
+          "prompt": {
+            "default": "",
+            "maxLength": 4400,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "provider": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Provider",
+            "type": "string"
+          },
+          "ratio": {
+            "default": "1:1",
+            "maxLength": 16,
+            "title": "Ratio",
+            "type": "string"
+          },
+          "seed": {
+            "default": "",
+            "maxLength": 12,
+            "title": "Seed",
+            "type": "string"
+          },
+          "v": {
+            "default": 1,
+            "title": "V",
+            "type": "integer"
+          }
+        },
+        "title": "DraftIn",
         "type": "object"
       }
     }
@@ -5474,6 +5528,71 @@
           }
         },
         "summary": "Clear"
+      }
+    },
+    "/api/apps/imagestudio/draft": {
+      "delete": {
+        "operationId": "draft_delete_api_apps_imagestudio_draft_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Draft Delete"
+      },
+      "get": {
+        "description": "The caller's own saved form (null when there is none).",
+        "operationId": "draft_get_api_apps_imagestudio_draft_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Draft Get"
+      },
+      "put": {
+        "operationId": "draft_put_api_apps_imagestudio_draft_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/dispatch_app_imagestudio__DraftIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft Put"
       }
     },
     "/api/apps/imagestudio/estimate": {
@@ -11968,6 +12087,22 @@
         "summary": "Image Job Callback"
       }
     },
+    "/api/image-spend": {
+      "get": {
+        "operationId": "image_spend_get_api_image_spend_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Image Spend Get"
+      }
+    },
     "/api/inject": {
       "post": {
         "description": "Push a message into the chat from OpenClaw (proactive / scheduled).\n\nUsed by OpenClaw cron/timers, e.g. a morning briefing into a daily thread.\nResolves the target thread, persists, and broadcasts to all clients.\n\nSession-exempt for MACHINES (see _is_inbound) — a browser tab is judged as\nthe person it is (the gate never hands a browser the machine bypass): this\nbox's own signed-out tab must not be able to write into any thread (or fire\n`:react:` markers) via the machine-to-machine bypass.",
@@ -13830,7 +13965,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DraftIn"
+                "$ref": "#/components/schemas/app__bot_builder_api__DraftIn"
               }
             }
           },
