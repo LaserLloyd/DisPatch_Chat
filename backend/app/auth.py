@@ -1076,16 +1076,33 @@ def _dead(s: _Session, cfg: SecurityConfig, now: float) -> bool:
     return (now - s.last_seen) > _session_timeout(s, cfg) + HOLD_SECONDS
 
 
-def _persist_row(s: _Session, **fields) -> None:
-    with contextlib.suppress(Exception):
-        accounts.update_session_row(_token_hash(s.token), **fields)
+def _db_retry(fn, *args, **kw) -> bool:
+    """4.4 review: session rows now decide what a restart brings back, so a write that ends
+    or locks a session must not be lost silently. Three tries; False (logged) if all fail."""
+    for i in range(3):
+        try:
+            fn(*args, **kw)
+            return True
+        except Exception as e:  # noqa: BLE001 - sqlite busy / locked / io
+            if i == 2:
+                log.error("session row write failed (%s): %s", getattr(fn, "__name__", "?"), e)
+            else:
+                time.sleep(0.05 * (i + 1))
+    return False
 
 
-def _hold_now(s: _Session, at: float | None = None) -> None:
-    """Lock (hold) a live session. Caller holds _lock."""
+def _persist_row(s: _Session, **fields) -> bool:
+    return _db_retry(accounts.update_session_row, _token_hash(s.token), **fields)
+
+
+def _hold_now(s: _Session, at: float | None = None) -> bool:
+    """Lock (hold) a live session. Caller holds _lock. False when the lock could not be
+    written: the caller then ENDS the session (a lock that a restart could undo is not a
+    lock)."""
     if s.locked_at is None:
         s.locked_at = time.time() if at is None else at
-        _persist_row(s, locked_at=_iso(s.locked_at))
+        return _persist_row(s, locked_at=_iso(s.locked_at))
+    return True
 
 
 def _session_valid(s: _Session) -> bool:
@@ -1224,8 +1241,7 @@ def get_held(token: str | None) -> _Session | None:
 
 def _drop(token: str) -> None:
     _sessions.pop(token, None)
-    with contextlib.suppress(Exception):
-        accounts.drop_session(_token_hash(token))
+    _db_retry(accounts.drop_session, _token_hash(token))
 
 
 def _resolve(token: str | None) -> _Session | None:
@@ -1263,7 +1279,9 @@ def _resolve(token: str | None) -> _Session | None:
                     revoke(token)
                     return None
                 # Idle: LOCK it (resumable with its credential), never just drop it.
-                _hold_now(s, at=time.time() - (idle - limit))
+                if not _hold_now(s, at=time.time() - (idle - limit)):
+                    revoke(token)
+                    return None
         return s
 
 
@@ -1290,8 +1308,12 @@ def _remint(token: str, cfg: SecurityConfig) -> _Session | None:
         if row is not None and row.get("epoch") is not None and prof is not None \
                 and int(row["epoch"]) != prof.epoch:
             return None
-        s = _Session(token=token, last_seen=time.monotonic(), persistent=True,
+        # The idle clock carries over from the row (4.4 review): a restart is not use.
+        seen = _wall(row.get("last_seen")) if row is not None else None
+        idle = max(0.0, now_wall - seen) if seen is not None else 0.0
+        s = _Session(token=token, last_seen=time.monotonic() - idle, persistent=True,
                      profile_id=pid, epoch=prof.epoch if prof else 0,
+                     resume_fails=int((row or {}).get("resume_fails") or 0),
                      keep_unlocked=(bool(row["keep_unlocked"]) if row is not None
                                     and row.get("epoch") is not None
                                     else _keep_default(prof, True)),
@@ -1312,7 +1334,8 @@ def _remint(token: str, cfg: SecurityConfig) -> _Session | None:
     idle = max(0.0, now_wall - seen)
     s = _Session(token=token, last_seen=time.monotonic() - idle, persistent=False,
                  profile_id=prof.id, device_id=row.get("device_id"), epoch=prof.epoch,
-                 locked_at=_wall(row.get("locked_at")), row_seen=now_wall)
+                 locked_at=_wall(row.get("locked_at")), row_seen=now_wall,
+                 resume_fails=int(row.get("resume_fails") or 0))
     if s.locked_at is None and idle > _session_timeout(s, cfg) + HOLD_SECONDS:
         return None
     _sessions[token] = s
@@ -1326,7 +1349,9 @@ def hold(token: str | None) -> bool:
         s = _resolve(token)
         if s is None:
             return False
-        _hold_now(s)
+        if not _hold_now(s):
+            revoke(token)          # could not record the lock: end the session instead
+            return False
         return True
 
 
@@ -1341,6 +1366,18 @@ def unhold(token: str | None) -> _Session | None:
         s.row_seen = time.time()
         _persist_row(s, locked_at=None, last_seen=_iso(s.row_seen))
         return s
+
+
+def note_resume_fail(token: str | None) -> None:
+    """One wrong resume of this cookie's hold: counted durably (a restart must not hand out
+    fresh guesses); at RESUME_MAX_FAILS the hold is dropped for good."""
+    with _lock:
+        s = get_held(token)
+        if s is None:
+            return
+        s.resume_fails += 1
+        if s.resume_fails >= RESUME_MAX_FAILS or not _persist_row(s, resume_fails=s.resume_fails):
+            revoke(token)
 
 
 def has_credential(profile: accounts.Profile | None) -> bool:
@@ -1453,8 +1490,7 @@ def revoke(token: str | None) -> None:
         if store.pop(_token_hash(token), None) is not None:
             with contextlib.suppress(OSError):
                 _save_trusted()
-        with contextlib.suppress(Exception):
-            accounts.drop_session(_token_hash(token))
+        _db_retry(accounts.drop_session, _token_hash(token))
 
 
 def revoke_profile(profile_id: str) -> int:
@@ -1477,8 +1513,9 @@ def revoke_profile(profile_id: str) -> int:
         if gone:
             with contextlib.suppress(OSError):
                 _save_trusted()
-        with contextlib.suppress(Exception):
-            accounts.drop_profile_sessions(profile_id)
+        _db_retry(accounts.drop_profile_sessions, profile_id)
+        # 4.4 review: also move the epoch, so a row the delete missed can never be re-minted.
+        _db_retry(accounts.bump_epoch, profile_id)
     return n
 
 

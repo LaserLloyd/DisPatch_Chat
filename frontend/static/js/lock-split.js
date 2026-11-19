@@ -20,7 +20,7 @@ import { avatarSpec, markNode } from './profiles.js?v=6';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'abc', '0', 'back'];
 /** One cap for every profile kind, so the field itself says nothing (a password fits). */
-export const SECRET_MAX = 128;
+export const SECRET_MAX = 256;
 
 function mainAvatar(profile) {
   const spec = avatarSpec(profile, { noImages: nimEnabled() });

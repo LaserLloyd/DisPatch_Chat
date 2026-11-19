@@ -168,6 +168,7 @@ _ADDED_COLUMNS = (
     "ALTER TABLE sessions ADD COLUMN epoch INTEGER",
     "ALTER TABLE sessions ADD COLUMN locked_at TEXT",
     "ALTER TABLE sessions ADD COLUMN keep_unlocked INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE sessions ADD COLUMN resume_fails INTEGER NOT NULL DEFAULT 0",
 )
 
 #: Tables this module owns, in drop-safe (children first) order.
@@ -761,7 +762,7 @@ def get_session_row(token_hash: str) -> dict | None:
     return dict(row) if row else None
 
 
-_SESSION_ROW_FIELDS = frozenset({"last_seen", "locked_at", "keep_unlocked", "persistent"})
+_SESSION_ROW_FIELDS = frozenset({"last_seen", "locked_at", "keep_unlocked", "persistent", "resume_fails"})
 
 
 def update_session_row(token_hash: str, **fields) -> None:
@@ -773,6 +774,15 @@ def update_session_row(token_hash: str, **fields) -> None:
     with _lock, connect() as con:
         con.execute(f"UPDATE sessions SET {', '.join(c + ' = ?' for c in cols)} WHERE token_hash = ?",
                     (*vals, token_hash))
+
+
+def bump_epoch(profile_id: str) -> None:
+    """End every session of a profile for good (4.4: "sign out everywhere"): rows written
+    under the old epoch can never be re-minted after a restart."""
+    with _lock, connect() as con:
+        con.execute("UPDATE profiles SET epoch = epoch + 1 WHERE id = ?", (profile_id,))
+        _bump_rev(con)
+    invalidate()
 
 
 def drop_session(token_hash: str) -> None:

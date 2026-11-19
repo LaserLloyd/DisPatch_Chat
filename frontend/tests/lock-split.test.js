@@ -45,7 +45,7 @@ test('the bottom half names nobody and the field is neutral',
     assert.doesNotMatch(html, /Family|p-main|<img/);
     const f = host.querySelector('#lks-field');
     assert.equal(f.type, 'password');
-    assert.equal(f.getAttribute('maxlength'), '128');
+    assert.equal(f.getAttribute('maxlength'), '256');
     assert.equal(f.getAttribute('autocomplete'), 'one-time-code');
     assert.equal(f.getAttribute('placeholder'), null);
     // The top half is the only identity: main's name.

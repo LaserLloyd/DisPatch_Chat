@@ -9398,11 +9398,19 @@ async function authPost(path, body) {
  *  layout key and the last-used character. Tool layout state and the theme are this
  *  device's, not a profile's. */
 function forgetHeldTraces() {
+  // The live regions and the toast keep their last text ("Signed in as <name>."): screen
+  // readers re-read a log region, and a hidden toast is still in the DOM.
+  for (const id of ['sr-live', 'sr-status', 'sr-alert']) if (dom[id]) dom[id].textContent = '';
+  const toastEl = document.getElementById('toast');
+  if (toastEl) { toastEl.textContent = ''; toastEl.classList.add('hidden'); }
   try {
     const drop = [];
     for (let i = 0; i < localStorage.length; i += 1) {
       const k = localStorage.key(i);
-      if (k && (k.startsWith('dispatch-appwin:') || k === 'dispatch-last-character')) drop.push(k);
+      // Image Studio's per-profile draft keys are a hash of the (public) profile id: they
+      // would name the held profile to anyone who hashes the sign-in tiles' ids.
+      if (k && (k.startsWith('dispatch-appwin:') || k === 'dispatch-last-character'
+        || k.startsWith('dispatch-imagestudio-draft:') || k.startsWith('dispatch-imagestudio-last-dismissed:'))) drop.push(k);
     }
     for (const k of drop) localStorage.removeItem(k);
   } catch { /* storage off */ }
@@ -9516,7 +9524,7 @@ function keepUnlockedRow() {
     let r = await authPost('/api/auth/keep-unlocked', { on: true });
     if (r.ok || r.status !== 401) { await done(r); return; }
     // Not a remembered device yet and not right after a sign-in: your PIN or password first.
-    const field = el('input', { type: 'password', class: 'keep-unlocked-secret', autocomplete: 'current-password', 'aria-label': t('lockr.keep_secret') });
+    const field = el('input', { type: 'password', class: 'keep-unlocked-secret', autocomplete: 'off', maxlength: '256', 'aria-label': t('lockr.keep_secret') });
     const ok = el('button', { type: 'button', class: 'btn-primary', text: t('lockr.keep_confirm') });
     const send = async () => {
       const v = field.value; field.value = '';

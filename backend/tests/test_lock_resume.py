@@ -353,3 +353,89 @@ def test_a_reminted_session_is_never_fresh(world, owner):
     world.login(c, profile_id=mia["id"], pin="1357")
     _restart()
     assert c.post("/api/auth/keep-unlocked", json={"on": True}).status_code == 401
+
+
+# ----------------------------------------------------------------- 4.4 security review
+
+
+def test_a_remembered_device_turned_off_needs_the_credential_to_turn_it_back_on(world, owner):
+    auth.set_remember_days(30)
+    c = world.client()
+    oid = accounts.get_owner().id
+    c.post("/api/auth/login", json={"profile_id": oid, "pin": OWNER_PIN, "remember": True})
+    assert c.post("/api/auth/keep-unlocked", json={"on": False}).json()["keep_unlocked"] is False
+    mine = next(s for s in auth._sessions.values() if s.profile_id == oid and s.persistent)
+    mine.issued -= auth.FRESH_SIGNIN_SECONDS + 1          # someone picks the phone up later
+    assert c.post("/api/auth/keep-unlocked", json={"on": True}).status_code == 401
+    assert _st(c)["keep_unlocked"] is False
+    r = c.post("/api/auth/keep-unlocked", json={"on": True, "secret": OWNER_PIN})
+    assert r.status_code == 200 and r.json()["keep_unlocked"] is True
+
+
+def test_asking_without_a_secret_is_not_a_failed_attempt(world, owner):
+    auth.set_remember_days(30)
+    mia = _mia(world, owner)
+    c = world.client()
+    world.login(c, profile_id=mia["id"], pin="1357")
+    _sess(mia["id"]).issued -= auth.FRESH_SIGNIN_SECONDS + 1
+    for _ in range(8):
+        assert c.post("/api/auth/keep-unlocked", json={"on": True}).status_code == 401
+    assert not auth._buckets                      # nothing charged anywhere
+    assert world.login(world.client(), profile_id=mia["id"], pin="1357").status_code == 200
+
+
+def test_wrong_resumes_are_counted_across_a_restart(world, owner):
+    mia = _mia(world, owner)
+    c = world.client()
+    world.login(c, profile_id=mia["id"], pin="1357")
+    c.post("/api/auth/lock")
+    for _ in range(auth.RESUME_MAX_FAILS - 1):
+        c.post("/api/auth/resume", json={"secret": "0000"})
+    _restart()                                   # buckets and memory gone
+    assert _st(c)["resumable"] is True
+    c.post("/api/auth/resume", json={"secret": "0000"})
+    auth._buckets.clear()
+    assert _st(c)["resumable"] is False
+    assert c.post("/api/auth/resume", json={"secret": "1357"}).status_code == 401
+
+
+def test_a_lock_that_cannot_be_written_ends_the_session(world, owner, monkeypatch):
+    mia = _mia(world, owner)
+    c = world.client()
+    world.login(c, profile_id=mia["id"], pin="1357")
+
+    def boom(*a, **k):
+        raise RuntimeError("database is locked")
+    with monkeypatch.context() as m:
+        m.setattr(accounts, "update_session_row", boom)
+        c.post("/api/auth/lock")
+    assert not any(s.profile_id == mia["id"] for s in auth._sessions.values())
+    _restart()
+    st = _st(c)
+    assert st["signed_in"] is False and st["resumable"] is False
+
+
+def test_sign_out_everywhere_holds_even_if_the_row_delete_is_lost(world, owner, monkeypatch):
+    mia = _mia(world, owner)
+    c = world.client()
+    world.login(c, profile_id=mia["id"], pin="1357")
+    with monkeypatch.context() as m:
+        m.setattr(accounts, "drop_profile_sessions", lambda pid: 0)
+        auth.revoke_profile(mia["id"])
+    assert accounts.list_sessions(mia["id"])     # the row is still there ...
+    _restart()
+    assert _st(c)["signed_in"] is False           # ... and still never comes back
+
+
+def test_a_restart_keeps_the_idle_clock_of_a_remembered_device_that_locks(world, owner):
+    auth.set_remember_days(30)
+    assert settings_store.set_many({"people.session_timeout_user": 3600}).ok
+    mia = _mia(world, owner)
+    c = world.client()
+    c.post("/api/auth/login", json={"profile_id": mia["id"], "pin": "1357", "remember": True})
+    assert c.post("/api/auth/keep-unlocked", json={"on": False}).status_code == 200
+    th = auth._token_hash(_sess(mia["id"]).token)
+    accounts.update_session_row(th, last_seen=auth._iso(time.time() - 4000))
+    _restart()
+    st = _st(c)
+    assert st["signed_in"] is False and st["resumable"] is True

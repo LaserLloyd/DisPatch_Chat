@@ -1002,9 +1002,9 @@ function makePane(rec) {
     p.frame.addEventListener('load', () => onPaneLoad(p));
     // 4.4 (docs/design/lock-resume.md): use of a tool window is use of the app. The pointer
     // entering ANY tool's frame (a url tool, someone else's site, included) counts; what
-    // happens inside it is counted below per kind (app: its own events, static: its
-    // `dispatch:activity` message, url: focus moving into it).
-    p.frame.addEventListener('pointerenter', () => frameActivity());
+    // happens inside it is counted below (an app: its real input events; static and url
+    // frames: focus moving into them).
+    p.frame.addEventListener('pointerenter', (ev) => frameActivity(ev));
   }
   panes.set(rec.id, p);
   const tool = findTool(rec.id);
@@ -1743,14 +1743,16 @@ function onWindowMessage(ev) {
 // never reach it: ten minutes of typing in Image Studio looked idle and the device locked
 // under the person's fingers. Every kind of frame now reports use, throttled by the shell's
 // bumpIdle (deps.activity): nothing else is ever done with it.
-//   app     same origin, no sandbox: the shell listens on the frame's own window.
-//   static  sandboxed (opaque origin): it may post {type:'dispatch:activity'}; accepted only
-//           from the frame of a live window of a static tool, origin 'null'.
-//   url     someone else's site: only focus moving into its frame (and the pointer entering
-//           it, above). Its messages are never trusted to keep a session unlocked.
+//   app     same origin, no sandbox: the shell listens on the frame's own window and counts
+//           only TRUSTED events (a real key or touch; a script's dispatchEvent is not use).
+//   static, url   sandboxed / someone else's: only focus moving into the frame and the
+//           pointer entering it, seen from the shell. Their messages are never trusted to
+//           keep a session unlocked (4.4 review: a setInterval posting "activity" would
+//           hold off the idle lock forever, Basic's included).
 const ACTIVITY_EVENTS = ['keydown', 'pointerdown', 'wheel', 'input', 'touchstart', 'scroll'];
 
-function frameActivity() {
+function frameActivity(ev) {
+  if (ev && ev.isTrusted === false) return;
   if (deps && typeof deps.activity === 'function') deps.activity();
 }
 
@@ -1764,15 +1766,6 @@ function watchAppFrame(p) {
     w.__dispatchActivity = true;
     for (const ev of ACTIVITY_EVENTS) w.addEventListener(ev, frameActivity, { passive: true, capture: true });
   } catch { /* a frame that went away mid-load */ }
-}
-
-function onActivityMessage(ev) {
-  const msg = ev.data;
-  if (!msg || typeof msg !== 'object' || msg.type !== 'dispatch:activity') return;
-  const p = paneBySource(ev.source);
-  const tool = p ? findTool(p.id) : null;
-  if (!p || !tool || tool.kind !== 'static' || ev.origin !== 'null') return;
-  frameActivity();
 }
 
 /** Focus moved from the shell into a tool's frame (the shell's window blurs and the
@@ -2312,7 +2305,6 @@ export function wireTools(d) {
   // Every framed tool: its saved layout, on request and once per load.
   window.addEventListener('message', onToolStateMessage);
   // 4.4: use inside a tool window keeps the idle lock away (see watchAppFrame).
-  window.addEventListener('message', onActivityMessage);
   window.addEventListener('blur', onShellBlur);
   document.addEventListener('ui-theme-change', () => { for (const p of panes.values()) syncPane(p); });
   // The Tools popup: its keys, and a re-layout when the viewport crosses the

@@ -64,9 +64,12 @@ session is the only resumable one (one session cookie per browser).
    re-arms. A manual Lock is never refused; a lock request that fails falls through to
    the local lock (fail closed).
 6. Frame activity as built: `tools.js` attaches capture listeners to same-origin app
-   frames directly (no `app-sdk.js` change), accepts `dispatch:activity` only from a live
-   static-tool frame (origin `null`, source checked), and counts focus moving into, or the
-   pointer entering, any tool frame.
+   frames directly (no `app-sdk.js` change) and counts only trusted events (a script's
+   `dispatchEvent` is not use); every tool frame also counts focus moving into it and the
+   pointer entering it. Static and url frames are not trusted to report their own
+   activity (the security review: a timer posting "activity" would hold off the idle
+   lock forever, Basic's included), so ten minutes of typing in a STATIC tool without
+   touching the pointer still idles (known limit; the built-in tools are apps).
 
 ## 4. Part 2: the lock screen
 
@@ -148,11 +151,22 @@ earns no remembered-device throttle privilege and is never `touch`ed.
 * `POST /api/auth/resume` `{secret}`: public, throttled exactly like `/api/auth/login`.
 * `POST /api/auth/keep-unlocked` `{on, secret?}`: the caller's own signed-in session
   (`use_chat`); refused for Basic. Turning it ON on a session that is not yet remembered
-  needs the profile's credential (throttled like a sign-in) unless the session was
-  signed in within the last 180 s (the one-time offer card right after a sign-in), and
+  needs the profile's credential (throttled like a sign-in; asking with no secret is not
+  a failed attempt) whenever it is off and the session was not signed in within the
+  last 180 s, remembered device or not (the one-time offer card right after a sign-in), and
   never for a re-minted session (a restart is not a fresh sign-in).
 
-## 6. Keep-unlocked and the idle timeouts
+## 6. Durability (security review)
+
+Session rows now decide what a restart brings back, so every write that ends or locks a
+session is retried; a lock that cannot be written ENDS the session instead. "Sign out
+everywhere" also moves the profile's epoch, so a row a failed delete left behind can
+never be re-minted. Wrong resumes are counted in the row (a restart gives no fresh
+guesses). A remembered device that is not keep-unlocked keeps its idle clock across a
+restart. There is no separate "sign out and forget this device" button: Lock holds for
+12 h; an Admin's "Sign out everywhere" (People) ends it at once.
+
+## 7. Keep-unlocked and the idle timeouts
 
 The idle lock window of a session is the per-role timeout (`session_timeout_*`, or
 `lock_timeout_seconds` for the Owner). "Keep this device unlocked" removes the idle lock

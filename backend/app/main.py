@@ -8613,15 +8613,17 @@ async def auth_resume(request: Request):
         prof = accounts.get_profile(held.profile_id) if held.profile_id else accounts.get_owner()
     offer = (held is not None and prof is not None and auth.has_credential(prof)
              and held.resume_fails < auth.RESUME_MAX_FAILS)
-    ok = people_api.guarded(request, "resume", auth.RESUME_SUBJECT,
-                            lambda: auth.verify_any(prof if offer else None, secret) and offer)
+
+    def _check() -> bool:
+        good = auth.verify_any(prof if offer else None, secret) and offer
+        if not good and held is not None:
+            auth.note_resume_fail(tok)      # counted before any 429 the throttle may answer
+        return good
+
+    ok = people_api.guarded(request, "resume", auth.RESUME_SUBJECT, _check)
     if isinstance(ok, JSONResponse):
         return ok
     if not ok:
-        if held is not None:
-            held.resume_fails += 1
-            if held.resume_fails >= auth.RESUME_MAX_FAILS:
-                auth.revoke(tok)
         accounts.log_activity("login_failed", subject=people_api._client_keys(request)[1],
                               detail="resume", category="audit")
         return JSONResponse({"detail": "Incorrect PIN or password",
@@ -8665,7 +8667,15 @@ async def auth_keep_unlocked(request: Request):
                              "error": errors.envelope("permission_denied",
                                                       message="This profile cannot keep a device unlocked.")},
                             status_code=403)
-    if on and not sess.persistent and auth.has_credential(prof) and not auth.fresh_signin(sess):
+    # 4.4 review: turning it ON needs the credential whenever this is not the moment right
+    # after a sign-in, remembered device or not (an unlocked phone found on a table must not
+    # be switchable to "never lock"). Asking without a secret is not a failed attempt.
+    if on and not sess.keep_unlocked and auth.has_credential(prof) and not auth.fresh_signin(sess):
+        if not secret:
+            return JSONResponse({"detail": "Enter your PIN or password.",
+                                 "error": errors.envelope("incorrect_credential",
+                                                          message="Enter your PIN or password.")},
+                                status_code=401)
         ok = people_api.guarded(request, "unlock", prof.id if prof else "owner",
                                 lambda: prof is not None and auth.verify_any(prof, secret))
         if isinstance(ok, JSONResponse):
