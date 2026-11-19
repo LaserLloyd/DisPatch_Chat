@@ -2,7 +2,8 @@
 // Only registers on secure contexts (https / localhost); over plain LAN http
 // the app still works fully — this just enables PWA install + cold-start
 // resilience where the context allows it.
-const CACHE = 'local-chat-v228';  // v228: lock and resume (docs/design/lock-resume.md) - a lock HOLDS the session and a browser that holds one gets the split lock screen (main profile on top, an anonymous Resume previous session pad below; new js/lock-split.js joins SHELL), Settings -> This device gains Keep this device unlocked (+ a one-time offer after a sign-in), a phone waking offline keeps its cover and retries instead of signing out, use inside a tool window (app frames, static tools' dispatch:activity, focus into a url frame) re-arms the idle lock (tools.js?v=28->29, privacy.js?v=23->24 wipes the offer flag and its importer pins.js?v=29->30, their importer main.js?v=193->194), app.css?v=129->130, index.html, locales lockr.* + lock.remember.
+const CACHE = 'local-chat-v229';  // v229: first-load round (docs/design/first-load.md) - the worker registers after boot instead of during parsing, precaches each versioned file at the exact ?v= URL the page used (an HTTP-cache hit, not a second download; generated VERSIONS table, frontend/scripts/startup-graph.mjs) and unversioned files with no-cache (a 304 when unchanged) instead of cache: 'reload', answers a file at the version it precached from its own cache with no network, and never writes another version under that path; the reaction pack is no longer fetched at every start (main.js?v=194->195, reactions.js?v=32->33), index.html (deferred registration, CSP hash).
+// v228: lock and resume (docs/design/lock-resume.md) - a lock HOLDS the session and a browser that holds one gets the split lock screen (main profile on top, an anonymous Resume previous session pad below; new js/lock-split.js joins SHELL), Settings -> This device gains Keep this device unlocked (+ a one-time offer after a sign-in), a phone waking offline keeps its cover and retries instead of signing out, use inside a tool window (app frames, static tools' dispatch:activity, focus into a url frame) re-arms the idle lock (tools.js?v=28->29, privacy.js?v=23->24 wipes the offer flag and its importer pins.js?v=29->30, their importer main.js?v=193->194), app.css?v=129->130, index.html, locales lockr.* + lock.remember.
 // v227: Image Studio keeps its form on the server per profile (no draft stays in the browser after a switch, lock or sign-out) and paid picture providers have a daily spend cap with an 80% notice and today's use in Settings (studio.js?v=31->32, studio-logic.js?v=15->16, privacy.js?v=22->23 and importer pins.js?v=28->29, integrations.js?v=9->10 and importers llm.js?v=19->20, plugins.js?v=27->28, main.js?v=192->193, index.html, locales spend.*, integrations.spend_*). v226: tool windows fix round - the built-in panes (Harness, StudioForge, Mail, Clients) and every add-on pane live in tool windows too (one per add-on, its tools as tabs); pills keep first-open order, scroll sideways on a phone and close only by an upward drag or the X; a phone sheet sits on a solid tray strip with the tab bar hidden; floats, full windows and sheets stop above the tray wherever it is; a dock without room for the thread list gets a Show chat list button; a phone chat header gets a Tools button; finished-while-minimised tints the pill and survives a reload; unloaded pills say Asleep and typed text is spared (5 live pages on a desktop); a requested size wins up to a margin; below 1600 px a tool that named no layout docks (appwin-state.js?v=1->2 and its importer appwin.js?v=1->2 and its importer tools.js?v=27->28 and its importer main.js?v=191->192, app.css?v=128->129, index.html, locales win.asleep*).
 // v225: tool windows - every app / static / url tool opens in a window that floats, docks left or right beside the chat (draggable divider), fills the screen or (phone) is a sheet; Back to chat turns it into a pill in a tray above the composer and keeps its page alive (new js/appwin.js + js/appwin-state.js join SHELL, js/toolsplit.js leaves it; tools.js?v=26->27, app-sdk.js?v=7->8 (the win SDK) and importers ext-sdk.js?v=26->27, main.js, Image Studio studio.js?v=30->31, Job Board board.js / thread.js; privacy.js?v=21->22 (dispatch-appwin: keys wiped) and importers pins.js?v=27->28, main.js?v=190->191, app.css?v=127->128, index.html, locales win.*).
 // v224: Image Studio keeps its form per profile on this device (Reset, pictures still being made, Reload last generation from the server record) and the tool pane can sit beside the chat (split view, draggable divider, phone quick switch); new js/toolsplit.js joins SHELL (studio.js?v=26->30, studio-logic.js?v=13->15, studio.css?v=15->17, tools.js?v=23->26, privacy.js?v=20->21 and importers pins.js?v=26->27, main.js?v=187->190, app.css?v=125->127, index.html, locales).
@@ -451,13 +452,124 @@ const SHELL = [
   '/static/vendor/purify.min.js', '/static/vendor/github-dark.min.css',
 ];
 
+// The ?v= each versioned shell file is loaded at. GENERATED by
+// frontend/scripts/startup-graph.mjs from index.html and js/*.js (re-run it after any
+// ?v= bump; tests/startup-graph.test.js fails until you do).
+// startup-versions:begin
+const VERSIONS = {
+  '/static/app.css': '130',
+  '/static/apple-touch-icon.png': '3',
+  '/static/dashboard.css': '6',
+  '/static/favicon.svg': '3',
+  '/static/js/about.js': '27',
+  '/static/js/account-reset.js': '6',
+  '/static/js/advisor.js': '5',
+  '/static/js/agents.js': '6',
+  '/static/js/api.js': '37',
+  '/static/js/app-sdk.js': '8',
+  '/static/js/approval_card.js': '4',
+  '/static/js/appwin-state.js': '2',
+  '/static/js/appwin.js': '2',
+  '/static/js/backup.js': '6',
+  '/static/js/bot-editor.js': '6',
+  '/static/js/bot-ids.js': '1',
+  '/static/js/bot-kits.js': '10',
+  '/static/js/bots-edit.js': '8',
+  '/static/js/characters-page.js': '11',
+  '/static/js/chatdrop.js': '4',
+  '/static/js/checklist.js': '16',
+  '/static/js/clients.js': '16',
+  '/static/js/connections.js': '8',
+  '/static/js/dashboard.js': '13',
+  '/static/js/ext-sdk.js': '27',
+  '/static/js/extensions.js': '5',
+  '/static/js/give-to.js': '3',
+  '/static/js/host-notice.js': '7',
+  '/static/js/i18n.js': '5',
+  '/static/js/imagejobs.js': '8',
+  '/static/js/integrations.js': '10',
+  '/static/js/lightbox-nav.js': '6',
+  '/static/js/links.js': '10',
+  '/static/js/llm.js': '20',
+  '/static/js/lock-split.js': '1',
+  '/static/js/main.js': '195',
+  '/static/js/markdown.js': '37',
+  '/static/js/media-expired.js': '1',
+  '/static/js/menubots.js': '4',
+  '/static/js/modelchip.js': '2',
+  '/static/js/my-bots.js': '11',
+  '/static/js/newchat.js': '4',
+  '/static/js/nim.js': '8',
+  '/static/js/notice.js': '5',
+  '/static/js/oidc-settings.js': '2',
+  '/static/js/pack-dialog.js': '1',
+  '/static/js/people-perms.js': '9',
+  '/static/js/people.js': '19',
+  '/static/js/pins.js': '30',
+  '/static/js/plugins.js': '28',
+  '/static/js/privacy.js': '24',
+  '/static/js/profile-picture.js': '7',
+  '/static/js/profiles.js': '6',
+  '/static/js/push.js': '4',
+  '/static/js/quick-actions.js': '7',
+  '/static/js/railmenu.js': '5',
+  '/static/js/reactions.js': '33',
+  '/static/js/settings-nav.js': '17',
+  '/static/js/settings-resize.js': '2',
+  '/static/js/settings_schema.js': '11',
+  '/static/js/signin.js': '9',
+  '/static/js/storage-card.js': '2',
+  '/static/js/store.js': '3',
+  '/static/js/task_card.js': '4',
+  '/static/js/tasks.js': '6',
+  '/static/js/theme.js': '24',
+  '/static/js/thread-pager.js': '2',
+  '/static/js/thread-sections.js': '2',
+  '/static/js/tools.js': '29',
+  '/static/js/util.js': '23',
+  '/static/js/viewer.js': '11',
+  '/static/js/voice-absent.js': '23',
+  '/static/js/voice-heard.js': '1',
+  '/static/js/w5-api.js': '4',
+  '/static/js/wizard.js': '9',
+  '/static/js/ws.js': '10',
+  '/static/profiles.css': '12',
+  '/static/tasks.css': '4',
+  '/static/theme.css': '8',
+  '/static/w5.css': '4',
+};
+// startup-versions:end
+
+// Where the install step fetches a SHELL entry from, and how.
+//
+// A versioned file is fetched at the EXACT URL the page uses (`main.js?v=194`), with the
+// default cache mode: those URLs are immutable (the server says so, and the ?v= moves
+// whenever the bytes do), so the copy the page itself just downloaded is reused from the
+// HTTP cache instead of crossing the network a second time. That second download used to
+// be most of the bytes of a first visit and of the first open after every deploy, on the
+// same slow link the page was booting over.
+//
+// An unversioned file (locales, the theme folder, icons, '/') is fetched with
+// cache: 'no-cache': always revalidated with the server, never trusted from the HTTP
+// cache (a phone that heuristically cached the old pufferfish icon-192.png under its
+// bare URL put it straight back into every new CACHE, v204), but a file that did not
+// change costs a 304, not its whole body.
+//
+// Either way the entry is STORED under its bare pathname, the key the fetch handler
+// reads and writes.
+function precacheRequest(path) {
+  const v = VERSIONS[path];
+  return v ? new Request(`${path}?v=${v}`) : new Request(path, { cache: 'no-cache' });
+}
+
 self.addEventListener('install', (e) => {
-  // cache: 'reload' — the precache must come from the server, never from the
-  // browser's HTTP cache: SHELL lists bare paths, and a phone that cached the
-  // old pufferfish icon-192.png under its bare URL put it straight back into
-  // every new CACHE on install (v204).
+  // All or nothing, like cache.addAll(): one missing file fails the install and the
+  // previous worker (with its complete cache) stays in charge.
   e.waitUntil(caches.open(CACHE)
-    .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
+    .then((c) => Promise.all(SHELL.map((path) => fetch(precacheRequest(path)).then((res) => {
+      if (!res.ok) throw new TypeError(`precache ${path}: HTTP ${res.status}`);
+      return c.put(path, res);
+    }))))
     .then(() => self.skipWaiting()));
 });
 
@@ -495,10 +607,25 @@ self.addEventListener('fetch', (e) => {
   // humanized keys. A navigation request cannot be re-made with a cache mode.
   const req = (!url.search && e.request.mode !== 'navigate')
     ? new Request(e.request, { cache: 'no-cache' }) : e.request;
+  // A versioned file at the version THIS worker precached (VERSIONS) is answered from
+  // this worker's own cache, without touching the network: the ?v= moves whenever the
+  // bytes do, so the copy is the file. This is what makes a reopen cost no requests for
+  // the 70-odd startup modules. Another version (a page newer or older than this worker,
+  // during an update) goes to the network as before, and is NOT written into this cache,
+  // so the entry under the bare path always holds exactly VERSIONS[path] and an older
+  // tab never gets a newer module under its old URL.
+  const v = url.searchParams.get('v');
+  const pinned = v !== null && e.request.mode !== 'navigate' && VERSIONS[p] !== undefined;
+  if (pinned && VERSIONS[p] === v) {
+    e.respondWith(caches.open(CACHE)
+      .then((c) => c.match(p))
+      .then((hit) => hit || fetch(req)));
+    return;
+  }
   e.respondWith(
     fetch(req)
       .then((res) => {
-        if (res.ok) {
+        if (res.ok && !pinned) {
           const copy = res.clone();
           // Key by pathname only (drop ?v=N): the install-time precache
           // (bare paths, see SHELL) and runtime fetches (versioned URLs) must

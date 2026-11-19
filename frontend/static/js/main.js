@@ -21,7 +21,7 @@ import {
   mountManager as mountReactionManager, closeManager as unmountReactionManager,
   managerOpen as reactionManagerOpen, repaintManager as repaintReactionManager,
   reactionMessageEl,
-} from './reactions.js?v=32';
+} from './reactions.js?v=33';
 import { mountDashboard, unmountDashboard, repaintDashboard } from './dashboard.js?v=13';
 import { initClients, showClientsTab, clientsTabNav, stopClientsPolling } from './clients.js?v=16';
 import {
@@ -8420,14 +8420,16 @@ function getSocket() {
 // landing: its profile button switches instead); the attach "＋" shows for every profile.
 function applyAuthChrome() {
   tasksUi.refreshAccess();     // who may assign tasks / see the Tasks button (debounced inside)
-  // The reaction pack is per profile, so re-fetch it (and drop any overlay mid-flight)
-  // whenever a different profile takes over.
+  // The reaction pack is per profile, so drop it (and any overlay mid-flight) whenever a
+  // different profile takes over. It is NOT re-fetched here: the full pack is ~1 MB on a
+  // big pool, nothing on the first screen shows it, and it used to cost every app start
+  // that download. The manager, the first reaction event and a test fire load it
+  // (reactions.js loadReactions).
   if (applyAuthChrome._lastWho !== profileKey()) {
     applyAuthChrome._lastWho = profileKey();
     // Tool windows are per profile on this device (js/appwin.js).
     setToolProfile(state.auth.profile ? state.auth.profile.id : null);
     resetReactions();
-    loadReactions(true);
   }
   paintLockButton();         // also Settings -> Account's button (4.3 Fable: same name, same rule)
   dom['attach-btn'].classList.remove('hidden');

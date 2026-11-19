@@ -59,7 +59,7 @@
          viewer, and the server refuses its routes to everyone else. -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
-    script-src 'self' 'sha256-fOcZiNX5zINBrez16W209dN/kABWeXQFS78UGnrDO4U=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-smnZXf5LCCUarhFqEYhDX9TJKEB5PkNgBpsrJo4mgW8=' 'sha256-7p2Z9i8YCoczeqRLKfpXnpWpYZ2VNrK/yQNeWQcc1nE=';
+    script-src 'self' 'sha256-fOcZiNX5zINBrez16W209dN/kABWeXQFS78UGnrDO4U=' 'sha256-+2qAWS0NIB8FRDOpzpLJ1Pyqn7NMflX2myWbpo/AXtI=' 'sha256-smnZXf5LCCUarhFqEYhDX9TJKEB5PkNgBpsrJo4mgW8=' 'sha256-VAUuBszPljObHfD22v+D5EbKZ+vMiGgF9gykTACmWKs=';
     style-src 'self';
     img-src 'self' data: blob:;
     media-src 'self' blob:;
@@ -1230,6 +1230,20 @@
       // then is a pointless flash. Only reload on a genuine worker SWAP (an update
       // to an already-controlled tab), not the initial claim.
       const hadController = !!navigator.serviceWorker.controller;
+      // Register only once the app is on screen. Installing a worker precaches the
+      // whole shell; started during parsing, that download ran on the same slow link
+      // the page was booting over and roughly doubled the bytes of a first visit.
+      // After boot, the worker's versioned fetches are HTTP-cache hits (see sw.js
+      // precacheRequest). Boot's last line sets window.__bootDone; 20 s is the
+      // ceiling for a boot that stalls (the sign-in screen, a dead network).
+      const whenBooted = (fn) => {
+        const t0 = Date.now();
+        (function wait() {
+          if (window.__bootDone || Date.now() - t0 > 20000) fn();
+          else setTimeout(wait, 250);
+        })();
+      };
+      whenBooted(() => {
       // scope '/' — the worker file lives under /static/ but must control the
       // document at /. Paired with the Service-Worker-Allowed: / response header
       // the backend sends for /static/sw.js. Without both, the SW registered but
@@ -1269,6 +1283,7 @@
         // Proactively check for an update on load so a stale tab self-heals.
         try { reg.update(); } catch {}
       }).catch(() => {});
+      });
     }
   </script>
   <!-- Only what the first paint genuinely needs. `defer` keeps these ordered
@@ -1279,6 +1294,6 @@
        open a code block. -->
   <script defer src="/static/vendor/marked.min.js"></script>
   <script defer src="/static/vendor/purify.min.js"></script>
-  <script type="module" src="/static/js/main.js?v=194"></script>
+  <script type="module" src="/static/js/main.js?v=195"></script>
 </body>
 </html>

@@ -757,6 +757,16 @@ def _wants_problem_json(request: Request) -> bool:
         return False
 
 
+def _is_versioned_static(path: str, query: str) -> bool:
+    """An app file under /static/ requested at a `?v=N` URL (see the immutable rule below)."""
+    if not path.startswith("/static/") or path.startswith(
+            ("/static/avatars/", "/static/ui-theme/", "/static/locales/", "/static/guide/")):
+        return False
+    if path in ("/static/sw.js", "/static/index.html", "/static/manifest.webmanifest"):
+        return False
+    return any(part.startswith("v=") and part[2:].isdigit() for part in query.split("&"))
+
+
 @app.middleware("http")
 async def media_security_headers(request: Request, call_next):
     """Defense-in-depth: never let a served file execute as an active document.
@@ -835,6 +845,18 @@ async def media_security_headers(request: Request, call_next):
                                "/manifest.webmanifest", "/static/manifest.webmanifest") \
             or path.startswith(("/static/ui-theme/", "/static/locales/", "/static/guide/")):
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    # A versioned app file (`/static/js/main.js?v=194`, `app.css?v=130`) never changes
+    # under its URL: the ?v= moves whenever the bytes do (the deploy check refuses a
+    # changed file whose ?v= did not). Saying so lets a phone reopen the app without
+    # asking about each of its ~70 modules again once the heuristic freshness the
+    # browser guesses from Last-Modified has run out, and lets the service worker's
+    # install reuse the copies the page just downloaded. Avatars (the data directory's
+    # own mount, owner-replaceable files) and the unversioned folders above are not
+    # app files and keep their own rules.
+    elif (_is_versioned_static(path, request.url.query)
+          and response.status_code == 200
+          and "cache-control" not in response.headers):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     # A worker file served from /static/ may only claim a scope at or below
     # /static/ unless it says otherwise. The app lives at /, so without this the
     # SW registered but never controlled the document: controller stayed null,

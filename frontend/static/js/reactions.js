@@ -75,6 +75,7 @@ export async function loadReactions(force = false) {
       R.pool = r.pool || { remaining: 0 };
       R.reactionBots = r.reaction_bots || [];
       R.loaded = true;
+      R.fetched = true;
     } catch {
       // A locked/offline client just gets an empty pack.
       R.items = [];
@@ -90,6 +91,7 @@ export async function loadReactions(force = false) {
 // Called on sign-in and sign-out: the visible pack can differ per profile.
 export function resetReactions() {
   R.loaded = false;
+  R.fetched = false;
   R.items = [];
   dismissOverlay(true);
   // The pack manager is an ADMIN surface — thumbnails of every card, the
@@ -180,6 +182,10 @@ export function handleReactionFrame(ev) {
   // crucially no image URL ever constructed. Returning here rather than at the
   // render layer is what keeps the promise that nothing is downloaded.
   if (nimEnabled()) return;
+  // The pack is fetched on demand since the first-load round (the full list is ~1 MB on a
+  // big pool and the first screen never shows it): the first reaction this profile sees
+  // pulls the tuned overlay settings in for the next ones; this one uses the defaults.
+  if (!R.fetched) loadReactions();
   if (ev.event_id) {
     if (R.seen.has(ev.event_id)) return;
     R.seen.add(ev.event_id);
@@ -317,6 +323,7 @@ export async function fireReaction(idOrAlias, opts = {}) {
   // Fires are agent-only server-side: reactions belong to the bots. The one
   // in-app caller left is the manager's Test button, which fires AS the
   // enabled reaction bot — with none enabled there is nobody to fire as.
+  if (!R.fetched) await loadReactions();
   const asBot = opts.bot_id || R.reactionBots[0] || null;
   if (!asBot) {
     ctx.toast(t('reactions.no_bot_enabled'), true);

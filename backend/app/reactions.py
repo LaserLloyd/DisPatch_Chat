@@ -61,7 +61,7 @@ import threading
 import time
 import unicodedata
 import uuid
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -857,9 +857,13 @@ def list_for(*, bot_id: str | None = None, allow_bot=None) -> list[dict]:
             continue
         st = pool_load(bid)
         if st.config.enabled:
-            for mood, p in _iter_ready(bid):
-                d = _file_reaction(mood, p, st.config,
-                                   bot_id=bid).to_dict(settings=pack.settings)
+            ready = _iter_ready(bid)
+            ids = _ids_by_mood(ready)
+            # One label per mood, not per picture: _mood_label reads the prompt bank.
+            labels = {mood: _mood_label(mood, bid) for mood in dict.fromkeys(m for m, _p in ready)}
+            for mood, p in ready:
+                d = _file_reaction(mood, p, st.config, bot_id=bid, rid=ids[p],
+                                   label=labels[mood]).to_dict(settings=pack.settings)
                 d["pool"] = True        # one-shot: the UI marks it, and it vanishes on use
                 out.append(d)
     return out
@@ -2108,6 +2112,28 @@ def pool_file_id_for(mood: str, path: Path) -> str:
     return base
 
 
+def _ids_by_mood(pairs: list[tuple[str, Path]]) -> dict[Path, str]:
+    """:func:`pool_file_id_for` for a whole shelf at once: ``{path: id}``.
+
+    Same ids, one pass. The per-file mint re-lists every folder of the file's mood to
+    look for a clashing twin, so minting a shelf of N pictures per mood cost N folder
+    listings per mood: with ~2,600 pictures that was ~8 s of blocking file system
+    work inside every ``GET /api/reactions`` (each app start) and every exclusive draw.
+    ``pairs`` must hold EVERY stocked file of each mood it mentions (``_iter_ready``
+    does), so the clash check sees the same peers the per-file mint would.
+    """
+    by_mood: dict[str, list[Path]] = {}
+    for mood, p in pairs:
+        by_mood.setdefault(mood, []).append(p)
+    out: dict[Path, str] = {}
+    for mood, paths in by_mood.items():
+        bases = {p: pool_file_id(mood, p.name) for p in paths}
+        counts = Counter(bases.values())
+        for p, b in bases.items():
+            out[p] = _disambiguated(mood, p) if counts[b] > 1 else b
+    return out
+
+
 def _resolve_pool_file(rid: str, base: Path) -> tuple[str, Path] | None:
     """Find the blob a pool id names under one root (moods/ or spent/).
 
@@ -2161,7 +2187,8 @@ def _mood_label(mood: str, bot_id: str | None = None) -> str:
 
 
 def _file_reaction(mood: str, path: Path, cfg: PoolConfig, *,
-                   spent: bool = False, bot_id: str | None = None) -> Reaction:
+                   spent: bool = False, bot_id: str | None = None,
+                   rid: str | None = None, label: str | None = None) -> Reaction:
     """Present a pool blob through the same shape as a pack reaction, so the
     fire chokepoint and the frontend need no special case.
 
@@ -2179,7 +2206,8 @@ def _file_reaction(mood: str, path: Path, cfg: PoolConfig, *,
     else:
         rel = f"{_MOODS_FMT.format(bot_id=bot_id)}/{path.parent.name}/{path.name}"
     return Reaction(
-        id=pool_file_id_for(mood, path), name=_mood_label(mood, bot_id),
+        id=rid or pool_file_id_for(mood, path),
+        name=label if label is not None else _mood_label(mood, bot_id),
         file=rel, aliases=[],
         category=mood, safe=cfg.safe, duration_ms=None,
         source="pool", prompt="", created_at=created,
@@ -2458,14 +2486,14 @@ def pool_draw(category: str | None = None,
     st = pool_load(bot_id)
     if not st.config.enabled:
         return None
-    ready = [(mood, p) for mood, p in _iter_ready(bot_id)
-             if (not category or mood == category)
-             and (not exclude or pool_file_id_for(mood, p) not in exclude)]
+    shelf = [(mood, p) for mood, p in _iter_ready(bot_id) if not category or mood == category]
+    ids = _ids_by_mood(shelf)
+    ready = [(mood, p) for mood, p in shelf if not exclude or ids[p] not in exclude]
     if not ready:
         return None
     import random
     mood, p = random.choice(ready)
-    return _file_reaction(mood, p, st.config, bot_id=bot_id)
+    return _file_reaction(mood, p, st.config, bot_id=bot_id, rid=ids[p])
 
 
 def pool_categories(bot_id: str | None = None) -> dict[str, int]:

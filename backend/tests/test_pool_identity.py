@@ -334,3 +334,37 @@ def test_storage_measures_the_avatar_stores(rx):
     assert out["avatar_snapshots"]["bytes"] >= 256
     # Still deliberately outside the cap maths, like reactions.
     assert out["blob_bytes"] == out["media"]["bytes"] + out["files"]["bytes"]
+
+
+# --------------------------------------------------------------------------- #
+# First-load round: the shelf is minted in one pass (docs/design/first-load.md)
+# --------------------------------------------------------------------------- #
+
+def test_batch_mint_equals_per_file_mint(rx):
+    """_ids_by_mood gives every file the id pool_file_id_for gives it, clashes included."""
+    for name in ("a b.png", "a-b.png", "plain.png", "Other.png"):
+        _drop(name, mood="bravo")
+    _drop("x.png", folder="Bravo")                    # same mood key, case-folded folder
+    _drop("a b.png", mood="charlie")
+    ready = reactions._iter_ready()
+    batch = reactions._ids_by_mood(ready)
+    assert batch == {p: reactions.pool_file_id_for(m, p) for m, p in ready}
+    assert len(set(batch.values())) == len(batch)      # one id, one picture
+
+
+def test_listing_a_big_shelf_is_not_quadratic(rx):
+    """2,600 pictures used to cost ~8 s of blocking file-system work per GET /api/reactions
+    (every app start). The listing must stay well under a second for a shelf this size."""
+    import time
+    src = next(config.REACTIONS_BUILTIN_DIR.glob("*.png")).read_bytes()
+    base = reactions._moods_dir(None)
+    for m in range(20):
+        d = base / f"mood{m:02d}"
+        d.mkdir(parents=True, exist_ok=True)
+        for i in range(60):
+            (d / f"img-{i:03d}.png").write_bytes(src)
+    t = time.perf_counter()
+    ready = reactions._iter_ready()
+    ids = reactions._ids_by_mood(ready)
+    assert len(ids) >= 1200
+    assert time.perf_counter() - t < 1.0
